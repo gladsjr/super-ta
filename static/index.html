@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TA-Assignment (MVP-0)</title>
+<body style="font-family: system-ui; margin:2rem; max-width: 720px">
+  <h1>TA-Assignment (MVP-0)</h1>
+
+  <button id="newSession">Nova sessão</button>
+  <span id="sid"></span>
+
+  <h3>Upload da entrega</h3>
+  <input type="file" id="file"/>
+  <button id="sendFile">Enviar</button>
+  <div id="fileRef"></div>
+
+  <h3>Chat</h3>
+  <div id="chat" style="border:1px solid #ccc; padding:1rem; min-height: 200px"></div>
+  <input id="msg" placeholder="Sua resposta..." style="width:80%"/>
+  <button id="send">Enviar</button>
+
+  <h3>Finalizar</h3>
+  <button id="finalize">Gerar avaliação</button>
+  <pre id="result"></pre>
+
+<script>
+let session = null;
+const sid = document.getElementById('sid');
+const chat = document.getElementById('chat');
+
+document.getElementById('newSession').onclick = async () => {
+  const r = await fetch('/session', {method:'POST'});
+  const j = await r.json();
+  session = j.session_id;
+  sid.textContent = 'Sessão: ' + session;
+  chat.innerHTML = '';
+  document.getElementById('result').textContent = '';
+  document.getElementById('fileRef').textContent = '';
+};
+
+document.getElementById('sendFile').onclick = async () => {
+  if(!session) return alert('Crie a sessão primeiro.');
+  const f = document.getElementById('file').files[0];
+  if(!f) return alert('Escolha um arquivo.');
+  const form = new FormData();
+  form.append('file', f);
+  const r = await fetch('/upload?session='+session, {method:'POST', body:form});
+  const j = await r.json();
+  document.getElementById('fileRef').textContent = 'Arquivo: ' + j.file_ref;
+};
+
+document.getElementById('send').onclick = async () => {
+  if(!session) return alert('Crie a sessão.');
+  const m = document.getElementById('msg').value;
+  if(!m) return;
+  chat.innerHTML += `<div><b>Você:</b> ${m}</div>`;
+  document.getElementById('msg').value = '';
+  const r = await fetch('/chat?session='+session,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({message:m})
+  });
+  const j = await r.json();
+  chat.innerHTML += `<div><b>TA:</b> ${j.assistant}</div>`;
+  chat.scrollTop = chat.scrollHeight;
+};
+
+document.getElementById('finalize').onclick = async () => {
+  if(!session) return alert('Crie a sessão.');
+  const r = await fetch('/finalize?session='+session, {method:'POST'});
+  const j = await r.json();
+  document.getElementById('result').textContent = JSON.stringify(j, null, 2);
+};
+</script>
+</body>
+</html>

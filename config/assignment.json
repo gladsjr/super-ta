@@ -1,0 +1,8 @@
+{
+  "title": "Payback de mineração caseira de bitcoin",
+  "objectives": [
+    "Calcular o payback de um equipamento de mineração de bitcoin"
+  ],
+  "deliverables": ["Planilha com os cálculos"],
+  "constraints": { "max_pages": 5, "external_web": false }
+}

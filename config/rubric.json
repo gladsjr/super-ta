@@ -1,0 +1,8 @@
+{
+  "criteria": [
+    { "id": "C1", "name": "Compreensão do conteúdo do próprio trabalho entregue", "weight": 0.4 },
+    { "id": "C2", "name": "Correção da metodologia e dos cálculos", "weight": 0.4 },
+    { "id": "C3", "name": "Valores adequados para os parâmetros", "weight": 0.2 }
+  ],
+  "levels": ["fraco","básico","bom","excelente"]
+}
