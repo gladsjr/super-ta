@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 5000;
 
 // memória volátil por sessão (MVP sem DB)
 const SESSIONS = new Map();
@@ -150,9 +150,9 @@ app.post("/finalize", (req, res) => {
   res.json({ score_total: score, breakdown });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   if (!process.env.OPENAI_API_KEY) {
     console.warn("⚠️  OPENAI_API_KEY ausente no .env");
   }
-  console.log(`TA-Assignment MVP rodando em http://localhost:${PORT}`);
+  console.log(`TA-Assignment MVP rodando em http://0.0.0.0:${PORT}`);
 });
