@@ -1,2 +1,6 @@
 .env
 node_modules/
+*.log
+.DS_Store
+data/submissions/*
+!data/submissions/.gitkeep
