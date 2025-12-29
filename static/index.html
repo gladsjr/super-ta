@@ -42,14 +42,36 @@ document.getElementById('sendFile').onclick = async () => {
   if(!session) return alert('Crie a sessão primeiro.');
   const f = document.getElementById('file').files[0];
   if(!f) return alert('Escolha um arquivo.');
+  
+  const sendBtn = document.getElementById('sendFile');
+  sendBtn.disabled = true;
+  
+  chat.innerHTML += `<div style="color:#666"><em>Enviando arquivo...</em></div>`;
+  chat.scrollTop = chat.scrollHeight;
+  
   const form = new FormData();
   form.append('file', f);
-  const r = await fetch('/upload?session='+session, {method:'POST', body:form});
-  const j = await r.json();
-  document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
-  if(j.assistant) {
-    chat.innerHTML += `<div><b>TA:</b> ${j.assistant}</div>`;
+  
+  await new Promise(r => setTimeout(r, 500));
+  chat.innerHTML += `<div style="color:#666"><em>Analisando trabalho...</em></div>`;
+  chat.scrollTop = chat.scrollHeight;
+  
+  try {
+    const r = await fetch('/upload?session='+session, {method:'POST', body:form});
+    const j = await r.json();
+    document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
+    
+    if(j.error) {
+      chat.innerHTML += `<div style="color:red"><b>Erro:</b> ${j.error}</div>`;
+    } else if(j.assistant) {
+      chat.innerHTML += `<div><b>TA:</b> ${j.assistant}</div>`;
+    }
     chat.scrollTop = chat.scrollHeight;
+  } catch(err) {
+    chat.innerHTML += `<div style="color:red"><b>Erro:</b> Falha na comunicação com o servidor</div>`;
+    chat.scrollTop = chat.scrollHeight;
+  } finally {
+    sendBtn.disabled = false;
   }
 };
 
