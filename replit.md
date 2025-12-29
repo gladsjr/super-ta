@@ -25,5 +25,12 @@ A teaching assistant assignment evaluation application that uses OpenAI to condu
 npm run dev
 ```
 
+## OpenAI Integration
+The application uses OpenAI's APIs:
+- **Files API**: Uploads student files to OpenAI for analysis
+- **Responses API**: Generates AI responses with file context
+- **System Prompt**: Defined in `config/system_prompt.txt`
+
 ## Recent Changes
+- 2025-12-29: Integrated OpenAI Files API and Responses API for file analysis
 - 2025-12-28: Configured for Replit environment (port 5000, host 0.0.0.0)
