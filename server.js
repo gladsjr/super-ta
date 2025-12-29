@@ -26,26 +26,10 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const OPENAI_MODEL = "gpt-4o-mini";
 
 // helpers
-function loadConfigs() {
+function loadSystemPrompt() {
   const cfgDir = path.join(__dirname, "config");
-  const assignment = JSON.parse(fs.readFileSync(path.join(cfgDir, "assignment.json"), "utf-8"));
-  const rubric = JSON.parse(fs.readFileSync(path.join(cfgDir, "rubric.json"), "utf-8"));
   const systemPrompt = fs.readFileSync(path.join(cfgDir, "system_prompt.txt"), "utf-8");
-  return { assignment, rubric, systemPrompt };
-}
-
-function buildMessages(session) {
-  const { assignment, rubric, systemPrompt } = session;
-  const context =
-    `ASSIGNMENT: ${assignment.title}\n` +
-    `OBJECTIVES: ${JSON.stringify(assignment.objectives)}\n` +
-    `RUBRIC: ${JSON.stringify(rubric.criteria)}\n` +
-    `POLICY: web_access=false\n`;
-
-  const msgs = [{ role: "system", content: systemPrompt + "\n\n" + context }];
-  const hist = session.history.slice(-12);
-  for (const m of hist) msgs.push(m);
-  return msgs;
+  return systemPrompt;
 }
 
 // rotas
@@ -56,8 +40,8 @@ app.get("/", (_req, res) => {
 // 1) criar sessão
 app.post("/session", (_req, res) => {
   const id = Math.random().toString(36).slice(2, 14);
-  const { assignment, rubric, systemPrompt } = loadConfigs();
-  const sess = { assignment, rubric, systemPrompt, history: [], submissionPath: null };
+  const systemPrompt = loadSystemPrompt();
+  const sess = { systemPrompt, history: [], submissionPath: null, openaiFileId: null };
   SESSIONS.set(id, sess);
 
   const dir = path.join(__dirname, "data", "submissions", id);
@@ -87,14 +71,43 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   const fileRef = req.file.path;
   sess.submissionPath = fileRef;
 
-  // Mensagem inicial do assistente após upload
-  const initialPrompt = "Podemos iniciar nossa avaliação?";
-  // Adiciona mensagem do assistente ao histórico
-  const messages = buildMessages(sess);
-  messages.push({ role: "assistant", content: initialPrompt });
-  sess.history.push({ role: "assistant", content: initialPrompt });
+  try {
+    // 1) Upload file to OpenAI Files API
+    const fileUpload = await openai.files.create({
+      file: fs.createReadStream(fileRef),
+      purpose: "user_data"
+    });
+    sess.openaiFileId = fileUpload.id;
 
-  res.json({ ok: true, file_ref: fileRef, assistant: initialPrompt });
+    // 2) Call Responses API with system prompt and file
+    const response = await openai.responses.create({
+      model: OPENAI_MODEL,
+      instructions: sess.systemPrompt,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "Este é o trabalho do aluno. Por favor, analise e inicie a avaliação."
+            },
+            {
+              type: "input_file",
+              file_id: fileUpload.id
+            }
+          ]
+        }
+      ]
+    });
+
+    const assistantMessage = response.output_text || "Arquivo recebido. Podemos iniciar nossa avaliação?";
+    sess.history.push({ role: "assistant", content: assistantMessage });
+
+    res.json({ ok: true, file_ref: fileRef, assistant: assistantMessage });
+  } catch (error) {
+    console.error("Erro ao processar arquivo com OpenAI:", error);
+    res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
+  }
 });
 
 // 3) chat
@@ -108,43 +121,60 @@ app.post("/chat", async (req, res) => {
 
   sess.history.push({ role: "user", content: message });
 
-  const messages = buildMessages(sess);
+  try {
+    // Build input with file context if available
+    const userContent = [];
+    userContent.push({ type: "input_text", text: message });
+    
+    if (sess.openaiFileId) {
+      userContent.push({ type: "input_file", file_id: sess.openaiFileId });
+    }
 
-  const completion = await openai.chat.completions.create({
-    model: OPENAI_MODEL,
-    messages,
-    temperature: 0.2
-  });
+    // Build conversation history for context
+    const inputMessages = sess.history.slice(0, -1).map(m => ({
+      role: m.role,
+      content: m.content
+    }));
 
-  const assistant = completion.choices[0].message.content.trim();
-  sess.history.push({ role: "assistant", content: assistant });
+    // Add current user message with file
+    inputMessages.push({
+      role: "user",
+      content: userContent
+    });
 
-  res.json({ assistant });
+    const response = await openai.responses.create({
+      model: OPENAI_MODEL,
+      instructions: sess.systemPrompt,
+      input: inputMessages
+    });
+
+    const assistant = response.output_text || "Desculpe, não consegui processar sua mensagem.";
+    sess.history.push({ role: "assistant", content: assistant });
+
+    res.json({ assistant });
+  } catch (error) {
+    console.error("Erro no chat:", error);
+    res.status(500).json({ error: "Erro ao processar mensagem" });
+  }
 });
 
-// 4) finalizar (heurística simples)
+// 4) finalizar (heurística simples baseada na conversa)
 app.post("/finalize", (req, res) => {
   const sessionId = String(req.query.session || "");
   const sess = SESSIONS.get(sessionId);
   if (!sess) return res.status(400).json({ error: "invalid session" });
 
-  const userText = sess.history.filter(m => m.role === "user").map(m => m.content).join(" ").toLowerCase();
+  const userMessages = sess.history.filter(m => m.role === "user");
+  const userText = userMessages.map(m => m.content).join(" ");
 
-  const objectives = sess.assignment.objectives;
-  let hits = 0;
-  for (const obj of objectives) {
-    // proxy ridiculamente simples só para MVP
-    const tokens = obj.toString().toLowerCase().split(/\W+/).filter(Boolean);
-    if (tokens.some(t => userText.includes(t))) hits += 1;
-  }
-  const coverage = Math.min(hits / objectives.length, 1);
+  // Heurística simples: baseada em quantidade de interações e tamanho das respostas
+  const interactions = Math.min(userMessages.length / 5, 1);
   const clarity = Math.min(userText.length / 600, 1);
-  const score = Math.round(10 * (0.6 * coverage + 0.4 * clarity) * 10) / 10;
+  const score = Math.round(10 * (0.5 * interactions + 0.5 * clarity) * 10) / 10;
 
   const breakdown = {
-    C1: Math.round(10 * coverage * 0.4 * 10) / 10,
-    C2: Math.round(10 * coverage * 0.4 * 10) / 10,
-    C3: Math.round(10 * clarity * 0.2 * 10) / 10
+    participacao: Math.round(10 * interactions * 10) / 10,
+    clareza: Math.round(10 * clarity * 10) / 10
   };
 
   res.json({ score_total: score, breakdown });
