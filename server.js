@@ -88,7 +88,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   sess.submissionPath = fileRef;
 
   // Mensagem inicial do assistente após upload
-  const initialPrompt = "Por favor, me conte sobre o trabalho que você acabou de enviar. Quais foram os principais desafios? O que você gostaria de destacar?";
+  const initialPrompt = "Podemos iniciar nossa avaliação?";
   // Adiciona mensagem do assistente ao histórico
   const messages = buildMessages(sess);
   messages.push({ role: "assistant", content: initialPrompt });

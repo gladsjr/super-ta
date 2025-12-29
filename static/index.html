@@ -46,7 +46,11 @@ document.getElementById('sendFile').onclick = async () => {
   form.append('file', f);
   const r = await fetch('/upload?session='+session, {method:'POST', body:form});
   const j = await r.json();
-  document.getElementById('fileRef').textContent = 'Arquivo: ' + j.file_ref;
+  document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
+  if(j.assistant) {
+    chat.innerHTML += `<div><b>TA:</b> ${j.assistant}</div>`;
+    chat.scrollTop = chat.scrollHeight;
+  }
 };
 
 document.getElementById('send').onclick = async () => {
