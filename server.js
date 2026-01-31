@@ -5,6 +5,7 @@ import express from "express";
 import multer from "multer";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { MapBuilderAgent } from "./agents/MapBuilderAgent.js";
 
 dotenv.config();
 
@@ -110,8 +111,11 @@ async function createVectorStoreWithFile(fileId, sessionId) {
 }
 
 // ============================================================================
-// EVALUATORS INFRASTRUCTURE
+// AGENTS: COGNITIVE COMPONENTS
 // ============================================================================
+
+// Initialize MapBuilder Agent (singleton) with advanced model
+const mapBuilderAgent = new MapBuilderAgent(openai, 'gpt-4o');
 
 /**
  * Base structure for evaluation signals
@@ -428,14 +432,14 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     });
     sess.openaiFileId = fileUpload.id;
 
-    // 2) Generate DocumentMap for global understanding
-    console.log("Gerando DocumentMap...");
-    sess.documentMap = await generateDocumentMap(fileUpload.id);
-    console.log("DocumentMap gerado:", JSON.stringify(sess.documentMap, null, 2));
-
-    // 3) Create Vector Store for RAG/file_search
+    // 2) Create Vector Store for RAG/file_search (needed for MapBuilder)
     console.log("Criando Vector Store...");
     sess.vectorStoreId = await createVectorStoreWithFile(fileUpload.id, sessionId);
+
+    // 3) Generate DocumentMap using MapBuilder Agent (fail fast if error)
+    console.log("Gerando DocumentMap com MapBuilder Agent...");
+    sess.documentMap = await mapBuilderAgent.generateDocumentMap(sess.vectorStoreId);
+    console.log("✓ DocumentMap gerado:", JSON.stringify(sess.documentMap, null, 2));
 
     // 4) Call Responses API with system prompt and file
     const response = await openai.responses.create({
