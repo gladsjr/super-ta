@@ -66,6 +66,29 @@ async function getConversationContext(conversationId, limit = 12) {
   return lines.reverse().join("\n");
 }
 
+async function logConversationContents(conversationId, label, limit = 20) {
+  const page = await openai.conversations.items.list(conversationId, { limit });
+  const items = page?.data || [];
+  const lines = items.map((item, index) => {
+    if (item?.type === 'message') {
+      const text = (item.content || [])
+        .map(part => (part && typeof part.text === 'string') ? part.text : "")
+        .filter(Boolean)
+        .join("\n");
+      return `${index + 1}. [${item.role}] ${text}`;
+    }
+    return `${index + 1}. [${item?.type || 'unknown'}]`;
+  });
+
+  console.log(`\n===== CONVERSATION DUMP: ${label} (${conversationId}) =====`);
+  if (lines.length === 0) {
+    console.log('(vazia)');
+  } else {
+    console.log(lines.join("\n"));
+  }
+  console.log(`===== END CONVERSATION DUMP: ${label} =====\n`);
+}
+
 /**
  * Generate DocumentMap: Global document understanding
  * Extracts structure, thesis, methodology, key claims, weak points
@@ -201,6 +224,8 @@ async function runEvaluators(session, studentResponse) {
       content: `[EVALUATION SIGNALS] ${JSON.stringify(signals, null, 2)}`
     }]
   });
+
+  await logConversationContents(session.conversationId_eval, `EVAL signals`);
 
   return signals;
 }
@@ -355,6 +380,9 @@ app.post("/session", async (_req, res) => {
 
     console.log(`✓ Sessão ${id} criada (chat=${chatConversation.id}, eval=${evalConversation.id})`);
 
+    await logConversationContents(chatConversation.id, `SESSION_CREATE chat ${id}`);
+    await logConversationContents(evalConversation.id, `SESSION_CREATE eval ${id}`);
+
     res.json({ session_id: id });
   } catch (error) {
     console.error("❌ Erro ao criar sessão:", error);
@@ -403,7 +431,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     console.log("Gerando DocumentMap com MapBuilder Agent...");
     sess.documentMap = await mapBuilderAgent.generateDocumentMap(
       sess.conversationId_eval,
-      sess.vectorStoreId
+      sess.openaiFileId
     );
     console.log("✓ DocumentMap gerado:", JSON.stringify(sess.documentMap, null, 2));
 
@@ -413,6 +441,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}`
       }]
     });
+
+    await logConversationContents(sess.conversationId_eval, `UPLOAD document_map eval ${sessionId}`);
 
     // 4) Call Responses API with system prompt and file
     const payload = {
@@ -456,6 +486,9 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       items: [{ role: "assistant", content: assistantMessage }]
     });
 
+    await logConversationContents(sess.conversationId_chat, `UPLOAD assistant chat ${sessionId}`);
+    await logConversationContents(sess.conversationId_eval, `UPLOAD assistant eval ${sessionId}`);
+
     // Update state
     sess.currentPhase = 'interviewing';
 
@@ -493,6 +526,9 @@ app.post("/chat", async (req, res) => {
     await openai.conversations.items.create(sess.conversationId_eval, {
       items: [{ role: "user", content: message }]
     });
+
+    await logConversationContents(sess.conversationId_chat, `CHAT user chat ${sessionId}`);
+    await logConversationContents(sess.conversationId_eval, `CHAT user eval ${sessionId}`);
 
     // 2. Run evaluators (internal analysis)
     console.log("\n[TURN DYNAMICS] Executando avaliadores...");
@@ -537,6 +573,9 @@ app.post("/chat", async (req, res) => {
     await openai.conversations.items.create(sess.conversationId_eval, {
       items: [{ role: "assistant", content: assistantResponse }]
     });
+
+    await logConversationContents(sess.conversationId_chat, `CHAT assistant chat ${sessionId}`);
+    await logConversationContents(sess.conversationId_eval, `CHAT assistant eval ${sessionId}`);
 
     sess.questionCount++;
 

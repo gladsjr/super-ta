@@ -2,7 +2,7 @@
  * MapBuilderAgent
  * 
  * Specialized agent for analyzing documents and generating structured DocumentMap.
- * Uses OpenAI Conversations + Responses API with file_search tool for deep document understanding.
+ * Uses OpenAI Responses API with the full document attached as input.
  * 
  * Architecture: Cognitive component (not orchestration)
  * - Provides structured analysis of student documents
@@ -32,7 +32,7 @@ Seja crítico ao identificar weakPoints - procure por:
 - Inconsistências entre seções
 - Cálculos ou raciocínios que precisam de clarificação
 
-Use o tool file_search para buscar evidências específicas no documento.
+Use o conteúdo completo do documento para buscar evidências específicas.
 Cite seções, tabelas ou figuras quando relevante.
 
 Retorne SEMPRE JSON válido no formato especificado.`;
@@ -41,15 +41,19 @@ Retorne SEMPRE JSON válido no formato especificado.`;
     /**
      * Generate DocumentMap using the agent
      * 
-    * @param {string} conversationId - ID of the Conversation (required)
-     * @param {string} vectorStoreId - ID of the Vector Store containing the document
+     * @param {string} conversationId - ID of the Conversation (required)
+     * @param {string} openaiFileId - OpenAI File ID for the full document
      * @returns {Promise<Object>} DocumentMap with validated structure
      * @throws {Error} If agent fails or returns invalid structure
      */
-    async generateDocumentMap(conversationId, vectorStoreId) {
+    async generateDocumentMap(conversationId, openaiFileId) {
         try {
             if (!conversationId) {
                 throw new Error('Missing conversationId for MapBuilderAgent');
+            }
+
+            if (!openaiFileId) {
+                throw new Error('Missing openaiFileId for MapBuilderAgent');
             }
 
             const conversationContext = await this.getConversationContext(conversationId);
@@ -60,7 +64,10 @@ Retorne SEMPRE JSON válido no formato especificado.`;
                 instructions: this.systemPrompt,
                 input: [{
                     role: "user",
-                    content: `Analise o documento em profundidade e retorne um JSON estruturado com:
+                    content: [
+                        {
+                            type: "input_text",
+                            text: `Analise o documento completo (anexo) e retorne um JSON estruturado com:
 
 {
   "thesis": "objetivo/tese principal do trabalho",
@@ -70,12 +77,11 @@ Retorne SEMPRE JSON válido no formato especificado.`;
   "weakPoints": ["ponto fraco 1", "ponto fraco 2", ...]
 }
 
-Use file_search para buscar evidências específicas.
+Use exclusivamente o conteúdo do documento anexado como base.
 Retorne APENAS o JSON, sem markdown ou texto adicional.${contextBlock}`
-                }],
-                tools: [{
-                    type: "file_search",
-                    vector_store_ids: [vectorStoreId]
+                        },
+                        { type: "input_file", file_id: openaiFileId }
+                    ]
                 }]
             };
 
