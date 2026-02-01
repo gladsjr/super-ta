@@ -2,7 +2,7 @@
  * MapBuilderAgent
  * 
  * Specialized agent for analyzing documents and generating structured DocumentMap.
- * Uses OpenAI Assistants API with file_search tool for deep document understanding.
+ * Uses OpenAI Conversations + Responses API with file_search tool for deep document understanding.
  * 
  * Architecture: Cognitive component (not orchestration)
  * - Provides structured analysis of student documents
@@ -14,19 +14,7 @@ export class MapBuilderAgent {
     constructor(openaiClient, model = 'gpt-5.2') {
         this.client = openaiClient;
         this.model = model;
-        this.agentId = null;
-    }
-
-    /**
-     * Create or retrieve the MapBuilder agent
-     */
-    async initialize() {
-        if (this.agentId) return this.agentId;
-
-        try {
-            const agent = await this.client.beta.assistants.create({
-                name: "MapBuilder",
-                instructions: `Você é um especialista em análise estruturada de documentos acadêmicos e técnicos.
+        this.systemPrompt = `Você é um especialista em análise estruturada de documentos acadêmicos e técnicos.
 
 Sua tarefa é analisar documentos e extrair um mapa estruturado com:
 
@@ -47,42 +35,25 @@ Seja crítico ao identificar weakPoints - procure por:
 Use o tool file_search para buscar evidências específicas no documento.
 Cite seções, tabelas ou figuras quando relevante.
 
-Retorne SEMPRE JSON válido no formato especificado.`,
-                model: this.model,
-                tools: [{ type: "file_search" }]
-            });
-
-            this.agentId = agent.id;
-            console.log(`✓ MapBuilder Agent criado: ${this.agentId} (modelo: ${this.model})`);
-            return this.agentId;
-        } catch (error) {
-            console.error("❌ Erro ao criar MapBuilder Agent:", error);
-            throw error;
-        }
+Retorne SEMPRE JSON válido no formato especificado.`;
     }
 
     /**
      * Generate DocumentMap using the agent
      * 
+     * @param {string} conversationId - ID of the Conversation
      * @param {string} vectorStoreId - ID of the Vector Store containing the document
      * @returns {Promise<Object>} DocumentMap with validated structure
      * @throws {Error} If agent fails or returns invalid structure
      */
-    async generateDocumentMap(vectorStoreId) {
-        await this.initialize();
-
+    async generateDocumentMap(conversationId, vectorStoreId) {
         try {
-            // Create a thread with the vector store attached
-            const thread = await this.client.beta.threads.create({
-                tool_resources: {
-                    file_search: { vector_store_ids: [vectorStoreId] }
-                }
-            });
-
-            // Add user message requesting analysis
-            await this.client.beta.threads.messages.create(thread.id, {
-                role: "user",
-                content: `Analise o documento em profundidade e retorne um JSON estruturado com:
+            const payload = {
+                model: this.model,
+                instructions: this.systemPrompt,
+                input: [{
+                    role: "user",
+                    content: `Analise o documento em profundidade e retorne um JSON estruturado com:
 
 {
   "thesis": "objetivo/tese principal do trabalho",
@@ -94,26 +65,25 @@ Retorne SEMPRE JSON válido no formato especificado.`,
 
 Use file_search para buscar evidências específicas.
 Retorne APENAS o JSON, sem markdown ou texto adicional.`
-            });
+                }],
+                tools: [{
+                    type: "file_search",
+                    vector_store_ids: [vectorStoreId]
+                }]
+            };
 
-            // Run the agent
-            const run = await this.client.beta.threads.runs.createAndPoll(thread.id, {
-                assistant_id: this.agentId
-            });
-
-            if (run.status !== 'completed') {
-                throw new Error(`Agent run failed with status: ${run.status}`);
+            if (conversationId) {
+                payload.conversation_id = conversationId;
             }
 
-            // Retrieve the response
-            const messages = await this.client.beta.threads.messages.list(thread.id);
-            const assistantMessage = messages.data.find(m => m.role === 'assistant');
+            const response = await this.client.responses.create(payload);
 
-            if (!assistantMessage || !assistantMessage.content[0]) {
+            const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
+            const newConversationId = response.conversation_id || conversationId;
+
+            if (!responseText) {
                 throw new Error('No response from agent');
             }
-
-            const responseText = assistantMessage.content[0].text.value;
 
             // Extract JSON from response (handles markdown code blocks)
             const jsonMatch = responseText.match(/\{[\s\S]*\}/);
@@ -138,27 +108,11 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.`
             }
 
             console.log(`✓ DocumentMap gerado pelo MapBuilder Agent`);
-            return documentMap;
+            return { documentMap, conversationId: newConversationId };
 
         } catch (error) {
             console.error("❌ Erro no MapBuilder Agent:", error.message);
             throw error; // Fail fast - critical component
-        }
-    }
-
-    /**
-     * Clean up: delete the assistant
-     * Useful for testing or resetting
-     */
-    async cleanup() {
-        if (!this.agentId) return;
-
-        try {
-            await this.client.beta.assistants.del(this.agentId);
-            console.log(`✓ MapBuilder Agent deletado: ${this.agentId}`);
-            this.agentId = null;
-        } catch (error) {
-            console.error("⚠️  Erro ao deletar MapBuilder Agent:", error.message);
         }
     }
 }
