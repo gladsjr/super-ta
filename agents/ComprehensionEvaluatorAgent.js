@@ -51,7 +51,7 @@ Seja criterioso mas justo. Use citações do documento quando relevante.`;
     /**
      * Evaluate student comprehension
      * 
-     * @param {string|null} conversationId - ID of the Conversation (conv_eval)
+    * @param {string} conversationId - ID of the Conversation (conv_eval)
      * @param {string} vectorStoreId - ID of the Vector Store containing the document
      * @param {Object} documentMap - Global document summary for context
      * @param {string} studentResponse - Student's response to evaluate
@@ -60,7 +60,13 @@ Seja criterioso mas justo. Use citações do documento quando relevante.`;
      */
     async evaluate(conversationId, vectorStoreId, documentMap, studentResponse) {
         try {
+            if (!conversationId) {
+                throw new Error('Missing conversationId for ComprehensionEvaluatorAgent');
+            }
+
             const documentContext = JSON.stringify(documentMap, null, 2);
+            const conversationContext = await this.getConversationContext(conversationId);
+            const contextBlock = conversationContext ? `\n\n**Histórico da conversa (eval):**\n${conversationContext}` : "";
 
             const payload = {
                 model: this.model,
@@ -69,6 +75,8 @@ Seja criterioso mas justo. Use citações do documento quando relevante.`;
                     role: "user",
                     content: `**Contexto do Documento (DocumentMap):**
 ${documentContext}
+
+${contextBlock}
 
 **Resposta do Aluno:**
 "${studentResponse}"
@@ -93,13 +101,8 @@ Retorne APENAS o JSON.`
                 }]
             };
 
-            if (conversationId) {
-                payload.conversation_id = conversationId;
-            }
-
             const response = await this.client.responses.create(payload);
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
-            const newConversationId = response.conversation_id || conversationId;
 
             if (!responseText) {
                 throw new Error('No response from agent');
@@ -128,13 +131,34 @@ Retorne APENAS o JSON.`
                     redFlags: evaluation.redFlags || [],
                     suggestedFollowUp: evaluation.suggestedFollowUp
                 },
-                timestamp: Date.now(),
-                conversationId: newConversationId
+                timestamp: Date.now()
             };
 
         } catch (error) {
             console.error("❌ Erro no ComprehensionEvaluator Agent:", error.message);
             throw error; // Fail fast - critical component
         }
+    }
+
+    async getConversationContext(conversationId, limit = 12) {
+        const page = await this.client.conversations.items.list(conversationId, { limit });
+        const items = page?.data || [];
+        const lines = items
+            .filter(item => item?.type === 'message')
+            .map(item => {
+                const text = this.extractTextFromContent(item.content || []);
+                if (!text) return null;
+                return `${item.role}: ${text}`;
+            })
+            .filter(Boolean);
+
+        return lines.reverse().join("\n");
+    }
+
+    extractTextFromContent(content) {
+        return content
+            .map(part => (part && typeof part.text === 'string') ? part.text : "")
+            .filter(Boolean)
+            .join("\n");
     }
 }

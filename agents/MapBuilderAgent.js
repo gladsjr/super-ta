@@ -41,13 +41,20 @@ Retorne SEMPRE JSON válido no formato especificado.`;
     /**
      * Generate DocumentMap using the agent
      * 
-     * @param {string} conversationId - ID of the Conversation
+    * @param {string} conversationId - ID of the Conversation (required)
      * @param {string} vectorStoreId - ID of the Vector Store containing the document
      * @returns {Promise<Object>} DocumentMap with validated structure
      * @throws {Error} If agent fails or returns invalid structure
      */
     async generateDocumentMap(conversationId, vectorStoreId) {
         try {
+            if (!conversationId) {
+                throw new Error('Missing conversationId for MapBuilderAgent');
+            }
+
+            const conversationContext = await this.getConversationContext(conversationId);
+            const contextBlock = conversationContext ? `\n\n**Contexto da conversa (eval):**\n${conversationContext}` : "";
+
             const payload = {
                 model: this.model,
                 instructions: this.systemPrompt,
@@ -64,7 +71,7 @@ Retorne SEMPRE JSON válido no formato especificado.`;
 }
 
 Use file_search para buscar evidências específicas.
-Retorne APENAS o JSON, sem markdown ou texto adicional.`
+Retorne APENAS o JSON, sem markdown ou texto adicional.${contextBlock}`
                 }],
                 tools: [{
                     type: "file_search",
@@ -72,14 +79,9 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.`
                 }]
             };
 
-            if (conversationId) {
-                payload.conversation_id = conversationId;
-            }
-
             const response = await this.client.responses.create(payload);
 
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
-            const newConversationId = response.conversation_id || conversationId;
 
             if (!responseText) {
                 throw new Error('No response from agent');
@@ -108,11 +110,33 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.`
             }
 
             console.log(`✓ DocumentMap gerado pelo MapBuilder Agent`);
-            return { documentMap, conversationId: newConversationId };
+            return documentMap;
 
         } catch (error) {
             console.error("❌ Erro no MapBuilder Agent:", error.message);
             throw error; // Fail fast - critical component
         }
+    }
+
+    async getConversationContext(conversationId, limit = 12) {
+        const page = await this.client.conversations.items.list(conversationId, { limit });
+        const items = page?.data || [];
+        const lines = items
+            .filter(item => item?.type === 'message')
+            .map(item => {
+                const text = this.extractTextFromContent(item.content || []);
+                if (!text) return null;
+                return `${item.role}: ${text}`;
+            })
+            .filter(Boolean);
+
+        return lines.reverse().join("\n");
+    }
+
+    extractTextFromContent(content) {
+        return content
+            .map(part => (part && typeof part.text === 'string') ? part.text : "")
+            .filter(Boolean)
+            .join("\n");
     }
 }

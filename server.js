@@ -48,6 +48,24 @@ function loadSystemPrompt() {
   return systemPrompt;
 }
 
+async function getConversationContext(conversationId, limit = 12) {
+  const page = await openai.conversations.items.list(conversationId, { limit });
+  const items = page?.data || [];
+  const lines = items
+    .filter(item => item?.type === 'message')
+    .map(item => {
+      const text = (item.content || [])
+        .map(part => (part && typeof part.text === 'string') ? part.text : "")
+        .filter(Boolean)
+        .join("\n");
+      if (!text) return null;
+      return `${item.role}: ${text}`;
+    })
+    .filter(Boolean);
+
+  return lines.reverse().join("\n");
+}
+
 /**
  * Generate DocumentMap: Global document understanding
  * Extracts structure, thesis, methodology, key claims, weak points
@@ -145,25 +163,25 @@ const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, MODELS.CL
 async function runEvaluators(session, studentResponse) {
   const signals = [];
 
+  if (!session.conversationId_eval) {
+    throw new Error('Missing conversationId_eval for evaluators');
+  }
+
   // Run both evaluator agents in parallel
   const [comprehensionSignal, clarificationSignal] = await Promise.all([
     comprehensionEvaluator.evaluate(
-      session.conversationId_eval,  // Uses eval conversation (created implicitly if null)
+      session.conversationId_eval,
       session.vectorStoreId,
       session.documentMap,
       studentResponse
     ),
     clarificationEvaluator.evaluate(
-      session.conversationId_eval,  // Uses eval conversation (created implicitly if null)
+      session.conversationId_eval,
       session.vectorStoreId,
       session.documentMap,
       studentResponse
     )
   ]);
-
-  if (!session.conversationId_eval) {
-    session.conversationId_eval = comprehensionSignal.conversationId || clarificationSignal.conversationId || null;
-  }
 
   signals.push(comprehensionSignal, clarificationSignal);
 
@@ -175,6 +193,13 @@ async function runEvaluators(session, studentResponse) {
     role: "system",
     content: `[EVALUATION SIGNALS] ${JSON.stringify(signals, null, 2)}`,
     metadata: { signals, timestamp: Date.now() }
+  });
+
+  await openai.conversations.items.create(session.conversationId_eval, {
+    items: [{
+      role: "developer",
+      content: `[EVALUATION SIGNALS] ${JSON.stringify(signals, null, 2)}`
+    }]
   });
 
   return signals;
@@ -225,10 +250,11 @@ async function generateNextQuestion(session) {
   const documentContext = session.documentMap ?
     `**Resumo do Documento:**\n${JSON.stringify(session.documentMap, null, 2)}\n\n` : "";
 
-  // Get recent conversation (last 3 exchanges)
-  const recentChat = session.conv_chat.slice(-6).map(m =>
-    `${m.role === 'user' ? 'Aluno' : 'TA'}: ${m.content}`
-  ).join('\n');
+  if (!session.conversationId_chat) {
+    throw new Error('Missing conversationId_chat for chat generation');
+  }
+
+  const recentChat = await getConversationContext(session.conversationId_chat, 12);
 
   const prompt = `${session.systemPrompt}
 
@@ -275,20 +301,12 @@ Retorne APENAS a pergunta, sem texto adicional.`;
       input
     };
 
-    if (session.conversationId_chat) {
-      payload.conversation_id = session.conversationId_chat;
-    }
-
     const response = await openai.responses.create(payload);
-
-    if (!session.conversationId_chat && response.conversation_id) {
-      session.conversationId_chat = response.conversation_id;
-    }
 
     return response.output_text || "Pode me explicar melhor esse ponto do seu trabalho?";
   } catch (error) {
     console.error("Erro ao gerar próxima pergunta:", error);
-    return "Pode me explicar melhor esse ponto do seu trabalho?";
+    throw error;
   }
 }
 
@@ -302,38 +320,46 @@ app.get("/", (_req, res) => {
 });
 
 // 1) criar sessão
-app.post("/session", (_req, res) => {
+app.post("/session", async (_req, res) => {
   const id = Math.random().toString(36).slice(2, 14);
   const systemPrompt = loadSystemPrompt();
 
-  // Note: Conversations API creates conversations implicitly on first responses.create() call
-  // We store conversation IDs that will be set on first use
-  const sess = {
-    systemPrompt,
-    // Dual conversations (IDs will be set on first responses.create() call)
-    conversationId_chat: null,   // Student-facing conversation
-    conversationId_eval: null,   // Internal evaluation conversation
-    conv_chat: [],        // Local cache (for display)
-    conv_eval: [],        // Local cache (for logging)
-    history: [],          // Backward compatibility (alias to conv_chat)
-    // Document understanding
-    documentMap: null,    // Global document summary
-    submissionPath: null,
-    openaiFileId: null,
-    vectorStoreId: null,  // For RAG/file_search
-    // State machine
-    currentPhase: 'awaiting_upload',  // awaiting_upload, interviewing, finalizing
-    questionCount: 0,
-    evaluationSignals: [] // Accumulated signals from evaluators
-  };
-  SESSIONS.set(id, sess);
+  try {
+    const [chatConversation, evalConversation] = await Promise.all([
+      openai.conversations.create({ metadata: { session_id: id, type: "chat" } }),
+      openai.conversations.create({ metadata: { session_id: id, type: "eval" } })
+    ]);
 
-  const dir = path.join(__dirname, "data", "submissions", id);
-  fs.mkdirSync(dir, { recursive: true });
+    const sess = {
+      systemPrompt,
+      // Dual conversations (explicitly created)
+      conversationId_chat: chatConversation.id,   // Student-facing conversation
+      conversationId_eval: evalConversation.id,   // Internal evaluation conversation
+      conv_chat: [],        // Local cache (for display)
+      conv_eval: [],        // Local cache (for logging)
+      history: [],          // Backward compatibility (alias to conv_chat)
+      // Document understanding
+      documentMap: null,    // Global document summary
+      submissionPath: null,
+      openaiFileId: null,
+      vectorStoreId: null,  // For RAG/file_search
+      // State machine
+      currentPhase: 'awaiting_upload',  // awaiting_upload, interviewing, finalizing
+      questionCount: 0,
+      evaluationSignals: [] // Accumulated signals from evaluators
+    };
+    SESSIONS.set(id, sess);
 
-  console.log(`✓ Sessão ${id} criada (conversations criadas implicitamente no primeiro uso)`);
+    const dir = path.join(__dirname, "data", "submissions", id);
+    fs.mkdirSync(dir, { recursive: true });
 
-  res.json({ session_id: id });
+    console.log(`✓ Sessão ${id} criada (chat=${chatConversation.id}, eval=${evalConversation.id})`);
+
+    res.json({ session_id: id });
+  } catch (error) {
+    console.error("❌ Erro ao criar sessão:", error);
+    res.status(500).json({ error: "Erro ao criar sessão" });
+  }
 });
 
 // 2) upload
@@ -354,6 +380,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   const sess = SESSIONS.get(sessionId);
   if (!sess) return res.status(400).json({ error: "invalid session" });
 
+  if (!sess.conversationId_chat || !sess.conversationId_eval) {
+    return res.status(500).json({ error: "Sessão sem conversations válidas" });
+  }
+
   const fileRef = req.file.path;
   sess.submissionPath = fileRef;
 
@@ -371,15 +401,18 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     // 3) Generate DocumentMap using MapBuilder Agent (fail fast if error)
     console.log("Gerando DocumentMap com MapBuilder Agent...");
-    const mapResult = await mapBuilderAgent.generateDocumentMap(
+    sess.documentMap = await mapBuilderAgent.generateDocumentMap(
       sess.conversationId_eval,
       sess.vectorStoreId
     );
-    sess.documentMap = mapResult.documentMap;
-    if (!sess.conversationId_eval && mapResult.conversationId) {
-      sess.conversationId_eval = mapResult.conversationId;
-    }
     console.log("✓ DocumentMap gerado:", JSON.stringify(sess.documentMap, null, 2));
+
+    await openai.conversations.items.create(sess.conversationId_eval, {
+      items: [{
+        role: "developer",
+        content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}`
+      }]
+    });
 
     // 4) Call Responses API with system prompt and file
     const payload = {
@@ -402,15 +435,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       ]
     };
 
-    if (sess.conversationId_chat) {
-      payload.conversation_id = sess.conversationId_chat;
-    }
-
     const response = await openai.responses.create(payload);
-
-    if (!sess.conversationId_chat && response.conversation_id) {
-      sess.conversationId_chat = response.conversation_id;
-    }
 
     const assistantMessage = response.output_text || "Arquivo recebido. Podemos iniciar nossa avaliação?";
 
@@ -422,6 +447,14 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       metadata: { documentMap: sess.documentMap }
     });
     sess.history = sess.conv_chat; // Maintain backward compatibility
+
+    await openai.conversations.items.create(sess.conversationId_chat, {
+      items: [{ role: "assistant", content: assistantMessage }]
+    });
+
+    await openai.conversations.items.create(sess.conversationId_eval, {
+      items: [{ role: "assistant", content: assistantMessage }]
+    });
 
     // Update state
     sess.currentPhase = 'interviewing';
@@ -448,7 +481,19 @@ app.post("/chat", async (req, res) => {
   sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
   sess.history = sess.conv_chat; // Maintain backward compatibility
 
+  if (!sess.conversationId_chat || !sess.conversationId_eval) {
+    return res.status(500).json({ error: "Sessão sem conversations válidas" });
+  }
+
   try {
+    await openai.conversations.items.create(sess.conversationId_chat, {
+      items: [{ role: "user", content: message }]
+    });
+
+    await openai.conversations.items.create(sess.conversationId_eval, {
+      items: [{ role: "user", content: message }]
+    });
+
     // 2. Run evaluators (internal analysis)
     console.log("\n[TURN DYNAMICS] Executando avaliadores...");
     const signals = await runEvaluators(sess, message);
@@ -484,6 +529,14 @@ app.post("/chat", async (req, res) => {
       metadata: { decision, timestamp: Date.now() }
     });
     sess.history = sess.conv_chat;
+
+    await openai.conversations.items.create(sess.conversationId_chat, {
+      items: [{ role: "assistant", content: assistantResponse }]
+    });
+
+    await openai.conversations.items.create(sess.conversationId_eval, {
+      items: [{ role: "assistant", content: assistantResponse }]
+    });
 
     sess.questionCount++;
 

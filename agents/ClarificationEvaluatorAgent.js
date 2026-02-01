@@ -51,7 +51,7 @@ A pergunta sugerida deve ser direcionada e evidencial (ex: "Na seção X, você 
     /**
      * Evaluate what needs clarification
      * 
-     * @param {string|null} conversationId - ID of the Conversation (conv_eval)
+    * @param {string} conversationId - ID of the Conversation (conv_eval)
      * @param {string} vectorStoreId - ID of the Vector Store containing the document
      * @param {Object} documentMap - Global document summary for context
      * @param {string} studentResponse - Recent student response for context
@@ -60,7 +60,13 @@ A pergunta sugerida deve ser direcionada e evidencial (ex: "Na seção X, você 
      */
     async evaluate(conversationId, vectorStoreId, documentMap, studentResponse) {
         try {
+            if (!conversationId) {
+                throw new Error('Missing conversationId for ClarificationEvaluatorAgent');
+            }
+
             const documentContext = JSON.stringify(documentMap, null, 2);
+            const conversationContext = await this.getConversationContext(conversationId);
+            const contextBlock = conversationContext ? `\n\n**Histórico da conversa (eval):**\n${conversationContext}` : "";
 
             const payload = {
                 model: this.model,
@@ -69,6 +75,8 @@ A pergunta sugerida deve ser direcionada e evidencial (ex: "Na seção X, você 
                     role: "user",
                     content: `**Contexto do Documento (DocumentMap):**
 ${documentContext}
+
+${contextBlock}
 
 **Resposta Recente do Aluno:**
 "${studentResponse}"
@@ -92,13 +100,8 @@ Retorne APENAS o JSON.`
                 }]
             };
 
-            if (conversationId) {
-                payload.conversation_id = conversationId;
-            }
-
             const response = await this.client.responses.create(payload);
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
-            const newConversationId = response.conversation_id || conversationId;
 
             if (!responseText) {
                 throw new Error('No response from agent');
@@ -126,13 +129,34 @@ Retorne APENAS o JSON.`
                     unclearAspects: evaluation.unclearAspects || [],
                     suggestedQuestion: evaluation.suggestedQuestion
                 },
-                timestamp: Date.now(),
-                conversationId: newConversationId
+                timestamp: Date.now()
             };
 
         } catch (error) {
             console.error("❌ Erro no ClarificationEvaluator Agent:", error.message);
             throw error; // Fail fast - critical component
         }
+    }
+
+    async getConversationContext(conversationId, limit = 12) {
+        const page = await this.client.conversations.items.list(conversationId, { limit });
+        const items = page?.data || [];
+        const lines = items
+            .filter(item => item?.type === 'message')
+            .map(item => {
+                const text = this.extractTextFromContent(item.content || []);
+                if (!text) return null;
+                return `${item.role}: ${text}`;
+            })
+            .filter(Boolean);
+
+        return lines.reverse().join("\n");
+    }
+
+    extractTextFromContent(content) {
+        return content
+            .map(part => (part && typeof part.text === 'string') ? part.text : "")
+            .filter(Boolean)
+            .join("\n");
     }
 }
