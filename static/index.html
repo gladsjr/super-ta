@@ -1,9 +1,23 @@
 <!doctype html>
 <html lang="pt-br">
+<head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>TA-Assignment (MVP-0)</title>
-<body style="font-family: system-ui; margin:2rem; max-width: 720px">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  body { font-family: system-ui; margin: 2rem; max-width: 720px; }
+  #chat { border: 1px solid #ccc; padding: 1rem; min-height: 200px; }
+  #chat .ta-msg { margin: 0.5rem 0; line-height: 1.6; }
+  #chat .ta-msg p { margin: 0.5em 0; }
+  #chat .ta-msg code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
+  #chat .ta-msg pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
+  .katex-display { margin: 1em 0; overflow-x: auto; }
+</style>
+</head>
+<body>
   <h1>TA-Assignment (MVP-0)</h1>
 
   <button id="newSession">Nova sessão</button>
@@ -15,7 +29,7 @@
   <div id="fileRef"></div>
 
   <h3>Chat</h3>
-  <div id="chat" style="border:1px solid #ccc; padding:1rem; min-height: 200px"></div>
+  <div id="chat"></div>
   <input id="msg" placeholder="Sua resposta..." style="width:80%"/>
   <button id="send">Enviar</button>
 
@@ -27,6 +41,45 @@
 let session = null;
 const sid = document.getElementById('sid');
 const chat = document.getElementById('chat');
+
+function renderMessage(text) {
+  let html = text;
+  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (match, formula) => {
+    try {
+      return katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false });
+    } catch (e) { return match; }
+  });
+  html = html.replace(/\\\(([\s\S]*?)\\\)/g, (match, formula) => {
+    try {
+      return katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false });
+    } catch (e) { return match; }
+  });
+  html = marked.parse(html);
+  return html;
+}
+
+function appendTA(text) {
+  const div = document.createElement('div');
+  div.className = 'ta-msg';
+  div.innerHTML = `<b>TA:</b> ${renderMessage(text)}`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function appendUser(text) {
+  const div = document.createElement('div');
+  div.innerHTML = `<b>Você:</b> ${text}`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function appendStatus(text, isError = false) {
+  const div = document.createElement('div');
+  div.style.color = isError ? 'red' : '#666';
+  div.innerHTML = isError ? `<b>Erro:</b> ${text}` : `<em>${text}</em>`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
 
 document.getElementById('newSession').onclick = async () => {
   const r = await fetch('/session', {method:'POST'});
@@ -46,15 +99,13 @@ document.getElementById('sendFile').onclick = async () => {
   const sendBtn = document.getElementById('sendFile');
   sendBtn.disabled = true;
   
-  chat.innerHTML += `<div style="color:#666"><em>Enviando arquivo...</em></div>`;
-  chat.scrollTop = chat.scrollHeight;
+  appendStatus('Enviando arquivo...');
   
   const form = new FormData();
   form.append('file', f);
   
   await new Promise(r => setTimeout(r, 500));
-  chat.innerHTML += `<div style="color:#666"><em>Analisando trabalho...</em></div>`;
-  chat.scrollTop = chat.scrollHeight;
+  appendStatus('Analisando trabalho...');
   
   try {
     const r = await fetch('/upload?session='+session, {method:'POST', body:form});
@@ -62,14 +113,12 @@ document.getElementById('sendFile').onclick = async () => {
     document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
     
     if(j.error) {
-      chat.innerHTML += `<div style="color:red"><b>Erro:</b> ${j.error}</div>`;
+      appendStatus(j.error, true);
     } else if(j.assistant) {
-      chat.innerHTML += `<div><b>TA:</b> ${j.assistant}</div>`;
+      appendTA(j.assistant);
     }
-    chat.scrollTop = chat.scrollHeight;
   } catch(err) {
-    chat.innerHTML += `<div style="color:red"><b>Erro:</b> Falha na comunicação com o servidor</div>`;
-    chat.scrollTop = chat.scrollHeight;
+    appendStatus('Falha na comunicação com o servidor', true);
   } finally {
     sendBtn.disabled = false;
   }
@@ -79,7 +128,7 @@ document.getElementById('send').onclick = async () => {
   if(!session) return alert('Crie a sessão.');
   const m = document.getElementById('msg').value;
   if(!m) return;
-  chat.innerHTML += `<div><b>Você:</b> ${m}</div>`;
+  appendUser(m);
   document.getElementById('msg').value = '';
   const r = await fetch('/chat?session='+session,{
     method:'POST',
@@ -87,8 +136,7 @@ document.getElementById('send').onclick = async () => {
     body: JSON.stringify({message:m})
   });
   const j = await r.json();
-  chat.innerHTML += `<div><b>TA:</b> ${j.assistant}</div>`;
-  chat.scrollTop = chat.scrollHeight;
+  appendTA(j.assistant);
 };
 
 document.getElementById('finalize').onclick = async () => {
