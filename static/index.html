@@ -15,10 +15,32 @@
   #chat .ta-msg code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
   #chat .ta-msg pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
   .katex-display { margin: 1em 0; overflow-x: auto; }
+  #login-screen { max-width: 320px; margin: 4rem auto; padding: 2rem; border: 1px solid #ccc; border-radius: 8px; }
+  #login-screen input { display: block; width: 100%; padding: 0.5rem; margin: 0.5rem 0; box-sizing: border-box; }
+  #login-screen button { width: 100%; padding: 0.6rem; }
+  #login-error { color: red; min-height: 1.2em; margin-top: 0.5rem; }
+  #topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  #user-info { color: #555; font-size: 0.9em; }
 </style>
 </head>
 <body>
-  <h1>TA-Assignment (MVP-0)</h1>
+
+<div id="login-screen" style="display:none">
+  <h2>Entrar</h2>
+  <input id="login-user" placeholder="Usuário" autocomplete="username"/>
+  <input id="login-pass" type="password" placeholder="Senha" autocomplete="current-password"/>
+  <button id="login-btn">Entrar</button>
+  <div id="login-error"></div>
+</div>
+
+<div id="app-screen" style="display:none">
+  <div id="topbar">
+    <h1 style="margin:0">TA-Assignment (MVP-0)</h1>
+    <div>
+      <span id="user-info"></span>
+      <button id="logout-btn">Sair</button>
+    </div>
+  </div>
 
   <button id="newSession">Nova sessão</button>
   <span id="sid"></span>
@@ -36,26 +58,24 @@
   <h3>Finalizar</h3>
   <button id="finalize">Gerar avaliação</button>
   <pre id="result"></pre>
+</div>
 
 <script>
 let session = null;
-const sid = document.getElementById('sid');
 const chat = document.getElementById('chat');
+const sid = document.getElementById('sid');
 
 function renderMessage(text) {
   let html = text;
-  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (match, formula) => {
-    try {
-      return katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false });
-    } catch (e) { return match; }
+  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (m, f) => {
+    try { return katex.renderToString(f.trim(), { displayMode: true, throwOnError: false }); }
+    catch (e) { return m; }
   });
-  html = html.replace(/\\\(([\s\S]*?)\\\)/g, (match, formula) => {
-    try {
-      return katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false });
-    } catch (e) { return match; }
+  html = html.replace(/\\\(([\s\S]*?)\\\)/g, (m, f) => {
+    try { return katex.renderToString(f.trim(), { displayMode: false, throwOnError: false }); }
+    catch (e) { return m; }
   });
-  html = marked.parse(html);
-  return html;
+  return marked.parse(html);
 }
 
 function appendTA(text) {
@@ -65,14 +85,12 @@ function appendTA(text) {
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
 }
-
 function appendUser(text) {
   const div = document.createElement('div');
   div.innerHTML = `<b>Você:</b> ${text}`;
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
 }
-
 function appendStatus(text, isError = false) {
   const div = document.createElement('div');
   div.style.color = isError ? 'red' : '#666';
@@ -81,8 +99,77 @@ function appendStatus(text, isError = false) {
   chat.scrollTop = chat.scrollHeight;
 }
 
+// ===== Auth =====
+async function checkAuth() {
+  try {
+    const r = await fetch('/me');
+    if (r.ok) {
+      const j = await r.json();
+      showApp(j.user);
+    } else {
+      showLogin();
+    }
+  } catch {
+    showLogin();
+  }
+}
+
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'block';
+  document.getElementById('app-screen').style.display = 'none';
+}
+
+function showApp(user) {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  document.getElementById('user-info').textContent = `Olá, ${user.username}`;
+}
+
+document.getElementById('login-btn').onclick = async () => {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  if (!username || !password) {
+    errEl.textContent = 'Informe usuário e senha';
+    return;
+  }
+  try {
+    const r = await fetch('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (r.ok) {
+      const j = await r.json();
+      document.getElementById('login-pass').value = '';
+      showApp(j.user);
+    } else {
+      errEl.textContent = 'Usuário ou senha inválidos';
+    }
+  } catch {
+    errEl.textContent = 'Falha na comunicação';
+  }
+};
+
+document.getElementById('login-pass').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('login-btn').click();
+});
+
+document.getElementById('logout-btn').onclick = async () => {
+  await fetch('/logout', { method: 'POST' });
+  session = null;
+  chat.innerHTML = '';
+  sid.textContent = '';
+  document.getElementById('result').textContent = '';
+  document.getElementById('fileRef').textContent = '';
+  showLogin();
+};
+
+// ===== App =====
 document.getElementById('newSession').onclick = async () => {
-  const r = await fetch('/session', {method:'POST'});
+  const r = await fetch('/session', { method: 'POST' });
+  if (r.status === 401) return showLogin();
   const j = await r.json();
   session = j.session_id;
   sid.textContent = 'Sessão: ' + session;
@@ -92,32 +179,27 @@ document.getElementById('newSession').onclick = async () => {
 };
 
 document.getElementById('sendFile').onclick = async () => {
-  if(!session) return alert('Crie a sessão primeiro.');
+  if (!session) return alert('Crie a sessão primeiro.');
   const f = document.getElementById('file').files[0];
-  if(!f) return alert('Escolha um arquivo.');
-  
+  if (!f) return alert('Escolha um arquivo.');
+
   const sendBtn = document.getElementById('sendFile');
   sendBtn.disabled = true;
-  
+
   appendStatus('Enviando arquivo...');
-  
   const form = new FormData();
   form.append('file', f);
-  
   await new Promise(r => setTimeout(r, 500));
   appendStatus('Analisando trabalho...');
-  
+
   try {
-    const r = await fetch('/upload?session='+session, {method:'POST', body:form});
+    const r = await fetch('/upload?session=' + session, { method: 'POST', body: form });
+    if (r.status === 401) { sendBtn.disabled = false; return showLogin(); }
     const j = await r.json();
     document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
-    
-    if(j.error) {
-      appendStatus(j.error, true);
-    } else if(j.assistant) {
-      appendTA(j.assistant);
-    }
-  } catch(err) {
+    if (j.error) appendStatus(j.error, true);
+    else if (j.assistant) appendTA(j.assistant);
+  } catch {
     appendStatus('Falha na comunicação com o servidor', true);
   } finally {
     sendBtn.disabled = false;
@@ -125,26 +207,30 @@ document.getElementById('sendFile').onclick = async () => {
 };
 
 document.getElementById('send').onclick = async () => {
-  if(!session) return alert('Crie a sessão.');
+  if (!session) return alert('Crie a sessão.');
   const m = document.getElementById('msg').value;
-  if(!m) return;
+  if (!m) return;
   appendUser(m);
   document.getElementById('msg').value = '';
-  const r = await fetch('/chat?session='+session,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({message:m})
+  const r = await fetch('/chat?session=' + session, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: m })
   });
+  if (r.status === 401) return showLogin();
   const j = await r.json();
   appendTA(j.assistant);
 };
 
 document.getElementById('finalize').onclick = async () => {
-  if(!session) return alert('Crie a sessão.');
-  const r = await fetch('/finalize?session='+session, {method:'POST'});
+  if (!session) return alert('Crie a sessão.');
+  const r = await fetch('/finalize?session=' + session, { method: 'POST' });
+  if (r.status === 401) return showLogin();
   const j = await r.json();
   document.getElementById('result').textContent = JSON.stringify(j, null, 2);
 };
+
+checkAuth();
 </script>
 </body>
 </html>

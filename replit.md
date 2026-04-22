@@ -43,7 +43,8 @@ The system combines:
 
 ## Project Structure
 - `server.js` – Express server with orchestration logic and agents
-- `static/index.html` – Frontend chat interface
+- `auth.js` – Authentication module (bcrypt, express-session, PostgreSQL store)
+- `static/index.html` – Frontend chat interface (with login screen)
 - `config/`
   - `assignment.json` – Assignment goals and constraints
   - `rubric.json` – Evaluation criteria (C1: 40%, C2: 40%, C3: 20%)
@@ -177,6 +178,18 @@ The system always follows this loop:
 ## Environment Variables
 - `OPENAI_API_KEY` – Required (get from platform.openai.com)
 - `PORT` – Defaults to 5000
+- `DATABASE_URL` – PostgreSQL connection (auto-provisioned by Replit)
+- `INITIAL_USERS` – Seeded users in format `user1:pass1,user2:pass2` (created on startup if missing)
+- `SESSION_SECRET` – Optional; auto-generated if absent (use a stable value in production)
+
+## Authentication
+- Simple username/password login with bcrypt-hashed passwords stored in PostgreSQL `users` table
+- Session cookies (HTTP-only, signed) backed by `app_session` table via `connect-pg-simple`
+- Session ID is regenerated on login to prevent session fixation
+- `cookie.secure` is enabled when `NODE_ENV=production`
+- Routes `/session`, `/upload`, `/chat`, `/finalize` require authentication
+- Each in-memory eval session is bound to its creator (`ownerUserId`); cross-user access returns 403
+- Auth endpoints: `POST /login`, `POST /logout`, `GET /me`
 
 ---
 

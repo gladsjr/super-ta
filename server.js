@@ -8,6 +8,14 @@ import OpenAI from "openai";
 import { MapBuilderAgent } from "./agents/MapBuilderAgent.js";
 import { ComprehensionEvaluatorAgent } from "./agents/ComprehensionEvaluatorAgent.js";
 import { ClarificationEvaluatorAgent } from "./agents/ClarificationEvaluatorAgent.js";
+import {
+  sessionMiddleware,
+  seedInitialUsers,
+  requireAuth,
+  loginHandler,
+  logoutHandler,
+  meHandler,
+} from "./auth.js";
 
 dotenv.config();
 
@@ -23,6 +31,12 @@ const SESSIONS = new Map();
 // static
 app.use("/static", express.static(path.join(__dirname, "static")));
 app.use(express.json({ limit: "2mb" }));
+app.use(sessionMiddleware);
+
+// Auth routes (public)
+app.post("/login", loginHandler);
+app.post("/logout", logoutHandler);
+app.get("/me", meHandler);
 
 // OpenAI
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -344,8 +358,23 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "static", "index.html"));
 });
 
+// Helper: ensure the authenticated user owns the eval session
+function getOwnedSession(req, res) {
+  const sessionId = String(req.query.session || "");
+  const sess = SESSIONS.get(sessionId);
+  if (!sess) {
+    res.status(400).json({ error: "invalid session" });
+    return null;
+  }
+  if (sess.ownerUserId !== req.session.user.id) {
+    res.status(403).json({ error: "forbidden" });
+    return null;
+  }
+  return { sess, sessionId };
+}
+
 // 1) criar sessão
-app.post("/session", async (_req, res) => {
+app.post("/session", requireAuth, async (req, res) => {
   const id = Math.random().toString(36).slice(2, 14);
   const systemPrompt = loadSystemPrompt();
 
@@ -357,6 +386,7 @@ app.post("/session", async (_req, res) => {
 
     const sess = {
       systemPrompt,
+      ownerUserId: req.session.user.id,           // Bind session to authenticated user
       // Dual conversations (explicitly created)
       conversationId_chat: chatConversation.id,   // Student-facing conversation
       conversationId_eval: evalConversation.id,   // Internal evaluation conversation
@@ -403,10 +433,10 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 
-app.post("/upload", upload.single("file"), async (req, res) => {
-  const sessionId = String(req.query.session || "");
-  const sess = SESSIONS.get(sessionId);
-  if (!sess) return res.status(400).json({ error: "invalid session" });
+app.post("/upload", requireAuth, upload.single("file"), async (req, res) => {
+  const owned = getOwnedSession(req, res);
+  if (!owned) return;
+  const { sess, sessionId } = owned;
 
   if (!sess.conversationId_chat || !sess.conversationId_eval) {
     return res.status(500).json({ error: "Sessão sem conversations válidas" });
@@ -500,10 +530,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 // 3) chat
-app.post("/chat", async (req, res) => {
-  const sessionId = String(req.query.session || "");
-  const sess = SESSIONS.get(sessionId);
-  if (!sess) return res.status(400).json({ error: "invalid session" });
+app.post("/chat", requireAuth, async (req, res) => {
+  const owned = getOwnedSession(req, res);
+  if (!owned) return;
+  const { sess, sessionId } = owned;
 
   const message = (req.body?.message || "").toString();
   if (!message) return res.status(400).json({ error: "empty message" });
@@ -587,10 +617,10 @@ app.post("/chat", async (req, res) => {
 });
 
 // 4) finalizar (consolidação baseada em avaliadores)
-app.post("/finalize", async (req, res) => {
-  const sessionId = String(req.query.session || "");
-  const sess = SESSIONS.get(sessionId);
-  if (!sess) return res.status(400).json({ error: "invalid session" });
+app.post("/finalize", requireAuth, async (req, res) => {
+  const owned = getOwnedSession(req, res);
+  if (!owned) return;
+  const { sess } = owned;
 
   try {
     // Consolidate all evaluation signals
@@ -730,9 +760,14 @@ function generateFinalReport(session, rubricScores) {
   };
 }
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", async () => {
   if (!process.env.OPENAI_API_KEY) {
     console.warn("⚠️  OPENAI_API_KEY ausente no .env");
+  }
+  try {
+    await seedInitialUsers();
+  } catch (err) {
+    console.error("Erro ao semear usuários iniciais:", err);
   }
   console.log(`TA-Assignment MVP rodando em http://0.0.0.0:${PORT}`);
 });
