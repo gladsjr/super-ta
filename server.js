@@ -8,6 +8,7 @@ import OpenAI from "openai";
 import { MapBuilderAgent } from "./agents/MapBuilderAgent.js";
 import { ComprehensionEvaluatorAgent } from "./agents/ComprehensionEvaluatorAgent.js";
 import { ClarificationEvaluatorAgent } from "./agents/ClarificationEvaluatorAgent.js";
+import log from "./lib/logger.js";
 
 dotenv.config();
 
@@ -28,15 +29,18 @@ app.use(express.json({ limit: "2mb" }));
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ============================================================================
-// MODEL CONFIGURATION - Easily adjustable per agent
+// MODEL CONFIGURATION
+// Overridable via env vars. OPENAI_MODEL sets the default for all roles;
+// per-role vars (OPENAI_MODEL_MAP_BUILDER etc.) take precedence when set.
 // ============================================================================
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-5.2";
 const MODELS = {
-  DEFAULT: "gpt-5.2",           // For simple tasks (chat, questions)
-  MAP_BUILDER: "gpt-5.2",           // Advanced model for document analysis
-  COMPREHENSION_EVAL: "gpt-5.2",    // Advanced model for comprehension evaluation
-  CLARIFICATION_EVAL: "gpt-5.2",    // Advanced model for clarification identification
-  METHODOLOGY_EVAL: "gpt-5.2",      // For C2 evaluation
-  PARAMETERS_EVAL: "gpt-5.2"        // For C3 evaluation
+  DEFAULT:            DEFAULT_MODEL,
+  MAP_BUILDER:        process.env.OPENAI_MODEL_MAP_BUILDER        || DEFAULT_MODEL,
+  COMPREHENSION_EVAL: process.env.OPENAI_MODEL_COMPREHENSION_EVAL || DEFAULT_MODEL,
+  CLARIFICATION_EVAL: process.env.OPENAI_MODEL_CLARIFICATION_EVAL || DEFAULT_MODEL,
+  METHODOLOGY_EVAL:   process.env.OPENAI_MODEL_METHODOLOGY_EVAL   || DEFAULT_MODEL,
+  PARAMETERS_EVAL:    process.env.OPENAI_MODEL_PARAMETERS_EVAL    || DEFAULT_MODEL
 };
 
 const OPENAI_MODEL = MODELS.DEFAULT;
@@ -66,85 +70,59 @@ async function getConversationContext(conversationId, limit = 12) {
   return lines.reverse().join("\n");
 }
 
-async function logConversationContents(conversationId, label, limit = 20) {
+function extractItemText(item) {
+  if (item?.type !== 'message') return null;
+  return (item.content || [])
+    .map(part => (part && typeof part.text === 'string') ? part.text : "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Log only the newest item appended to a conversation (DEBUG level).
+ * Avoids dumping the entire history on every turn.
+ * DocumentMap payloads are summarized, never reprinted.
+ */
+async function logLastConvItem(conversationId, scope) {
+  if (!log.enabled("debug")) return;
+  try {
+    const page = await openai.conversations.items.list(conversationId, { limit: 1, order: "desc" });
+    const item = page?.data?.[0];
+    if (!item) return;
+    if (item.type !== 'message') {
+      log.debug(scope, `+${item.type || 'unknown'}`);
+      return;
+    }
+    const text = extractItemText(item) || "";
+    if (text.startsWith('[DOCUMENT_MAP]')) {
+      log.debug(scope, `+${item.role} [DOCUMENT_MAP] (stored, ${text.length} chars)`);
+      return;
+    }
+    if (text.startsWith('[EVALUATION SIGNALS]')) {
+      log.debug(scope, `+${item.role} [EVALUATION SIGNALS] (stored, ${text.length} chars)`);
+      return;
+    }
+    log.debug(scope, `+${item.role} ${log.preview(text, 140)}`);
+  } catch (err) {
+    log.debug(scope, `logLastConvItem failed: ${err.message}`);
+  }
+}
+
+/**
+ * Full conversation dump (TRACE only — opt-in for deep debugging).
+ */
+async function logFullConv(conversationId, scope, limit = 20) {
+  if (!log.enabled("trace")) return;
   const page = await openai.conversations.items.list(conversationId, { limit });
   const items = page?.data || [];
   const lines = items.map((item, index) => {
     if (item?.type === 'message') {
-      const text = (item.content || [])
-        .map(part => (part && typeof part.text === 'string') ? part.text : "")
-        .filter(Boolean)
-        .join("\n");
-      return `${index + 1}. [${item.role}] ${text}`;
+      const text = extractItemText(item);
+      return `${index + 1}. [${item.role}] ${log.preview(text, 200)}`;
     }
     return `${index + 1}. [${item?.type || 'unknown'}]`;
   });
-
-  console.log(`\n===== CONVERSATION DUMP: ${label} (${conversationId}) =====`);
-  if (lines.length === 0) {
-    console.log('(vazia)');
-  } else {
-    console.log(lines.join("\n"));
-  }
-  console.log(`===== END CONVERSATION DUMP: ${label} =====\n`);
-}
-
-/**
- * Generate DocumentMap: Global document understanding
- * Extracts structure, thesis, methodology, key claims, weak points
- */
-async function generateDocumentMap(fileId) {
-  const prompt = `Você é um assistente de análise de documentos. Analise o documento anexado e gere um resumo estruturado JSON com:
-
-1. **thesis**: Qual é a tese/objetivo principal do trabalho?
-2. **structure**: Quais são as seções principais? (lista breve)
-3. **methodology**: Que metodologia ou abordagem foi usada?
-4. **keyClaims**: Quais são as principais afirmações/conclusões? (lista de 2-4 pontos)
-5. **weakPoints**: Há pontos fracos, incompletos ou ambíguos no documento? (lista de 1-3 itens)
-
-Retorne apenas JSON válido, sem texto adicional.
-
-Exemplo:
-{
-  "thesis": "Calcular viabilidade econômica de mineração caseira de Bitcoin",
-  "structure": ["Introdução", "Parâmetros", "Cálculos", "Conclusão"],
-  "methodology": "Análise de payback com planilha Excel",
-  "keyClaims": ["Payback de 18 meses", "Consumo energético é fator crítico"],
-  "weakPoints": ["Não justifica valor de taxa elétrica usado", "Falta análise de risco"]
-}`;
-
-  try {
-    const response = await openai.responses.create({
-      model: OPENAI_MODEL,
-      instructions: prompt,
-      input: [
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: "Analise este documento:" },
-            { type: "input_file", file_id: fileId }
-          ]
-        }
-      ]
-    });
-
-    const outputText = response.output_text || "{}";
-    // Extract JSON from response (might have markdown code blocks)
-    const jsonMatch = outputText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    return JSON.parse(outputText);
-  } catch (error) {
-    console.error("Erro ao gerar DocumentMap:", error);
-    return {
-      thesis: "Não foi possível extrair",
-      structure: [],
-      methodology: "Desconhecida",
-      keyClaims: [],
-      weakPoints: ["Erro na análise do documento"]
-    };
-  }
+  log.trace(scope, `full conv (${items.length} items)\n${lines.join("\n")}`);
 }
 
 /**
@@ -158,10 +136,10 @@ async function createVectorStoreWithFile(fileId, sessionId) {
       file_ids: [fileId]
     });
 
-    console.log(`✓ Vector Store criado: ${vectorStore.id}`);
+    log.info("UPLOAD", `vector store ${vectorStore.id} created`);
     return vectorStore.id;
   } catch (error) {
-    console.error("❌ Erro ao criar Vector Store:", error);
+    log.error("UPLOAD", `vector store creation failed: ${error.message}`);
     throw error; // Fail fast - this is a critical architectural component
   }
 }
@@ -225,7 +203,7 @@ async function runEvaluators(session, studentResponse) {
     }]
   });
 
-  await logConversationContents(session.conversationId_eval, `EVAL signals`);
+  await logLastConvItem(session.conversationId_eval, "CONV:eval");
 
   return signals;
 }
@@ -326,11 +304,14 @@ Retorne APENAS a pergunta, sem texto adicional.`;
       input
     };
 
-    const response = await openai.responses.create(payload);
+    log.prompt("QUESTION_GEN", prompt);
+    const response = await log.span("QUESTION_GEN", "responses.create", () =>
+      openai.responses.create(payload)
+    );
 
     return response.output_text || "Pode me explicar melhor esse ponto do seu trabalho?";
   } catch (error) {
-    console.error("Erro ao gerar próxima pergunta:", error);
+    log.error("QUESTION_GEN", `failed: ${error.message}`);
     throw error;
   }
 }
@@ -378,14 +359,11 @@ app.post("/session", async (_req, res) => {
     const dir = path.join(__dirname, "data", "submissions", id);
     fs.mkdirSync(dir, { recursive: true });
 
-    console.log(`✓ Sessão ${id} criada (chat=${chatConversation.id}, eval=${evalConversation.id})`);
-
-    await logConversationContents(chatConversation.id, `SESSION_CREATE chat ${id}`);
-    await logConversationContents(evalConversation.id, `SESSION_CREATE eval ${id}`);
+    log.info("SESSION", `created id=${id} chat=${chatConversation.id} eval=${evalConversation.id}`);
 
     res.json({ session_id: id });
   } catch (error) {
-    console.error("❌ Erro ao criar sessão:", error);
+    log.error("SESSION", `creation failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao criar sessão" });
   }
 });
@@ -417,23 +395,23 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
   try {
     // 1) Upload file to OpenAI Files API
+    const fileName = path.basename(fileRef);
+    log.info("UPLOAD", `file=${fileName} session=${sessionId}`);
     const fileUpload = await openai.files.create({
       file: fs.createReadStream(fileRef),
       purpose: "user_data"
     });
     sess.openaiFileId = fileUpload.id;
+    log.info("UPLOAD", `openai file=${fileUpload.id}`);
 
     // 2) Create Vector Store for RAG/file_search (needed for MapBuilder)
-    console.log("Criando Vector Store...");
     sess.vectorStoreId = await createVectorStoreWithFile(fileUpload.id, sessionId);
 
     // 3) Generate DocumentMap using MapBuilder Agent (fail fast if error)
-    console.log("Gerando DocumentMap com MapBuilder Agent...");
     sess.documentMap = await mapBuilderAgent.generateDocumentMap(
       sess.conversationId_eval,
       sess.openaiFileId
     );
-    console.log("✓ DocumentMap gerado:", JSON.stringify(sess.documentMap, null, 2));
 
     await openai.conversations.items.create(sess.conversationId_eval, {
       items: [{
@@ -442,7 +420,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       }]
     });
 
-    await logConversationContents(sess.conversationId_eval, `UPLOAD document_map eval ${sessionId}`);
+    await logLastConvItem(sess.conversationId_eval, "CONV:eval");
 
     // 4) Call Responses API with system prompt and file
     const payload = {
@@ -465,7 +443,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       ]
     };
 
-    const response = await openai.responses.create(payload);
+    log.prompt("UPLOAD:intro", sess.systemPrompt);
+    const response = await log.span("UPLOAD", "intro responses.create", () =>
+      openai.responses.create(payload)
+    );
 
     const assistantMessage = response.output_text || "Arquivo recebido. Podemos iniciar nossa avaliação?";
 
@@ -486,15 +467,15 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       items: [{ role: "assistant", content: assistantMessage }]
     });
 
-    await logConversationContents(sess.conversationId_chat, `UPLOAD assistant chat ${sessionId}`);
-    await logConversationContents(sess.conversationId_eval, `UPLOAD assistant eval ${sessionId}`);
+    log.info("CHAT", `assistant (intro) ${log.preview(assistantMessage, 120)}`);
+    await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
     // Update state
     sess.currentPhase = 'interviewing';
 
     res.json({ ok: true, file_ref: fileRef, assistant: assistantMessage });
   } catch (error) {
-    console.error("Erro ao processar arquivo com OpenAI:", error);
+    log.error("UPLOAD", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
   }
 });
@@ -527,17 +508,17 @@ app.post("/chat", async (req, res) => {
       items: [{ role: "user", content: message }]
     });
 
-    await logConversationContents(sess.conversationId_chat, `CHAT user chat ${sessionId}`);
-    await logConversationContents(sess.conversationId_eval, `CHAT user eval ${sessionId}`);
+    log.info("CHAT", `user #${sess.questionCount + 1} ${log.preview(message, 140)}`);
+    await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
     // 2. Run evaluators (internal analysis)
-    console.log("\n[TURN DYNAMICS] Executando avaliadores...");
+    log.info("TURN", `q#${sess.questionCount + 1} evaluators=Comprehension,Clarification (parallel)`);
     const signals = await runEvaluators(sess, message);
-    console.log(`[TURN DYNAMICS] ${signals.length} sinais gerados`);
+    log.debug("TURN", `${signals.length} signals generated`);
 
     // 3. Orchestrator decides next action based on signals
     const decision = await orchestrateNextAction(sess, signals);
-    console.log(`[TURN DYNAMICS] Decisão: ${decision.action}`);
+    log.info("ORCH", `decision=${decision.action}`);
 
     // 4. Generate appropriate response
     let assistantResponse;
@@ -574,14 +555,14 @@ app.post("/chat", async (req, res) => {
       items: [{ role: "assistant", content: assistantResponse }]
     });
 
-    await logConversationContents(sess.conversationId_chat, `CHAT assistant chat ${sessionId}`);
-    await logConversationContents(sess.conversationId_eval, `CHAT assistant eval ${sessionId}`);
+    log.info("CHAT", `assistant ${log.preview(assistantResponse, 140)}`);
+    await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
     sess.questionCount++;
 
     res.json({ assistant: assistantResponse });
   } catch (error) {
-    console.error("Erro no chat:", error);
+    log.error("CHAT", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao processar mensagem" });
   }
 });
@@ -593,6 +574,8 @@ app.post("/finalize", async (req, res) => {
   if (!sess) return res.status(400).json({ error: "invalid session" });
 
   try {
+    log.info("FINAL", `start session=${sessionId} signals=${sess.evaluationSignals.length} questions=${sess.questionCount}`);
+
     // Consolidate all evaluation signals
     const allSignals = sess.evaluationSignals;
 
@@ -602,9 +585,11 @@ app.post("/finalize", async (req, res) => {
     // Generate final report
     const report = generateFinalReport(sess, rubricScores);
 
+    log.info("FINAL", `scores C1=${report.breakdown.C1_compreensao} C2=${report.breakdown.C2_metodologia} C3=${report.breakdown.C3_parametros} total=${report.score_total}`);
+
     res.json(report);
   } catch (error) {
-    console.error("Erro ao finalizar avaliação:", error);
+    log.error("FINAL", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao gerar avaliação final" });
   }
 });
@@ -656,19 +641,29 @@ Retorne JSON:
 }`;
 
   try {
-    const response = await openai.responses.create({
-      model: MODELS.METHODOLOGY_EVAL,
-      instructions: prompt,
-      input: [{ role: "user", content: "Avalie a metodologia." }]
-    });
+    log.prompt("EVAL:Methodology", prompt);
+    const response = await log.span("EVAL:Methodology", "responses.create", () =>
+      openai.responses.create({
+        model: MODELS.METHODOLOGY_EVAL,
+        instructions: prompt,
+        input: [{ role: "user", content: "Avalie a metodologia." }]
+      })
+    );
 
-    const outputText = response.output_text || "{}";
+    const outputText = response.output_text || "";
     const jsonMatch = outputText.match(/\{[\s\S]*\}/);
-    const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { score: 5, rationale: "Sem dados" };
-    return result.score || 5;
+    if (!jsonMatch) {
+      throw new Error("Methodology evaluator returned no parseable JSON");
+    }
+    const result = JSON.parse(jsonMatch[0]);
+    if (typeof result.score !== "number") {
+      throw new Error("Methodology evaluator returned invalid score");
+    }
+    log.info("EVAL:Methodology", `score=${result.score}`);
+    return result.score;
   } catch (error) {
-    console.error("Erro ao avaliar metodologia:", error);
-    return 5;
+    log.error("EVAL:Methodology", `failed: ${error.message}`);
+    throw error; // Fail fast - critical scoring component
   }
 }
 
@@ -690,19 +685,29 @@ Retorne JSON:
 }`;
 
   try {
-    const response = await openai.responses.create({
-      model: MODELS.PARAMETERS_EVAL,
-      instructions: prompt,
-      input: [{ role: "user", content: "Avalie os parâmetros." }]
-    });
+    log.prompt("EVAL:Parameters", prompt);
+    const response = await log.span("EVAL:Parameters", "responses.create", () =>
+      openai.responses.create({
+        model: MODELS.PARAMETERS_EVAL,
+        instructions: prompt,
+        input: [{ role: "user", content: "Avalie os parâmetros." }]
+      })
+    );
 
-    const outputText = response.output_text || "{}";
+    const outputText = response.output_text || "";
     const jsonMatch = outputText.match(/\{[\s\S]*\}/);
-    const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { score: 5, rationale: "Sem dados" };
-    return result.score || 5;
+    if (!jsonMatch) {
+      throw new Error("Parameters evaluator returned no parseable JSON");
+    }
+    const result = JSON.parse(jsonMatch[0]);
+    if (typeof result.score !== "number") {
+      throw new Error("Parameters evaluator returned invalid score");
+    }
+    log.info("EVAL:Parameters", `score=${result.score}`);
+    return result.score;
   } catch (error) {
-    console.error("Erro ao avaliar parâmetros:", error);
-    return 5;
+    log.error("EVAL:Parameters", `failed: ${error.message}`);
+    throw error; // Fail fast - critical scoring component
   }
 }
 
@@ -732,7 +737,7 @@ function generateFinalReport(session, rubricScores) {
 
 app.listen(PORT, "0.0.0.0", () => {
   if (!process.env.OPENAI_API_KEY) {
-    console.warn("⚠️  OPENAI_API_KEY ausente no .env");
+    log.warn("BOOT", "OPENAI_API_KEY ausente no .env");
   }
-  console.log(`TA-Assignment MVP rodando em http://0.0.0.0:${PORT}`);
+  log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${OPENAI_MODEL}`);
 });

@@ -1,8 +1,16 @@
 {
-  "title": "Payback de mineração caseira de bitcoin",
+  "title": "Avaliar viabilidade econômica de mineração de Bitcoin",
   "objectives": [
-    "Calcular o payback de um equipamento de mineração de bitcoin"
+    "Avaliar viabilidade econômica de mineração de Bitcoin em uma fazenda com usina hidrelétrica própria"
   ],
-  "deliverables": ["Planilha com os cálculos"],
-  "constraints": { "max_pages": 5, "external_web": false }
+  "complete_statement": [
+    "Você herdou uma fazenda da sua família, localizada em uma região fria, isolada e bucólica, mas com bom acesso à internet via 5G. No passado, a fazenda abrigou diversos empreendimentos e, para suportá-los, foi construída uma micro usina de geração de energia elétrica, que permanece operacional até hoje, produzindo de forma estável 80 kW de potência elétrica.\n\nDecidido a dar um novo rumo ao local, você resolveu realizar um antigo projeto pessoal: abrir um restaurante de alta gastronomia, inspirado na culinária mineira, integrado à paisagem natural e funcionando exclusivamente no período noturno. Para isso, recuperou áreas degradadas da propriedade, passou a residir na antiga casa da fazenda e realizou as reformas necessárias para a instalação do restaurante.\n\nA operação do restaurante é relativamente pequena e exclusiva, com apenas 20 mesas. A maior parte da cocção, dos fornos e do aquecimento é feita com lenha e gás, tanto por escolha estética quanto por coerência com o conceito do local. Além do restaurante, a fazenda mantém hortas próprias, uma pequena criação de galinhas para ovos e algumas vacas leiteiras, que complementam a operação. Considerando o conjunto dessas atividades — restaurante, residência dos proprietários, hortas e pequeno estábulo — o consumo elétrico total permanece abaixo de 40 kW, mesmo nos momentos de maior demanda.\n\nDiante disso, você passa a considerar a possibilidade de utilizar a energia excedente para montar uma operação semi-caseira de mineração de Bitcoin, instalada nas proximidades da usina elétrica e da queda d'água, dentro de uma estrutura industrial já existente. O local é distante do restaurante, de modo que ruído não é uma restrição relevante. O sistema de resfriamento pode utilizar a água fria do próprio riacho, por meio de um circuito apropriado, o que implica um custo adicional de R$ 80 mil no investimento inicial.\n\nPara fins deste trabalho, desconsidere todas as questões burocráticas, regulatórias ou de licenciamento, assumindo que a usina já existia legalmente. Desconsidere também o custo de mão de obra, tanto para a operação do restaurante quanto da mineração.\n\nSeu objetivo é avaliar a viabilidade econômica da mineração de Bitcoin nesse contexto, considerando um horizonte de 10 anos.\n\nO estudo deve obrigatoriamente:\n• Considerar três cenários para a mineração: otimista, neutro e pessimista, levando em conta possíveis evoluções do preço do Bitcoin e do hash rate da rede.\n• Considerar uso de mineração em pool.\n• Considere o custo de aquisição de equipamentos e R$ 20 mil para instalação (além dos R$ 80 mil do resfriamento).\n• Considerar a necessidade de atualização tecnológica dos equipamentos de mineração ao longo do tempo.\n• Calcular o retorno econômico do investimento ao longo dos 10 anos. Para trazer a valor presente, utilize uma taxa de desconto de 8% ou sugira (e defenda) outra no próprio trabalho.\n\nPrecisa entregar um PDF, incluindo possíveis gráficos e tabelas."
+  ],
+  "deliverables": [
+    "PDF atendendo a todos os requisitos"
+  ],
+  "constraints": {
+    "max_pages": 5,
+    "external_web": false
+  }
 }
