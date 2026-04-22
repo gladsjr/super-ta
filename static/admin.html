@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SuperTA — Admin</title>
+<style>
+  body { font-family: system-ui; margin: 2rem auto; max-width: 820px; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: 0.5rem; }
+  #login-screen { max-width: 320px; margin: 4rem auto; padding: 2rem; border: 1px solid #ccc; border-radius: 8px; }
+  #login-screen input { display: block; width: 100%; padding: 0.5rem; margin: 0.5rem 0; box-sizing: border-box; }
+  #login-screen button { width: 100%; padding: 0.6rem; }
+  #login-error { color: red; min-height: 1.2em; margin-top: 0.5rem; }
+  #topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  #topbar .right { color: #555; font-size: 0.9em; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 0.75rem 0; }
+  .card h3 { margin: 0 0 0.3rem 0; }
+  .muted { color: #666; font-size: 0.9em; }
+  .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 0.1em 0.5em; border-radius: 10px; font-size: 0.8em; background: #f0f0f0; margin-left: 0.3rem; }
+  input, button { padding: 0.4rem; font-size: 1em; }
+  a { color: #0366d6; word-break: break-all; }
+  code.token { background: #f4f4f4; border: 1px solid #e4e4e4; padding: 0.2em 0.5em; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.95em; word-break: break-all; }
+  button.icon-btn { background: none; border: 1px solid #ddd; border-radius: 4px; padding: 0.15em 0.45em; cursor: pointer; font-size: 1em; line-height: 1; }
+  button.icon-btn:hover { background: #f4f4f4; }
+  button.icon-btn:disabled { color: #2a8f3a; border-color: #c9e5cf; background: #eefaf0; cursor: default; }
+</style>
+</head>
+<body>
+
+<div id="login-screen" style="display:none">
+  <h2>Entrar</h2>
+  <input id="login-user" placeholder="Usuário" autocomplete="username"/>
+  <input id="login-pass" type="password" placeholder="Senha" autocomplete="current-password"/>
+  <button id="login-btn">Entrar</button>
+  <div id="login-error"></div>
+</div>
+
+<div id="app-screen" style="display:none">
+  <div id="topbar">
+    <h1 style="margin:0">Admin — SuperTA</h1>
+    <div class="right">
+      <span id="user-info"></span>
+      <button id="logout-btn">Sair</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Novo trabalho</h3>
+    <div class="row">
+      <input id="new-work-name" placeholder="Nome do trabalho (ex.: Prova 1)" style="flex:1; min-width: 260px"/>
+      <button id="create-work">Criar</button>
+    </div>
+    <div id="create-msg" class="muted" style="margin-top:0.5rem"></div>
+  </div>
+
+  <h3>Seus trabalhos</h3>
+  <div id="works"></div>
+</div>
+
+<script>
+async function checkAuth() {
+  try {
+    const r = await fetch('/me');
+    if (r.ok) { const j = await r.json(); showApp(j.user); loadWorks(); }
+    else showLogin();
+  } catch { showLogin(); }
+}
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'block';
+  document.getElementById('app-screen').style.display = 'none';
+}
+function showApp(user) {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  document.getElementById('user-info').textContent = `Olá, ${user.username}`;
+}
+
+document.getElementById('login-btn').onclick = async () => {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  if (!username || !password) return errEl.textContent = 'Informe usuário e senha';
+  try {
+    const r = await fetch('/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadWorks(); }
+    else errEl.textContent = 'Usuário ou senha inválidos';
+  } catch { errEl.textContent = 'Falha na comunicação'; }
+};
+document.getElementById('login-pass').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('login-btn').click();
+});
+document.getElementById('logout-btn').onclick = async () => {
+  await fetch('/logout', { method: 'POST' });
+  document.getElementById('works').innerHTML = '';
+  showLogin();
+};
+
+document.getElementById('create-work').onclick = async () => {
+  const name = document.getElementById('new-work-name').value.trim();
+  const msg = document.getElementById('create-msg');
+  msg.textContent = '';
+  if (!name) { msg.textContent = 'Nome obrigatório'; return; }
+  try {
+    const r = await fetch('/admin/works', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (r.status === 401) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao criar'); return; }
+    document.getElementById('new-work-name').value = '';
+    msg.textContent = 'Criado.';
+    loadWorks();
+  } catch { msg.textContent = 'Falha na comunicação'; }
+};
+
+async function loadWorks() {
+  const r = await fetch('/admin/works');
+  if (r.status === 401) return showLogin();
+  const j = await r.json();
+  const el = document.getElementById('works');
+  if (!j.works || j.works.length === 0) {
+    el.innerHTML = '<p class="muted">Nenhum trabalho ainda.</p>';
+    return;
+  }
+  el.innerHTML = j.works.map(w => {
+    const profUrl = '/w/' + encodeURIComponent(w.work_token);
+    const pending = Number(w.pending || 0);
+    const inprog = Number(w.in_progress || 0);
+    const finalized = Number(w.finalized || 0);
+    return `
+      <div class="card">
+        <h3>${escapeHtml(w.name)}</h3>
+        <div class="row" style="margin-top:0.5rem">
+          <span class="badge">pending: ${pending}</span>
+          <span class="badge">em andamento: ${inprog}</span>
+          <span class="badge">finalizados: ${finalized}</span>
+          ${w.assignment_pdf ? '<span class="badge">enunciado ✓</span>' : '<span class="badge">sem enunciado</span>'}
+        </div>
+        <div style="margin-top:0.75rem">
+          <div class="muted">Token de trabalho:</div>
+          <div class="row" style="margin-top:0.3rem">
+            <code class="token">${escapeHtml(w.work_token)}</code>
+            <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${w.work_token}')">📋</button>
+            <a href="${profUrl}" target="_blank" title="Abrir painel do professor">abrir ↗</a>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function copyToken(btn, token) {
+  try { await navigator.clipboard.writeText(token); }
+  catch { return; }
+  const prev = btn.textContent;
+  btn.textContent = '✓';
+  btn.disabled = true;
+  setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+checkAuth();
+</script>
+</body>
+</html>

@@ -1,9 +1,10 @@
+import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
 import multer from "multer";
-import dotenv from "dotenv";
+import yaml from "js-yaml";
 import OpenAI from "openai";
 import { MapBuilderAgent } from "./agents/MapBuilderAgent.js";
 import { ComprehensionEvaluatorAgent } from "./agents/ComprehensionEvaluatorAgent.js";
@@ -11,13 +12,22 @@ import { ClarificationEvaluatorAgent } from "./agents/ClarificationEvaluatorAgen
 import {
   sessionMiddleware,
   seedInitialUsers,
-  requireAuth,
   loginHandler,
   logoutHandler,
   meHandler,
 } from "./auth.js";
-
-dotenv.config();
+import {
+  newToken,
+  requireAdmin,
+  requireWorkToken,
+  requireSubmissionToken,
+  sanitizeLabel,
+  parseDirName,
+  submissionStatus,
+  WORKS_ROOT,
+  PROJECT_ROOT,
+} from "./lib/middleware.js";
+import log from "./lib/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -334,261 +344,408 @@ Retorne APENAS a pergunta, sem texto adicional.`;
 // ============================================================================
 
 // rotas
+// ============================================================================
+// STATIC PAGES
+// ============================================================================
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "static", "index.html"));
 });
+app.get("/admin", (_req, res) => {
+  res.sendFile(path.join(__dirname, "static", "admin.html"));
+});
+app.get("/trabalho", (_req, res) => {
+  res.sendFile(path.join(__dirname, "static", "trabalho.html"));
+});
+app.get("/envio", (_req, res) => {
+  res.sendFile(path.join(__dirname, "static", "envio.html"));
+});
+app.get("/w/:workToken", (_req, res) => {
+  res.sendFile(path.join(__dirname, "static", "professor.html"));
+});
+app.get("/s/:submissionToken", (_req, res) => {
+  res.sendFile(path.join(__dirname, "static", "student.html"));
+});
 
-// Helper: ensure the authenticated user owns the eval session
-function getOwnedSession(req, res) {
-  const sessionId = String(req.query.session || "");
-  const sess = SESSIONS.get(sessionId);
-  if (!sess) {
-    res.status(400).json({ error: "invalid session" });
-    return null;
+// ============================================================================
+// MULTER: two storages — enunciado (professor) and student upload
+// ============================================================================
+const enunciadoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      fs.mkdirSync(req.work.full_path, { recursive: true });
+      cb(null, req.work.full_path);
+    },
+    filename: (_req, _file, cb) => cb(null, "enunciado.pdf"),
+  }),
+});
+const studentUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      fs.mkdirSync(req.submission.full_path, { recursive: true });
+      cb(null, req.submission.full_path);
+    },
+    filename: (_req, file, cb) => cb(null, file.originalname),
+  }),
+});
+
+// ============================================================================
+// ADMIN ROUTES
+// ============================================================================
+app.get("/admin/works", requireAdmin, (req, res) => {
+  try {
+    fs.mkdirSync(WORKS_ROOT, { recursive: true });
+    const works = [];
+    for (const e of fs.readdirSync(WORKS_ROOT, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const parsed = parseDirName(e.name);
+      if (!parsed) continue;
+      const workFullPath = path.join(WORKS_ROOT, e.name);
+      const subsRoot = path.join(workFullPath, "submissions");
+      let pending = 0, in_progress = 0, finalized = 0;
+      if (fs.existsSync(subsRoot)) {
+        for (const se of fs.readdirSync(subsRoot, { withFileTypes: true })) {
+          if (!se.isDirectory()) continue;
+          if (!parseDirName(se.name)) continue;
+          const status = submissionStatus(path.join(subsRoot, se.name));
+          if (status === "pending") pending++;
+          else if (status === "in_progress") in_progress++;
+          else if (status === "finalized") finalized++;
+        }
+      }
+      works.push({
+        work_token: parsed.token,
+        name: parsed.label,
+        assignment_pdf: fs.existsSync(path.join(workFullPath, "enunciado.pdf")),
+        pending,
+        in_progress,
+        finalized,
+      });
+    }
+    res.json({ works });
+  } catch (err) {
+    log.error("ADMIN", `list works failed: ${err.message}`);
+    res.status(500).json({ error: "failed to list works" });
   }
-  if (sess.ownerUserId !== req.session.user.id) {
-    res.status(403).json({ error: "forbidden" });
-    return null;
+});
+
+app.post("/admin/works", requireAdmin, (req, res) => {
+  let name;
+  try { name = sanitizeLabel(req.body?.name); }
+  catch (err) { return res.status(400).json({ error: err.message }); }
+  try {
+    const workToken = newToken();
+    const dirName = `${workToken}-${name}`;
+    fs.mkdirSync(path.join(WORKS_ROOT, dirName), { recursive: true });
+    log.info("ADMIN", `work created token=${workToken} name="${name}" by=${req.session.user.username}`);
+    res.json({ work: { work_token: workToken, name } });
+  } catch (err) {
+    log.error("ADMIN", `create work failed: ${err.message}`);
+    res.status(500).json({ error: "failed to create work" });
   }
-  return { sess, sessionId };
+});
+
+// ============================================================================
+// PROFESSOR ROUTES (bearer auth via work_token)
+// ============================================================================
+app.get("/w/:workToken/info", requireWorkToken, (req, res) => {
+  try {
+    const subsRoot = path.join(req.work.full_path, "submissions");
+    const submissions = [];
+    if (fs.existsSync(subsRoot)) {
+      for (const e of fs.readdirSync(subsRoot, { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        const parsed = parseDirName(e.name);
+        if (!parsed) continue;
+        submissions.push({
+          submission_token: parsed.token,
+          student_label: parsed.label,
+          status: submissionStatus(path.join(subsRoot, e.name)),
+        });
+      }
+    }
+    const hasInterviewer = fs.existsSync(path.join(req.work.full_path, "interviewer.yaml"));
+    res.json({
+      work: {
+        name: req.work.name,
+        has_enunciado: !!req.work.assignment_pdf,
+        has_interviewer: hasInterviewer,
+      },
+      submissions,
+    });
+  } catch (err) {
+    log.error("WORK", `info failed: ${err.message}`);
+    res.status(500).json({ error: "failed to load work info" });
+  }
+});
+
+// ---- Interviewer templates (shared) ----
+const INTERVIEWER_TEMPLATES_DIR = path.join(__dirname, "config", "interviewers");
+
+function listInterviewerTemplates() {
+  if (!fs.existsSync(INTERVIEWER_TEMPLATES_DIR)) return [];
+  return fs
+    .readdirSync(INTERVIEWER_TEMPLATES_DIR)
+    .filter(f => /\.ya?ml$/i.test(f))
+    .sort();
 }
 
-// 1) criar sessão
-app.post("/session", requireAuth, async (req, res) => {
-  const id = Math.random().toString(36).slice(2, 14);
-  const systemPrompt = loadSystemPrompt();
+app.get("/interviewers/templates", (_req, res) => {
+  res.json({ templates: listInterviewerTemplates().map(filename => ({ filename })) });
+});
+
+app.get("/interviewers/templates/:filename", (req, res) => {
+  const filename = String(req.params.filename);
+  if (!listInterviewerTemplates().includes(filename)) {
+    return res.status(404).json({ error: "template not found" });
+  }
+  const content = fs.readFileSync(path.join(INTERVIEWER_TEMPLATES_DIR, filename), "utf8");
+  res.type("text/plain").send(content);
+});
+
+// ---- Per-work interviewer YAML ----
+app.get("/w/:workToken/interviewer", requireWorkToken, (req, res) => {
+  const p = path.join(req.work.full_path, "interviewer.yaml");
+  if (!fs.existsSync(p)) return res.json({ yaml: null });
+  res.json({ yaml: fs.readFileSync(p, "utf8") });
+});
+
+app.post("/w/:workToken/interviewer", requireWorkToken, express.json({ limit: "256kb" }), (req, res) => {
+  const content = String(req.body?.yaml ?? "");
+  if (!content.trim()) return res.status(400).json({ error: "yaml content required" });
+  try {
+    yaml.load(content);
+  } catch (err) {
+    return res.status(400).json({ error: "invalid YAML", detail: err.message });
+  }
+  fs.mkdirSync(req.work.full_path, { recursive: true });
+  fs.writeFileSync(path.join(req.work.full_path, "interviewer.yaml"), content, "utf8");
+  log.info("WORK", `interviewer saved work=${req.work.work_token} bytes=${content.length}`);
+  res.json({ ok: true });
+});
+
+app.get("/w/:workToken/enunciado", requireWorkToken, (req, res) => {
+  const p = path.join(req.work.full_path, "enunciado.pdf");
+  if (!fs.existsSync(p)) return res.status(404).json({ error: "enunciado not uploaded" });
+  res.sendFile(p);
+});
+
+app.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "file required" });
+  const rel = path.relative(PROJECT_ROOT, req.file.path);
+  log.info("WORK", `enunciado uploaded work=${req.work.work_token} path=${rel}`);
+  res.json({ ok: true, path: rel });
+});
+
+app.post("/w/:workToken/submissions", requireWorkToken, (req, res) => {
+  let baseLabel;
+  try { baseLabel = sanitizeLabel(req.body?.label); }
+  catch (err) { return res.status(400).json({ error: err.message }); }
+
+  const rawCount = Number(req.body?.count ?? 1);
+  const count = Number.isFinite(rawCount) && rawCount > 0 && rawCount <= 50 ? Math.floor(rawCount) : 1;
 
   try {
-    const [chatConversation, evalConversation] = await Promise.all([
-      openai.conversations.create({ metadata: { session_id: id, type: "chat" } }),
-      openai.conversations.create({ metadata: { session_id: id, type: "eval" } })
-    ]);
-
-    const sess = {
-      systemPrompt,
-      ownerUserId: req.session.user.id,           // Bind session to authenticated user
-      // Dual conversations (explicitly created)
-      conversationId_chat: chatConversation.id,   // Student-facing conversation
-      conversationId_eval: evalConversation.id,   // Internal evaluation conversation
-      conv_chat: [],        // Local cache (for display)
-      conv_eval: [],        // Local cache (for logging)
-      history: [],          // Backward compatibility (alias to conv_chat)
-      // Document understanding
-      documentMap: null,    // Global document summary
-      submissionPath: null,
-      openaiFileId: null,
-      vectorStoreId: null,  // For RAG/file_search
-      // State machine
-      currentPhase: 'awaiting_upload',  // awaiting_upload, interviewing, finalizing
-      questionCount: 0,
-      evaluationSignals: [] // Accumulated signals from evaluators
-    };
-    SESSIONS.set(id, sess);
-
-    const dir = path.join(__dirname, "data", "submissions", id);
-    fs.mkdirSync(dir, { recursive: true });
-
-    log.info("SESSION", `created id=${id} chat=${chatConversation.id} eval=${evalConversation.id}`);
-
-    res.json({ session_id: id });
-  } catch (error) {
-    log.error("SESSION", `creation failed: ${error.message}`);
-    res.status(500).json({ error: "Erro ao criar sessão" });
+    const rows = [];
+    const subsRoot = path.join(req.work.full_path, "submissions");
+    fs.mkdirSync(subsRoot, { recursive: true });
+    for (let i = 0; i < count; i++) {
+      const submissionToken = newToken();
+      const label = count > 1 ? `${baseLabel}-${i + 1}` : baseLabel;
+      fs.mkdirSync(path.join(subsRoot, `${submissionToken}-${label}`), { recursive: true });
+      rows.push({ submission_token: submissionToken, student_label: label, status: "pending" });
+    }
+    log.info("SUBMISSION", `created ${count} submission(s) for work=${req.work.work_token}`);
+    res.json({ submissions: rows });
+  } catch (err) {
+    log.error("SUBMISSION", `create failed: ${err.message}`);
+    res.status(500).json({ error: "failed to create submissions" });
   }
 });
 
-// 2) upload
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const session = req.query.session;
-    const dir = path.join(__dirname, "data", "submissions", String(session || "unknown"));
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (_req, file, cb) => cb(null, file.originalname)
-});
-const upload = multer({ storage });
+// ============================================================================
+// STUDENT ROUTES (bearer auth via submission_token)
+// SESSIONS map is keyed by submission_token.
+// ============================================================================
 
+function sessionToClientState(sess) {
+  return {
+    currentPhase: sess.currentPhase,
+    questionCount: sess.questionCount,
+    hasUpload: !!sess.submissionPath,
+    chat: sess.conv_chat.map(m => ({ role: m.role, content: m.content })),
+  };
+}
 
-app.post("/upload", requireAuth, upload.single("file"), async (req, res) => {
-  const owned = getOwnedSession(req, res);
-  if (!owned) return;
-  const { sess, sessionId } = owned;
-
-  if (!sess.conversationId_chat || !sess.conversationId_eval) {
-    return res.status(500).json({ error: "Sessão sem conversations válidas" });
+app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) => {
+  const token = req.submission.submission_token;
+  if (req.submission.status === "finalized") {
+    return res.status(403).json({ error: "submission already finalized" });
   }
+
+  try {
+    let sess = SESSIONS.get(token);
+    if (!sess) {
+      const systemPrompt = loadSystemPrompt();
+      const [chatConversation, evalConversation] = await Promise.all([
+        openai.conversations.create({ metadata: { submission_token: token, type: "chat" } }),
+        openai.conversations.create({ metadata: { submission_token: token, type: "eval" } }),
+      ]);
+      sess = {
+        systemPrompt,
+        submissionToken: token,
+        workToken: req.work.work_token,
+        conversationId_chat: chatConversation.id,
+        conversationId_eval: evalConversation.id,
+        conv_chat: [],
+        conv_eval: [],
+        history: [],
+        documentMap: null,
+        submissionPath: null,
+        openaiFileId: null,
+        vectorStoreId: null,
+        currentPhase: "awaiting_upload",
+        questionCount: 0,
+        evaluationSignals: [],
+      };
+      SESSIONS.set(token, sess);
+      fs.mkdirSync(req.submission.full_path, { recursive: true });
+      log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} chat=${chatConversation.id} eval=${evalConversation.id}`);
+    } else {
+      log.info("SUBMISSION", `resume token=${token} phase=${sess.currentPhase} qn=${sess.questionCount}`);
+    }
+
+    res.json({
+      work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
+      submission: { status: req.submission.status === "pending" ? "in_progress" : req.submission.status, student_label: req.submission.student_label },
+      session: sessionToClientState(sess),
+    });
+  } catch (err) {
+    log.error("SUBMISSION", `start failed: ${err.message}`);
+    res.status(500).json({ error: "failed to start submission" });
+  }
+});
+
+app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.single("file"), async (req, res) => {
+  const token = req.submission.submission_token;
+  if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
+  const sess = SESSIONS.get(token);
+  if (!sess) return res.status(400).json({ error: "call /start first" });
+  if (!req.file) return res.status(400).json({ error: "file required" });
 
   const fileRef = req.file.path;
   sess.submissionPath = fileRef;
 
   try {
-    // 1) Upload file to OpenAI Files API
     const fileName = path.basename(fileRef);
-    log.info("UPLOAD", `file=${fileName} session=${sessionId}`);
-    const fileUpload = await openai.files.create({
-      file: fs.createReadStream(fileRef),
-      purpose: "user_data"
-    });
+    log.info("UPLOAD", `student file=${fileName} submission=${token}`);
+    const fileUpload = await openai.files.create({ file: fs.createReadStream(fileRef), purpose: "user_data" });
     sess.openaiFileId = fileUpload.id;
     log.info("UPLOAD", `openai file=${fileUpload.id}`);
 
-    // 2) Create Vector Store for RAG/file_search (needed for MapBuilder)
-    sess.vectorStoreId = await createVectorStoreWithFile(fileUpload.id, sessionId);
+    sess.vectorStoreId = await createVectorStoreWithFile(fileUpload.id, token);
 
-    // 3) Generate DocumentMap using MapBuilder Agent (fail fast if error)
     sess.documentMap = await mapBuilderAgent.generateDocumentMap(
       sess.conversationId_eval,
       sess.openaiFileId
     );
 
     await openai.conversations.items.create(sess.conversationId_eval, {
-      items: [{
-        role: "developer",
-        content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}`
-      }]
+      items: [{ role: "developer", content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}` }],
     });
-
     await logLastConvItem(sess.conversationId_eval, "CONV:eval");
 
-    // 4) Call Responses API with system prompt and file
     const payload = {
       model: OPENAI_MODEL,
       instructions: sess.systemPrompt,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: "Este é o trabalho do aluno. Por favor, analise e inicie a avaliação."
-            },
-            {
-              type: "input_file",
-              file_id: fileUpload.id
-            }
-          ]
-        }
-      ]
+      input: [{
+        role: "user",
+        content: [
+          { type: "input_text", text: "Este é o trabalho do aluno. Por favor, analise e inicie a avaliação." },
+          { type: "input_file", file_id: fileUpload.id },
+        ],
+      }],
     };
 
     log.prompt("UPLOAD:intro", sess.systemPrompt);
-    const response = await log.span("UPLOAD", "intro responses.create", () =>
-      openai.responses.create(payload)
-    );
-
+    const response = await log.span("UPLOAD", "intro responses.create", () => openai.responses.create(payload));
     const assistantMessage = response.output_text || "Arquivo recebido. Podemos iniciar nossa avaliação?";
 
-    // Store in both conversations
     sess.conv_chat.push({ role: "assistant", content: assistantMessage });
-    sess.conv_eval.push({
-      role: "assistant",
-      content: assistantMessage,
-      metadata: { documentMap: sess.documentMap }
-    });
-    sess.history = sess.conv_chat; // Maintain backward compatibility
+    sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { documentMap: sess.documentMap } });
+    sess.history = sess.conv_chat;
 
     await openai.conversations.items.create(sess.conversationId_chat, {
-      items: [{ role: "assistant", content: assistantMessage }]
+      items: [{ role: "assistant", content: assistantMessage }],
     });
-
     await openai.conversations.items.create(sess.conversationId_eval, {
-      items: [{ role: "assistant", content: assistantMessage }]
+      items: [{ role: "assistant", content: assistantMessage }],
     });
 
     log.info("CHAT", `assistant (intro) ${log.preview(assistantMessage, 120)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    // Update state
-    sess.currentPhase = 'interviewing';
+    sess.currentPhase = "interviewing";
 
-    res.json({ ok: true, file_ref: fileRef, assistant: assistantMessage });
+    res.json({ ok: true, assistant: assistantMessage });
   } catch (error) {
     log.error("UPLOAD", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
   }
 });
 
-// 3) chat
-app.post("/chat", requireAuth, async (req, res) => {
-  const owned = getOwnedSession(req, res);
-  if (!owned) return;
-  const { sess, sessionId } = owned;
+app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) => {
+  const token = req.submission.submission_token;
+  if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
+  const sess = SESSIONS.get(token);
+  if (!sess) return res.status(400).json({ error: "call /start first" });
+  if (!sess.vectorStoreId || !sess.documentMap) {
+    return res.status(400).json({ error: "envie o trabalho (PDF) antes de iniciar a conversa" });
+  }
 
   const message = (req.body?.message || "").toString();
   if (!message) return res.status(400).json({ error: "empty message" });
 
-  // ===== TURN DYNAMICS PROTOCOL =====
-  // 1. Student responds - store in both conversations
   sess.conv_chat.push({ role: "user", content: message });
   sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
-  sess.history = sess.conv_chat; // Maintain backward compatibility
-
-  if (!sess.conversationId_chat || !sess.conversationId_eval) {
-    return res.status(500).json({ error: "Sessão sem conversations válidas" });
-  }
+  sess.history = sess.conv_chat;
 
   try {
-    await openai.conversations.items.create(sess.conversationId_chat, {
-      items: [{ role: "user", content: message }]
-    });
-
-    await openai.conversations.items.create(sess.conversationId_eval, {
-      items: [{ role: "user", content: message }]
-    });
+    await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
+    await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
 
     log.info("CHAT", `user #${sess.questionCount + 1} ${log.preview(message, 140)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    // 2. Run evaluators (internal analysis)
     log.info("TURN", `q#${sess.questionCount + 1} evaluators=Comprehension,Clarification (parallel)`);
     const signals = await runEvaluators(sess, message);
     log.debug("TURN", `${signals.length} signals generated`);
 
-    // 3. Orchestrator decides next action based on signals
     const decision = await orchestrateNextAction(sess, signals);
     log.info("ORCH", `decision=${decision.action}`);
 
-    // 4. Generate appropriate response
     let assistantResponse;
-
-    if (decision.action === 'followup') {
-      // Use suggested question from evaluators
+    if (decision.action === "followup") {
       assistantResponse = decision.question;
-    } else if (decision.action === 'continue') {
-      // Generate new question via LLM
+    } else if (decision.action === "continue") {
       assistantResponse = await generateNextQuestion(sess);
-    } else if (decision.action === 'finalize') {
-      // Signal that interview is complete
+    } else if (decision.action === "finalize") {
       assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. Use o botão 'Finalizar' quando estiver pronto.";
-      sess.currentPhase = 'finalizing';
+      sess.currentPhase = "finalizing";
     } else {
-      // Default fallback
       assistantResponse = await generateNextQuestion(sess);
     }
 
-    // 5. Store response in both conversations
     sess.conv_chat.push({ role: "assistant", content: assistantResponse });
-    sess.conv_eval.push({
-      role: "assistant",
-      content: assistantResponse,
-      metadata: { decision, timestamp: Date.now() }
-    });
+    sess.conv_eval.push({ role: "assistant", content: assistantResponse, metadata: { decision, timestamp: Date.now() } });
     sess.history = sess.conv_chat;
 
-    await openai.conversations.items.create(sess.conversationId_chat, {
-      items: [{ role: "assistant", content: assistantResponse }]
-    });
-
-    await openai.conversations.items.create(sess.conversationId_eval, {
-      items: [{ role: "assistant", content: assistantResponse }]
-    });
+    await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: assistantResponse }] });
+    await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: assistantResponse }] });
 
     log.info("CHAT", `assistant ${log.preview(assistantResponse, 140)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
     sess.questionCount++;
-
     res.json({ assistant: assistantResponse });
   } catch (error) {
     log.error("CHAT", `failed: ${error.message}`);
@@ -596,26 +753,28 @@ app.post("/chat", requireAuth, async (req, res) => {
   }
 });
 
-// 4) finalizar (consolidação baseada em avaliadores)
-app.post("/finalize", requireAuth, async (req, res) => {
-  const owned = getOwnedSession(req, res);
-  if (!owned) return;
-  const { sess } = owned;
+app.post("/s/:submissionToken/finalize", requireSubmissionToken, async (req, res) => {
+  const token = req.submission.submission_token;
+  if (req.submission.status === "finalized" && req.submission.final_report) {
+    return res.json(req.submission.final_report);
+  }
+  const sess = SESSIONS.get(token);
+  if (!sess) return res.status(400).json({ error: "no active session; start and complete the interview first" });
 
   try {
-    log.info("FINAL", `start session=${sessionId} signals=${sess.evaluationSignals.length} questions=${sess.questionCount}`);
+    log.info("FINAL", `start submission=${token} signals=${sess.evaluationSignals.length} questions=${sess.questionCount}`);
 
-    // Consolidate all evaluation signals
-    const allSignals = sess.evaluationSignals;
-
-    // Calculate rubric-based scores
-    const rubricScores = await calculateRubricScores(sess, allSignals);
-
-    // Generate final report
+    const rubricScores = await calculateRubricScores(sess, sess.evaluationSignals);
     const report = generateFinalReport(sess, rubricScores);
 
-    log.info("FINAL", `scores C1=${report.breakdown.C1_compreensao} C2=${report.breakdown.C2_metodologia} C3=${report.breakdown.C3_parametros} total=${report.score_total}`);
+    fs.writeFileSync(
+      path.join(req.submission.full_path, "final_report.json"),
+      JSON.stringify(report, null, 2),
+      "utf8"
+    );
 
+    log.info("FINAL", `submission=${token} C1=${report.breakdown.C1_compreensao} C2=${report.breakdown.C2_metodologia} C3=${report.breakdown.C3_parametros} total=${report.score_total}`);
+    SESSIONS.delete(token);
     res.json(report);
   } catch (error) {
     log.error("FINAL", `failed: ${error.message}`);
@@ -771,7 +930,7 @@ app.listen(PORT, "0.0.0.0", async () => {
   try {
     await seedInitialUsers();
   } catch (err) {
-    console.error("Erro ao semear usuários iniciais:", err);
+    log.error("BOOT", `seedInitialUsers failed: ${err.message}`);
   }
-  console.log(`TA-Assignment MVP rodando em http://0.0.0.0:${PORT}`);
+  log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${OPENAI_MODEL}`);
 });

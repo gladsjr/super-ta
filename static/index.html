@@ -3,234 +3,39 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>TA-Assignment (MVP-0)</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"/>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<title>SuperTA</title>
 <style>
-  body { font-family: system-ui; margin: 2rem; max-width: 720px; }
-  #chat { border: 1px solid #ccc; padding: 1rem; min-height: 200px; }
-  #chat .ta-msg { margin: 0.5rem 0; line-height: 1.6; }
-  #chat .ta-msg p { margin: 0.5em 0; }
-  #chat .ta-msg code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
-  #chat .ta-msg pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
-  .katex-display { margin: 1em 0; overflow-x: auto; }
-  #login-screen { max-width: 320px; margin: 4rem auto; padding: 2rem; border: 1px solid #ccc; border-radius: 8px; }
-  #login-screen input { display: block; width: 100%; padding: 0.5rem; margin: 0.5rem 0; box-sizing: border-box; }
-  #login-screen button { width: 100%; padding: 0.6rem; }
-  #login-error { color: red; min-height: 1.2em; margin-top: 0.5rem; }
-  #topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-  #user-info { color: #555; font-size: 0.9em; }
+  body { font-family: system-ui; margin: 2rem auto; max-width: 520px; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: 0.5rem; }
+  p { color: #555; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 0.75rem 0; }
+  .card h3 { margin: 0 0 0.3rem 0; }
+  .card p { margin: 0 0 0.5rem 0; font-size: 0.95em; }
+  input { padding: 0.4rem; font-size: 1em; width: 60%; }
+  button { padding: 0.4rem 0.9rem; font-size: 1em; }
+  a { color: #0366d6; }
 </style>
 </head>
 <body>
+  <h1>SuperTA</h1>
+  <p>Sistema de avaliação assistida por IA.</p>
 
-<div id="login-screen" style="display:none">
-  <h2>Entrar</h2>
-  <input id="login-user" placeholder="Usuário" autocomplete="username"/>
-  <input id="login-pass" type="password" placeholder="Senha" autocomplete="current-password"/>
-  <button id="login-btn">Entrar</button>
-  <div id="login-error"></div>
-</div>
-
-<div id="app-screen" style="display:none">
-  <div id="topbar">
-    <h1 style="margin:0">TA-Assignment (MVP-0)</h1>
-    <div>
-      <span id="user-info"></span>
-      <button id="logout-btn">Sair</button>
-    </div>
+  <div class="card">
+    <h3>Administrador</h3>
+    <p>Gerencia trabalhos e distribui links para professores.</p>
+    <a href="/admin">Ir para o painel administrativo →</a>
   </div>
 
-  <button id="newSession">Nova sessão</button>
-  <span id="sid"></span>
+  <div class="card">
+    <h3>Professor</h3>
+    <p>Use o token de trabalho que você recebeu do administrador.</p>
+    <a href="/trabalho">Acessar trabalho →</a>
+  </div>
 
-  <h3>Upload da entrega</h3>
-  <input type="file" id="file"/>
-  <button id="sendFile">Enviar</button>
-  <div id="fileRef"></div>
-
-  <h3>Chat</h3>
-  <div id="chat"></div>
-  <input id="msg" placeholder="Sua resposta..." style="width:80%"/>
-  <button id="send">Enviar</button>
-
-  <h3>Finalizar</h3>
-  <button id="finalize">Gerar avaliação</button>
-  <pre id="result"></pre>
-</div>
-
-<script>
-let session = null;
-const chat = document.getElementById('chat');
-const sid = document.getElementById('sid');
-
-function renderMessage(text) {
-  let html = text;
-  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (m, f) => {
-    try { return katex.renderToString(f.trim(), { displayMode: true, throwOnError: false }); }
-    catch (e) { return m; }
-  });
-  html = html.replace(/\\\(([\s\S]*?)\\\)/g, (m, f) => {
-    try { return katex.renderToString(f.trim(), { displayMode: false, throwOnError: false }); }
-    catch (e) { return m; }
-  });
-  return marked.parse(html);
-}
-
-function appendTA(text) {
-  const div = document.createElement('div');
-  div.className = 'ta-msg';
-  div.innerHTML = `<b>TA:</b> ${renderMessage(text)}`;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
-function appendUser(text) {
-  const div = document.createElement('div');
-  div.innerHTML = `<b>Você:</b> ${text}`;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
-function appendStatus(text, isError = false) {
-  const div = document.createElement('div');
-  div.style.color = isError ? 'red' : '#666';
-  div.innerHTML = isError ? `<b>Erro:</b> ${text}` : `<em>${text}</em>`;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-// ===== Auth =====
-async function checkAuth() {
-  try {
-    const r = await fetch('/me');
-    if (r.ok) {
-      const j = await r.json();
-      showApp(j.user);
-    } else {
-      showLogin();
-    }
-  } catch {
-    showLogin();
-  }
-}
-
-function showLogin() {
-  document.getElementById('login-screen').style.display = 'block';
-  document.getElementById('app-screen').style.display = 'none';
-}
-
-function showApp(user) {
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'block';
-  document.getElementById('user-info').textContent = `Olá, ${user.username}`;
-}
-
-document.getElementById('login-btn').onclick = async () => {
-  const username = document.getElementById('login-user').value.trim();
-  const password = document.getElementById('login-pass').value;
-  const errEl = document.getElementById('login-error');
-  errEl.textContent = '';
-  if (!username || !password) {
-    errEl.textContent = 'Informe usuário e senha';
-    return;
-  }
-  try {
-    const r = await fetch('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    if (r.ok) {
-      const j = await r.json();
-      document.getElementById('login-pass').value = '';
-      showApp(j.user);
-    } else {
-      errEl.textContent = 'Usuário ou senha inválidos';
-    }
-  } catch {
-    errEl.textContent = 'Falha na comunicação';
-  }
-};
-
-document.getElementById('login-pass').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('login-btn').click();
-});
-
-document.getElementById('logout-btn').onclick = async () => {
-  await fetch('/logout', { method: 'POST' });
-  session = null;
-  chat.innerHTML = '';
-  sid.textContent = '';
-  document.getElementById('result').textContent = '';
-  document.getElementById('fileRef').textContent = '';
-  showLogin();
-};
-
-// ===== App =====
-document.getElementById('newSession').onclick = async () => {
-  const r = await fetch('/session', { method: 'POST' });
-  if (r.status === 401) return showLogin();
-  const j = await r.json();
-  session = j.session_id;
-  sid.textContent = 'Sessão: ' + session;
-  chat.innerHTML = '';
-  document.getElementById('result').textContent = '';
-  document.getElementById('fileRef').textContent = '';
-};
-
-document.getElementById('sendFile').onclick = async () => {
-  if (!session) return alert('Crie a sessão primeiro.');
-  const f = document.getElementById('file').files[0];
-  if (!f) return alert('Escolha um arquivo.');
-
-  const sendBtn = document.getElementById('sendFile');
-  sendBtn.disabled = true;
-
-  appendStatus('Enviando arquivo...');
-  const form = new FormData();
-  form.append('file', f);
-  await new Promise(r => setTimeout(r, 500));
-  appendStatus('Analisando trabalho...');
-
-  try {
-    const r = await fetch('/upload?session=' + session, { method: 'POST', body: form });
-    if (r.status === 401) { sendBtn.disabled = false; return showLogin(); }
-    const j = await r.json();
-    document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
-    if (j.error) appendStatus(j.error, true);
-    else if (j.assistant) appendTA(j.assistant);
-  } catch {
-    appendStatus('Falha na comunicação com o servidor', true);
-  } finally {
-    sendBtn.disabled = false;
-  }
-};
-
-document.getElementById('send').onclick = async () => {
-  if (!session) return alert('Crie a sessão.');
-  const m = document.getElementById('msg').value;
-  if (!m) return;
-  appendUser(m);
-  document.getElementById('msg').value = '';
-  const r = await fetch('/chat?session=' + session, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: m })
-  });
-  if (r.status === 401) return showLogin();
-  const j = await r.json();
-  appendTA(j.assistant);
-};
-
-document.getElementById('finalize').onclick = async () => {
-  if (!session) return alert('Crie a sessão.');
-  const r = await fetch('/finalize?session=' + session, { method: 'POST' });
-  if (r.status === 401) return showLogin();
-  const j = await r.json();
-  document.getElementById('result').textContent = JSON.stringify(j, null, 2);
-};
-
-checkAuth();
-</script>
+  <div class="card">
+    <h3>Aluno</h3>
+    <p>Use o token de envio que você recebeu do seu professor.</p>
+    <a href="/envio">Acessar envio →</a>
+  </div>
 </body>
 </html>

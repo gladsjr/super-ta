@@ -206,6 +206,12 @@ All three agents are implemented as classes under `agents/` and call the **Respo
 npm install
 ```
 
+### Apply Database Schema (first run only)
+The `users` and `app_session` tables must exist before the first boot. Apply the idempotent schema:
+```bash
+psql "$DATABASE_URL" -f schema.sql
+```
+
 ### Start Server
 ```bash
 npm run dev
