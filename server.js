@@ -63,7 +63,8 @@ const MODELS = {
   COMPREHENSION_EVAL: process.env.OPENAI_MODEL_COMPREHENSION_EVAL || DEFAULT_MODEL,
   CLARIFICATION_EVAL: process.env.OPENAI_MODEL_CLARIFICATION_EVAL || DEFAULT_MODEL,
   METHODOLOGY_EVAL:   process.env.OPENAI_MODEL_METHODOLOGY_EVAL   || DEFAULT_MODEL,
-  PARAMETERS_EVAL:    process.env.OPENAI_MODEL_PARAMETERS_EVAL    || DEFAULT_MODEL
+  PARAMETERS_EVAL:    process.env.OPENAI_MODEL_PARAMETERS_EVAL    || DEFAULT_MODEL,
+  INTERVIEWER_ADAPT:  process.env.OPENAI_MODEL_INTERVIEWER_ADAPT  || DEFAULT_MODEL
 };
 
 const OPENAI_MODEL = MODELS.DEFAULT;
@@ -521,6 +522,91 @@ app.post("/w/:workToken/interviewer", requireWorkToken, express.json({ limit: "2
   fs.writeFileSync(path.join(req.work.full_path, "interviewer.yaml"), content, "utf8");
   log.info("WORK", `interviewer saved work=${req.work.work_token} bytes=${content.length}`);
   res.json({ ok: true });
+});
+
+const INTERVIEWER_ADAPT_INSTRUCTIONS = `Você adapta prompts de entrevistador acadêmico. Receberá:
+1) Um YAML com a definição genérica de um entrevistador (agente, cenário, conversa).
+2) O enunciado de um trabalho específico, em PDF anexado.
+
+Produza um NOVO YAML que preserve exatamente a mesma estrutura de chaves
+e hierarquia do genérico, mas com valores textuais especializados ao trabalho
+descrito no enunciado. Os valores passam a referenciar conceitos, termos,
+objetivos, métodos e entregáveis concretos do enunciado.
+
+Regras rígidas:
+- NÃO invente informações ausentes do enunciado.
+- NÃO adicione, remova ou renomeie chaves.
+- Mantenha o idioma do YAML genérico.
+- Listas mantêm aproximadamente o mesmo número de itens; reescreva cada
+  item para soar específico ao trabalho.
+- Onde o YAML genérico usar expressões abstratas ("o trabalho", "o aluno
+  deve"), substitua por formulações ancoradas no enunciado.
+- Campos inerentemente genéricos (ex.: interaction_style: "investigativo")
+  podem ser mantidos se não houver base no enunciado para especializá-los.
+- O campo scenario.case_context.summary deve descrever, em 1–2 frases, o
+  caso concreto entregue pelo aluno conforme o enunciado.
+
+Responda APENAS com o YAML adaptado. Nada antes, nada depois. Sem cercas
+de código markdown.`;
+
+function stripYamlFence(text) {
+  const trimmed = String(text || "").trim();
+  const fenced = trimmed.match(/^```(?:ya?ml)?\s*\n([\s\S]*?)\n```\s*$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+app.post("/w/:workToken/interviewer/adapt", requireWorkToken, express.json({ limit: "256kb" }), async (req, res) => {
+  const genericYaml = String(req.body?.yaml ?? "");
+  if (!genericYaml.trim()) return res.status(400).json({ error: "yaml content required" });
+  try {
+    yaml.load(genericYaml);
+  } catch (err) {
+    return res.status(400).json({ error: "invalid input YAML", detail: err.message });
+  }
+
+  const enunciadoPath = path.join(req.work.full_path, "enunciado.pdf");
+  if (!fs.existsSync(enunciadoPath)) {
+    return res.status(400).json({ error: "envie o enunciado do trabalho antes de adaptar" });
+  }
+
+  try {
+    log.info("INTERVIEWER_ADAPT", `start work=${req.work.work_token} bytes=${genericYaml.length}`);
+    const fileUpload = await openai.files.create({
+      file: fs.createReadStream(enunciadoPath),
+      purpose: "user_data",
+    });
+    log.info("INTERVIEWER_ADAPT", `uploaded enunciado file=${fileUpload.id}`);
+
+    const response = await log.span("INTERVIEWER_ADAPT", "responses.create", () =>
+      openai.responses.create({
+        model: MODELS.INTERVIEWER_ADAPT,
+        instructions: INTERVIEWER_ADAPT_INSTRUCTIONS,
+        input: [{
+          role: "user",
+          content: [
+            { type: "input_text", text: `YAML genérico:\n\n${genericYaml}\n\nEnunciado em anexo. Gere o YAML adaptado.` },
+            { type: "input_file", file_id: fileUpload.id },
+          ],
+        }],
+      })
+    );
+
+    const adaptedYaml = stripYamlFence(response.output_text || "");
+    if (!adaptedYaml) {
+      return res.status(502).json({ error: "o modelo não retornou YAML" });
+    }
+    try {
+      yaml.load(adaptedYaml);
+    } catch (err) {
+      log.warn("INTERVIEWER_ADAPT", `returned YAML did not parse: ${err.message}`);
+      return res.status(502).json({ error: "o modelo retornou YAML inválido", yaml: adaptedYaml, detail: err.message });
+    }
+    log.info("INTERVIEWER_ADAPT", `ok work=${req.work.work_token} out_bytes=${adaptedYaml.length}`);
+    res.json({ yaml: adaptedYaml });
+  } catch (err) {
+    log.error("INTERVIEWER_ADAPT", `failed: ${err.message}`);
+    res.status(500).json({ error: "falha ao adaptar o interviewer", detail: err.message });
+  }
 });
 
 app.get("/w/:workToken/enunciado", requireWorkToken, (req, res) => {

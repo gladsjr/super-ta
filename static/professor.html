@@ -48,6 +48,7 @@
       <label for="tpl-select">Carregar template:</label>
       <select id="tpl-select"></select>
       <button id="load-tpl">Carregar</button>
+      <button id="adapt-interviewer" title="Especializa o YAML para o enunciado deste trabalho">Adaptar ao enunciado</button>
     </div>
     <textarea id="interviewer-yaml" style="width:100%; height:22rem; margin-top:0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em" spellcheck="false"></textarea>
     <div class="row" style="margin-top:0.4rem">
@@ -97,6 +98,11 @@ async function load() {
   document.getElementById('interviewer-status').textContent = j.work.has_interviewer
     ? 'Interviewer salvo. Edite e salve novamente para substituir.'
     : 'Nenhum interviewer salvo ainda.';
+  const adaptBtn = document.getElementById('adapt-interviewer');
+  adaptBtn.disabled = !j.work.has_enunciado;
+  adaptBtn.title = j.work.has_enunciado
+    ? 'Especializa o YAML para o enunciado deste trabalho'
+    : 'Envie o enunciado antes de adaptar';
 
   const tbody = document.querySelector('#sub-table tbody');
   if (j.submissions.length === 0) {
@@ -161,6 +167,43 @@ document.getElementById('load-tpl').onclick = async () => {
   const r = await fetch(`/interviewers/templates/${filename}`);
   if (!r.ok) { msg.textContent = 'Falha ao carregar template'; return; }
   ta.value = await r.text();
+};
+
+document.getElementById('adapt-interviewer').onclick = async () => {
+  const ta = document.getElementById('interviewer-yaml');
+  const msg = document.getElementById('interviewer-msg');
+  const btn = document.getElementById('adapt-interviewer');
+  msg.textContent = '';
+  const content = ta.value.trim();
+  if (!content) { msg.textContent = 'Carregue ou cole um YAML antes de adaptar.'; return; }
+  if (!confirm('Substituir o conteúdo atual por uma versão adaptada ao enunciado? Isso pode levar 20–40s.')) return;
+  btn.disabled = true;
+  const prevText = btn.textContent;
+  btn.textContent = 'Adaptando...';
+  msg.textContent = 'Gerando YAML adaptado — aguarde.';
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/interviewer/adapt`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml: content })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (j.yaml) {
+        ta.value = j.yaml;
+        msg.textContent = 'Modelo retornou YAML inválido; revise manualmente.';
+      } else {
+        msg.textContent = 'Falha: ' + (j.error || 'ao adaptar');
+      }
+      return;
+    }
+    ta.value = j.yaml;
+    msg.textContent = 'Adaptado. Revise e clique em Salvar.';
+  } catch {
+    msg.textContent = 'Falha na comunicação.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevText;
+  }
 };
 
 document.getElementById('save-interviewer').onclick = async () => {
