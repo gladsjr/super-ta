@@ -11,6 +11,8 @@
  * - Critical component: must succeed (no fallback)
  */
 
+import log from "../lib/logger.js";
+
 export class ComprehensionEvaluatorAgent {
     constructor(openaiClient, model = 'gpt-5.2') {
         this.client = openaiClient;
@@ -101,7 +103,10 @@ Retorne APENAS o JSON.`
                 }]
             };
 
-            const response = await this.client.responses.create(payload);
+            log.prompt("AGENT:Comprehension", this.systemPrompt + "\n\n" + payload.input[0].content);
+            const response = await log.span("AGENT:Comprehension", "responses.create", () =>
+                this.client.responses.create(payload)
+            );
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
 
             if (!responseText) {
@@ -110,7 +115,7 @@ Retorne APENAS o JSON.`
 
             const jsonMatch = responseText.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
-                console.error("Agent response without JSON:", responseText);
+                log.error("AGENT:Comprehension", `response without JSON: ${log.preview(responseText, 200)}`);
                 throw new Error('No valid JSON found in agent response');
             }
 
@@ -120,7 +125,8 @@ Retorne APENAS o JSON.`
                 throw new Error('Invalid confidence value');
             }
 
-            console.log(`✓ Comprehension evaluated: confidence=${evaluation.confidence}`);
+            const redFlagCount = Array.isArray(evaluation.redFlags) ? evaluation.redFlags.length : 0;
+            log.info("AGENT:Comprehension", `ok confidence=${evaluation.confidence} understands=${!!evaluation.understands} redFlags=${redFlagCount}`);
 
             return {
                 type: 'comprehension',
@@ -135,7 +141,7 @@ Retorne APENAS o JSON.`
             };
 
         } catch (error) {
-            console.error("❌ Erro no ComprehensionEvaluator Agent:", error.message);
+            log.error("AGENT:Comprehension", `failed: ${error.message}`);
             throw error; // Fail fast - critical component
         }
     }

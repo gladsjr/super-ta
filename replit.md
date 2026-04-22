@@ -28,11 +28,11 @@ The system combines:
    - Errors are architectural feedback, not edge cases
    
 4. **Global understanding via DocumentMap**
-   - Generated once by MapBuilder Agent with `file_search`
+   - Generated once by MapBuilder Agent, which reads the full document via `input_file` attached to the Responses API
    - Compressed context injected into all evaluators
-   
+
 5. **Local verification via RAG**
-   - Vector Store enables evidential questioning
+   - Vector Store (`file_search`) used by evaluators and question generation for citations
    - Cite specific sections, tables, figures
    
 6. **Internal evaluation never exposed to student**
@@ -49,7 +49,7 @@ The system combines:
   - `assignment.json` – Assignment goals and constraints
   - `rubric.json` – Evaluation criteria (C1: 40%, C2: 40%, C3: 20%)
   - `system_prompt.txt` – Base behavioral constraints for TA
-  - `replit-future.md` – Architecture specification
+  - `policy.yaml` – Runtime policy flags (web access, max turns, challenge task)
 - `data/submissions/` – Uploaded student files (by session ID)
 
 ---
@@ -76,7 +76,7 @@ Student documents are processed in two complementary ways:
 
 #### Global View – DocumentMap
 - Generated once after upload by **MapBuilder Agent**
-- Uses `file_search` tool for deep document analysis
+- Reads the full document by attaching it as `input_file` to a **Responses API** call (no `file_search` used here — the agent sees the entire document directly)
 - Structured summary of:
   - thesis and structure
   - methodology
@@ -86,14 +86,14 @@ Student documents are processed in two complementary ways:
 - Serves as **compressed global context**
 
 #### Local View – Vector Store (RAG)
-- Full document indexed via OpenAI Vector Store
-- Used by agents to:
-  - verify claims with citations
-  - locate sections, tables, figures
-  - support evidential questioning
+- Full document indexed via OpenAI Vector Store (`openai.vectorStores.create`)
+- Exposed as a `file_search` tool to:
+  - `ComprehensionEvaluatorAgent` and `ClarificationEvaluatorAgent` (evidence gathering)
+  - `generateNextQuestion()` in `server.js` (grounded question generation)
+- Used to verify claims, locate sections/tables/figures, and support evidential questioning
 
-> Global understanding comes from the DocumentMap;  
-> verification and grounding come from RAG.
+> Global understanding comes from the DocumentMap;
+> verification and grounding come from the Vector Store via `file_search`.
 
 ### 3. Turn Dynamics (Invariant Flow)
 
@@ -112,20 +112,24 @@ The system always follows this loop:
 
 ## Cognitive Agents
 
-### MapBuilder Agent
-- **Purpose**: Generate structured DocumentMap
-- **Tools**: `file_search` for deep document analysis
-- **Output**: Validated JSON with thesis, structure, methodology, keyClaims, weakPoints
+All three agents are implemented as classes under `agents/` and call the **Responses API**. They `throw` on any internal error (fail-fast).
+
+### MapBuilderAgent (`agents/MapBuilderAgent.js`)
+- **Purpose**: Generate the structured DocumentMap
+- **Input**: The full document attached via `input_file` on the Responses API (no `file_search`)
+- **Output**: Validated JSON with `thesis`, `structure`, `methodology`, `keyClaims`, `weakPoints`
 - **Criticality**: **Must succeed** – no fallback
 
-### ComprehensionEvaluator (Function, planned for Agent migration)
-- **Purpose**: Assess if student understands their own work
-- **Output**: Signal with confidence (0.0-1.0), evidence, redFlags, suggestedFollowUp
+### ComprehensionEvaluatorAgent (`agents/ComprehensionEvaluatorAgent.js`)
+- **Purpose**: Assess whether the student understands their own work
+- **Tools**: `file_search` against the session's Vector Store
+- **Output**: `{ type: 'comprehension', confidence: 0.0-1.0, data: { understands, evidence, redFlags, suggestedFollowUp } }`
 - **Maps to**: Rubric C1 (40%)
 
-### ClarificationEvaluator (Function, planned for Agent migration)
-- **Purpose**: Identify unclear aspects needing questions
-- **Output**: Signal with needsClarification, unclearAspects, suggestedQuestion
+### ClarificationEvaluatorAgent (`agents/ClarificationEvaluatorAgent.js`)
+- **Purpose**: Identify unclear aspects that require targeted questions
+- **Tools**: `file_search` against the session's Vector Store
+- **Output**: `{ type: 'clarification', confidence: 0.0-1.0, data: { needsClarification, unclearAspects, suggestedQuestion } }`
 
 ---
 
@@ -146,13 +150,15 @@ The system always follows this loop:
 ## OpenAI Integration
 
 ### APIs Used
-- **Files API**: Upload student documents
-- **Vector Stores API**: Index documents for RAG with `file_search`
-- **Assistants API (Agents SDK)**: MapBuilder Agent with tools
-- **Responses API**: Generate questions and evaluations
+- **Files API** (`openai.files.create`): Upload student documents
+- **Vector Stores API** (`openai.vectorStores.create`, top-level in SDK v6): Index documents for RAG with `file_search`
+- **Conversations API** (`openai.conversations.create`, `conversations.items.*`): Persists per-session `conv_chat` and `conv_eval` server-side
+- **Responses API** (`openai.responses.create`): All generation — DocumentMap, evaluator signals, next questions, C2/C3 scoring
+
+> The system does **not** use the Assistants API. Cognitive agents are local classes (`agents/*.js`) that encapsulate prompts + tool wiring around the Responses API.
 
 ### SDK Version
-- `openai@6.17.0` (requires Node.js 14+)
+- `openai@^6.17.0` (see `package.json`)
 
 ---
 
@@ -214,14 +220,17 @@ Server starts at `http://localhost:5000`
 ```javascript
 {
   systemPrompt: "...",
-  
-  // Dual conversations
-  conv_chat: [],              // Student-facing only
-  conv_eval: [],              // Internal + mirrored
-  history: [],                // Alias to conv_chat (backward compat)
-  
+
+  // Dual conversations: both the remote Conversation IDs (source of truth)
+  // and local caches used for display and logging
+  conversationId_chat: "conv_...",   // Remote conversation for student-facing turns
+  conversationId_eval: "conv_...",   // Remote conversation for internal evaluation
+  conv_chat: [],                     // Local cache (student-facing)
+  conv_eval: [],                     // Local cache (internal + mirrored)
+  history: [],                       // Alias to conv_chat (backward compat)
+
   // Document understanding
-  documentMap: {              // From MapBuilder Agent
+  documentMap: {              // From MapBuilderAgent
     thesis: "...",
     structure: [...],
     methodology: "...",
@@ -231,7 +240,7 @@ Server starts at `http://localhost:5000`
   submissionPath: "...",
   openaiFileId: "file-xxx",
   vectorStoreId: "vs-xxx",
-  
+
   // State machine
   currentPhase: "awaiting_upload" | "interviewing" | "finalizing",
   questionCount: 0,
@@ -255,19 +264,29 @@ Final score is weighted average (0-10).
 
 ## Recent Changes
 
+### 2026-04-19: Documentation/Code Alignment
+- Rewrote Cognitive Agents, OpenAI Integration and Project Structure sections to match the current code
+- Clarified: MapBuilder reads the document via `input_file`; `file_search` is used by evaluators and question generation
+- Added Conversations API to "APIs Used" (used to persist `conv_chat` and `conv_eval` server-side)
+- Removed reference to non-existent `config/replit-future.md`; added `config/policy.yaml`
+- `OPENAI_MODEL` env var now controls the default model (with optional per-role overrides)
+- Deleted obsolete `ARCHITECTURE_EVOLUTION.md`
+- Removed dead `generateDocumentMap` helper in `server.js`
+- C2/C3 scoring (`evaluateMethodology`, `evaluateParameters`) now fail-fast on LLM errors instead of returning a silent default of 5
+
 ### 2026-01-31: Agent-Based Architecture
-- ✅ Implemented MapBuilder Agent using Assistants API
-- ✅ Dual-state conversations (conv_chat + conv_eval)
+- ✅ Cognitive agents split into class-based modules under `agents/` (Responses API under the hood)
+- ✅ Dual-state conversations (conv_chat + conv_eval), persisted via the Conversations API
 - ✅ Vector Store integration for RAG
 - ✅ Turn Dynamics protocol with evaluators
 - ✅ Orchestrator-controlled state machine
-- ✅ Updated SDK to openai@6.17.0
+- ✅ Updated SDK to openai@^6.17.0
 - ✅ **Removed architectural fallbacks** – fail fast on critical components
 
 ### 2025-12-29: OpenAI Integration
 - Integrated Files API and Responses API for file analysis
 
-### 2025-12-28: Replit Configuration  
+### 2025-12-28: Replit Configuration
 - Configured for port 5000, host 0.0.0.0
 
 ---

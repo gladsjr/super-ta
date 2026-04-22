@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check c:/Users/glads/src/super-ta/server.js)",
+      "Bash(PORT=5099 timeout 5 node server.js)"
+    ]
+  }
+}

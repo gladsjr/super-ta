@@ -10,6 +10,8 @@
  * - Critical component: must succeed (no fallback)
  */
 
+import log from "../lib/logger.js";
+
 export class MapBuilderAgent {
     constructor(openaiClient, model = 'gpt-5.2') {
         this.client = openaiClient;
@@ -85,7 +87,10 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.${contextBlock}`
                 }]
             };
 
-            const response = await this.client.responses.create(payload);
+            log.prompt("AGENT:MapBuilder", this.systemPrompt + "\n\n" + payload.input[0].content[0].text);
+            const response = await log.span("AGENT:MapBuilder", "responses.create", () =>
+                this.client.responses.create(payload)
+            );
 
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
 
@@ -96,7 +101,7 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.${contextBlock}`
             // Extract JSON from response (handles markdown code blocks)
             const jsonMatch = responseText.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
-                console.error("Agent response without JSON:", responseText);
+                log.error("AGENT:MapBuilder", `response without JSON: ${log.preview(responseText, 200)}`);
                 throw new Error('No valid JSON found in agent response');
             }
 
@@ -115,11 +120,14 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.${contextBlock}`
                 throw new Error('Invalid DocumentMap: structure, keyClaims, and weakPoints must be arrays');
             }
 
-            console.log(`✓ DocumentMap gerado pelo MapBuilder Agent`);
+            log.info("AGENT:MapBuilder", `ok thesis=${log.preview(documentMap.thesis, 80)} structure=${documentMap.structure.length} claims=${documentMap.keyClaims.length} weak=${documentMap.weakPoints.length}`);
+            if (log.enabled("debug")) {
+                log.debug("AGENT:MapBuilder", `DocumentMap JSON:\n${JSON.stringify(documentMap, null, 2)}`);
+            }
             return documentMap;
 
         } catch (error) {
-            console.error("❌ Erro no MapBuilder Agent:", error.message);
+            log.error("AGENT:MapBuilder", `failed: ${error.message}`);
             throw error; // Fail fast - critical component
         }
     }
