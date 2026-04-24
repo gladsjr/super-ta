@@ -4,27 +4,35 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>SuperTA — Acessar envio</title>
-<style>
-  body { font-family: system-ui; margin: 4rem auto; max-width: 480px; padding: 0 1rem; color: #222; }
-  h1 { margin-bottom: 0.5rem; }
-  p { color: #555; }
-  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1.25rem 1.5rem; margin-top: 1.5rem; }
-  input { padding: 0.5rem; font-size: 1em; width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  button { padding: 0.5rem 1rem; font-size: 1em; margin-top: 0.6rem; }
-  .err { color: #b00020; min-height: 1.2em; margin-top: 0.5rem; font-size: 0.9em; }
-</style>
+<link rel="stylesheet" href="/static/css/app.css"/>
 </head>
 <body>
-  <h1>Acessar envio</h1>
-  <p>Cole o token que você recebeu do seu professor.</p>
 
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
+    <div class="spacer"></div>
+    <span class="topbar-right">Acesso do aluno</span>
+  </div>
+</header>
+
+<main class="page-narrow">
   <div class="card">
-    <form id="f">
-      <input id="t" placeholder="token de envio (12 caracteres)" autocomplete="off" autofocus/>
-      <button type="submit">Abrir</button>
-      <div id="err" class="err"></div>
+    <h1>Acessar envio</h1>
+    <p class="muted">Cole o token que você recebeu do seu professor. São 12 caracteres hexadecimais.</p>
+
+    <form id="f" class="stack">
+      <div class="field">
+        <label class="label" for="t">Token de envio</label>
+        <input id="t" class="input input-mono" placeholder="ex.: 674d2aa7a25b" autocomplete="off" autofocus/>
+      </div>
+      <div class="row">
+        <button type="submit" class="btn btn-primary">Abrir</button>
+        <div id="err" class="error-text"></div>
+      </div>
     </form>
   </div>
+</main>
 
 <script>
 const TOKEN_RE = /^[0-9a-f]{12}$/i;

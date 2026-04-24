@@ -4,72 +4,135 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>SuperTA — Aluno</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
-  body { font-family: system-ui; margin: 2rem auto; max-width: 720px; padding: 0 1rem; }
-  h1 { margin-bottom: 0.2rem; }
-  .muted { color: #666; font-size: 0.9em; }
-  #chat { border: 1px solid #ccc; padding: 1rem; min-height: 200px; margin-top: 0.5rem; }
-  #chat .ta-msg { margin: 0.5rem 0; line-height: 1.6; }
-  #chat .ta-msg p { margin: 0.5em 0; }
-  #chat .ta-msg code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
-  #chat .ta-msg pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
-  .katex-display { margin: 1em 0; overflow-x: auto; }
-  .notice { padding: 0.75rem 1rem; border-radius: 6px; margin: 0.75rem 0; }
-  .notice.err { background: #fde8e8; color: #8c1c1c; }
-  .notice.ok { background: #e6f4ea; color: #1a662c; }
-  input, button { padding: 0.4rem; font-size: 1em; }
-  dialog.meta-dialog { max-width: 520px; border: 1px solid #ccc; border-radius: 10px; padding: 0; }
-  dialog.meta-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
-  dialog.meta-dialog .dlg-body { padding: 1.1rem 1.3rem; }
-  dialog.meta-dialog h3 { margin-top: 0; }
-  dialog.meta-dialog .dlg-text { line-height: 1.5; white-space: pre-wrap; }
-  dialog.meta-dialog .dlg-actions { margin-top: 1rem; text-align: right; border-top: 1px solid #eee; padding: 0.6rem 1.3rem; background: #fafafa; }
+  #chat-card { padding: 0; overflow: hidden; }
+  #chat {
+    padding: var(--sp-4) var(--sp-5);
+    min-height: 320px;
+    max-height: 60vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    background: var(--bg-muted);
+  }
+  .msg { display: flex; flex-direction: column; max-width: 78%; }
+  .msg.ta  { align-self: flex-start; }
+  .msg.you { align-self: flex-end; }
+  .msg .who { font-size: var(--fs-xs); color: var(--ink-500); margin-bottom: var(--sp-1); font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
+  .msg .bubble {
+    padding: 0.65rem 0.9rem;
+    border-radius: var(--r-lg);
+    line-height: 1.55;
+    word-wrap: break-word;
+    font-size: var(--fs-md);
+    border: 1px solid;
+  }
+  .msg.ta .bubble  { background: var(--bg-raised); border-color: var(--ink-100); color: var(--ink-900); border-top-left-radius: 4px; }
+  .msg.you .bubble { background: var(--accent-50); border-color: var(--accent-50); color: var(--ink-900); border-top-right-radius: 4px; }
+  .msg .bubble p:first-child { margin-top: 0; }
+  .msg .bubble p:last-child  { margin-bottom: 0; }
+  .msg .bubble pre { background: var(--ink-50); border-color: var(--ink-100); }
+  .msg .bubble code { background: var(--ink-100); }
+  .msg.you .bubble code { background: rgba(255,255,255,0.6); }
+  .katex-display { margin: 0.6em 0; overflow-x: auto; }
+
+  .sys-line { align-self: center; color: var(--ink-500); font-size: var(--fs-sm); font-style: italic; padding: var(--sp-1) var(--sp-3); }
+  .sys-line.err { color: var(--danger-700); background: var(--danger-50); border-radius: var(--r-md); font-style: normal; }
+
+  .input-area {
+    border-top: 1px solid var(--ink-100);
+    padding: var(--sp-4) var(--sp-5);
+    background: var(--bg-raised);
+  }
+  .input-area textarea {
+    width: 100%;
+    min-height: 5.5rem;
+    max-height: 14rem;
+    resize: vertical;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--r-md);
+    font-family: inherit;
+    font-size: var(--fs-md);
+    line-height: 1.55;
+    color: var(--ink-900);
+    background: var(--bg-raised);
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .input-area textarea:focus { outline: none; border-color: var(--accent-500); box-shadow: var(--focus-ring); }
+  .input-footer { display: flex; justify-content: space-between; align-items: center; margin-top: var(--sp-3); gap: var(--sp-3); }
+  .input-footer .hint { margin: 0; }
+
+  .finalize-card { text-align: left; }
+  #result { background: var(--ink-50); border: 1px solid var(--ink-100); padding: var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-sm); overflow-x: auto; margin-top: var(--sp-3); }
+  #result:empty { display: none; }
 </style>
 </head>
 <body>
 
-<div id="notfound" class="notice err" style="display:none">Token inválido ou trabalho não encontrado. Confira o link.</div>
-<div id="finalized-notice" class="notice ok" style="display:none">
-  Esta avaliação já foi finalizada. Veja o resultado abaixo.
-</div>
-
-<div id="main" style="display:none">
-  <h1 id="work-name">—</h1>
-  <div class="muted" id="meta"></div>
-
-  <div id="upload-area" style="margin-top:1rem">
-    <h3>Envio do trabalho</h3>
-    <input type="file" id="file"/>
-    <button id="sendFile">Enviar</button>
-    <div id="fileRef" class="muted"></div>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
+    <span class="topbar-context" id="tb-context">Entrevista do aluno</span>
   </div>
+</header>
 
-  <div id="chat-area" style="margin-top:1rem">
-    <h3>Conversa</h3>
-    <div id="chat"></div>
-    <div style="margin-top:0.5rem; display:flex; gap:0.5rem">
-      <input id="msg" placeholder="Sua resposta..." style="flex:1"/>
-      <button id="send">Enviar</button>
+<main class="page">
+
+  <div id="notfound" class="notice notice-error hidden">Token inválido ou trabalho não encontrado. Confira o link.</div>
+  <div id="finalized-notice" class="notice notice-success hidden">Esta avaliação já foi finalizada. Veja o resultado abaixo.</div>
+
+  <div id="main" class="hidden">
+    <div class="page-header">
+      <h1 id="work-name">—</h1>
+      <div class="subtitle" id="meta">Responda com clareza e profundidade. Você pode editar sua resposta antes de enviar.</div>
+    </div>
+
+    <div id="upload-area" class="card">
+      <h3 class="card-title">Envio do trabalho</h3>
+      <p class="card-sub">Envie o PDF do seu trabalho para iniciar a entrevista.</p>
+      <div class="row">
+        <input type="file" id="file" class="input" accept="application/pdf" style="flex:1; min-width:260px"/>
+        <button id="sendFile" class="btn btn-primary">Enviar</button>
+      </div>
+      <div id="fileRef" class="hint"></div>
+    </div>
+
+    <div id="chat-area">
+      <div id="chat-card" class="card">
+        <div id="chat"></div>
+        <div class="input-area">
+          <textarea id="msg" placeholder="Escreva sua resposta..."></textarea>
+          <div class="input-footer">
+            <span class="hint">Enter envia · Shift+Enter quebra linha</span>
+            <button id="send" class="btn btn-primary">Enviar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card finalize-card">
+      <h3 class="card-title">Finalizar entrevista</h3>
+      <p class="card-sub">Quando o entrevistador avisar que tem informações suficientes, clique abaixo para gerar sua avaliação. Depois disso a conversa é encerrada.</p>
+      <button id="finalize" class="btn">Gerar avaliação</button>
+      <pre id="result"></pre>
     </div>
   </div>
 
-  <div style="margin-top:1rem">
-    <h3>Finalizar</h3>
-    <button id="finalize">Gerar avaliação</button>
-    <pre id="result"></pre>
-  </div>
-</div>
+</main>
 
-<dialog id="meta-dialog" class="meta-dialog">
+<dialog id="meta-dialog">
   <div class="dlg-body">
     <h3>Esta pergunta é para o professor</h3>
-    <div id="meta-dialog-text" class="dlg-text"></div>
+    <div id="meta-dialog-text" style="white-space: pre-wrap; line-height: 1.55;"></div>
   </div>
   <div class="dlg-actions">
-    <button id="meta-dialog-close">Entendi</button>
+    <button id="meta-dialog-close" class="btn btn-primary">Entendi</button>
   </div>
 </dialog>
 
@@ -90,14 +153,24 @@ function renderMessage(text) {
   return marked.parse(html);
 }
 function appendTA(text) {
-  const div = document.createElement('div');
-  div.className = 'ta-msg';
-  div.innerHTML = `<b>TA:</b> ${renderMessage(text)}`;
-  chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ta';
+  wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${renderMessage(text)}</div>`;
+  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+  return wrap;
 }
 function appendUser(text) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg you';
+  const safe = String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  wrap.innerHTML = `<span class="who">Você</span><div class="bubble">${safe.replace(/\n/g, '<br>')}</div>`;
+  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+  return wrap;
+}
+function appendStatus(text, isError = false) {
   const div = document.createElement('div');
-  div.innerHTML = `<b>Você:</b> ${text}`;
+  div.className = 'sys-line' + (isError ? ' err' : '');
+  div.textContent = text;
   chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
   return div;
 }
@@ -110,45 +183,40 @@ function showMetaDialog(text) {
 document.getElementById('meta-dialog-close').onclick = () => {
   document.getElementById('meta-dialog').close();
 };
-function appendStatus(text, isError = false) {
-  const div = document.createElement('div');
-  div.style.color = isError ? 'red' : '#666';
-  div.innerHTML = isError ? `<b>Erro:</b> ${text}` : `<em>${text}</em>`;
-  chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
-}
 
 async function start() {
   const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/start`, { method: 'POST' });
   if (r.status === 404) {
-    document.getElementById('notfound').style.display = 'block';
+    document.getElementById('notfound').classList.remove('hidden');
     return;
   }
   if (r.status === 403) {
     finalized = true;
-    document.getElementById('finalized-notice').style.display = 'block';
-    document.getElementById('main').style.display = 'block';
-    document.getElementById('upload-area').style.display = 'none';
-    document.getElementById('chat-area').style.display = 'none';
+    document.getElementById('finalized-notice').classList.remove('hidden');
+    document.getElementById('main').classList.remove('hidden');
+    document.getElementById('upload-area').classList.add('hidden');
+    document.getElementById('chat-area').classList.add('hidden');
     return;
   }
   if (!r.ok) {
-    document.getElementById('notfound').textContent = 'Erro ao iniciar. Tente novamente.';
-    document.getElementById('notfound').style.display = 'block';
+    const nf = document.getElementById('notfound');
+    nf.textContent = 'Erro ao iniciar. Tente novamente.';
+    nf.classList.remove('hidden');
     return;
   }
   const j = await r.json();
-  document.getElementById('main').style.display = 'block';
+  document.getElementById('main').classList.remove('hidden');
   document.getElementById('work-name').textContent = j.work.name;
+  document.getElementById('tb-context').textContent = j.work.name + (j.submission?.student_label ? ` · ${j.submission.student_label}` : '');
   phase = j.session.currentPhase;
 
-  // Render history (resume)
   for (const m of (j.session.chat || [])) {
     if (m.role === 'assistant') appendTA(m.content);
     else appendUser(m.content);
   }
 
   if (j.session.hasUpload) {
-    document.getElementById('upload-area').style.display = 'none';
+    document.getElementById('upload-area').classList.add('hidden');
   }
 }
 
@@ -157,20 +225,22 @@ document.getElementById('sendFile').onclick = async () => {
   if (!f) return alert('Escolha um arquivo.');
   const sendBtn = document.getElementById('sendFile');
   sendBtn.disabled = true;
-  appendStatus('Enviando arquivo...');
+  const status = appendStatus('Enviando arquivo...');
   const form = new FormData();
   form.append('file', f);
-  appendStatus('Analisando trabalho...');
+  status.textContent = 'Analisando trabalho...';
   try {
     const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form });
     const j = await r.json();
     document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
+    status.remove();
     if (j.error) appendStatus(j.error, true);
     else if (j.assistant) {
       appendTA(j.assistant);
-      document.getElementById('upload-area').style.display = 'none';
+      document.getElementById('upload-area').classList.add('hidden');
     }
   } catch {
+    status.remove();
     appendStatus('Falha na comunicação com o servidor', true);
   } finally {
     sendBtn.disabled = false;
@@ -179,7 +249,7 @@ document.getElementById('sendFile').onclick = async () => {
 
 document.getElementById('send').onclick = async () => {
   const input = document.getElementById('msg');
-  const m = input.value;
+  const m = input.value.trim();
   if (!m) return;
   const userNode = appendUser(m);
   input.value = '';
@@ -196,7 +266,6 @@ document.getElementById('send').onclick = async () => {
   }
   if (j.error) { appendStatus(j.error, true); return; }
   if (j.channel === 'modal') {
-    // Meta intervention: remove the optimistic bubble, restore input, show modal.
     if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
     input.value = j.restore_input ?? m;
     input.focus();
@@ -207,7 +276,10 @@ document.getElementById('send').onclick = async () => {
 };
 
 document.getElementById('msg').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('send').click(); }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('send').click();
+  }
 });
 
 document.getElementById('finalize').onclick = async () => {

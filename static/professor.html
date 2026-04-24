@@ -4,74 +4,85 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>SuperTA — Professor</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
 <style>
-  body { font-family: system-ui; margin: 2rem auto; max-width: 820px; padding: 0 1rem; color: #222; }
-  h1 { margin-bottom: 0.2rem; }
-  .muted { color: #666; font-size: 0.9em; }
-  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 0.75rem 0; }
-  .card h3 { margin: 0 0 0.3rem 0; }
-  .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-  .badge { display: inline-block; padding: 0.1em 0.5em; border-radius: 10px; font-size: 0.8em; background: #f0f0f0; }
-  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
-  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #eee; font-size: 0.95em; }
-  input, button { padding: 0.4rem; font-size: 1em; }
-  a { color: #0366d6; word-break: break-all; }
-  #notfound { color: red; }
-  code.token { background: #f4f4f4; border: 1px solid #e4e4e4; padding: 0.15em 0.45em; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; word-break: break-all; }
-  button.icon-btn { background: none; border: 1px solid #ddd; border-radius: 4px; padding: 0.1em 0.4em; cursor: pointer; font-size: 0.95em; line-height: 1; }
-  button.icon-btn:hover { background: #f4f4f4; }
-  button.icon-btn:disabled { color: #2a8f3a; border-color: #c9e5cf; background: #eefaf0; cursor: default; }
+  .meta-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-sm); }
+  .sub-form { display: grid; grid-template-columns: 1fr 100px auto; gap: var(--sp-3); align-items: end; }
+  @media (max-width: 680px) { .sub-form { grid-template-columns: 1fr; } }
+  .yaml-ta { min-height: 22rem; }
 </style>
 </head>
 <body>
 
-<div id="notfound" style="display:none">Trabalho não encontrado. Confira o link.</div>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
+    <span class="topbar-context" id="tb-context">Painel do professor</span>
+  </div>
+</header>
 
-<div id="main" style="display:none">
-  <h1 id="work-name">—</h1>
-  <div class="muted" id="meta"></div>
+<main class="page">
 
-  <div class="card">
-    <h3>Enunciado do trabalho</h3>
-    <div id="enunciado-status" class="muted"></div>
-    <div class="row" style="margin-top:0.5rem">
-      <input type="file" id="enunciado-file" accept="application/pdf"/>
-      <button id="send-enunciado">Enviar PDF</button>
+  <div id="notfound" class="notice notice-error hidden">Trabalho não encontrado. Confira o link.</div>
+
+  <div id="main" class="hidden">
+    <div class="page-header">
+      <h1 id="work-name">—</h1>
+      <div class="meta-row" id="meta"></div>
     </div>
-    <div id="enunciado-msg" class="muted" style="margin-top:0.4rem"></div>
+
+    <div class="card">
+      <h3 class="card-title">Enunciado do trabalho</h3>
+      <p class="card-sub" id="enunciado-status">—</p>
+      <div class="row">
+        <input type="file" id="enunciado-file" accept="application/pdf" class="input" style="flex:1; min-width:260px"/>
+        <button id="send-enunciado" class="btn btn-primary">Enviar PDF</button>
+      </div>
+      <div id="enunciado-msg" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Estilo do entrevistador</h3>
+      <p class="card-sub" id="interviewer-status">—</p>
+      <div class="row">
+        <label class="label" for="tpl-select" style="margin:0">Template:</label>
+        <select id="tpl-select" class="select" style="flex:1; min-width:240px"></select>
+        <button id="load-tpl" class="btn">Carregar</button>
+        <button id="adapt-interviewer" class="btn" title="Especializa o YAML para o enunciado deste trabalho">Adaptar ao enunciado</button>
+      </div>
+      <textarea id="interviewer-yaml" class="textarea code yaml-ta" spellcheck="false" style="margin-top: var(--sp-3)"></textarea>
+      <div class="row" style="margin-top: var(--sp-3)">
+        <button id="save-interviewer" class="btn btn-primary">Salvar</button>
+        <span id="interviewer-msg" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Tokens de envio para alunos</h3>
+      <p class="card-sub">Gere tokens para cada aluno e compartilhe com eles. Cada token abre uma entrevista independente.</p>
+      <div class="sub-form">
+        <div>
+          <label class="label" for="sub-label">Nome do aluno</label>
+          <input id="sub-label" class="input" placeholder="obrigatório"/>
+        </div>
+        <div>
+          <label class="label" for="sub-count">Quantidade</label>
+          <input id="sub-count" class="input" type="number" min="1" max="50" value="1"/>
+        </div>
+        <button id="create-subs" class="btn btn-primary">Gerar</button>
+      </div>
+      <div id="sub-msg" class="hint"></div>
+      <div style="margin-top: var(--sp-4)">
+        <table id="sub-table" class="table hidden">
+          <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
+      </div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>Estilo do entrevistador</h3>
-    <div id="interviewer-status" class="muted"></div>
-    <div class="row" style="margin-top:0.5rem">
-      <label for="tpl-select">Carregar template:</label>
-      <select id="tpl-select"></select>
-      <button id="load-tpl">Carregar</button>
-      <button id="adapt-interviewer" title="Especializa o YAML para o enunciado deste trabalho">Adaptar ao enunciado</button>
-    </div>
-    <textarea id="interviewer-yaml" style="width:100%; height:22rem; margin-top:0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em" spellcheck="false"></textarea>
-    <div class="row" style="margin-top:0.4rem">
-      <button id="save-interviewer">Salvar</button>
-      <span id="interviewer-msg" class="muted"></span>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3>Tokens de envio para alunos</h3>
-    <div class="row">
-      <input id="sub-label" placeholder="Nome do aluno (obrigatório)"/>
-      <input id="sub-count" type="number" min="1" max="50" value="1" style="width:80px"/>
-      <button id="create-subs">Gerar</button>
-    </div>
-    <div id="sub-msg" class="muted" style="margin-top:0.4rem"></div>
-    <table id="sub-table" style="display:none">
-      <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div id="sub-empty" class="muted" style="display:none">Nenhum token criado ainda.</div>
-  </div>
-</div>
+</main>
 
 <script>
 const workToken = location.pathname.split('/').filter(Boolean)[1];
@@ -79,17 +90,20 @@ const workToken = location.pathname.split('/').filter(Boolean)[1];
 async function load() {
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/info`);
   if (r.status === 404) {
-    document.getElementById('notfound').style.display = 'block';
+    document.getElementById('notfound').classList.remove('hidden');
     return;
   }
   if (!r.ok) {
-    document.getElementById('notfound').textContent = 'Erro ao carregar.';
-    document.getElementById('notfound').style.display = 'block';
+    const nf = document.getElementById('notfound');
+    nf.textContent = 'Erro ao carregar.';
+    nf.classList.remove('hidden');
     return;
   }
   const j = await r.json();
-  document.getElementById('main').style.display = 'block';
+  document.getElementById('main').classList.remove('hidden');
   document.getElementById('work-name').textContent = j.work.name;
+  document.getElementById('tb-context').textContent = j.work.name;
+
   const enunciadoUrl = `/w/${encodeURIComponent(workToken)}/enunciado`;
   document.getElementById('enunciado-status').innerHTML = j.work.has_enunciado
     ? `Enunciado atual: <a href="${enunciadoUrl}" target="_blank">abrir PDF ↗</a>. Envie um novo arquivo para substituir.`
@@ -104,34 +118,53 @@ async function load() {
     ? 'Especializa o YAML para o enunciado deste trabalho'
     : 'Envie o enunciado antes de adaptar';
 
+  const metaEl = document.getElementById('meta');
+  const pending = j.submissions.filter(s => s.status === 'pending').length;
+  const inprog = j.submissions.filter(s => s.status === 'in_progress').length;
+  const finalized = j.submissions.filter(s => s.status === 'finalized').length;
+  metaEl.innerHTML = `
+    <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
+    <span class="badge badge-in_progress">${inprog} em andamento</span>
+    <span class="badge badge-finalized">${finalized} finalizado${finalized === 1 ? '' : 's'}</span>
+    <span class="muted">Token do trabalho: <code class="token-chip">${escapeHtml(workToken)}</code></span>
+  `;
+
   const tbody = document.querySelector('#sub-table tbody');
   if (j.submissions.length === 0) {
-    document.getElementById('sub-table').style.display = 'none';
-    document.getElementById('sub-empty').style.display = 'block';
+    document.getElementById('sub-table').classList.add('hidden');
+    document.getElementById('sub-empty').classList.remove('hidden');
   } else {
-    document.getElementById('sub-table').style.display = 'table';
-    document.getElementById('sub-empty').style.display = 'none';
+    document.getElementById('sub-table').classList.remove('hidden');
+    document.getElementById('sub-empty').classList.add('hidden');
     tbody.innerHTML = j.submissions.map(s => {
       const url = '/s/' + encodeURIComponent(s.submission_token);
       const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token);
       const hasConv = s.status === 'in_progress' || s.status === 'finalized';
       const convCell = hasConv
-        ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">ver conversa ↗</a>`
+        ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">Ver conversa ↗</a>`
         : `<span class="muted">—</span>`;
       return `<tr>
         <td>
-          <div class="row">
-            <code class="token">${escapeHtml(s.submission_token)}</code>
+          <div class="row-tight">
+            <code class="token-chip">${escapeHtml(s.submission_token)}</code>
             <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${s.submission_token}')">📋</button>
             <a href="${url}" target="_blank" title="Abrir página do aluno">abrir ↗</a>
           </div>
         </td>
         <td>${escapeHtml(s.student_label || '—')}</td>
-        <td><span class="badge">${s.status}</span></td>
+        <td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span></td>
         <td>${convCell}</td>
       </tr>`;
     }).join('');
   }
+}
+
+function statusLabel(s) {
+  return {
+    pending: 'pendente',
+    in_progress: 'em andamento',
+    finalized: 'finalizado',
+  }[s] || s;
 }
 
 document.getElementById('send-enunciado').onclick = async () => {

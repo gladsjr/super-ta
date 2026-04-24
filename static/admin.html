@@ -4,59 +4,67 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>SuperTA — Admin</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
 <style>
-  body { font-family: system-ui; margin: 2rem auto; max-width: 820px; padding: 0 1rem; color: #222; }
-  h1 { margin-bottom: 0.5rem; }
-  #login-screen { max-width: 320px; margin: 4rem auto; padding: 2rem; border: 1px solid #ccc; border-radius: 8px; }
-  #login-screen input { display: block; width: 100%; padding: 0.5rem; margin: 0.5rem 0; box-sizing: border-box; }
-  #login-screen button { width: 100%; padding: 0.6rem; }
-  #login-error { color: red; min-height: 1.2em; margin-top: 0.5rem; }
-  #topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-  #topbar .right { color: #555; font-size: 0.9em; }
-  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 0.75rem 0; }
-  .card h3 { margin: 0 0 0.3rem 0; }
-  .muted { color: #666; font-size: 0.9em; }
-  .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-  .badge { display: inline-block; padding: 0.1em 0.5em; border-radius: 10px; font-size: 0.8em; background: #f0f0f0; margin-left: 0.3rem; }
-  input, button { padding: 0.4rem; font-size: 1em; }
-  a { color: #0366d6; word-break: break-all; }
-  code.token { background: #f4f4f4; border: 1px solid #e4e4e4; padding: 0.2em 0.5em; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.95em; word-break: break-all; }
-  button.icon-btn { background: none; border: 1px solid #ddd; border-radius: 4px; padding: 0.15em 0.45em; cursor: pointer; font-size: 1em; line-height: 1; }
-  button.icon-btn:hover { background: #f4f4f4; }
-  button.icon-btn:disabled { color: #2a8f3a; border-color: #c9e5cf; background: #eefaf0; cursor: default; }
+  .login-wrap { max-width: 380px; margin: var(--sp-10) auto 0; }
+  .work-card { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4) var(--sp-5); align-items: start; }
+  .work-card h3 { margin: 0 0 var(--sp-2) 0; }
+  .work-stats { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-1); }
+  .work-token-block .label { margin-bottom: var(--sp-1); }
 </style>
 </head>
 <body>
 
-<div id="login-screen" style="display:none">
-  <h2>Entrar</h2>
-  <input id="login-user" placeholder="Usuário" autocomplete="username"/>
-  <input id="login-pass" type="password" placeholder="Senha" autocomplete="current-password"/>
-  <button id="login-btn">Entrar</button>
-  <div id="login-error"></div>
-</div>
-
-<div id="app-screen" style="display:none">
-  <div id="topbar">
-    <h1 style="margin:0">Admin — SuperTA</h1>
-    <div class="right">
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
+    <span class="topbar-context">Painel administrativo</span>
+    <div class="topbar-right" id="user-area">
       <span id="user-info"></span>
-      <button id="logout-btn">Sair</button>
+      <button id="logout-btn" class="btn btn-sm">Sair</button>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+
+  <div id="login-screen" class="login-wrap hidden">
+    <div class="card">
+      <h2>Entrar</h2>
+      <p class="muted">Use suas credenciais para acessar o painel.</p>
+      <div class="field">
+        <label class="label" for="login-user">Usuário</label>
+        <input id="login-user" class="input" placeholder="usuário" autocomplete="username"/>
+      </div>
+      <div class="field">
+        <label class="label" for="login-pass">Senha</label>
+        <input id="login-pass" class="input" type="password" autocomplete="current-password"/>
+      </div>
+      <button id="login-btn" class="btn btn-primary" style="width:100%">Entrar</button>
+      <div id="login-error" class="error-text"></div>
     </div>
   </div>
 
-  <div class="card">
-    <h3>Novo trabalho</h3>
-    <div class="row">
-      <input id="new-work-name" placeholder="Nome do trabalho (ex.: Prova 1)" style="flex:1; min-width: 260px"/>
-      <button id="create-work">Criar</button>
+  <div id="app-screen" class="hidden">
+    <div class="page-header">
+      <h1>Trabalhos</h1>
+      <div class="subtitle">Crie trabalhos e distribua os tokens para os professores responsáveis.</div>
     </div>
-    <div id="create-msg" class="muted" style="margin-top:0.5rem"></div>
+
+    <div class="card">
+      <h3 class="card-title">Novo trabalho</h3>
+      <div class="row">
+        <input id="new-work-name" class="input" placeholder="Nome do trabalho (ex.: Prova 1)" style="flex:1; min-width: 260px"/>
+        <button id="create-work" class="btn btn-primary">Criar</button>
+      </div>
+      <div id="create-msg" class="hint"></div>
+    </div>
+
+    <h3 style="margin-top: var(--sp-6)">Seus trabalhos</h3>
+    <div id="works"></div>
   </div>
 
-  <h3>Seus trabalhos</h3>
-  <div id="works"></div>
-</div>
+</main>
 
 <script>
 async function checkAuth() {
@@ -67,13 +75,15 @@ async function checkAuth() {
   } catch { showLogin(); }
 }
 function showLogin() {
-  document.getElementById('login-screen').style.display = 'block';
-  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('app-screen').classList.add('hidden');
+  document.getElementById('user-area').classList.add('hidden');
 }
 function showApp(user) {
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'block';
-  document.getElementById('user-info').textContent = `Olá, ${user.username}`;
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app-screen').classList.remove('hidden');
+  document.getElementById('user-area').classList.remove('hidden');
+  document.getElementById('user-info').textContent = user.username;
 }
 
 document.getElementById('login-btn').onclick = async () => {
@@ -114,7 +124,7 @@ document.getElementById('create-work').onclick = async () => {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao criar'); return; }
     document.getElementById('new-work-name').value = '';
-    msg.textContent = 'Criado.';
+    msg.textContent = 'Trabalho criado.';
     loadWorks();
   } catch { msg.textContent = 'Falha na comunicação'; }
 };
@@ -125,7 +135,7 @@ async function loadWorks() {
   const j = await r.json();
   const el = document.getElementById('works');
   if (!j.works || j.works.length === 0) {
-    el.innerHTML = '<p class="muted">Nenhum trabalho ainda.</p>';
+    el.innerHTML = '<div class="card"><div class="table-empty">Nenhum trabalho ainda. Crie o primeiro acima.</div></div>';
     return;
   }
   el.innerHTML = j.works.map(w => {
@@ -133,21 +143,26 @@ async function loadWorks() {
     const pending = Number(w.pending || 0);
     const inprog = Number(w.in_progress || 0);
     const finalized = Number(w.finalized || 0);
+    const enunBadge = w.assignment_pdf
+      ? '<span class="badge badge-accent">enunciado ✓</span>'
+      : '<span class="badge">sem enunciado</span>';
     return `
-      <div class="card">
-        <h3>${escapeHtml(w.name)}</h3>
-        <div class="row" style="margin-top:0.5rem">
-          <span class="badge">pending: ${pending}</span>
-          <span class="badge">em andamento: ${inprog}</span>
-          <span class="badge">finalizados: ${finalized}</span>
-          ${w.assignment_pdf ? '<span class="badge">enunciado ✓</span>' : '<span class="badge">sem enunciado</span>'}
+      <div class="card work-card">
+        <div>
+          <h3>${escapeHtml(w.name)}</h3>
+          <div class="work-stats">
+            <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
+            <span class="badge badge-in_progress">${inprog} em andamento</span>
+            <span class="badge badge-finalized">${finalized} finalizado${finalized === 1 ? '' : 's'}</span>
+            ${enunBadge}
+          </div>
         </div>
-        <div style="margin-top:0.75rem">
-          <div class="muted">Token de trabalho:</div>
-          <div class="row" style="margin-top:0.3rem">
-            <code class="token">${escapeHtml(w.work_token)}</code>
+        <div class="work-token-block">
+          <div class="label">Token de trabalho</div>
+          <div class="row-tight">
+            <code class="token-chip">${escapeHtml(w.work_token)}</code>
             <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${w.work_token}')">📋</button>
-            <a href="${profUrl}" target="_blank" title="Abrir painel do professor">abrir ↗</a>
+            <a class="btn btn-ghost btn-sm" href="${profUrl}" target="_blank" title="Abrir painel do professor">Abrir ↗</a>
           </div>
         </div>
       </div>`;

@@ -4,38 +4,97 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>SuperTA</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
 <style>
-  body { font-family: system-ui; margin: 2rem auto; max-width: 520px; padding: 0 1rem; color: #222; }
-  h1 { margin-bottom: 0.5rem; }
-  p { color: #555; }
-  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 0.75rem 0; }
-  .card h3 { margin: 0 0 0.3rem 0; }
-  .card p { margin: 0 0 0.5rem 0; font-size: 0.95em; }
-  input { padding: 0.4rem; font-size: 1em; width: 60%; }
-  button { padding: 0.4rem 0.9rem; font-size: 1em; }
-  a { color: #0366d6; }
+  .hero { padding: var(--sp-8) 0 var(--sp-6); text-align: left; }
+  .hero h1 { font-size: var(--fs-3xl); margin-bottom: var(--sp-2); }
+  .hero p { color: var(--ink-500); font-size: var(--fs-lg); max-width: 56ch; margin: 0; }
+  .entry-card {
+    display: flex;
+    flex-direction: column;
+    padding: var(--sp-5);
+    background: var(--bg-raised);
+    border: 1px solid var(--ink-100);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-sm);
+    transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+    text-decoration: none;
+    color: inherit;
+  }
+  .entry-card:hover {
+    border-color: var(--accent-400);
+    box-shadow: var(--sh-md);
+    text-decoration: none;
+  }
+  .entry-icon {
+    width: 40px; height: 40px;
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    border-radius: var(--r-md);
+    background: var(--accent-50);
+    color: var(--accent-700);
+    margin-bottom: var(--sp-4);
+  }
+  .entry-card h3 { margin: 0 0 var(--sp-2) 0; }
+  .entry-card p { color: var(--ink-500); font-size: var(--fs-sm); margin: 0 0 var(--sp-4) 0; flex: 1; }
+  .entry-link { color: var(--accent-600); font-weight: 500; font-size: var(--fs-sm); }
 </style>
 </head>
 <body>
-  <h1>SuperTA</h1>
-  <p>Sistema de avaliação assistida por IA.</p>
 
-  <div class="card">
-    <h3>Administrador</h3>
-    <p>Gerencia trabalhos e distribui links para professores.</p>
-    <a href="/admin">Ir para o painel administrativo →</a>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
+    <div class="spacer"></div>
   </div>
+</header>
 
-  <div class="card">
-    <h3>Professor</h3>
-    <p>Use o token de trabalho que você recebeu do administrador.</p>
-    <a href="/trabalho">Acessar trabalho →</a>
-  </div>
+<main class="page">
+  <section class="hero">
+    <h1>SuperTA</h1>
+    <p>Sistema de avaliação assistida por IA para arguição oral sobre trabalhos acadêmicos.</p>
+  </section>
 
-  <div class="card">
-    <h3>Aluno</h3>
-    <p>Use o token de envio que você recebeu do seu professor.</p>
-    <a href="/envio">Acessar envio →</a>
-  </div>
+  <section class="grid-3">
+    <a class="entry-card" href="/admin">
+      <span class="entry-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </span>
+      <h3>Administrador</h3>
+      <p>Gerencia trabalhos e distribui tokens para os professores.</p>
+      <span class="entry-link">Ir para o painel →</span>
+    </a>
+
+    <a class="entry-card" href="/trabalho">
+      <span class="entry-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+          <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
+        </svg>
+      </span>
+      <h3>Professor</h3>
+      <p>Use o token de trabalho recebido do administrador para configurar e acompanhar.</p>
+      <span class="entry-link">Acessar trabalho →</span>
+    </a>
+
+    <a class="entry-card" href="/envio">
+      <span class="entry-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="9" y1="13" x2="15" y2="13"></line>
+          <line x1="9" y1="17" x2="15" y2="17"></line>
+        </svg>
+      </span>
+      <h3>Aluno</h3>
+      <p>Use o token de envio recebido do seu professor para iniciar a entrevista.</p>
+      <span class="entry-link">Acessar envio →</span>
+    </a>
+  </section>
+</main>
+
 </body>
 </html>
