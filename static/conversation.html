@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SuperTA — Conversa da entrevista</title>
+<style>
+  :root {
+    --fg: #222;
+    --muted: #666;
+    --muted-2: #888;
+    --border: #ddd;
+    --border-soft: #eee;
+    --bg-muted: #fafafa;
+    --q-bg: #eef4ff;
+    --q-border: #b7d0ff;
+    --a-bg: #f4faf0;
+    --a-border: #c0dba5;
+    --r-bg: #fff9e8;
+    --r-border: #e9d08a;
+    --link: #0366d6;
+  }
+  body { font-family: system-ui; margin: 2rem auto; max-width: 860px; padding: 0 1rem; color: var(--fg); }
+  h1 { margin: 0 0 0.2rem 0; }
+  .muted { color: var(--muted); font-size: 0.9em; }
+  .topbar { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 0.1em 0.5em; border-radius: 10px; font-size: 0.8em; background: #f0f0f0; margin-left: 0.3rem; }
+  .badge.in_progress { background: #fff1cc; color: #7a5d00; }
+  .badge.finalized { background: #d8f0d5; color: #1f6c27; }
+  .badge.pending { background: #f0f0f0; color: #555; }
+  .meta-line { color: var(--muted); font-size: 0.9em; margin-top: 0.2rem; }
+  a { color: var(--link); }
+  a:hover { text-decoration: underline; }
+
+  #empty, #notfound { color: #b00020; margin-top: 1.5rem; }
+
+  .turn {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    margin-top: 1.2rem;
+    background: #fff;
+  }
+  .turn-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border-soft);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.7rem;
+  }
+  .turn-header h2 { margin: 0; font-size: 1.05em; }
+  .turn-header .time { color: var(--muted-2); font-size: 0.85em; }
+
+  .block { border-left: 4px solid transparent; padding: 0.55rem 0.8rem; border-radius: 0 6px 6px 0; margin-top: 0.55rem; }
+  .block .label { font-weight: 600; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.25rem; color: var(--muted); }
+  .block .content { white-space: pre-wrap; line-height: 1.45; }
+
+  .block.question  { background: var(--q-bg); border-left-color: var(--q-border); }
+  .block.answer    { background: var(--a-bg); border-left-color: var(--a-border); }
+  .block.rationale { background: var(--r-bg); border-left-color: var(--r-border); }
+  .block.answer.missing .content { color: var(--muted-2); font-style: italic; }
+
+  details.meta {
+    margin-top: 0.9rem;
+    background: var(--bg-muted);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.88em;
+    color: var(--muted);
+  }
+  details.meta summary { cursor: pointer; color: var(--muted); }
+  details.meta[open] summary { margin-bottom: 0.4rem; }
+  details.meta dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.7rem; }
+  details.meta dt { font-weight: 600; }
+  details.meta dd { margin: 0; }
+  details.meta ul { margin: 0; padding-left: 1.1rem; }
+  details.meta .time-row { margin-top: 0.4rem; font-size: 0.85em; color: var(--muted-2); }
+
+  details.doc-map {
+    margin-top: 1rem;
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.9em;
+  }
+  details.doc-map pre { overflow-x: auto; font-size: 0.85em; background: #fff; padding: 0.6rem; border: 1px solid var(--border-soft); border-radius: 4px; }
+
+  .back { font-size: 0.9em; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1 id="work-name">Conversa</h1>
+    <div class="meta-line" id="meta-line"></div>
+  </div>
+  <a class="back" id="back-link" href="#">← Voltar ao trabalho</a>
+</div>
+
+<div id="notfound" style="display:none">Conversa não encontrada.</div>
+<div id="empty" style="display:none">Nenhuma conversa registrada para esta submissão ainda.</div>
+
+<details class="doc-map" id="doc-map" style="display:none">
+  <summary>Document map (análise estrutural do trabalho do aluno)</summary>
+  <pre id="doc-map-body"></pre>
+</details>
+
+<div id="turns"></div>
+
+<script>
+const parts = location.pathname.split('/').filter(Boolean);
+// Path shape: /w/<workToken>/s/<subToken>
+const workToken = parts[1];
+const subToken = parts[3];
+
+document.getElementById('back-link').href = '/w/' + encodeURIComponent(workToken || '');
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+function listBlock(items) {
+  const arr = Array.isArray(items) ? items.filter(x => x != null && String(x).trim() !== '') : [];
+  if (arr.length === 0) return '<span class="muted">—</span>';
+  return '<ul>' + arr.map(x => '<li>' + escapeHtml(x) + '</li>').join('') + '</ul>';
+}
+
+function renderTurn(turn) {
+  const m = turn.question_metadata || {};
+  const qBlock = `
+    <div class="block question">
+      <div class="label">Pergunta ${turn.index + 1}</div>
+      <div class="content">${escapeHtml(turn.question)}</div>
+    </div>`;
+  const rBlock = turn.rationale ? `
+    <div class="block rationale">
+      <div class="label">Justificativa</div>
+      <div class="content">${escapeHtml(turn.rationale)}</div>
+    </div>` : '';
+  const aBlock = turn.answer ? `
+    <div class="block answer">
+      <div class="label">Resposta do aluno</div>
+      <div class="content">${escapeHtml(turn.answer)}</div>
+    </div>` : `
+    <div class="block answer missing">
+      <div class="label">Resposta do aluno</div>
+      <div class="content">Aguardando resposta…</div>
+    </div>`;
+
+  const metaRows = [
+    ['Objectives', m.objectives],
+    ['Concerns', m.concerns],
+    ['Decision criteria', m.decision_criteria],
+    ['Information needs', m.information_needs],
+    ['Evaluation mode', m.evaluation_mode],
+  ].map(([label, v]) => `<dt>${label}</dt><dd>${listBlock(v)}</dd>`).join('');
+
+  return `
+    <section class="turn">
+      <div class="turn-header">
+        <h2>Turno ${turn.index + 1}${m.id != null ? ` · plan id ${escapeHtml(m.id)}` : ''}</h2>
+        <span class="time">${fmtTime(turn.asked_at)}${turn.answered_at ? ' → ' + fmtTime(turn.answered_at) : ''}</span>
+      </div>
+      ${qBlock}
+      ${rBlock}
+      ${aBlock}
+      <details class="meta">
+        <summary>Metadados da pergunta</summary>
+        <dl>${metaRows}</dl>
+        <div class="time-row">Perguntada em: ${fmtTime(turn.asked_at)} · Respondida em: ${fmtTime(turn.answered_at)}</div>
+      </details>
+    </section>`;
+}
+
+async function load() {
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/conversation`);
+  if (r.status === 404) {
+    document.getElementById('notfound').style.display = 'block';
+    return;
+  }
+  if (!r.ok) {
+    document.getElementById('notfound').textContent = 'Erro ao carregar a conversa.';
+    document.getElementById('notfound').style.display = 'block';
+    return;
+  }
+  const j = await r.json();
+
+  const workName = j.work?.name ?? '—';
+  document.getElementById('work-name').textContent = workName;
+  const statusKey = j.submission?.status || 'pending';
+  const statusLabel = {
+    pending: 'pendente',
+    in_progress: 'em andamento',
+    finalized: 'finalizado',
+  }[statusKey] || statusKey;
+  document.getElementById('meta-line').innerHTML =
+    `Aluno: <strong>${escapeHtml(j.submission?.student_label ?? '—')}</strong>` +
+    ` · Token: <code>${escapeHtml(subToken)}</code>` +
+    ` <span class="badge ${statusKey}">${statusLabel}</span>`;
+
+  const conv = j.conversation;
+  if (!conv) {
+    document.getElementById('empty').style.display = 'block';
+    return;
+  }
+
+  if (conv.document_map) {
+    document.getElementById('doc-map').style.display = 'block';
+    document.getElementById('doc-map-body').textContent = JSON.stringify(conv.document_map, null, 2);
+  }
+
+  const turnsEl = document.getElementById('turns');
+  const turns = Array.isArray(conv.turns) ? conv.turns : [];
+  if (turns.length === 0) {
+    turnsEl.innerHTML = '<p class="muted">Entrevista iniciada, mas ainda sem perguntas registradas.</p>';
+    return;
+  }
+  turnsEl.innerHTML = turns.map(renderTurn).join('');
+}
+
+load();
+</script>
+</body>
+</html>

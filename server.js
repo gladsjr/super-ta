@@ -24,10 +24,16 @@ import {
   sanitizeLabel,
   parseDirName,
   submissionStatus,
+  findSubmissionDirInWork,
   WORKS_ROOT,
   PROJECT_ROOT,
 } from "./lib/middleware.js";
 import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt.js";
+import {
+  writeConversationLog,
+  deleteConversationLog,
+  conversationLogPath,
+} from "./lib/conversationLog.js";
 import log from "./lib/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -166,6 +172,50 @@ async function logFullConv(conversationId, scope, limit = 20) {
     return `${index + 1}. [${item?.type || 'unknown'}]`;
   });
   log.trace(scope, `full conv (${items.length} items)\n${lines.join("\n")}`);
+}
+
+// Build a turn object from a plan question (answer/answered_at filled later).
+function turnFromPlanQuestion(index, q) {
+  return {
+    index,
+    question: q?.question ?? "",
+    rationale: q?.rationale ?? null,
+    answer: null,
+    asked_at: new Date().toISOString(),
+    answered_at: null,
+    question_metadata: {
+      id: q?.id ?? null,
+      objectives: q?.objectives ?? [],
+      concerns: q?.concerns ?? [],
+      decision_criteria: q?.decision_criteria ?? [],
+      information_needs: q?.information_needs ?? [],
+      evaluation_mode: q?.evaluation_mode ?? [],
+    },
+  };
+}
+
+// Serialize the professor-facing conversation log from the live session.
+function buildConversationLogPayload(sess, workToken, subToken, studentLabel) {
+  return {
+    submission_token: subToken,
+    work_token: workToken,
+    student_label: studentLabel,
+    started_at: sess.conversationStartedAt ?? null,
+    updated_at: new Date().toISOString(),
+    completed: !!sess.conversationCompleted,
+    document_map: sess.documentMap ?? null,
+    turns: sess.turnLog ?? [],
+  };
+}
+
+// Best-effort persistence. A log write failure must never abort the interview.
+function persistConversationLog(sess, submissionFullPath, workToken, subToken, studentLabel) {
+  try {
+    const payload = buildConversationLogPayload(sess, workToken, subToken, studentLabel);
+    writeConversationLog(submissionFullPath, payload);
+  } catch (err) {
+    log.error("LOG", `persist conversation failed submission=${subToken}: ${err.message}`);
+  }
 }
 
 /**
@@ -382,6 +432,9 @@ app.get("/envio", (_req, res) => {
 app.get("/w/:workToken", (_req, res) => {
   res.sendFile(path.join(__dirname, "static", "professor.html"));
 });
+app.get("/w/:workToken/s/:subToken", (_req, res) => {
+  res.sendFile(path.join(__dirname, "static", "conversation.html"));
+});
 app.get("/s/:submissionToken", (_req, res) => {
   res.sendFile(path.join(__dirname, "static", "student.html"));
 });
@@ -496,6 +549,29 @@ app.get("/w/:workToken/info", requireWorkToken, (req, res) => {
     log.error("WORK", `info failed: ${err.message}`);
     res.status(500).json({ error: "failed to load work info" });
   }
+});
+
+app.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken, (req, res) => {
+  const subToken = String(req.params.subToken || "").toLowerCase();
+  const subFound = findSubmissionDirInWork(req.work.full_path, subToken);
+  if (!subFound) return res.status(404).json({ error: "submission not found" });
+
+  const status = submissionStatus(subFound.fullPath);
+  const logPath = conversationLogPath(subFound.fullPath);
+  let conversation = null;
+  if (fs.existsSync(logPath)) {
+    try {
+      conversation = JSON.parse(fs.readFileSync(logPath, "utf8"));
+    } catch (err) {
+      log.error("WORK", `conversation read failed submission=${subToken}: ${err.message}`);
+      return res.status(500).json({ error: "failed to read conversation" });
+    }
+  }
+  res.json({
+    work: { work_token: req.work.work_token, name: req.work.name },
+    submission: { submission_token: subToken, student_label: subFound.label, status },
+    conversation,
+  });
 });
 
 // ---- Interviewer templates (shared) ----
@@ -740,6 +816,14 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
   const fileRef = req.file.path;
   sess.submissionPath = fileRef;
 
+  // New upload = new interview attempt. Reset log state and wipe any previous
+  // conversation.json so the professor only ever sees the current attempt.
+  sess.turnLog = [];
+  sess.conversationStartedAt = new Date().toISOString();
+  sess.conversationCompleted = false;
+  try { deleteConversationLog(req.submission.full_path); }
+  catch (err) { log.error("LOG", `delete old conversation log failed: ${err.message}`); }
+
   const interviewerYamlPath = path.join(req.work.full_path, "interviewer.yaml");
   const enunciadoPath = path.join(req.work.full_path, "enunciado.pdf");
   if (!fs.existsSync(interviewerYamlPath)) {
@@ -830,6 +914,15 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
     sess.currentPhase = "interviewing";
     sess.questionIndex = 1;
 
+    sess.turnLog.push(turnFromPlanQuestion(0, plan.questions[0]));
+    persistConversationLog(
+      sess,
+      req.submission.full_path,
+      req.work.work_token,
+      token,
+      req.submission.student_label,
+    );
+
     res.json({ ok: true, assistant: assistantMessage });
   } catch (error) {
     log.error("UPLOAD", `failed: ${error.message}`);
@@ -853,6 +946,22 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
   sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
   sess.history = sess.conv_chat;
 
+  // Record the answer on the turn that is currently waiting for one.
+  if (Array.isArray(sess.turnLog) && sess.turnLog.length > 0) {
+    const lastTurn = sess.turnLog[sess.turnLog.length - 1];
+    if (lastTurn.answer == null) {
+      lastTurn.answer = message;
+      lastTurn.answered_at = new Date().toISOString();
+      persistConversationLog(
+        sess,
+        req.submission.full_path,
+        req.work.work_token,
+        token,
+        req.submission.student_label,
+      );
+    }
+  }
+
   try {
     await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
     await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
@@ -862,12 +971,21 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
 
     let assistantResponse;
     if (sess.questionIndex < sess.interviewPlan.questions.length) {
-      const nextQuestion = sess.interviewPlan.questions[sess.questionIndex]?.question;
+      const planQuestion = sess.interviewPlan.questions[sess.questionIndex];
+      const nextQuestion = planQuestion?.question;
       if (!nextQuestion) {
         throw new Error("Question not found in interview plan");
       }
       assistantResponse = nextQuestion;
+      sess.turnLog.push(turnFromPlanQuestion(sess.turnLog.length, planQuestion));
       sess.questionIndex++;
+      persistConversationLog(
+        sess,
+        req.submission.full_path,
+        req.work.work_token,
+        token,
+        req.submission.student_label,
+      );
       log.info("TURN", `q#${sess.questionIndex} (sequential from plan)`);
     } else {
       assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. Use o botão 'Finalizar' quando estiver pronto.";
@@ -913,6 +1031,16 @@ app.post("/s/:submissionToken/finalize", requireSubmissionToken, async (req, res
     );
 
     log.info("FINAL", `submission=${token} C1=${report.breakdown.C1_compreensao} C2=${report.breakdown.C2_metodologia} C3=${report.breakdown.C3_parametros} total=${report.score_total}`);
+
+    sess.conversationCompleted = true;
+    persistConversationLog(
+      sess,
+      req.submission.full_path,
+      req.work.work_token,
+      token,
+      req.submission.student_label,
+    );
+
     SESSIONS.delete(token);
     res.json(report);
   } catch (error) {

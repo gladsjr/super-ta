@@ -66,7 +66,7 @@
     </div>
     <div id="sub-msg" class="muted" style="margin-top:0.4rem"></div>
     <table id="sub-table" style="display:none">
-      <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th></tr></thead>
+      <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th></tr></thead>
       <tbody></tbody>
     </table>
     <div id="sub-empty" class="muted" style="display:none">Nenhum token criado ainda.</div>
@@ -113,6 +113,11 @@ async function load() {
     document.getElementById('sub-empty').style.display = 'none';
     tbody.innerHTML = j.submissions.map(s => {
       const url = '/s/' + encodeURIComponent(s.submission_token);
+      const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token);
+      const hasConv = s.status === 'in_progress' || s.status === 'finalized';
+      const convCell = hasConv
+        ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">ver conversa ↗</a>`
+        : `<span class="muted">—</span>`;
       return `<tr>
         <td>
           <div class="row">
@@ -123,6 +128,7 @@ async function load() {
         </td>
         <td>${escapeHtml(s.student_label || '—')}</td>
         <td><span class="badge">${s.status}</span></td>
+        <td>${convCell}</td>
       </tr>`;
     }).join('');
   }
