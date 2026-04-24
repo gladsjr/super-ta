@@ -5,7 +5,12 @@ challenge_task: true
 # Model configuration
 models:
   principal_reasoning_model: "gpt-5.4"
+  fast_model: "gpt-5.4-mini"
   # Future context-specific models can be configured here
   # comprehension_evaluator_model: "gpt-5.3"
   # clarification_evaluator_model: "gpt-5.3"
   # map_builder_model: "gpt-5.4"
+
+# Triage (runs after each student answer, before next question)
+triage:
+  intensity_threshold: 6   # winner fires only if max(intensity) >= threshold

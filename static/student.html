@@ -21,6 +21,12 @@
   .notice.err { background: #fde8e8; color: #8c1c1c; }
   .notice.ok { background: #e6f4ea; color: #1a662c; }
   input, button { padding: 0.4rem; font-size: 1em; }
+  dialog.meta-dialog { max-width: 520px; border: 1px solid #ccc; border-radius: 10px; padding: 0; }
+  dialog.meta-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+  dialog.meta-dialog .dlg-body { padding: 1.1rem 1.3rem; }
+  dialog.meta-dialog h3 { margin-top: 0; }
+  dialog.meta-dialog .dlg-text { line-height: 1.5; white-space: pre-wrap; }
+  dialog.meta-dialog .dlg-actions { margin-top: 1rem; text-align: right; border-top: 1px solid #eee; padding: 0.6rem 1.3rem; background: #fafafa; }
 </style>
 </head>
 <body>
@@ -57,6 +63,16 @@
   </div>
 </div>
 
+<dialog id="meta-dialog" class="meta-dialog">
+  <div class="dlg-body">
+    <h3>Esta pergunta é para o professor</h3>
+    <div id="meta-dialog-text" class="dlg-text"></div>
+  </div>
+  <div class="dlg-actions">
+    <button id="meta-dialog-close">Entendi</button>
+  </div>
+</dialog>
+
 <script>
 const submissionToken = location.pathname.split('/').filter(Boolean)[1];
 let phase = 'awaiting_upload';
@@ -83,7 +99,17 @@ function appendUser(text) {
   const div = document.createElement('div');
   div.innerHTML = `<b>Você:</b> ${text}`;
   chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+  return div;
 }
+function showMetaDialog(text) {
+  document.getElementById('meta-dialog-text').textContent = text;
+  const dlg = document.getElementById('meta-dialog');
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else alert(text);
+}
+document.getElementById('meta-dialog-close').onclick = () => {
+  document.getElementById('meta-dialog').close();
+};
 function appendStatus(text, isError = false) {
   const div = document.createElement('div');
   div.style.color = isError ? 'red' : '#666';
@@ -152,17 +178,32 @@ document.getElementById('sendFile').onclick = async () => {
 };
 
 document.getElementById('send').onclick = async () => {
-  const m = document.getElementById('msg').value;
+  const input = document.getElementById('msg');
+  const m = input.value;
   if (!m) return;
-  appendUser(m);
-  document.getElementById('msg').value = '';
-  const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: m })
-  });
-  const j = await r.json();
-  if (j.error) appendStatus(j.error, true);
-  else appendTA(j.assistant);
+  const userNode = appendUser(m);
+  input.value = '';
+  let r, j;
+  try {
+    r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: m })
+    });
+    j = await r.json();
+  } catch {
+    appendStatus('Falha na comunicação com o servidor', true);
+    return;
+  }
+  if (j.error) { appendStatus(j.error, true); return; }
+  if (j.channel === 'modal') {
+    // Meta intervention: remove the optimistic bubble, restore input, show modal.
+    if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
+    input.value = j.restore_input ?? m;
+    input.focus();
+    showMetaDialog(j.assistant_response ?? '');
+    return;
+  }
+  appendTA(j.assistant);
 };
 
 document.getElementById('msg').addEventListener('keydown', (e) => {

@@ -9,6 +9,9 @@ import OpenAI from "openai";
 import { MapBuilderAgent } from "./agents/MapBuilderAgent.js";
 import { ComprehensionEvaluatorAgent } from "./agents/ComprehensionEvaluatorAgent.js";
 import { ClarificationEvaluatorAgent } from "./agents/ClarificationEvaluatorAgent.js";
+import { ScopeClarificationAgent } from "./agents/ScopeClarificationAgent.js";
+import { OffTopicRedirectAgent } from "./agents/OffTopicRedirectAgent.js";
+import { MetaInterventionAgent } from "./agents/MetaInterventionAgent.js";
 import {
   sessionMiddleware,
   seedInitialUsers,
@@ -67,8 +70,13 @@ const OPENAI_MODEL = policy?.models?.principal_reasoning_model;
 if (!OPENAI_MODEL || typeof OPENAI_MODEL !== "string") {
   throw new Error("config/policy.yaml must define models.principal_reasoning_model");
 }
+const FAST_MODEL = policy?.models?.fast_model;
+if (!FAST_MODEL || typeof FAST_MODEL !== "string") {
+  throw new Error("config/policy.yaml must define models.fast_model");
+}
+const TRIAGE_THRESHOLD = Number(policy?.triage?.intensity_threshold ?? 6);
 
-log.info("CONFIG", `principal_reasoning_model=${OPENAI_MODEL}`);
+log.info("CONFIG", `principal_reasoning_model=${OPENAI_MODEL} fast_model=${FAST_MODEL} triage_threshold=${TRIAGE_THRESHOLD}`);
 
 // Fixed for now; becomes configurable later.
 const INTERVIEW_QUESTION_COUNT = 10;
@@ -245,6 +253,29 @@ async function createVectorStoreWithFile(fileId, sessionId) {
 const mapBuilderAgent = new MapBuilderAgent(openai, OPENAI_MODEL);
 const comprehensionEvaluator = new ComprehensionEvaluatorAgent(openai, OPENAI_MODEL);
 const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, OPENAI_MODEL);
+const scopeClarificationAgent = new ScopeClarificationAgent(openai, FAST_MODEL);
+const offTopicRedirectAgent = new OffTopicRedirectAgent(openai, FAST_MODEL);
+const metaInterventionAgent = new MetaInterventionAgent(openai, FAST_MODEL);
+
+// Tie-break order when two triage agents return the same max intensity.
+// Rationale: meta is the most distinctive indicator (system malfunction vs
+// on-topic confusion), scope clarification should precede off-topic redirect
+// so we don't push a confused student "back" before clarifying.
+const TRIAGE_PRIORITY = ["meta", "scope_clarification", "off_topic_redirect"];
+
+function pickTriageWinner(results) {
+  let best = null;
+  for (const r of results) {
+    if (r.intensity < TRIAGE_THRESHOLD) continue;
+    if (!best) { best = r; continue; }
+    if (r.intensity > best.intensity) { best = r; continue; }
+    if (r.intensity === best.intensity &&
+        TRIAGE_PRIORITY.indexOf(r.type) < TRIAGE_PRIORITY.indexOf(best.type)) {
+      best = r;
+    }
+  }
+  return best;
+}
 
 // ============================================================================
 // EVALUATORS INFRASTRUCTURE
@@ -856,6 +887,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
     await logLastConvItem(sess.conversationId_eval, "CONV:eval");
 
     const interviewerYamlText = fs.readFileSync(interviewerYamlPath, "utf8");
+    sess.interviewerYamlText = interviewerYamlText;
     const renderedPrompt = renderInterviewPrompt(
       loadInterviewPromptTemplate(),
       interviewerYamlText,
@@ -942,24 +974,129 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
   const message = (req.body?.message || "").toString();
   if (!message) return res.status(400).json({ error: "empty message" });
 
+  const persist = () => persistConversationLog(
+    sess,
+    req.submission.full_path,
+    req.work.work_token,
+    token,
+    req.submission.student_label,
+  );
+
+  const planHasMoreQuestions = sess.questionIndex < (sess.interviewPlan?.questions?.length ?? 0);
+  const currentTurn = sess.turnLog?.[sess.turnLog.length - 1];
+
+  // ------------------------------------------------------------------
+  // Triage phase. Runs only while the plan still has a pending question.
+  // The three agents run in parallel on fast_model. If one throws, it is
+  // downgraded to intensity=0 so the remaining two can still decide.
+  // ------------------------------------------------------------------
+  if (planHasMoreQuestions && currentTurn && currentTurn.answer == null) {
+    const context = {
+      interviewerYamlText: sess.interviewerYamlText ?? "",
+      currentTurn,
+      studentMessage: message,
+      vectorStoreId: sess.vectorStoreId,
+    };
+    const fallback = (type, channel) => (err) => {
+      log.error(`AGENT:${type}`, `failed, scoring as 0: ${err.message}`);
+      return { type, channel, intensity: 0, assistant_response: "", rationale: `agent failed: ${err.message}` };
+    };
+    const [scopeResult, offTopicResult, metaResult] = await Promise.all([
+      scopeClarificationAgent.evaluate(context).catch(fallback("scope_clarification", "chat")),
+      offTopicRedirectAgent.evaluate(context).catch(fallback("off_topic_redirect", "chat")),
+      metaInterventionAgent.evaluate(context).catch(fallback("meta", "modal")),
+    ]);
+    const triageResults = [scopeResult, offTopicResult, metaResult];
+    const scores = {
+      scope_clarification: scopeResult.intensity,
+      off_topic_redirect: offTopicResult.intensity,
+      meta: metaResult.intensity,
+    };
+    log.info("TRIAGE", `scores scope=${scores.scope_clarification} off_topic=${scores.off_topic_redirect} meta=${scores.meta}`);
+
+    const winner = pickTriageWinner(triageResults);
+    if (winner) {
+      log.info("TRIAGE", `winner=${winner.type} intensity=${winner.intensity} channel=${winner.channel}`);
+      const intervention = {
+        type: winner.type,
+        student_message: message,
+        assistant_response: winner.assistant_response,
+        intensity: winner.intensity,
+        channel: winner.channel,
+        scores,
+        at: new Date().toISOString(),
+      };
+      if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
+      currentTurn.interventions.push(intervention);
+
+      if (winner.channel === "modal") {
+        // Meta intervention: keep the student message OUT of conv_chat (local
+        // and remote). Record into conv_eval for audit so the final evaluator
+        // still sees the exchange if needed.
+        sess.conv_eval.push({ role: "user", content: message, metadata: { triage: "meta", dropped_from_chat: true, timestamp: Date.now() } });
+        sess.conv_eval.push({ role: "assistant", content: winner.assistant_response, metadata: { triage: "meta", channel: "modal", timestamp: Date.now() } });
+        try {
+          await openai.conversations.items.create(sess.conversationId_eval, {
+            items: [
+              { role: "user", content: message },
+              { role: "assistant", content: winner.assistant_response },
+            ],
+          });
+        } catch (err) {
+          log.error("CHAT", `remote eval write (meta) failed: ${err.message}`);
+        }
+        persist();
+        return res.json({
+          channel: "modal",
+          assistant_response: winner.assistant_response,
+          restore_input: message,
+        });
+      }
+
+      // Chat-channel intervention (scope_clarification / off_topic_redirect):
+      // student message and agent response DO flow through conv_chat.
+      sess.conv_chat.push({ role: "user", content: message });
+      sess.conv_chat.push({ role: "assistant", content: winner.assistant_response });
+      sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
+      sess.conv_eval.push({ role: "assistant", content: winner.assistant_response, metadata: { triage: winner.type, timestamp: Date.now() } });
+      sess.history = sess.conv_chat;
+      try {
+        await openai.conversations.items.create(sess.conversationId_chat, {
+          items: [
+            { role: "user", content: message },
+            { role: "assistant", content: winner.assistant_response },
+          ],
+        });
+        await openai.conversations.items.create(sess.conversationId_eval, {
+          items: [
+            { role: "user", content: message },
+            { role: "assistant", content: winner.assistant_response },
+          ],
+        });
+      } catch (err) {
+        log.error("CHAT", `remote write (triage=${winner.type}) failed: ${err.message}`);
+      }
+      log.info("CHAT", `user (triaged=${winner.type}) ${log.preview(message, 140)}`);
+      await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+      persist();
+      return res.json({ channel: "chat", assistant: winner.assistant_response });
+    }
+    // No winner — fall through to normal flow.
+  }
+
+  // ------------------------------------------------------------------
+  // Normal flow (no triage intervention). Student message becomes the
+  // answer to the current turn; next plan question (or the wrap-up
+  // sentinel if the plan is exhausted) is returned.
+  // ------------------------------------------------------------------
   sess.conv_chat.push({ role: "user", content: message });
   sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
   sess.history = sess.conv_chat;
 
-  // Record the answer on the turn that is currently waiting for one.
-  if (Array.isArray(sess.turnLog) && sess.turnLog.length > 0) {
-    const lastTurn = sess.turnLog[sess.turnLog.length - 1];
-    if (lastTurn.answer == null) {
-      lastTurn.answer = message;
-      lastTurn.answered_at = new Date().toISOString();
-      persistConversationLog(
-        sess,
-        req.submission.full_path,
-        req.work.work_token,
-        token,
-        req.submission.student_label,
-      );
-    }
+  if (currentTurn && currentTurn.answer == null) {
+    currentTurn.answer = message;
+    currentTurn.answered_at = new Date().toISOString();
+    persist();
   }
 
   try {
@@ -979,13 +1116,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
       assistantResponse = nextQuestion;
       sess.turnLog.push(turnFromPlanQuestion(sess.turnLog.length, planQuestion));
       sess.questionIndex++;
-      persistConversationLog(
-        sess,
-        req.submission.full_path,
-        req.work.work_token,
-        token,
-        req.submission.student_label,
-      );
+      persist();
       log.info("TURN", `q#${sess.questionIndex} (sequential from plan)`);
     } else {
       assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. Use o botão 'Finalizar' quando estiver pronto.";
@@ -1003,7 +1134,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     log.info("CHAT", `assistant ${log.preview(assistantResponse, 140)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    res.json({ assistant: assistantResponse });
+    res.json({ channel: "chat", assistant: assistantResponse });
   } catch (error) {
     log.error("CHAT", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao processar mensagem" });

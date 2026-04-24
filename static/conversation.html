@@ -61,6 +61,19 @@
   .block.rationale { background: var(--r-bg); border-left-color: var(--r-border); }
   .block.answer.missing .content { color: var(--muted-2); font-style: italic; }
 
+  .interventions { margin-top: 0.9rem; border-top: 1px dashed var(--border); padding-top: 0.7rem; }
+  .interventions-title { font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.45rem; }
+  .iv { background: #f6f6f6; border: 1px solid var(--border-soft); border-radius: 6px; padding: 0.55rem 0.75rem; margin-bottom: 0.55rem; font-size: 0.92em; }
+  .iv-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.35rem; color: var(--muted); font-size: 0.85em; }
+  .iv-type { font-weight: 600; color: var(--fg); }
+  .iv-type.meta { color: #7a3a9a; }
+  .iv-type.scope_clarification { color: #0b5fa5; }
+  .iv-type.off_topic_redirect { color: #8a5a00; }
+  .iv-row { margin: 0.2rem 0; }
+  .iv-row .who { display: inline-block; min-width: 5.2em; color: var(--muted); font-weight: 600; }
+  .iv .iv-text { white-space: pre-wrap; }
+  .iv-scores { margin-top: 0.3rem; font-size: 0.82em; color: var(--muted-2); }
+
   details.meta {
     margin-top: 0.9rem;
     background: var(--bg-muted);
@@ -136,6 +149,38 @@ function listBlock(items) {
   return '<ul>' + arr.map(x => '<li>' + escapeHtml(x) + '</li>').join('') + '</ul>';
 }
 
+function renderInterventions(interventions) {
+  if (!Array.isArray(interventions) || interventions.length === 0) return '';
+  const cards = interventions.map((iv, i) => {
+    const type = String(iv.type ?? '');
+    const typeLabel = {
+      scope_clarification: 'Esclarecimento de escopo',
+      off_topic_redirect: 'Redirecionamento (off-topic)',
+      meta: 'Meta-pergunta (modal)',
+    }[type] || type;
+    const channel = iv.channel ? ` · canal ${escapeHtml(iv.channel)}` : '';
+    const intensity = iv.intensity != null ? ` · intensidade ${escapeHtml(iv.intensity)}` : '';
+    const scoresLine = iv.scores
+      ? `<div class="iv-scores">scores — scope: ${escapeHtml(iv.scores.scope_clarification ?? '—')}, off_topic: ${escapeHtml(iv.scores.off_topic_redirect ?? '—')}, meta: ${escapeHtml(iv.scores.meta ?? '—')}</div>`
+      : '';
+    return `
+      <div class="iv">
+        <div class="iv-head">
+          <span><span class="iv-type ${escapeHtml(type)}">Intervenção ${i + 1} — ${escapeHtml(typeLabel)}</span>${intensity}${channel}</span>
+          <span>${fmtTime(iv.at)}</span>
+        </div>
+        <div class="iv-row"><span class="who">aluno:</span><span class="iv-text">${escapeHtml(iv.student_message ?? '')}</span></div>
+        <div class="iv-row"><span class="who">agente:</span><span class="iv-text">${escapeHtml(iv.assistant_response ?? '')}</span></div>
+        ${scoresLine}
+      </div>`;
+  }).join('');
+  return `
+    <div class="interventions">
+      <div class="interventions-title">Intervenções antes da resposta final</div>
+      ${cards}
+    </div>`;
+}
+
 function renderTurn(turn) {
   const m = turn.question_metadata || {};
   const qBlock = `
@@ -148,6 +193,7 @@ function renderTurn(turn) {
       <div class="label">Justificativa</div>
       <div class="content">${escapeHtml(turn.rationale)}</div>
     </div>` : '';
+  const ivBlock = renderInterventions(turn.interventions);
   const aBlock = turn.answer ? `
     <div class="block answer">
       <div class="label">Resposta do aluno</div>
@@ -174,6 +220,7 @@ function renderTurn(turn) {
       </div>
       ${qBlock}
       ${rBlock}
+      ${ivBlock}
       ${aBlock}
       <details class="meta">
         <summary>Metadados da pergunta</summary>
