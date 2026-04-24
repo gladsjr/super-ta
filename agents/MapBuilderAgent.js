@@ -13,7 +13,10 @@
 import log from "../lib/logger.js";
 
 export class MapBuilderAgent {
-    constructor(openaiClient, model = 'gpt-5.2') {
+    constructor(openaiClient, model) {
+        if (!model) {
+            throw new Error('Missing model for MapBuilderAgent');
+        }
         this.client = openaiClient;
         this.model = model;
         this.systemPrompt = `Você é um especialista em análise estruturada de documentos acadêmicos e técnicos.

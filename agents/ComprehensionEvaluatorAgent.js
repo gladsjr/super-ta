@@ -14,7 +14,10 @@
 import log from "../lib/logger.js";
 
 export class ComprehensionEvaluatorAgent {
-    constructor(openaiClient, model = 'gpt-5.2') {
+    constructor(openaiClient, model) {
+        if (!model) {
+            throw new Error('Missing model for ComprehensionEvaluatorAgent');
+        }
         this.client = openaiClient;
         this.model = model;
         this.systemPrompt = `Você é um avaliador especializado em verificar se estudantes genuinamente compreendem seus próprios trabalhos.

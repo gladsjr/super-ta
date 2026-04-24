@@ -14,7 +14,10 @@
 import log from "../lib/logger.js";
 
 export class ClarificationEvaluatorAgent {
-    constructor(openaiClient, model = 'gpt-5.2') {
+    constructor(openaiClient, model) {
+        if (!model) {
+            throw new Error('Missing model for ClarificationEvaluatorAgent');
+        }
         this.client = openaiClient;
         this.model = model;
         this.systemPrompt = `Você é um assistente que identifica aspectos não claros, incompletos ou que precisam de esclarecimento em trabalhos acadêmicos.

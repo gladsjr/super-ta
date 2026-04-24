@@ -1,3 +1,11 @@
 web_access: false
 max_turns: 12
 challenge_task: true
+
+# Model configuration
+models:
+  principal_reasoning_model: "gpt-5.4"
+  # Future context-specific models can be configured here
+  # comprehension_evaluator_model: "gpt-5.3"
+  # clarification_evaluator_model: "gpt-5.3"
+  # map_builder_model: "gpt-5.4"

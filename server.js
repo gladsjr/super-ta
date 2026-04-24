@@ -54,26 +54,30 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ============================================================================
 // MODEL CONFIGURATION
-// Overridable via env vars. OPENAI_MODEL sets the default for all roles;
-// per-role vars (OPENAI_MODEL_MAP_BUILDER etc.) take precedence when set.
+// Single source of truth: config/policy.yaml
 // ============================================================================
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-5.2";
-const MODELS = {
-  DEFAULT:            DEFAULT_MODEL,
-  MAP_BUILDER:        process.env.OPENAI_MODEL_MAP_BUILDER        || DEFAULT_MODEL,
-  COMPREHENSION_EVAL: process.env.OPENAI_MODEL_COMPREHENSION_EVAL || DEFAULT_MODEL,
-  CLARIFICATION_EVAL: process.env.OPENAI_MODEL_CLARIFICATION_EVAL || DEFAULT_MODEL,
-  METHODOLOGY_EVAL:   process.env.OPENAI_MODEL_METHODOLOGY_EVAL   || DEFAULT_MODEL,
-  PARAMETERS_EVAL:    process.env.OPENAI_MODEL_PARAMETERS_EVAL    || DEFAULT_MODEL,
-  INTERVIEWER_ADAPT:  process.env.OPENAI_MODEL_INTERVIEWER_ADAPT  || DEFAULT_MODEL
-};
+const policy = loadPolicy();
+const OPENAI_MODEL = policy?.models?.principal_reasoning_model;
+if (!OPENAI_MODEL || typeof OPENAI_MODEL !== "string") {
+  throw new Error("config/policy.yaml must define models.principal_reasoning_model");
+}
 
-const OPENAI_MODEL = MODELS.DEFAULT;
+log.info("CONFIG", `principal_reasoning_model=${OPENAI_MODEL}`);
 
 // Fixed for now; becomes configurable later.
 const INTERVIEW_QUESTION_COUNT = 10;
 
-// helpers
+// ============================================================================
+// CONFIGURATION LOADING
+// ============================================================================
+
+function loadPolicy() {
+  const cfgDir = path.join(__dirname, "config");
+  const policyPath = path.join(cfgDir, "policy.yaml");
+  const policyText = fs.readFileSync(policyPath, "utf-8");
+  return yaml.load(policyText) || {};
+}
+
 function loadSystemPrompt() {
   const cfgDir = path.join(__dirname, "config");
   const systemPrompt = fs.readFileSync(path.join(cfgDir, "system_prompt.txt"), "utf-8");
@@ -188,9 +192,9 @@ async function createVectorStoreWithFile(fileId, sessionId) {
 // ============================================================================
 
 // Initialize agents (singletons) with configured models
-const mapBuilderAgent = new MapBuilderAgent(openai, MODELS.MAP_BUILDER);
-const comprehensionEvaluator = new ComprehensionEvaluatorAgent(openai, MODELS.COMPREHENSION_EVAL);
-const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, MODELS.CLARIFICATION_EVAL);
+const mapBuilderAgent = new MapBuilderAgent(openai, OPENAI_MODEL);
+const comprehensionEvaluator = new ComprehensionEvaluatorAgent(openai, OPENAI_MODEL);
+const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, OPENAI_MODEL);
 
 // ============================================================================
 // EVALUATORS INFRASTRUCTURE
@@ -594,7 +598,7 @@ app.post("/w/:workToken/interviewer/adapt", requireWorkToken, express.json({ lim
 
     const response = await log.span("INTERVIEWER_ADAPT", "responses.create", () =>
       openai.responses.create({
-        model: MODELS.INTERVIEWER_ADAPT,
+        model: OPENAI_MODEL,
         instructions: INTERVIEWER_ADAPT_INSTRUCTIONS,
         input: [{
           role: "user",
@@ -824,6 +828,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
     sess.currentPhase = "interviewing";
+    sess.questionIndex = 1;
 
     res.json({ ok: true, assistant: assistantMessage });
   } catch (error) {
@@ -852,30 +857,26 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
     await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
 
-    log.info("CHAT", `user #${sess.questionCount + 1} ${log.preview(message, 140)}`);
+    log.info("CHAT", `user #${sess.questionIndex} ${log.preview(message, 140)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    log.info("TURN", `q#${sess.questionCount + 1} evaluators=Comprehension,Clarification (parallel)`);
-    const signals = await runEvaluators(sess, message);
-    log.debug("TURN", `${signals.length} signals generated`);
-
-    const decision = await orchestrateNextAction(sess, signals);
-    log.info("ORCH", `decision=${decision.action}`);
-
     let assistantResponse;
-    if (decision.action === "followup") {
-      assistantResponse = decision.question;
-    } else if (decision.action === "continue") {
-      assistantResponse = await generateNextQuestion(sess);
-    } else if (decision.action === "finalize") {
+    if (sess.questionIndex < sess.interviewPlan.questions.length) {
+      const nextQuestion = sess.interviewPlan.questions[sess.questionIndex]?.question;
+      if (!nextQuestion) {
+        throw new Error("Question not found in interview plan");
+      }
+      assistantResponse = nextQuestion;
+      sess.questionIndex++;
+      log.info("TURN", `q#${sess.questionIndex} (sequential from plan)`);
+    } else {
       assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. Use o botão 'Finalizar' quando estiver pronto.";
       sess.currentPhase = "finalizing";
-    } else {
-      assistantResponse = await generateNextQuestion(sess);
+      log.info("TURN", `all 10 questions completed, finalizing`);
     }
 
     sess.conv_chat.push({ role: "assistant", content: assistantResponse });
-    sess.conv_eval.push({ role: "assistant", content: assistantResponse, metadata: { decision, timestamp: Date.now() } });
+    sess.conv_eval.push({ role: "assistant", content: assistantResponse, metadata: { timestamp: Date.now() } });
     sess.history = sess.conv_chat;
 
     await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: assistantResponse }] });
@@ -884,7 +885,6 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     log.info("CHAT", `assistant ${log.preview(assistantResponse, 140)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    sess.questionCount++;
     res.json({ assistant: assistantResponse });
   } catch (error) {
     log.error("CHAT", `failed: ${error.message}`);
@@ -971,7 +971,7 @@ Retorne JSON:
     log.prompt("EVAL:Methodology", prompt);
     const response = await log.span("EVAL:Methodology", "responses.create", () =>
       openai.responses.create({
-        model: MODELS.METHODOLOGY_EVAL,
+        model: OPENAI_MODEL,
         instructions: prompt,
         input: [{ role: "user", content: "Avalie a metodologia." }]
       })
@@ -1015,7 +1015,7 @@ Retorne JSON:
     log.prompt("EVAL:Parameters", prompt);
     const response = await log.span("EVAL:Parameters", "responses.create", () =>
       openai.responses.create({
-        model: MODELS.PARAMETERS_EVAL,
+        model: OPENAI_MODEL,
         instructions: prompt,
         input: [{ role: "user", content: "Avalie os parâmetros." }]
       })

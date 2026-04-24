@@ -26,16 +26,21 @@ The system combines:
    - Critical components (MapBuilder, Vector Store) must work or fail explicitly
    - No silent degradation to legacy implementations
    - Errors are architectural feedback, not edge cases
+
+4. **Single source of truth for runtime configuration**
+  - Runtime model selection must come from `config/policy.yaml`
+  - Avoid configuration hierarchies, env-var overrides for model choice, and hidden fallbacks
+  - If a required config is missing, fail explicitly at boot
    
-4. **Global understanding via DocumentMap**
+5. **Global understanding via DocumentMap**
    - Generated once by MapBuilder Agent, which reads the full document via `input_file` attached to the Responses API
    - Compressed context injected into all evaluators
 
-5. **Local verification via RAG**
+6. **Local verification via RAG**
    - Vector Store (`file_search`) used by evaluators and question generation for citations
    - Cite specific sections, tables, figures
    
-6. **Internal evaluation never exposed to student**
+7. **Internal evaluation never exposed to student**
    - All evaluation signals stay in `conv_eval`
    - Student only sees questions and final score
 
@@ -49,7 +54,7 @@ The system combines:
   - `assignment.json` – Assignment goals and constraints
   - `rubric.json` – Evaluation criteria (C1: 40%, C2: 40%, C3: 20%)
   - `system_prompt.txt` – Base behavioral constraints for TA
-  - `policy.yaml` – Runtime policy flags (web access, max turns, challenge task)
+  - `policy.yaml` – Runtime policy and model configuration, including `models.principal_reasoning_model`
 - `data/submissions/` – Uploaded student files (by session ID)
 
 ---
@@ -188,6 +193,8 @@ All three agents are implemented as classes under `agents/` and call the **Respo
 - `INITIAL_USERS` – Seeded users in format `user1:pass1,user2:pass2` (created on startup if missing)
 - `SESSION_SECRET` – Optional; auto-generated if absent (use a stable value in production)
 
+Model selection is intentionally not controlled by environment variables. Set the reasoning model in `config/policy.yaml` only.
+
 ## Authentication
 - Simple username/password login with bcrypt-hashed passwords stored in PostgreSQL `users` table
 - Session cookies (HTTP-only, signed) backed by `app_session` table via `connect-pg-simple`
@@ -275,7 +282,7 @@ Final score is weighted average (0-10).
 - Clarified: MapBuilder reads the document via `input_file`; `file_search` is used by evaluators and question generation
 - Added Conversations API to "APIs Used" (used to persist `conv_chat` and `conv_eval` server-side)
 - Removed reference to non-existent `config/replit-future.md`; added `config/policy.yaml`
-- `OPENAI_MODEL` env var now controls the default model (with optional per-role overrides)
+- Model selection is defined in `config/policy.yaml` via `models.principal_reasoning_model`; avoid env/model fallback hierarchies
 - Deleted obsolete `ARCHITECTURE_EVOLUTION.md`
 - Removed dead `generateDocumentMap` helper in `server.js`
 - C2/C3 scoring (`evaluateMethodology`, `evaluateParameters`) now fail-fast on LLM errors instead of returning a silent default of 5
@@ -312,3 +319,8 @@ Final score is weighted average (0-10).
 - **No silent degradation** to legacy methods
 - **Errors are signals** that architecture needs attention
 - **Graceful user messaging** without exposing internals
+
+### Configuration Discipline
+- Prefer one explicit configuration source over layered overrides
+- Do not introduce fallback chains for runtime model choice
+- Do not add "just in case" defaults that obscure the active configuration

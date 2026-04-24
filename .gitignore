@@ -4,3 +4,4 @@ node_modules/
 .DS_Store
 data/submissions/*
 !data/submissions/.gitkeep
+data/works/
