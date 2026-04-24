@@ -27,6 +27,7 @@ import {
   WORKS_ROOT,
   PROJECT_ROOT,
 } from "./lib/middleware.js";
+import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt.js";
 import log from "./lib/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -69,11 +70,25 @@ const MODELS = {
 
 const OPENAI_MODEL = MODELS.DEFAULT;
 
+// Fixed for now; becomes configurable later.
+const INTERVIEW_QUESTION_COUNT = 10;
+
 // helpers
 function loadSystemPrompt() {
   const cfgDir = path.join(__dirname, "config");
   const systemPrompt = fs.readFileSync(path.join(cfgDir, "system_prompt.txt"), "utf-8");
   return systemPrompt;
+}
+
+let _interviewTemplateCache = null;
+function loadInterviewPromptTemplate() {
+  if (_interviewTemplateCache == null) {
+    _interviewTemplateCache = fs.readFileSync(
+      path.join(__dirname, "config", "interview_prompt_template.txt"),
+      "utf-8"
+    );
+  }
+  return _interviewTemplateCache;
 }
 
 async function getConversationContext(conversationId, limit = 12) {
@@ -721,14 +736,26 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
   const fileRef = req.file.path;
   sess.submissionPath = fileRef;
 
+  const interviewerYamlPath = path.join(req.work.full_path, "interviewer.yaml");
+  const enunciadoPath = path.join(req.work.full_path, "enunciado.pdf");
+  if (!fs.existsSync(interviewerYamlPath)) {
+    return res.status(400).json({ error: "O professor ainda não configurou o entrevistador para este trabalho." });
+  }
+  if (!fs.existsSync(enunciadoPath)) {
+    return res.status(400).json({ error: "O professor ainda não enviou o enunciado para este trabalho." });
+  }
+
   try {
     const fileName = path.basename(fileRef);
     log.info("UPLOAD", `student file=${fileName} submission=${token}`);
-    const fileUpload = await openai.files.create({ file: fs.createReadStream(fileRef), purpose: "user_data" });
-    sess.openaiFileId = fileUpload.id;
-    log.info("UPLOAD", `openai file=${fileUpload.id}`);
+    const studentFile = await openai.files.create({ file: fs.createReadStream(fileRef), purpose: "user_data" });
+    sess.openaiFileId = studentFile.id;
+    log.info("UPLOAD", `openai student file=${studentFile.id}`);
 
-    sess.vectorStoreId = await createVectorStoreWithFile(fileUpload.id, token);
+    const enunciadoFile = await openai.files.create({ file: fs.createReadStream(enunciadoPath), purpose: "user_data" });
+    log.info("UPLOAD", `openai enunciado file=${enunciadoFile.id}`);
+
+    sess.vectorStoreId = await createVectorStoreWithFile(studentFile.id, token);
 
     sess.documentMap = await mapBuilderAgent.generateDocumentMap(
       sess.conversationId_eval,
@@ -740,24 +767,50 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
     });
     await logLastConvItem(sess.conversationId_eval, "CONV:eval");
 
-    const payload = {
-      model: OPENAI_MODEL,
-      instructions: sess.systemPrompt,
-      input: [{
-        role: "user",
-        content: [
-          { type: "input_text", text: "Este é o trabalho do aluno. Por favor, analise e inicie a avaliação." },
-          { type: "input_file", file_id: fileUpload.id },
-        ],
-      }],
-    };
+    const interviewerYamlText = fs.readFileSync(interviewerYamlPath, "utf8");
+    const renderedPrompt = renderInterviewPrompt(
+      loadInterviewPromptTemplate(),
+      interviewerYamlText,
+      INTERVIEW_QUESTION_COUNT
+    );
+    log.prompt("UPLOAD:interview_plan", renderedPrompt);
 
-    log.prompt("UPLOAD:intro", sess.systemPrompt);
-    const response = await log.span("UPLOAD", "intro responses.create", () => openai.responses.create(payload));
-    const assistantMessage = response.output_text || "Arquivo recebido. Podemos iniciar nossa avaliação?";
+    const response = await log.span("UPLOAD", "interview plan responses.create", () =>
+      openai.responses.create({
+        model: OPENAI_MODEL,
+        instructions: renderedPrompt,
+        input: [{
+          role: "user",
+          content: [
+            { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
+            { type: "input_file", file_id: enunciadoFile.id },
+            { type: "input_file", file_id: studentFile.id },
+          ],
+        }],
+      })
+    );
+
+    let plan;
+    try {
+      plan = parseQuestionsJSON(response.output_text || "");
+    } catch (err) {
+      log.error("UPLOAD", `failed to parse interview plan JSON: ${err.message}`);
+      log.error("UPLOAD", `raw output: ${response.output_text}`);
+      throw new Error("O modelo não retornou JSON válido para o plano de entrevista.");
+    }
+
+    log.info("INTERVIEW_PLAN", `submission=${token} questions=${plan?.questions?.length ?? 0}`);
+    log.info("INTERVIEW_PLAN", `full plan:\n${JSON.stringify(plan, null, 2)}`);
+
+    const firstQuestion = plan?.questions?.[0]?.question;
+    if (!firstQuestion || typeof firstQuestion !== "string") {
+      throw new Error("O plano de entrevista não contém uma primeira pergunta válida.");
+    }
+    sess.interviewPlan = plan;
+    const assistantMessage = firstQuestion;
 
     sess.conv_chat.push({ role: "assistant", content: assistantMessage });
-    sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { documentMap: sess.documentMap } });
+    sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { documentMap: sess.documentMap, interviewPlan: plan } });
     sess.history = sess.conv_chat;
 
     await openai.conversations.items.create(sess.conversationId_chat, {
