@@ -82,6 +82,22 @@
     font-size: var(--fs-sm);
   }
   details.doc-map pre { font-size: var(--fs-xs); margin: var(--sp-2) 0 0; background: var(--bg-raised); }
+
+  details.skipped {
+    margin-top: var(--sp-4);
+    background: var(--bg-muted);
+    border: 1px solid var(--ink-100);
+    border-radius: var(--r-md);
+    padding: var(--sp-3);
+    font-size: var(--fs-sm);
+  }
+  details.skipped summary { color: var(--ink-700); cursor: pointer; font-weight: 500; }
+  details.skipped[open] summary { margin-bottom: var(--sp-2); }
+  .skipped-item { padding: var(--sp-2) 0; border-top: 1px dashed var(--ink-200); }
+  .skipped-item:first-of-type { border-top: none; padding-top: var(--sp-1); }
+  .skipped-q { color: var(--ink-700); }
+  .skipped-reason { color: var(--ink-500); margin-top: var(--sp-1); font-style: italic; }
+  .skipped-meta { color: var(--ink-400); font-size: var(--fs-xs); margin-top: var(--sp-1); }
 </style>
 </head>
 <body>
@@ -107,6 +123,11 @@
   <details class="doc-map hidden" id="doc-map">
     <summary>Document map (análise estrutural do trabalho do aluno)</summary>
     <pre id="doc-map-body"></pre>
+  </details>
+
+  <details class="skipped hidden" id="skipped">
+    <summary id="skipped-summary">Perguntas descartadas pelo agente de relevância</summary>
+    <div id="skipped-body"></div>
   </details>
 
   <div id="turns"></div>
@@ -259,6 +280,20 @@ async function load() {
   if (conv.document_map) {
     document.getElementById('doc-map').classList.remove('hidden');
     document.getElementById('doc-map-body').textContent = JSON.stringify(conv.document_map, null, 2);
+  }
+
+  const skipped = Array.isArray(conv.skipped_questions) ? conv.skipped_questions : [];
+  if (skipped.length > 0) {
+    const sk = document.getElementById('skipped');
+    document.getElementById('skipped-summary').textContent =
+      `Perguntas descartadas pelo agente de relevância (${skipped.length})`;
+    document.getElementById('skipped-body').innerHTML = skipped.map(s => `
+      <div class="skipped-item">
+        <div class="skipped-q"><strong>Plan id ${escapeHtml(s.plan_id ?? '—')}</strong> — ${escapeHtml(s.question ?? '')}</div>
+        <div class="skipped-reason">Motivo: ${escapeHtml(s.reason ?? '—')}</div>
+        <div class="skipped-meta">Descartada em ${fmtTime(s.at)}</div>
+      </div>`).join('');
+    sk.classList.remove('hidden');
   }
 
   const turnsEl = document.getElementById('turns');

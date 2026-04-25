@@ -12,6 +12,7 @@ import { ClarificationEvaluatorAgent } from "./agents/ClarificationEvaluatorAgen
 import { ScopeClarificationAgent } from "./agents/ScopeClarificationAgent.js";
 import { OffTopicRedirectAgent } from "./agents/OffTopicRedirectAgent.js";
 import { MetaInterventionAgent } from "./agents/MetaInterventionAgent.js";
+import { QuestionRelevanceAgent } from "./agents/QuestionRelevanceAgent.js";
 import {
   sessionMiddleware,
   seedInitialUsers,
@@ -213,6 +214,7 @@ function buildConversationLogPayload(sess, workToken, subToken, studentLabel) {
     completed: !!sess.conversationCompleted,
     document_map: sess.documentMap ?? null,
     turns: sess.turnLog ?? [],
+    skipped_questions: sess.skippedQuestions ?? [],
   };
 }
 
@@ -256,6 +258,11 @@ const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, OPENAI_MO
 const scopeClarificationAgent = new ScopeClarificationAgent(openai, FAST_MODEL);
 const offTopicRedirectAgent = new OffTopicRedirectAgent(openai, FAST_MODEL);
 const metaInterventionAgent = new MetaInterventionAgent(openai, FAST_MODEL);
+const questionRelevanceAgent = new QuestionRelevanceAgent(openai, FAST_MODEL);
+
+// Cap on consecutive skips by the relevance agent. With a 10-question plan
+// this leaves headroom; if it ever pegs, log and force the next ask.
+const MAX_RELEVANCE_SKIPS = 8;
 
 // Tie-break order when two triage agents return the same max intensity.
 // Rationale: meta is the most distinctive indicator (system malfunction vs
@@ -850,6 +857,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
   // New upload = new interview attempt. Reset log state and wipe any previous
   // conversation.json so the professor only ever sees the current attempt.
   sess.turnLog = [];
+  sess.skippedQuestions = [];
   sess.conversationStartedAt = new Date().toISOString();
   sess.conversationCompleted = false;
   try { deleteConversationLog(req.submission.full_path); }
@@ -1106,6 +1114,46 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     log.info("CHAT", `user #${sess.questionIndex} ${log.preview(message, 140)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
+    // Relevance pass: before serving the next planned question, ask whether
+    // it still makes sense given the conversation so far. Skip-loops past
+    // questions whose substance is already covered. Bounded to keep a
+    // misbehaving agent from emptying the rest of the plan.
+    let relevanceSkips = 0;
+    while (sess.questionIndex < sess.interviewPlan.questions.length && relevanceSkips < MAX_RELEVANCE_SKIPS) {
+      const candidate = sess.interviewPlan.questions[sess.questionIndex];
+      let decision;
+      try {
+        decision = await questionRelevanceAgent.evaluate({
+          interviewerYamlText: sess.interviewerYamlText ?? "",
+          turnLog: sess.turnLog,
+          candidateQuestion: candidate,
+        });
+      } catch (err) {
+        log.error("AGENT:QuestionRelevance", `failed, defaulting to ask: ${err.message}`);
+        decision = { decision: "ask", reason: "agent_failed" };
+      }
+      if (decision.decision === "skip") {
+        if (!Array.isArray(sess.skippedQuestions)) sess.skippedQuestions = [];
+        sess.skippedQuestions.push({
+          plan_id: candidate?.id ?? null,
+          question: candidate?.question ?? "",
+          rationale: candidate?.rationale ?? null,
+          reason: decision.reason,
+          at: new Date().toISOString(),
+        });
+        log.info("RELEVANCE", `skip plan_id=${candidate?.id} reason=${log.preview(decision.reason, 120)}`);
+        sess.questionIndex++;
+        relevanceSkips++;
+        persist();
+        continue;
+      }
+      log.info("RELEVANCE", `ask plan_id=${candidate?.id}`);
+      break;
+    }
+    if (relevanceSkips >= MAX_RELEVANCE_SKIPS) {
+      log.error("RELEVANCE", `cap reached (${MAX_RELEVANCE_SKIPS}); forcing ask on questionIndex=${sess.questionIndex}`);
+    }
+
     let assistantResponse;
     if (sess.questionIndex < sess.interviewPlan.questions.length) {
       const planQuestion = sess.interviewPlan.questions[sess.questionIndex];
@@ -1121,7 +1169,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     } else {
       assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. Use o botão 'Finalizar' quando estiver pronto.";
       sess.currentPhase = "finalizing";
-      log.info("TURN", `all 10 questions completed, finalizing`);
+      log.info("TURN", `all questions covered or completed, finalizing`);
     }
 
     sess.conv_chat.push({ role: "assistant", content: assistantResponse });
