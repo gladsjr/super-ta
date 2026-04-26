@@ -84,6 +84,23 @@
   }
   details.doc-map pre { font-size: var(--fs-xs); margin: var(--sp-2) 0 0; background: var(--bg-raised); }
 
+  details.intro {
+    margin-top: var(--sp-4);
+    background: var(--bg-muted);
+    border: 1px solid var(--ink-100);
+    border-radius: var(--r-md);
+    padding: var(--sp-3);
+    font-size: var(--fs-sm);
+  }
+  details.intro summary { color: var(--ink-700); cursor: pointer; font-weight: 500; }
+  details.intro[open] summary { margin-bottom: var(--sp-2); }
+  .intro-msg { padding: var(--sp-2) 0; border-top: 1px dashed var(--ink-200); }
+  .intro-msg:first-of-type { border-top: none; padding-top: var(--sp-1); }
+  .intro-msg .who { color: var(--ink-500); font-weight: 600; min-width: 5em; display: inline-block; }
+  .intro-msg .at { color: var(--ink-400); font-size: var(--fs-xs); margin-left: var(--sp-2); }
+  .intro-transitioned { color: var(--ink-500); font-size: var(--fs-xs); margin-top: var(--sp-2); font-style: italic; }
+  .persona-line { color: var(--ink-500); font-size: var(--fs-sm); margin-top: var(--sp-1); }
+
   details.skipped {
     margin-top: var(--sp-4);
     background: var(--bg-muted);
@@ -120,6 +137,12 @@
 
   <div id="notfound" class="notice notice-error hidden">Conversa não encontrada.</div>
   <div id="empty" class="notice notice-info hidden">Nenhuma conversa registrada para esta submissão ainda.</div>
+
+  <details class="intro hidden" id="intro">
+    <summary id="intro-summary">Apresentação inicial</summary>
+    <div id="intro-body"></div>
+    <div id="intro-transitioned" class="intro-transitioned"></div>
+  </details>
 
   <details class="doc-map hidden" id="doc-map">
     <summary>Document map (análise estrutural do trabalho do aluno)</summary>
@@ -273,15 +296,38 @@ async function load() {
   document.getElementById('work-name').textContent = workName;
   document.getElementById('tb-context').textContent = `${workName} · ${j.submission?.student_label ?? '—'}`;
   const statusKey = j.submission?.status || 'pending';
+  const persona = j.conversation?.interviewer_persona;
+  const personaLine = persona
+    ? `<div class="persona-line">Entrevistador: <strong>${escapeHtml(persona.name)}</strong>${persona.city ? ` (${escapeHtml(persona.city)})` : ''}</div>`
+    : '';
   document.getElementById('meta-line').innerHTML =
     `Aluno: <strong>${escapeHtml(j.submission?.student_label ?? '—')}</strong>` +
     ` · Token: <code class="token-chip">${escapeHtml(subToken)}</code>` +
-    ` <span class="badge badge-${statusKey}">${statusLabel(statusKey)}</span>`;
+    ` <span class="badge badge-${statusKey}">${statusLabel(statusKey)}</span>` +
+    personaLine;
 
   const conv = j.conversation;
   if (!conv) {
     document.getElementById('empty').classList.remove('hidden');
     return;
+  }
+
+  const introMsgs = Array.isArray(conv.intro?.messages) ? conv.intro.messages : [];
+  if (introMsgs.length > 0) {
+    const sumPersona = persona ? `${persona.name}${persona.city ? `, de ${persona.city}` : ''}` : 'agente';
+    document.getElementById('intro-summary').textContent =
+      `Apresentação inicial — ${sumPersona} (${introMsgs.length} mensagens)`;
+    document.getElementById('intro-body').innerHTML = introMsgs.map(m => `
+      <div class="intro-msg">
+        <span class="who">${m.role === 'assistant' ? 'agente' : 'aluno'}:</span>
+        <span class="iv-text" style="white-space: pre-wrap;">${escapeHtml(m.content ?? '')}</span>
+        <span class="at">${fmtTime(m.at)}</span>
+      </div>`).join('');
+    if (conv.intro?.transitioned_at) {
+      document.getElementById('intro-transitioned').textContent =
+        `Transição para a entrevista: ${fmtTime(conv.intro.transitioned_at)}`;
+    }
+    document.getElementById('intro').classList.remove('hidden');
   }
 
   if (conv.document_map) {

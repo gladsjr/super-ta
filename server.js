@@ -14,6 +14,8 @@ import { OffTopicRedirectAgent } from "./agents/OffTopicRedirectAgent.js";
 import { MetaInterventionAgent } from "./agents/MetaInterventionAgent.js";
 import { QuestionRelevanceAgent } from "./agents/QuestionRelevanceAgent.js";
 import { AnswerSufficiencyAgent } from "./agents/AnswerSufficiencyAgent.js";
+import { IntroductionAgent } from "./agents/IntroductionAgent.js";
+import { pickPersona } from "./lib/personas.js";
 import {
   sessionMiddleware,
   seedInitialUsers,
@@ -210,6 +212,11 @@ function buildConversationLogPayload(sess, workToken, subToken, studentLabel) {
     submission_token: subToken,
     work_token: workToken,
     student_label: studentLabel,
+    interviewer_persona: sess.interviewerPersona ?? null,
+    intro: {
+      messages: sess.introLog ?? [],
+      transitioned_at: sess.introTransitionedAt ?? null,
+    },
     started_at: sess.conversationStartedAt ?? null,
     updated_at: new Date().toISOString(),
     completed: !!sess.conversationCompleted,
@@ -261,6 +268,9 @@ const offTopicRedirectAgent = new OffTopicRedirectAgent(openai, FAST_MODEL);
 const metaInterventionAgent = new MetaInterventionAgent(openai, FAST_MODEL);
 const questionRelevanceAgent = new QuestionRelevanceAgent(openai, FAST_MODEL);
 const answerSufficiencyAgent = new AnswerSufficiencyAgent(openai, PRINCIPAL_REASONING_MODEL);
+const introductionAgent = new IntroductionAgent(openai, FAST_MODEL);
+
+const INTRO_TURN_CAP = 3;
 
 // Cap on consecutive skips by the relevance agent. With a 10-question plan
 // this leaves headroom; if it ever pegs, log and force the next ask.
@@ -811,6 +821,7 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
         openai.conversations.create({ metadata: { submission_token: token, type: "chat" } }),
         openai.conversations.create({ metadata: { submission_token: token, type: "eval" } }),
       ]);
+      const interviewerPersona = pickPersona();
       sess = {
         systemPrompt,
         submissionToken: token,
@@ -827,10 +838,14 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
         currentPhase: "awaiting_upload",
         questionCount: 0,
         evaluationSignals: [],
+        interviewerPersona,
+        introLog: [],
+        introTransitionedAt: null,
+        interviewPreparation: null,
       };
       SESSIONS.set(token, sess);
       fs.mkdirSync(req.submission.full_path, { recursive: true });
-      log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} chat=${chatConversation.id} eval=${evalConversation.id}`);
+      log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} persona=${interviewerPersona.name}/${interviewerPersona.city} chat=${chatConversation.id} eval=${evalConversation.id}`);
     } else {
       log.info("SUBMISSION", `resume token=${token} phase=${sess.currentPhase} qn=${sess.questionCount}`);
     }
@@ -886,18 +901,13 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
 
     sess.vectorStoreId = await createVectorStoreWithFile(studentFile.id, token);
 
-    sess.documentMap = await mapBuilderAgent.generateDocumentMap(
-      sess.conversationId_eval,
-      sess.openaiFileId
-    );
-
-    await openai.conversations.items.create(sess.conversationId_eval, {
-      items: [{ role: "developer", content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}` }],
-    });
-    await logLastConvItem(sess.conversationId_eval, "CONV:eval");
-
     const interviewerYamlText = fs.readFileSync(interviewerYamlPath, "utf8");
     sess.interviewerYamlText = interviewerYamlText;
+
+    // Heavy work (document map + interview plan generation) launched in
+    // background. The student is kept busy with the intro phase while these
+    // run. The promise lands on sess.interviewPlan when ready; if the intro
+    // hits its cap before, the chat handler awaits this same promise.
     const renderedPrompt = renderInterviewPrompt(
       loadInterviewPromptTemplate(),
       interviewerYamlText,
@@ -905,58 +915,87 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
     );
     log.prompt("UPLOAD:interview_plan", renderedPrompt);
 
-    const response = await log.span("UPLOAD", "interview plan responses.create", () =>
-      openai.responses.create({
-        model: PRINCIPAL_REASONING_MODEL,
-        instructions: renderedPrompt,
-        input: [{
-          role: "user",
-          content: [
-            { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
-            { type: "input_file", file_id: enunciadoFile.id },
-            { type: "input_file", file_id: studentFile.id },
-          ],
-        }],
-      })
-    );
+    sess.interviewPreparation = (async () => {
+      const [docMap, planResp] = await Promise.all([
+        mapBuilderAgent.generateDocumentMap(sess.conversationId_eval, sess.openaiFileId),
+        log.span("UPLOAD", "interview plan responses.create", () =>
+          openai.responses.create({
+            model: PRINCIPAL_REASONING_MODEL,
+            instructions: renderedPrompt,
+            input: [{
+              role: "user",
+              content: [
+                { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
+                { type: "input_file", file_id: enunciadoFile.id },
+                { type: "input_file", file_id: studentFile.id },
+              ],
+            }],
+          })
+        ),
+      ]);
+      sess.documentMap = docMap;
+      try {
+        await openai.conversations.items.create(sess.conversationId_eval, {
+          items: [{ role: "developer", content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}` }],
+        });
+        await logLastConvItem(sess.conversationId_eval, "CONV:eval");
+      } catch (err) {
+        log.error("UPLOAD", `remote eval write (document_map) failed: ${err.message}`);
+      }
+      let plan;
+      try {
+        plan = parseQuestionsJSON(planResp.output_text || "");
+      } catch (err) {
+        log.error("UPLOAD", `failed to parse interview plan JSON: ${err.message}`);
+        log.error("UPLOAD", `raw output: ${planResp.output_text}`);
+        throw new Error("O modelo não retornou JSON válido para o plano de entrevista.");
+      }
+      log.info("INTERVIEW_PLAN", `submission=${token} questions=${plan?.questions?.length ?? 0}`);
+      log.info("INTERVIEW_PLAN", `full plan:\n${JSON.stringify(plan, null, 2)}`);
+      const firstQuestion = plan?.questions?.[0]?.question;
+      if (!firstQuestion || typeof firstQuestion !== "string") {
+        throw new Error("O plano de entrevista não contém uma primeira pergunta válida.");
+      }
+      sess.interviewPlan = plan;
+    })().catch(err => {
+      log.error("UPLOAD", `background prep failed: ${err.message}`);
+      sess.interviewPreparationError = err;
+    });
 
-    let plan;
-    try {
-      plan = parseQuestionsJSON(response.output_text || "");
-    } catch (err) {
-      log.error("UPLOAD", `failed to parse interview plan JSON: ${err.message}`);
-      log.error("UPLOAD", `raw output: ${response.output_text}`);
-      throw new Error("O modelo não retornou JSON válido para o plano de entrevista.");
-    }
+    // Intro phase: greet the student with the persona. Fast model, runs
+    // while the heavy preparation above is still in flight.
+    sess.currentPhase = "intro";
+    sess.questionIndex = 1;
+    const greeting = await introductionAgent.evaluate({
+      interviewerYamlText,
+      persona: sess.interviewerPersona,
+      introHistory: sess.introLog,
+      studentMessage: null,
+      mainReady: false,
+      introTurnCount: 0,
+      introTurnCap: INTRO_TURN_CAP,
+    });
 
-    log.info("INTERVIEW_PLAN", `submission=${token} questions=${plan?.questions?.length ?? 0}`);
-    log.info("INTERVIEW_PLAN", `full plan:\n${JSON.stringify(plan, null, 2)}`);
-
-    const firstQuestion = plan?.questions?.[0]?.question;
-    if (!firstQuestion || typeof firstQuestion !== "string") {
-      throw new Error("O plano de entrevista não contém uma primeira pergunta válida.");
-    }
-    sess.interviewPlan = plan;
-    const assistantMessage = firstQuestion;
-
-    sess.conv_chat.push({ role: "assistant", content: assistantMessage });
-    sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { documentMap: sess.documentMap, interviewPlan: plan } });
+    const greetingEntry = { role: "assistant", content: greeting.message, at: new Date().toISOString() };
+    sess.introLog.push(greetingEntry);
+    sess.conv_chat.push({ role: "assistant", content: greeting.message });
+    sess.conv_eval.push({ role: "assistant", content: greeting.message, metadata: { phase: "intro", persona: sess.interviewerPersona, timestamp: Date.now() } });
     sess.history = sess.conv_chat;
 
-    await openai.conversations.items.create(sess.conversationId_chat, {
-      items: [{ role: "assistant", content: assistantMessage }],
-    });
-    await openai.conversations.items.create(sess.conversationId_eval, {
-      items: [{ role: "assistant", content: assistantMessage }],
-    });
+    try {
+      await openai.conversations.items.create(sess.conversationId_chat, {
+        items: [{ role: "assistant", content: greeting.message }],
+      });
+      await openai.conversations.items.create(sess.conversationId_eval, {
+        items: [{ role: "assistant", content: greeting.message }],
+      });
+    } catch (err) {
+      log.error("CHAT", `remote write (intro greeting) failed: ${err.message}`);
+    }
 
-    log.info("CHAT", `assistant (intro) ${log.preview(assistantMessage, 120)}`);
+    log.info("CHAT", `intro greeting persona=${sess.interviewerPersona.name}/${sess.interviewerPersona.city} ${log.preview(greeting.message, 120)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    sess.currentPhase = "interviewing";
-    sess.questionIndex = 1;
-
-    sess.turnLog.push(turnFromPlanQuestion(0, plan.questions[0]));
     persistConversationLog(
       sess,
       req.submission.full_path,
@@ -965,7 +1004,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
       req.submission.student_label,
     );
 
-    res.json({ ok: true, assistant: assistantMessage });
+    res.json({ ok: true, assistant: greeting.message });
   } catch (error) {
     log.error("UPLOAD", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
@@ -977,7 +1016,11 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
   if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
   const sess = SESSIONS.get(token);
   if (!sess) return res.status(400).json({ error: "call /start first" });
-  if (!sess.vectorStoreId || !sess.documentMap) {
+  // documentMap is populated by background prep — only vectorStoreId is required
+  // synchronously (created in /upload before the response). The intro phase does
+  // not depend on documentMap; the interviewing phase only starts once the plan
+  // (and therefore the documentMap, set in the same background task) is ready.
+  if (!sess.vectorStoreId) {
     return res.status(400).json({ error: "envie o trabalho (PDF) antes de iniciar a conversa" });
   }
 
@@ -991,6 +1034,111 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     token,
     req.submission.student_label,
   );
+
+  // ------------------------------------------------------------------
+  // Intro phase: short social opening from the persona-bearing agent
+  // while the heavy plan generation runs in background. Each turn the
+  // agent decides between continuing the chitchat and transitioning to
+  // the interview proper. Triage/sufficiency/relevance do not run here.
+  // ------------------------------------------------------------------
+  if (sess.currentPhase === "intro") {
+    sess.introLog.push({ role: "user", content: message, at: new Date().toISOString() });
+    sess.conv_chat.push({ role: "user", content: message });
+    sess.conv_eval.push({ role: "user", content: message, metadata: { phase: "intro", timestamp: Date.now() } });
+    sess.history = sess.conv_chat;
+    try {
+      await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
+      await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
+    } catch (err) {
+      log.error("CHAT", `remote write (intro user) failed: ${err.message}`);
+    }
+
+    const introTurnCount = sess.introLog.filter(m => m.role === "assistant").length;
+    const mainReady = !!sess.interviewPlan;
+
+    let intro;
+    try {
+      intro = await introductionAgent.evaluate({
+        interviewerYamlText: sess.interviewerYamlText ?? "",
+        persona: sess.interviewerPersona,
+        introHistory: sess.introLog.slice(0, -1),  // history without the just-pushed student message; agent receives that separately
+        studentMessage: message,
+        mainReady,
+        introTurnCount,
+        introTurnCap: INTRO_TURN_CAP,
+      });
+    } catch (err) {
+      log.error("AGENT:Introduction", `failed, forcing transition: ${err.message}`);
+      intro = { decision: "transition", message: "Bom, vamos ao trabalho.", reason: "agent_failed" };
+    }
+
+    // Force transition when the cap is reached, regardless of the agent's call.
+    if (intro.decision !== "transition" && introTurnCount >= INTRO_TURN_CAP) {
+      log.info("INTRO", `cap reached (${INTRO_TURN_CAP}), forcing transition`);
+      intro = { decision: "transition", message: intro.message || "Desculpe, tenho pouco tempo. Vamos ao trabalho.", reason: "cap_reached" };
+    }
+
+    if (intro.decision === "continue_intro") {
+      sess.introLog.push({ role: "assistant", content: intro.message, at: new Date().toISOString() });
+      sess.conv_chat.push({ role: "assistant", content: intro.message });
+      sess.conv_eval.push({ role: "assistant", content: intro.message, metadata: { phase: "intro", timestamp: Date.now() } });
+      sess.history = sess.conv_chat;
+      try {
+        await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: intro.message }] });
+        await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: intro.message }] });
+      } catch (err) {
+        log.error("CHAT", `remote write (intro continue) failed: ${err.message}`);
+      }
+      log.info("CHAT", `intro continue ${log.preview(intro.message, 120)}`);
+      await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+      persist();
+      return res.json({ channel: "chat", assistant: intro.message });
+    }
+
+    // Transition: ensure the plan is ready (may need to await the background
+    // prep if the cap fired before it finished), then push the first plan
+    // turn and combine the transition phrase with the first question.
+    if (!sess.interviewPlan) {
+      log.info("INTRO", "transitioning but plan not ready — awaiting interviewPreparation");
+      try {
+        await sess.interviewPreparation;
+      } catch (err) {
+        log.error("INTRO", `interviewPreparation failed during transition: ${err.message}`);
+        return res.status(500).json({ error: "Falha ao preparar a entrevista. Tente novamente." });
+      }
+    }
+    if (!sess.interviewPlan) {
+      log.error("INTRO", "interviewPlan still missing after await");
+      return res.status(500).json({ error: "Falha ao preparar a entrevista. Tente novamente." });
+    }
+
+    const firstPlanQuestion = sess.interviewPlan.questions[0];
+    const combined = `${intro.message}\n\n${firstPlanQuestion.question}`;
+
+    sess.introLog.push({ role: "assistant", content: intro.message, at: new Date().toISOString() });
+    sess.introTransitionedAt = new Date().toISOString();
+    sess.turnLog.push(turnFromPlanQuestion(0, firstPlanQuestion));
+    sess.questionIndex = 1;
+    sess.currentPhase = "interviewing";
+
+    sess.conv_chat.push({ role: "assistant", content: combined });
+    sess.conv_eval.push({
+      role: "assistant",
+      content: combined,
+      metadata: { phase: "intro_to_interviewing", documentMap: sess.documentMap, interviewPlan: sess.interviewPlan, timestamp: Date.now() },
+    });
+    sess.history = sess.conv_chat;
+    try {
+      await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: combined }] });
+      await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: combined }] });
+    } catch (err) {
+      log.error("CHAT", `remote write (intro transition) failed: ${err.message}`);
+    }
+    log.info("CHAT", `intro transition + first plan question ${log.preview(combined, 160)}`);
+    await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+    persist();
+    return res.json({ channel: "chat", assistant: combined });
+  }
 
   const planHasMoreQuestions = sess.questionIndex < (sess.interviewPlan?.questions?.length ?? 0);
   const currentTurn = sess.turnLog?.[sess.turnLog.length - 1];
