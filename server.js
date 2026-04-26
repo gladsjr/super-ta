@@ -13,6 +13,7 @@ import { ScopeClarificationAgent } from "./agents/ScopeClarificationAgent.js";
 import { OffTopicRedirectAgent } from "./agents/OffTopicRedirectAgent.js";
 import { MetaInterventionAgent } from "./agents/MetaInterventionAgent.js";
 import { QuestionRelevanceAgent } from "./agents/QuestionRelevanceAgent.js";
+import { AnswerSufficiencyAgent } from "./agents/AnswerSufficiencyAgent.js";
 import {
   sessionMiddleware,
   seedInitialUsers,
@@ -67,8 +68,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // Single source of truth: config/policy.yaml
 // ============================================================================
 const policy = loadPolicy();
-const OPENAI_MODEL = policy?.models?.principal_reasoning_model;
-if (!OPENAI_MODEL || typeof OPENAI_MODEL !== "string") {
+const PRINCIPAL_REASONING_MODEL = policy?.models?.principal_reasoning_model;
+if (!PRINCIPAL_REASONING_MODEL || typeof PRINCIPAL_REASONING_MODEL !== "string") {
   throw new Error("config/policy.yaml must define models.principal_reasoning_model");
 }
 const FAST_MODEL = policy?.models?.fast_model;
@@ -77,7 +78,7 @@ if (!FAST_MODEL || typeof FAST_MODEL !== "string") {
 }
 const TRIAGE_THRESHOLD = Number(policy?.triage?.intensity_threshold ?? 6);
 
-log.info("CONFIG", `principal_reasoning_model=${OPENAI_MODEL} fast_model=${FAST_MODEL} triage_threshold=${TRIAGE_THRESHOLD}`);
+log.info("CONFIG", `principal_reasoning_model=${PRINCIPAL_REASONING_MODEL} fast_model=${FAST_MODEL} triage_threshold=${TRIAGE_THRESHOLD}`);
 
 // Fixed for now; becomes configurable later.
 const INTERVIEW_QUESTION_COUNT = 10;
@@ -252,13 +253,14 @@ async function createVectorStoreWithFile(fileId, sessionId) {
 // ============================================================================
 
 // Initialize agents (singletons) with configured models
-const mapBuilderAgent = new MapBuilderAgent(openai, OPENAI_MODEL);
-const comprehensionEvaluator = new ComprehensionEvaluatorAgent(openai, OPENAI_MODEL);
-const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, OPENAI_MODEL);
+const mapBuilderAgent = new MapBuilderAgent(openai, PRINCIPAL_REASONING_MODEL);
+const comprehensionEvaluator = new ComprehensionEvaluatorAgent(openai, PRINCIPAL_REASONING_MODEL);
+const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, PRINCIPAL_REASONING_MODEL);
 const scopeClarificationAgent = new ScopeClarificationAgent(openai, FAST_MODEL);
 const offTopicRedirectAgent = new OffTopicRedirectAgent(openai, FAST_MODEL);
 const metaInterventionAgent = new MetaInterventionAgent(openai, FAST_MODEL);
 const questionRelevanceAgent = new QuestionRelevanceAgent(openai, FAST_MODEL);
+const answerSufficiencyAgent = new AnswerSufficiencyAgent(openai, PRINCIPAL_REASONING_MODEL);
 
 // Cap on consecutive skips by the relevance agent. With a 10-question plan
 // this leaves headroom; if it ever pegs, log and force the next ask.
@@ -429,7 +431,7 @@ Retorne APENAS a pergunta, sem texto adicional.`;
     }
 
     const payload = {
-      model: OPENAI_MODEL,
+      model: PRINCIPAL_REASONING_MODEL,
       instructions: prompt,
       tools,
       input
@@ -712,7 +714,7 @@ app.post("/w/:workToken/interviewer/adapt", requireWorkToken, express.json({ lim
 
     const response = await log.span("INTERVIEWER_ADAPT", "responses.create", () =>
       openai.responses.create({
-        model: OPENAI_MODEL,
+        model: PRINCIPAL_REASONING_MODEL,
         instructions: INTERVIEWER_ADAPT_INSTRUCTIONS,
         input: [{
           role: "user",
@@ -905,7 +907,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
 
     const response = await log.span("UPLOAD", "interview plan responses.create", () =>
       openai.responses.create({
-        model: OPENAI_MODEL,
+        model: PRINCIPAL_REASONING_MODEL,
         instructions: renderedPrompt,
         input: [{
           role: "user",
@@ -994,25 +996,53 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
   const currentTurn = sess.turnLog?.[sess.turnLog.length - 1];
 
   // ------------------------------------------------------------------
-  // Triage phase. Runs only while the plan still has a pending question.
-  // The three agents run in parallel on fast_model. If one throws, it is
-  // downgraded to intensity=0 so the remaining two can still decide.
+  // Triage + sufficiency phase. All four agents are launched in parallel
+  // as soon as the message arrives. Triage (3 fast agents) decides whether
+  // the message should be intercepted as scope/off-topic/meta. Sufficiency
+  // (1 reasoning agent) decides whether the answer is complete and coherent
+  // enough to advance — but its result is only consumed when no triage
+  // guardrail wins. If a guardrail wins, sufficiency is best-effort
+  // cancelled via AbortSignal and its outcome is ignored.
+  //
+  // Both phases are gated by "plan still has a pending question and the
+  // current turn is awaiting an answer".
   // ------------------------------------------------------------------
   if (planHasMoreQuestions && currentTurn && currentTurn.answer == null) {
-    const context = {
+    const triageContext = {
       interviewerYamlText: sess.interviewerYamlText ?? "",
       currentTurn,
       studentMessage: message,
       vectorStoreId: sess.vectorStoreId,
     };
+
+    const sufficiencyAbort = new AbortController();
+    const sufficiencyPromise = answerSufficiencyAgent.evaluate({
+      interviewerYamlText: sess.interviewerYamlText ?? "",
+      currentTurn,
+      turnLog: sess.turnLog,
+      studentMessage: message,
+      vectorStoreId: sess.vectorStoreId,
+      signal: sufficiencyAbort.signal,
+    }).catch(err => {
+      const aborted = err?.name === "APIUserAbortError"
+        || err?.constructor?.name === "APIUserAbortError"
+        || /aborted/i.test(err?.message ?? "");
+      if (aborted) {
+        log.info("AGENT:AnswerSufficiency", "aborted (triage winner)");
+        return { aborted: true };
+      }
+      log.error("AGENT:AnswerSufficiency", `failed, defaulting to accept: ${err.message}`);
+      return { aborted: false, decision: "accept", issue: "none", reason: "agent_failed", follow_up_question: null };
+    });
+
     const fallback = (type, channel) => (err) => {
       log.error(`AGENT:${type}`, `failed, scoring as 0: ${err.message}`);
       return { type, channel, intensity: 0, assistant_response: "", rationale: `agent failed: ${err.message}` };
     };
     const [scopeResult, offTopicResult, metaResult] = await Promise.all([
-      scopeClarificationAgent.evaluate(context).catch(fallback("scope_clarification", "chat")),
-      offTopicRedirectAgent.evaluate(context).catch(fallback("off_topic_redirect", "chat")),
-      metaInterventionAgent.evaluate(context).catch(fallback("meta", "modal")),
+      scopeClarificationAgent.evaluate(triageContext).catch(fallback("scope_clarification", "chat")),
+      offTopicRedirectAgent.evaluate(triageContext).catch(fallback("off_topic_redirect", "chat")),
+      metaInterventionAgent.evaluate(triageContext).catch(fallback("meta", "modal")),
     ]);
     const triageResults = [scopeResult, offTopicResult, metaResult];
     const scores = {
@@ -1024,6 +1054,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
 
     const winner = pickTriageWinner(triageResults);
     if (winner) {
+      sufficiencyAbort.abort();
       log.info("TRIAGE", `winner=${winner.type} intensity=${winner.intensity} channel=${winner.channel}`);
       const intervention = {
         type: winner.type,
@@ -1089,7 +1120,50 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
       persist();
       return res.json({ channel: "chat", assistant: winner.assistant_response });
     }
-    // No winner — fall through to normal flow.
+
+    // No triage winner — sufficiency now blocks the move to the next turn.
+    const sufficiency = await sufficiencyPromise;
+    if (sufficiency.decision === "follow_up" && sufficiency.follow_up_question) {
+      log.info("AGENT:AnswerSufficiency", `follow_up issue=${sufficiency.issue}`);
+      const intervention = {
+        type: "follow_up",
+        issue: sufficiency.issue,
+        student_message: message,
+        assistant_response: sufficiency.follow_up_question,
+        channel: "chat",
+        reason: sufficiency.reason,
+        at: new Date().toISOString(),
+      };
+      if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
+      currentTurn.interventions.push(intervention);
+
+      sess.conv_chat.push({ role: "user", content: message });
+      sess.conv_chat.push({ role: "assistant", content: intervention.assistant_response });
+      sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
+      sess.conv_eval.push({ role: "assistant", content: intervention.assistant_response, metadata: { intervention: "follow_up", issue: sufficiency.issue, timestamp: Date.now() } });
+      sess.history = sess.conv_chat;
+      try {
+        await openai.conversations.items.create(sess.conversationId_chat, {
+          items: [
+            { role: "user", content: message },
+            { role: "assistant", content: intervention.assistant_response },
+          ],
+        });
+        await openai.conversations.items.create(sess.conversationId_eval, {
+          items: [
+            { role: "user", content: message },
+            { role: "assistant", content: intervention.assistant_response },
+          ],
+        });
+      } catch (err) {
+        log.error("CHAT", `remote write (follow_up) failed: ${err.message}`);
+      }
+      log.info("CHAT", `user (follow_up=${sufficiency.issue}) ${log.preview(message, 140)}`);
+      await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+      persist();
+      return res.json({ channel: "chat", assistant: intervention.assistant_response });
+    }
+    // accept (or aborted/failed defaulting to accept) — fall through to normal flow.
   }
 
   // ------------------------------------------------------------------
@@ -1278,7 +1352,7 @@ Retorne JSON:
     log.prompt("EVAL:Methodology", prompt);
     const response = await log.span("EVAL:Methodology", "responses.create", () =>
       openai.responses.create({
-        model: OPENAI_MODEL,
+        model: PRINCIPAL_REASONING_MODEL,
         instructions: prompt,
         input: [{ role: "user", content: "Avalie a metodologia." }]
       })
@@ -1322,7 +1396,7 @@ Retorne JSON:
     log.prompt("EVAL:Parameters", prompt);
     const response = await log.span("EVAL:Parameters", "responses.create", () =>
       openai.responses.create({
-        model: OPENAI_MODEL,
+        model: PRINCIPAL_REASONING_MODEL,
         instructions: prompt,
         input: [{ role: "user", content: "Avalie os parâmetros." }]
       })
@@ -1378,5 +1452,5 @@ app.listen(PORT, "0.0.0.0", async () => {
   } catch (err) {
     log.error("BOOT", `seedInitialUsers failed: ${err.message}`);
   }
-  log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${OPENAI_MODEL}`);
+  log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });

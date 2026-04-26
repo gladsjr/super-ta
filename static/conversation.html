@@ -51,6 +51,7 @@
   .iv-type.meta { color: #7a3a9a; }
   .iv-type.scope_clarification { color: var(--accent-700); }
   .iv-type.off_topic_redirect { color: var(--warning-700); }
+  .iv-type.follow_up { color: var(--success-700); }
   .iv-row { margin: var(--sp-1) 0; }
   .iv-row .who { display: inline-block; min-width: 5.2em; color: var(--ink-500); font-weight: 600; }
   .iv .iv-text { white-space: pre-wrap; }
@@ -175,21 +176,27 @@ function renderInterventions(interventions) {
       scope_clarification: 'Esclarecimento de escopo',
       off_topic_redirect: 'Redirecionamento (off-topic)',
       meta: 'Meta-pergunta (modal)',
+      follow_up: 'Pedido de complemento',
     }[type] || type;
     const channel = iv.channel ? ` · canal ${escapeHtml(iv.channel)}` : '';
     const intensity = iv.intensity != null ? ` · intensidade ${escapeHtml(iv.intensity)}` : '';
+    const issueTag = iv.issue && iv.issue !== 'none' ? ` · issue ${escapeHtml(iv.issue)}` : '';
     const scoresLine = iv.scores
       ? `<div class="iv-scores">scores — scope: ${escapeHtml(iv.scores.scope_clarification ?? '—')}, off_topic: ${escapeHtml(iv.scores.off_topic_redirect ?? '—')}, meta: ${escapeHtml(iv.scores.meta ?? '—')}</div>`
+      : '';
+    const reasonLine = iv.reason
+      ? `<div class="iv-scores">motivo: ${escapeHtml(iv.reason)}</div>`
       : '';
     return `
       <div class="iv">
         <div class="iv-head">
-          <span><span class="iv-type ${escapeHtml(type)}">Intervenção ${i + 1} — ${escapeHtml(typeLabel)}</span>${intensity}${channel}</span>
+          <span><span class="iv-type ${escapeHtml(type)}">Intervenção ${i + 1} — ${escapeHtml(typeLabel)}</span>${intensity}${issueTag}${channel}</span>
           <span>${fmtTime(iv.at)}</span>
         </div>
         <div class="iv-row"><span class="who">aluno:</span><span class="iv-text">${escapeHtml(iv.student_message ?? '')}</span></div>
         <div class="iv-row"><span class="who">agente:</span><span class="iv-text">${escapeHtml(iv.assistant_response ?? '')}</span></div>
         ${scoresLine}
+        ${reasonLine}
       </div>`;
   }).join('');
   return `
