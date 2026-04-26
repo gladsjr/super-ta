@@ -57,6 +57,16 @@
   .iv .iv-text { white-space: pre-wrap; }
   .iv-scores { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--ink-400); }
 
+  .transition-line {
+    margin-top: var(--sp-3);
+    font-size: var(--fs-sm);
+    color: var(--ink-500);
+    font-style: italic;
+    padding-left: var(--sp-3);
+    border-left: 2px solid var(--ink-200);
+  }
+  .transition-line .arrow { color: var(--ink-400); margin-right: var(--sp-1); }
+
   details.meta {
     margin-top: var(--sp-3);
     background: var(--bg-muted);
@@ -251,6 +261,10 @@ function renderTurn(turn) {
       <div class="label">Resposta do aluno</div>
       <div class="content">Aguardando resposta…</div>
     </div>`;
+  const tBlock = turn.transition_to_next ? `
+    <div class="transition-line">
+      <span class="arrow">→</span>Transição: "${escapeHtml(turn.transition_to_next)}"
+    </div>` : '';
 
   const metaRows = [
     ['Objectives', m.objectives],
@@ -270,6 +284,7 @@ function renderTurn(turn) {
       ${rBlock}
       ${ivBlock}
       ${aBlock}
+      ${tBlock}
       <details class="meta">
         <summary>Metadados da pergunta</summary>
         <dl>${metaRows}</dl>

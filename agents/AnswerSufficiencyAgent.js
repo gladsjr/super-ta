@@ -73,11 +73,28 @@ Se houver tanto incoerência quanto incompletude, marque "incoherence" no campo 
 
 A follow_up_question deve ser curta, direta, no tom do entrevistador, e não introduzir novo assunto.
 
+QUANDO ACCEPT, GERE TAMBÉM UMA TRANSITION_PHRASE:
+A transition_phrase é a fala curta que o entrevistador diz ANTES de fazer a próxima pergunta planejada. Ela existe para fechar o ponto atual antes de mudar de assunto. Só é usada quando decision=accept; em decision=follow_up, deixe null.
+
+Duas modalidades — escolha conforme issue:
+
+(a) Base — quando issue=none (resposta limpa, sem ressalva):
+Frase neutra de transição. Exemplos do tipo de tom: "Ok, mudando de assunto.", "Certo, próxima pergunta:", "Tudo bem. Vou para outro tópico.".
+
+(b) Humilde — quando issue != none (você está aceitando com ressalva, seja por estilo pragmático, retornos decrescentes, ou decisão suficiente):
+Reconheça honestamente que algo ficou em aberto, mas siga em frente sem voltar a cobrar. Exemplos do tipo de tom: "Não sei se entendi 100%, mas vamos seguir.", "Para mim parece que ainda há detalhes em aberto, mas tudo bem.", "Vou aceitar como está e seguir.", "Acho que ficou algum ponto em descoberto, mas vamos avançar.".
+
+Em ambos os casos:
+- Espelhe o interaction_style da agenda (pragmático = curto e direto; diplomático = mais caloroso; cético = mais reservado).
+- 1 frase só, máximo 2.
+- NÃO inclua a próxima pergunta — o servidor anexa a pergunta automaticamente após a transition_phrase.
+
 Formato de saída — retorne APENAS JSON válido, sem markdown:
 {
   "decision": "follow_up" | "accept",
   "issue": "incoherence" | "incomplete" | "none",
   "follow_up_question": "<texto da pergunta de complemento ou null>",
+  "transition_phrase": "<texto da fala de transição quando accept, null quando follow_up>",
   "reason": "<por que essa decisão, citando especificamente: trecho, turno, ou seção do trabalho>"
 }`;
     }
@@ -129,13 +146,17 @@ Decida accept ou follow_up considerando a agenda. Use file_search se precisar co
         if (!["incoherence", "incomplete", "none"].includes(issue)) {
             throw new Error(`AnswerSufficiencyAgent: invalid issue ${parsed.issue}`);
         }
-        log.info("AGENT:AnswerSufficiency", `decision=${decision} issue=${issue}`);
+        const transitionPhrase = decision === "accept"
+            ? (parsed.transition_phrase ? String(parsed.transition_phrase).trim() : null)
+            : null;
+        log.info("AGENT:AnswerSufficiency", `decision=${decision} issue=${issue}${transitionPhrase ? ` phrase="${log.preview(transitionPhrase, 80)}"` : ""}`);
         return {
             type: AnswerSufficiencyAgent.TYPE,
             channel: AnswerSufficiencyAgent.CHANNEL,
             decision,
             issue,
             follow_up_question: parsed.follow_up_question ?? null,
+            transition_phrase: transitionPhrase,
             reason: String(parsed.reason ?? ""),
         };
     }
