@@ -34,9 +34,13 @@
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
       <p class="card-sub" id="enunciado-status">—</p>
+      <div class="row" style="margin-bottom: var(--sp-3)">
+        <button id="open-orientacoes" class="btn" type="button">Orientações</button>
+      </div>
       <div class="row">
         <input type="file" id="enunciado-file" accept="application/pdf" class="input" style="flex:1; min-width:260px"/>
         <button id="send-enunciado" class="btn btn-primary">Enviar PDF</button>
+        <button id="avaliar-enunciado" class="btn" type="button" title="Envie o enunciado antes de avaliar" disabled>Avaliar Enunciado</button>
       </div>
       <div id="enunciado-msg" class="hint"></div>
     </div>
@@ -84,6 +88,20 @@
 
 </main>
 
+<dialog id="orientacoes-dialog">
+  <div class="dlg-body">
+    <h3>Orientações para o enunciado do trabalho</h3>
+    <div style="line-height: 1.55">
+      <p>Envie aqui o PDF do enunciado que os alunos receberam. Esse documento é a referência principal usada pelo SuperTA para entender o que foi pedido, quais são os critérios de avaliação e quais conceitos o aluno precisa demonstrar dominar durante a entrevista.</p>
+      <p>Quanto mais claro e específico for o enunciado, melhor será a entrevista. Tente garantir que o documento descreva os objetivos do trabalho, o produto esperado (relatório, código, apresentação etc.), os critérios de avaliação e quaisquer restrições importantes. Se o enunciado original for vago, considere complementá-lo com uma rubrica ou um pequeno guia antes de enviar.</p>
+      <p>Depois de carregar o PDF, você poderá clicar em <strong>Avaliar Enunciado</strong> para receber um diagnóstico automático sobre pontos que podem confundir o aluno ou dificultar uma entrevista produtiva. Use esse retorno para revisar o enunciado antes de gerar os tokens dos alunos.</p>
+    </div>
+  </div>
+  <div class="dlg-actions">
+    <button id="close-orientacoes" class="btn btn-primary" type="button">Entendi</button>
+  </div>
+</dialog>
+
 <script>
 const workToken = location.pathname.split('/').filter(Boolean)[1];
 
@@ -117,6 +135,11 @@ async function load() {
   adaptBtn.title = j.work.has_enunciado
     ? 'Especializa o YAML para o enunciado deste trabalho'
     : 'Envie o enunciado antes de adaptar';
+  const avaliarBtn = document.getElementById('avaliar-enunciado');
+  avaliarBtn.disabled = !j.work.has_enunciado;
+  avaliarBtn.title = j.work.has_enunciado
+    ? 'Avaliar a clareza e completude do enunciado enviado'
+    : 'Envie o enunciado antes de avaliar';
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -166,6 +189,17 @@ function statusLabel(s) {
     finalized: 'finalizado',
   }[s] || s;
 }
+
+document.getElementById('open-orientacoes').onclick = () => {
+  document.getElementById('orientacoes-dialog').showModal();
+};
+document.getElementById('close-orientacoes').onclick = () => {
+  document.getElementById('orientacoes-dialog').close();
+};
+
+document.getElementById('avaliar-enunciado').onclick = () => {
+  // Placeholder: ainda não faz nada — apenas sinaliza visualmente.
+};
 
 document.getElementById('send-enunciado').onclick = async () => {
   const msg = document.getElementById('enunciado-msg');
