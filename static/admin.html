@@ -62,15 +62,35 @@
 
     <h3 style="margin-top: var(--sp-6)">Seus trabalhos</h3>
     <div id="works"></div>
+
+    <h3 style="margin-top: var(--sp-6)">Administradores</h3>
+    <div class="card">
+      <h3 class="card-title">Novo administrador</h3>
+      <p class="card-sub">Todo usuário cadastrado tem acesso ao painel administrativo. Use nomes curtos (2 a 32 caracteres, letras/números/<code>_.-</code>) e senha de pelo menos 6 caracteres.</p>
+      <div class="row">
+        <input id="new-user-name" class="input" placeholder="usuário" autocomplete="off" style="flex:1; min-width:160px"/>
+        <input id="new-user-pass" class="input" type="password" placeholder="senha" autocomplete="new-password" style="flex:1; min-width:160px"/>
+        <button id="create-user" class="btn btn-primary">Criar</button>
+      </div>
+      <div id="user-msg" class="hint"></div>
+    </div>
+    <div class="card">
+      <table id="users-table" class="table">
+        <thead><tr><th>Usuário</th><th>Criado em</th><th style="text-align:right">Ações</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="users-empty" class="table-empty hidden">Nenhum usuário ainda.</div>
+    </div>
   </div>
 
 </main>
 
 <script>
+let currentUser = null;
 async function checkAuth() {
   try {
     const r = await fetch('/me');
-    if (r.ok) { const j = await r.json(); showApp(j.user); loadWorks(); }
+    if (r.ok) { const j = await r.json(); showApp(j.user); loadWorks(); loadUsers(); }
     else showLogin();
   } catch { showLogin(); }
 }
@@ -80,6 +100,7 @@ function showLogin() {
   document.getElementById('user-area').classList.add('hidden');
 }
 function showApp(user) {
+  currentUser = user;
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
   document.getElementById('user-area').classList.remove('hidden');
@@ -97,7 +118,7 @@ document.getElementById('login-btn').onclick = async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadWorks(); }
+    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadWorks(); loadUsers(); }
     else errEl.textContent = 'Usuário ou senha inválidos';
   } catch { errEl.textContent = 'Falha na comunicação'; }
 };
@@ -181,6 +202,95 @@ async function copyToken(btn, token) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+// ---- User management ----
+const USER_ERR_MESSAGES = {
+  invalid_username: 'Usuário inválido. Use 2 a 32 caracteres: letras, números, _ . -',
+  password_too_short: 'A senha precisa ter pelo menos 6 caracteres.',
+  username_taken: 'Este nome de usuário já existe.',
+  cannot_delete_self: 'Você não pode excluir seu próprio usuário.',
+  cannot_delete_last_user: 'Não é possível excluir o último usuário do sistema.',
+  not_found: 'Usuário não encontrado.',
+};
+
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+async function loadUsers() {
+  const r = await fetch('/admin/users');
+  if (r.status === 401) return showLogin();
+  const j = await r.json();
+  const tbody = document.querySelector('#users-table tbody');
+  const empty = document.getElementById('users-empty');
+  const table = document.getElementById('users-table');
+  if (!j.users || j.users.length === 0) {
+    table.classList.add('hidden');
+    empty.classList.remove('hidden');
+    return;
+  }
+  table.classList.remove('hidden');
+  empty.classList.add('hidden');
+  tbody.innerHTML = j.users.map(u => {
+    const isSelf = currentUser && u.id === currentUser.id;
+    const btn = isSelf
+      ? `<span class="muted">(você)</span>`
+      : `<button class="btn btn-danger-ghost btn-sm" onclick="confirmDeleteUser(${u.id}, '${escapeHtml(u.username)}')">Excluir</button>`;
+    return `<tr>
+      <td><strong>${escapeHtml(u.username)}</strong></td>
+      <td class="muted">${fmtDateShort(u.created_at)}</td>
+      <td style="text-align:right">${btn}</td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('create-user').onclick = async () => {
+  const username = document.getElementById('new-user-name').value.trim();
+  const password = document.getElementById('new-user-pass').value;
+  const msg = document.getElementById('user-msg');
+  msg.textContent = '';
+  if (!username || !password) { msg.textContent = 'Informe usuário e senha.'; return; }
+  try {
+    const r = await fetch('/admin/users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (r.status === 401) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      msg.textContent = USER_ERR_MESSAGES[j.error] || ('Falha: ' + (j.error || 'ao criar'));
+      return;
+    }
+    document.getElementById('new-user-name').value = '';
+    document.getElementById('new-user-pass').value = '';
+    msg.textContent = `Administrador "${j.user?.username ?? username}" criado.`;
+    loadUsers();
+  } catch { msg.textContent = 'Falha na comunicação'; }
+};
+
+async function confirmDeleteUser(id, username) {
+  if (!confirm(`Excluir o administrador "${username}"? Essa ação não pode ser desfeita.`)) return;
+  const msg = document.getElementById('user-msg');
+  msg.textContent = '';
+  try {
+    const r = await fetch('/admin/users/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (r.status === 401) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      msg.textContent = USER_ERR_MESSAGES[j.error] || ('Falha: ' + (j.error || 'ao excluir'));
+      return;
+    }
+    msg.textContent = `Administrador "${username}" excluído.`;
+    loadUsers();
+  } catch { msg.textContent = 'Falha na comunicação'; }
+}
+
+document.getElementById('new-user-pass').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('create-user').click();
+});
 
 checkAuth();
 </script>

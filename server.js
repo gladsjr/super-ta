@@ -22,6 +22,9 @@ import {
   loginHandler,
   logoutHandler,
   meHandler,
+  listUsers,
+  createUser,
+  deleteUser,
 } from "./auth.js";
 import {
   newToken,
@@ -564,6 +567,41 @@ app.post("/admin/works", requireAdmin, (req, res) => {
   } catch (err) {
     log.error("ADMIN", `create work failed: ${err.message}`);
     res.status(500).json({ error: "failed to create work" });
+  }
+});
+
+// ---- User management (every authenticated user is an admin) ----
+app.get("/admin/users", requireAdmin, async (_req, res) => {
+  try {
+    const users = await listUsers();
+    res.json({ users });
+  } catch (err) {
+    log.error("ADMIN", `list users failed: ${err.message}`);
+    res.status(500).json({ error: "failed to list users" });
+  }
+});
+
+app.post("/admin/users", requireAdmin, async (req, res) => {
+  try {
+    const user = await createUser(req.body?.username, req.body?.password);
+    log.info("ADMIN", `user created username="${user.username}" by=${req.session.user.username}`);
+    res.json({ user });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    log.error("ADMIN", `create user failed: ${err.message}`);
+    res.status(500).json({ error: "failed to create user" });
+  }
+});
+
+app.delete("/admin/users/:id", requireAdmin, async (req, res) => {
+  try {
+    const username = await deleteUser(req.params.id, req.session.user.id);
+    log.info("ADMIN", `user deleted username="${username}" by=${req.session.user.username}`);
+    res.json({ ok: true, deleted: username });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    log.error("ADMIN", `delete user failed: ${err.message}`);
+    res.status(500).json({ error: "failed to delete user" });
   }
 });
 

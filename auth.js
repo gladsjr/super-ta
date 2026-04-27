@@ -122,3 +122,63 @@ export function meHandler(req, res) {
   if (!req.session?.user) return res.status(401).json({ error: "unauthorized" });
   res.json({ user: req.session.user });
 }
+
+// ---------------------------------------------------------------------
+// User management — every authenticated user is an admin in this system.
+// "Create user" === "create admin".
+// ---------------------------------------------------------------------
+
+const USERNAME_RE = /^[A-Za-z0-9_.-]{2,32}$/;
+const MIN_PASSWORD_LEN = 6;
+
+export async function listUsers() {
+  const r = await pool.query(
+    "SELECT id, username, created_at FROM users ORDER BY created_at ASC, id ASC"
+  );
+  return r.rows;
+}
+
+export async function createUser(username, password) {
+  const u = String(username ?? "").trim();
+  const p = String(password ?? "");
+  if (!USERNAME_RE.test(u)) {
+    throw Object.assign(new Error("invalid_username"), { status: 400 });
+  }
+  if (p.length < MIN_PASSWORD_LEN) {
+    throw Object.assign(new Error("password_too_short"), { status: 400 });
+  }
+  const exists = await pool.query("SELECT id FROM users WHERE username = $1", [u]);
+  if (exists.rowCount > 0) {
+    throw Object.assign(new Error("username_taken"), { status: 409 });
+  }
+  const hash = await bcrypt.hash(p, 12);
+  const r = await pool.query(
+    "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, created_at",
+    [u, hash]
+  );
+  return r.rows[0];
+}
+
+// Returns the deleted row's username, or throws an error with .status set.
+// Refuses to delete the last remaining user (would lock everyone out).
+export async function deleteUser(targetId, requesterId) {
+  const id = Number(targetId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw Object.assign(new Error("invalid_id"), { status: 400 });
+  }
+  if (id === Number(requesterId)) {
+    throw Object.assign(new Error("cannot_delete_self"), { status: 400 });
+  }
+  const count = await pool.query("SELECT COUNT(*)::int AS n FROM users");
+  if ((count.rows[0]?.n ?? 0) <= 1) {
+    throw Object.assign(new Error("cannot_delete_last_user"), { status: 400 });
+  }
+  const r = await pool.query(
+    "DELETE FROM users WHERE id = $1 RETURNING username",
+    [id]
+  );
+  if (r.rowCount === 0) {
+    throw Object.assign(new Error("not_found"), { status: 404 });
+  }
+  return r.rows[0].username;
+}
