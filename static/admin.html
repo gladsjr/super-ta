@@ -63,6 +63,18 @@
     <h3 style="margin-top: var(--sp-6)">Seus trabalhos</h3>
     <div id="works"></div>
 
+    <h3 style="margin-top: var(--sp-6)">Sua senha</h3>
+    <div class="card">
+      <h3 class="card-title">Alterar senha</h3>
+      <p class="card-sub">Confirme sua senha atual e informe a nova. Mínimo de 6 caracteres.</p>
+      <div class="row">
+        <input id="pwd-current" class="input" type="password" placeholder="senha atual" autocomplete="current-password" style="flex:1; min-width:160px"/>
+        <input id="pwd-new" class="input" type="password" placeholder="nova senha" autocomplete="new-password" style="flex:1; min-width:160px"/>
+        <button id="change-pwd" class="btn btn-primary">Alterar</button>
+      </div>
+      <div id="pwd-msg" class="hint"></div>
+    </div>
+
     <h3 style="margin-top: var(--sp-6)">Administradores</h3>
     <div class="card">
       <h3 class="card-title">Novo administrador</h3>
@@ -211,6 +223,7 @@ const USER_ERR_MESSAGES = {
   cannot_delete_self: 'Você não pode excluir seu próprio usuário.',
   cannot_delete_last_user: 'Não é possível excluir o último usuário do sistema.',
   not_found: 'Usuário não encontrado.',
+  invalid_current_password: 'Senha atual incorreta.',
 };
 
 function fmtDateShort(iso) {
@@ -290,6 +303,33 @@ async function confirmDeleteUser(id, username) {
 
 document.getElementById('new-user-pass').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('create-user').click();
+});
+
+// ---- Change own password ----
+document.getElementById('change-pwd').onclick = async () => {
+  const currentPassword = document.getElementById('pwd-current').value;
+  const newPassword = document.getElementById('pwd-new').value;
+  const msg = document.getElementById('pwd-msg');
+  msg.textContent = '';
+  if (!currentPassword || !newPassword) { msg.textContent = 'Informe a senha atual e a nova.'; return; }
+  try {
+    const r = await fetch('/admin/users/me/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    if (r.status === 401 && !currentPassword) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      msg.textContent = USER_ERR_MESSAGES[j.error] || ('Falha: ' + (j.error || 'ao alterar senha'));
+      return;
+    }
+    document.getElementById('pwd-current').value = '';
+    document.getElementById('pwd-new').value = '';
+    msg.textContent = 'Senha alterada.';
+  } catch { msg.textContent = 'Falha na comunicação'; }
+};
+document.getElementById('pwd-new').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('change-pwd').click();
 });
 
 checkAuth();

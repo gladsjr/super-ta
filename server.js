@@ -26,6 +26,7 @@ import {
   listUsers,
   createUser,
   deleteUser,
+  changeOwnPassword,
 } from "./auth.js";
 import {
   newToken,
@@ -550,6 +551,22 @@ app.post("/admin/users", requireAdmin, async (req, res) => {
     if (err.status) return res.status(err.status).json({ error: err.message });
     log.error("ADMIN", `create user failed: ${err.message}`);
     res.status(500).json({ error: "failed to create user" });
+  }
+});
+
+app.post("/admin/users/me/password", requireAdmin, async (req, res) => {
+  try {
+    await changeOwnPassword(
+      req.session.user.id,
+      req.body?.currentPassword,
+      req.body?.newPassword
+    );
+    log.info("ADMIN", `user password changed username="${req.session.user.username}"`);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    log.error("ADMIN", `change password failed: ${err.message}`);
+    res.status(500).json({ error: "failed to change password" });
   }
 });
 

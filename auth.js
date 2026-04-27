@@ -198,6 +198,28 @@ export async function createUser(username, password) {
   return r.rows[0];
 }
 
+// Lets a logged-in user change their own password. Verifies the current
+// password before swapping the hash. Does not touch the session.
+export async function changeOwnPassword(userId, currentPassword, newPassword) {
+  const id = Number(userId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw Object.assign(new Error("invalid_id"), { status: 400 });
+  }
+  if (String(newPassword ?? "").length < MIN_PASSWORD_LEN) {
+    throw Object.assign(new Error("password_too_short"), { status: 400 });
+  }
+  const r = await pool.query("SELECT password_hash FROM users WHERE id = $1", [id]);
+  if (r.rowCount === 0) {
+    throw Object.assign(new Error("not_found"), { status: 404 });
+  }
+  const ok = await bcrypt.compare(String(currentPassword ?? ""), r.rows[0].password_hash);
+  if (!ok) {
+    throw Object.assign(new Error("invalid_current_password"), { status: 401 });
+  }
+  const hash = await bcrypt.hash(String(newPassword), 12);
+  await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [hash, id]);
+}
+
 // Returns the deleted row's username, or throws an error with .status set.
 // Refuses to delete the last remaining user (would lock everyone out).
 export async function deleteUser(targetId, requesterId) {
