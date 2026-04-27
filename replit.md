@@ -277,6 +277,12 @@ Final score is weighted average (0-10).
 
 ## Recent Changes
 
+### 2026-04-27: PostgreSQL Migration Deployed on Replit
+- Applied `schema.sql` to the Replit Postgres: added `works`, `submissions`, `interviewer_templates` (and indexes)
+- Ran `npm run db:migrate-fs` to copy `data/works/72da1e0b031c-Mineracao Bitcoin/` (enunciado PDF + 2 submissions: "Glads", "Aluno 1") and the 2 interviewer templates (`Business Owner.yaml`, `Teacher Assistant.yaml`) into the database
+- **Replit workflow runs `node server.js` directly** (not `npm run dev`) to bypass the `predev` hook, which calls `scripts/start-db.mjs` and tries to launch Docker — only meaningful in the local dev setup. `package.json` was left untouched so the user's local Docker-based flow keeps working.
+- Legacy `data/works/` and `data/submissions/` directories left in place as backup until production validation; safe to delete after.
+
 ### 2026-04-19: Documentation/Code Alignment
 - Rewrote Cognitive Agents, OpenAI Integration and Project Structure sections to match the current code
 - Clarified: MapBuilder reads the document via `input_file`; `file_search` is used by evaluators and question generation
