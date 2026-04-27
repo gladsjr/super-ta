@@ -3,6 +3,9 @@ import pg from "pg";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import crypto from "crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const { Pool } = pg;
 
@@ -63,6 +66,40 @@ export async function seedInitialUsers() {
       [username, hash]
     );
     console.log(`✓ Usuário inicial criado: ${username}`);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Bootstrap interviewer templates from config/interviewers/*.yaml.
+// Idempotent: ON CONFLICT DO NOTHING preserves any edits made via the app.
+// ---------------------------------------------------------------------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const INTERVIEWERS_DIR = path.join(__dirname, "config", "interviewers");
+
+export async function seedInterviewerTemplates() {
+  if (!fs.existsSync(INTERVIEWERS_DIR)) {
+    console.warn(`⚠️  Diretório de templates não encontrado: ${INTERVIEWERS_DIR}`);
+    return;
+  }
+
+  const entries = fs.readdirSync(INTERVIEWERS_DIR).filter((f) => /\.ya?ml$/i.test(f));
+  if (entries.length === 0) {
+    console.warn("⚠️  Nenhum template encontrado em config/interviewers/");
+    return;
+  }
+
+  for (const filename of entries) {
+    const yamlText = fs.readFileSync(path.join(INTERVIEWERS_DIR, filename), "utf8");
+    const r = await pool.query(
+      `INSERT INTO interviewer_templates (filename, yaml_text)
+       VALUES ($1, $2)
+       ON CONFLICT (filename) DO NOTHING`,
+      [filename, yamlText]
+    );
+    if (r.rowCount > 0) {
+      console.log(`✓ Template inicial criado: ${filename}`);
+    }
   }
 }
 

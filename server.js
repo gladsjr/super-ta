@@ -19,6 +19,7 @@ import { pickPersona } from "./lib/personas.js";
 import {
   sessionMiddleware,
   seedInitialUsers,
+  seedInterviewerTemplates,
   loginHandler,
   logoutHandler,
   meHandler,
@@ -1615,6 +1616,11 @@ app.listen(PORT, "0.0.0.0", async () => {
     await seedInitialUsers();
   } catch (err) {
     log.error("BOOT", `seedInitialUsers failed: ${err.message}`);
+  }
+  try {
+    await seedInterviewerTemplates();
+  } catch (err) {
+    log.error("BOOT", `seedInterviewerTemplates failed: ${err.message}`);
   }
   log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });
