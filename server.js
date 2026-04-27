@@ -32,18 +32,14 @@ import {
   requireWorkToken,
   requireSubmissionToken,
   sanitizeLabel,
-  parseDirName,
-  submissionStatus,
-  findSubmissionDirInWork,
-  WORKS_ROOT,
   PROJECT_ROOT,
 } from "./lib/middleware.js";
 import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt.js";
 import {
   writeConversationLog,
   deleteConversationLog,
-  conversationLogPath,
 } from "./lib/conversationLog.js";
+import * as db from "./lib/db.js";
 import log from "./lib/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -230,10 +226,10 @@ function buildConversationLogPayload(sess, workToken, subToken, studentLabel) {
 }
 
 // Best-effort persistence. A log write failure must never abort the interview.
-function persistConversationLog(sess, submissionFullPath, workToken, subToken, studentLabel) {
+async function persistConversationLog(sess, submissionId, workToken, subToken, studentLabel) {
   try {
     const payload = buildConversationLogPayload(sess, workToken, subToken, studentLabel);
-    writeConversationLog(submissionFullPath, payload);
+    await writeConversationLog(submissionId, payload);
   } catch (err) {
     log.error("LOG", `persist conversation failed submission=${subToken}: ${err.message}`);
   }
@@ -493,60 +489,25 @@ app.get("/s/:submissionToken", (_req, res) => {
 });
 
 // ============================================================================
-// MULTER: two storages — enunciado (professor) and student upload
+// MULTER: in-memory storage. PDFs flow Buffer -> DB (BYTEA) and Buffer ->
+// OpenAI Files via OpenAI.toFile, never touching disk.
 // ============================================================================
+const UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024; // 25 MB
 const enunciadoUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, _file, cb) => {
-      fs.mkdirSync(req.work.full_path, { recursive: true });
-      cb(null, req.work.full_path);
-    },
-    filename: (_req, _file, cb) => cb(null, "enunciado.pdf"),
-  }),
+  storage: multer.memoryStorage(),
+  limits: { fileSize: UPLOAD_LIMIT_BYTES },
 });
 const studentUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, _file, cb) => {
-      fs.mkdirSync(req.submission.full_path, { recursive: true });
-      cb(null, req.submission.full_path);
-    },
-    filename: (_req, file, cb) => cb(null, file.originalname),
-  }),
+  storage: multer.memoryStorage(),
+  limits: { fileSize: UPLOAD_LIMIT_BYTES },
 });
 
 // ============================================================================
 // ADMIN ROUTES
 // ============================================================================
-app.get("/admin/works", requireAdmin, (req, res) => {
+app.get("/admin/works", requireAdmin, async (_req, res) => {
   try {
-    fs.mkdirSync(WORKS_ROOT, { recursive: true });
-    const works = [];
-    for (const e of fs.readdirSync(WORKS_ROOT, { withFileTypes: true })) {
-      if (!e.isDirectory()) continue;
-      const parsed = parseDirName(e.name);
-      if (!parsed) continue;
-      const workFullPath = path.join(WORKS_ROOT, e.name);
-      const subsRoot = path.join(workFullPath, "submissions");
-      let pending = 0, in_progress = 0, finalized = 0;
-      if (fs.existsSync(subsRoot)) {
-        for (const se of fs.readdirSync(subsRoot, { withFileTypes: true })) {
-          if (!se.isDirectory()) continue;
-          if (!parseDirName(se.name)) continue;
-          const status = submissionStatus(path.join(subsRoot, se.name));
-          if (status === "pending") pending++;
-          else if (status === "in_progress") in_progress++;
-          else if (status === "finalized") finalized++;
-        }
-      }
-      works.push({
-        work_token: parsed.token,
-        name: parsed.label,
-        assignment_pdf: fs.existsSync(path.join(workFullPath, "enunciado.pdf")),
-        pending,
-        in_progress,
-        finalized,
-      });
-    }
+    const works = await db.listWorks();
     res.json({ works });
   } catch (err) {
     log.error("ADMIN", `list works failed: ${err.message}`);
@@ -554,16 +515,14 @@ app.get("/admin/works", requireAdmin, (req, res) => {
   }
 });
 
-app.post("/admin/works", requireAdmin, (req, res) => {
+app.post("/admin/works", requireAdmin, async (req, res) => {
   let name;
   try { name = sanitizeLabel(req.body?.name); }
   catch (err) { return res.status(400).json({ error: err.message }); }
   try {
-    const workToken = newToken();
-    const dirName = `${workToken}-${name}`;
-    fs.mkdirSync(path.join(WORKS_ROOT, dirName), { recursive: true });
-    log.info("ADMIN", `work created token=${workToken} name="${name}" by=${req.session.user.username}`);
-    res.json({ work: { work_token: workToken, name } });
+    const work = await db.createWork(name);
+    log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" by=${req.session.user.username}`);
+    res.json({ work });
   } catch (err) {
     log.error("ADMIN", `create work failed: ${err.message}`);
     res.status(500).json({ error: "failed to create work" });
@@ -608,28 +567,14 @@ app.delete("/admin/users/:id", requireAdmin, async (req, res) => {
 // ============================================================================
 // PROFESSOR ROUTES (bearer auth via work_token)
 // ============================================================================
-app.get("/w/:workToken/info", requireWorkToken, (req, res) => {
+app.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
   try {
-    const subsRoot = path.join(req.work.full_path, "submissions");
-    const submissions = [];
-    if (fs.existsSync(subsRoot)) {
-      for (const e of fs.readdirSync(subsRoot, { withFileTypes: true })) {
-        if (!e.isDirectory()) continue;
-        const parsed = parseDirName(e.name);
-        if (!parsed) continue;
-        submissions.push({
-          submission_token: parsed.token,
-          student_label: parsed.label,
-          status: submissionStatus(path.join(subsRoot, e.name)),
-        });
-      }
-    }
-    const hasInterviewer = fs.existsSync(path.join(req.work.full_path, "interviewer.yaml"));
+    const submissions = await db.listSubmissionsForWork(req.work.id);
     res.json({
       work: {
         name: req.work.name,
         has_enunciado: !!req.work.assignment_pdf,
-        has_interviewer: hasInterviewer,
+        has_interviewer: !!req.work.has_interviewer,
       },
       submissions,
     });
@@ -639,61 +584,68 @@ app.get("/w/:workToken/info", requireWorkToken, (req, res) => {
   }
 });
 
-app.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken, (req, res) => {
+app.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken, async (req, res) => {
   const subToken = String(req.params.subToken || "").toLowerCase();
-  const subFound = findSubmissionDirInWork(req.work.full_path, subToken);
-  if (!subFound) return res.status(404).json({ error: "submission not found" });
-
-  const status = submissionStatus(subFound.fullPath);
-  const logPath = conversationLogPath(subFound.fullPath);
-  let conversation = null;
-  if (fs.existsSync(logPath)) {
-    try {
-      conversation = JSON.parse(fs.readFileSync(logPath, "utf8"));
-    } catch (err) {
-      log.error("WORK", `conversation read failed submission=${subToken}: ${err.message}`);
-      return res.status(500).json({ error: "failed to read conversation" });
+  try {
+    const found = await db.findSubmissionByToken(subToken);
+    if (!found || found.work_id !== req.work.id) {
+      return res.status(404).json({ error: "submission not found" });
     }
+    let conversation = null;
+    const text = await db.getConversationJson(found.id);
+    if (text) {
+      try { conversation = JSON.parse(text); }
+      catch (err) {
+        log.error("WORK", `conversation parse failed submission=${subToken}: ${err.message}`);
+        return res.status(500).json({ error: "failed to read conversation" });
+      }
+    }
+    res.json({
+      work: { work_token: req.work.work_token, name: req.work.name },
+      submission: { submission_token: subToken, student_label: found.student_label, status: found.status },
+      conversation,
+    });
+  } catch (err) {
+    log.error("WORK", `conversation lookup failed submission=${subToken}: ${err.message}`);
+    res.status(500).json({ error: "failed to read conversation" });
   }
-  res.json({
-    work: { work_token: req.work.work_token, name: req.work.name },
-    submission: { submission_token: subToken, student_label: subFound.label, status },
-    conversation,
-  });
 });
 
 // ---- Interviewer templates (shared) ----
-const INTERVIEWER_TEMPLATES_DIR = path.join(__dirname, "config", "interviewers");
-
-function listInterviewerTemplates() {
-  if (!fs.existsSync(INTERVIEWER_TEMPLATES_DIR)) return [];
-  return fs
-    .readdirSync(INTERVIEWER_TEMPLATES_DIR)
-    .filter(f => /\.ya?ml$/i.test(f))
-    .sort();
-}
-
-app.get("/interviewers/templates", (_req, res) => {
-  res.json({ templates: listInterviewerTemplates().map(filename => ({ filename })) });
+app.get("/interviewers/templates", async (_req, res) => {
+  try {
+    const templates = await db.listInterviewerTemplates();
+    res.json({ templates });
+  } catch (err) {
+    log.error("TPL", `list failed: ${err.message}`);
+    res.status(500).json({ error: "failed to list templates" });
+  }
 });
 
-app.get("/interviewers/templates/:filename", (req, res) => {
+app.get("/interviewers/templates/:filename", async (req, res) => {
   const filename = String(req.params.filename);
-  if (!listInterviewerTemplates().includes(filename)) {
-    return res.status(404).json({ error: "template not found" });
+  try {
+    const content = await db.getInterviewerTemplate(filename);
+    if (content == null) return res.status(404).json({ error: "template not found" });
+    res.type("text/plain").send(content);
+  } catch (err) {
+    log.error("TPL", `read failed: ${err.message}`);
+    res.status(500).json({ error: "failed to read template" });
   }
-  const content = fs.readFileSync(path.join(INTERVIEWER_TEMPLATES_DIR, filename), "utf8");
-  res.type("text/plain").send(content);
 });
 
 // ---- Per-work interviewer YAML ----
-app.get("/w/:workToken/interviewer", requireWorkToken, (req, res) => {
-  const p = path.join(req.work.full_path, "interviewer.yaml");
-  if (!fs.existsSync(p)) return res.json({ yaml: null });
-  res.json({ yaml: fs.readFileSync(p, "utf8") });
+app.get("/w/:workToken/interviewer", requireWorkToken, async (req, res) => {
+  try {
+    const yamlText = await db.getInterviewerYaml(req.work.id);
+    res.json({ yaml: yamlText ?? null });
+  } catch (err) {
+    log.error("WORK", `interviewer read failed: ${err.message}`);
+    res.status(500).json({ error: "failed to read interviewer" });
+  }
 });
 
-app.post("/w/:workToken/interviewer", requireWorkToken, express.json({ limit: "256kb" }), (req, res) => {
+app.post("/w/:workToken/interviewer", requireWorkToken, express.json({ limit: "256kb" }), async (req, res) => {
   const content = String(req.body?.yaml ?? "");
   if (!content.trim()) return res.status(400).json({ error: "yaml content required" });
   try {
@@ -701,10 +653,14 @@ app.post("/w/:workToken/interviewer", requireWorkToken, express.json({ limit: "2
   } catch (err) {
     return res.status(400).json({ error: "invalid YAML", detail: err.message });
   }
-  fs.mkdirSync(req.work.full_path, { recursive: true });
-  fs.writeFileSync(path.join(req.work.full_path, "interviewer.yaml"), content, "utf8");
-  log.info("WORK", `interviewer saved work=${req.work.work_token} bytes=${content.length}`);
-  res.json({ ok: true });
+  try {
+    await db.setInterviewerYaml(req.work.id, content);
+    log.info("WORK", `interviewer saved work=${req.work.work_token} bytes=${content.length}`);
+    res.json({ ok: true });
+  } catch (err) {
+    log.error("WORK", `interviewer save failed: ${err.message}`);
+    res.status(500).json({ error: "failed to save interviewer" });
+  }
 });
 
 const INTERVIEWER_ADAPT_INSTRUCTIONS = `Você adapta prompts de entrevistador acadêmico. Receberá:
@@ -747,15 +703,15 @@ app.post("/w/:workToken/interviewer/adapt", requireWorkToken, express.json({ lim
     return res.status(400).json({ error: "invalid input YAML", detail: err.message });
   }
 
-  const enunciadoPath = path.join(req.work.full_path, "enunciado.pdf");
-  if (!fs.existsSync(enunciadoPath)) {
+  const enunciadoBlob = await db.getEnunciadoBlob(req.work.id);
+  if (!enunciadoBlob) {
     return res.status(400).json({ error: "envie o enunciado do trabalho antes de adaptar" });
   }
 
   try {
     log.info("INTERVIEWER_ADAPT", `start work=${req.work.work_token} bytes=${genericYaml.length}`);
     const fileUpload = await openai.files.create({
-      file: fs.createReadStream(enunciadoPath),
+      file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
       purpose: "user_data",
     });
     log.info("INTERVIEWER_ADAPT", `uploaded enunciado file=${fileUpload.id}`);
@@ -792,20 +748,34 @@ app.post("/w/:workToken/interviewer/adapt", requireWorkToken, express.json({ lim
   }
 });
 
-app.get("/w/:workToken/enunciado", requireWorkToken, (req, res) => {
-  const p = path.join(req.work.full_path, "enunciado.pdf");
-  if (!fs.existsSync(p)) return res.status(404).json({ error: "enunciado not uploaded" });
-  res.sendFile(p);
+app.get("/w/:workToken/enunciado", requireWorkToken, async (req, res) => {
+  try {
+    const blob = await db.getEnunciadoBlob(req.work.id);
+    if (!blob) return res.status(404).json({ error: "enunciado not uploaded" });
+    res.type("application/pdf");
+    if (blob.filename) {
+      res.set("Content-Disposition", `inline; filename="${encodeURIComponent(blob.filename)}"`);
+    }
+    res.send(blob.pdf);
+  } catch (err) {
+    log.error("WORK", `enunciado read failed: ${err.message}`);
+    res.status(500).json({ error: "failed to read enunciado" });
+  }
 });
 
-app.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("file"), (req, res) => {
+app.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "file required" });
-  const rel = path.relative(PROJECT_ROOT, req.file.path);
-  log.info("WORK", `enunciado uploaded work=${req.work.work_token} path=${rel}`);
-  res.json({ ok: true, path: rel });
+  try {
+    await db.setEnunciadoBlob(req.work.id, req.file.buffer, req.file.originalname);
+    log.info("WORK", `enunciado uploaded work=${req.work.work_token} bytes=${req.file.size} name=${req.file.originalname}`);
+    res.json({ ok: true });
+  } catch (err) {
+    log.error("WORK", `enunciado save failed: ${err.message}`);
+    res.status(500).json({ error: "failed to save enunciado" });
+  }
 });
 
-app.post("/w/:workToken/submissions", requireWorkToken, (req, res) => {
+app.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
   let baseLabel;
   try { baseLabel = sanitizeLabel(req.body?.label); }
   catch (err) { return res.status(400).json({ error: err.message }); }
@@ -814,15 +784,7 @@ app.post("/w/:workToken/submissions", requireWorkToken, (req, res) => {
   const count = Number.isFinite(rawCount) && rawCount > 0 && rawCount <= 50 ? Math.floor(rawCount) : 1;
 
   try {
-    const rows = [];
-    const subsRoot = path.join(req.work.full_path, "submissions");
-    fs.mkdirSync(subsRoot, { recursive: true });
-    for (let i = 0; i < count; i++) {
-      const submissionToken = newToken();
-      const label = count > 1 ? `${baseLabel}-${i + 1}` : baseLabel;
-      fs.mkdirSync(path.join(subsRoot, `${submissionToken}-${label}`), { recursive: true });
-      rows.push({ submission_token: submissionToken, student_label: label, status: "pending" });
-    }
+    const rows = await db.createSubmissions(req.work.id, baseLabel, count);
     log.info("SUBMISSION", `created ${count} submission(s) for work=${req.work.work_token}`);
     res.json({ submissions: rows });
   } catch (err) {
@@ -882,7 +844,6 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
         interviewPreparation: null,
       };
       SESSIONS.set(token, sess);
-      fs.mkdirSync(req.submission.full_path, { recursive: true });
       log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} persona=${interviewerPersona.name}/${interviewerPersona.city} chat=${chatConversation.id} eval=${evalConversation.id}`);
     } else {
       log.info("SUBMISSION", `resume token=${token} phase=${sess.currentPhase} qn=${sess.questionCount}`);
@@ -906,40 +867,47 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
   if (!sess) return res.status(400).json({ error: "call /start first" });
   if (!req.file) return res.status(400).json({ error: "file required" });
 
-  const fileRef = req.file.path;
-  sess.submissionPath = fileRef;
+  const studentBuffer = req.file.buffer;
+  const studentFilename = req.file.originalname;
+  sess.submissionPath = studentFilename;
 
   // New upload = new interview attempt. Reset log state and wipe any previous
-  // conversation.json so the professor only ever sees the current attempt.
+  // conversation log so the professor only ever sees the current attempt.
   sess.turnLog = [];
   sess.skippedQuestions = [];
   sess.conversationStartedAt = new Date().toISOString();
   sess.conversationCompleted = false;
-  try { deleteConversationLog(req.submission.full_path); }
+  try { await deleteConversationLog(req.submission.id); }
   catch (err) { log.error("LOG", `delete old conversation log failed: ${err.message}`); }
 
-  const interviewerYamlPath = path.join(req.work.full_path, "interviewer.yaml");
-  const enunciadoPath = path.join(req.work.full_path, "enunciado.pdf");
-  if (!fs.existsSync(interviewerYamlPath)) {
+  const interviewerYamlText = await db.getInterviewerYaml(req.work.id);
+  if (!interviewerYamlText) {
     return res.status(400).json({ error: "O professor ainda não configurou o entrevistador para este trabalho." });
   }
-  if (!fs.existsSync(enunciadoPath)) {
+  const enunciadoBlob = await db.getEnunciadoBlob(req.work.id);
+  if (!enunciadoBlob) {
     return res.status(400).json({ error: "O professor ainda não enviou o enunciado para este trabalho." });
   }
 
   try {
-    const fileName = path.basename(fileRef);
-    log.info("UPLOAD", `student file=${fileName} submission=${token}`);
-    const studentFile = await openai.files.create({ file: fs.createReadStream(fileRef), purpose: "user_data" });
+    log.info("UPLOAD", `student file=${studentFilename} bytes=${studentBuffer.length} submission=${token}`);
+    await db.setStudentPdf(req.submission.id, studentBuffer, studentFilename);
+
+    const studentFile = await openai.files.create({
+      file: await OpenAI.toFile(studentBuffer, studentFilename),
+      purpose: "user_data",
+    });
     sess.openaiFileId = studentFile.id;
     log.info("UPLOAD", `openai student file=${studentFile.id}`);
 
-    const enunciadoFile = await openai.files.create({ file: fs.createReadStream(enunciadoPath), purpose: "user_data" });
+    const enunciadoFile = await openai.files.create({
+      file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
+      purpose: "user_data",
+    });
     log.info("UPLOAD", `openai enunciado file=${enunciadoFile.id}`);
 
     sess.vectorStoreId = await createVectorStoreWithFile(studentFile.id, token);
 
-    const interviewerYamlText = fs.readFileSync(interviewerYamlPath, "utf8");
     sess.interviewerYamlText = interviewerYamlText;
 
     // Heavy work (document map + interview plan generation) launched in
@@ -1034,9 +1002,9 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
     log.info("CHAT", `intro greeting persona=${sess.interviewerPersona.name}/${sess.interviewerPersona.city} ${log.preview(greeting.message, 120)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    persistConversationLog(
+    await persistConversationLog(
       sess,
-      req.submission.full_path,
+      req.submission.id,
       req.work.work_token,
       token,
       req.submission.student_label,
@@ -1067,7 +1035,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
 
   const persist = () => persistConversationLog(
     sess,
-    req.submission.full_path,
+    req.submission.id,
     req.work.work_token,
     token,
     req.submission.student_label,
@@ -1477,18 +1445,14 @@ app.post("/s/:submissionToken/finalize", requireSubmissionToken, async (req, res
     const rubricScores = await calculateRubricScores(sess, sess.evaluationSignals);
     const report = generateFinalReport(sess, rubricScores);
 
-    fs.writeFileSync(
-      path.join(req.submission.full_path, "final_report.json"),
-      JSON.stringify(report, null, 2),
-      "utf8"
-    );
+    await db.setFinalReport(req.submission.id, JSON.stringify(report, null, 2));
 
     log.info("FINAL", `submission=${token} C1=${report.breakdown.C1_compreensao} C2=${report.breakdown.C2_metodologia} C3=${report.breakdown.C3_parametros} total=${report.score_total}`);
 
     sess.conversationCompleted = true;
-    persistConversationLog(
+    await persistConversationLog(
       sess,
-      req.submission.full_path,
+      req.submission.id,
       req.work.work_token,
       token,
       req.submission.student_label,

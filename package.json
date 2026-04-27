@@ -5,6 +5,7 @@
   "scripts": {
     "db:up": "node scripts/start-db.mjs",
     "db:down": "docker compose down",
+    "db:migrate-fs": "node scripts/migrate-fs-to-db.mjs",
     "predev": "npm run db:up",
     "dev": "node server.js"
   },
