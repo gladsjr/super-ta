@@ -99,6 +99,8 @@ export async function seedInterviewerTemplates() {
     );
     if (r.rowCount > 0) {
       console.log(`✓ Template inicial criado: ${filename}`);
+    } else {
+      console.log(`• Template já existente, mantido sem alterações: ${filename}`);
     }
   }
 }
