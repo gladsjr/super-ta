@@ -38,15 +38,19 @@ CREATE TABLE IF NOT EXISTS interviewer_templates (
 
 -- Works (replaces data/works/<workToken>-<label>/).
 CREATE TABLE IF NOT EXISTS works (
-  id                  SERIAL PRIMARY KEY,
-  work_token          CHAR(12) UNIQUE NOT NULL,
-  name                TEXT NOT NULL,
-  enunciado_pdf       BYTEA,
-  enunciado_filename  TEXT,
-  interviewer_yaml    TEXT,
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                        SERIAL PRIMARY KEY,
+  work_token                CHAR(12) UNIQUE NOT NULL,
+  name                      TEXT NOT NULL,
+  enunciado_pdf             BYTEA,
+  enunciado_filename        TEXT,
+  interviewer_yaml          TEXT,
+  enunciado_coherence_json  TEXT,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration: add enunciado_coherence_json on existing works tables.
+ALTER TABLE works ADD COLUMN IF NOT EXISTS enunciado_coherence_json TEXT;
 
 CREATE INDEX IF NOT EXISTS works_token_idx ON works (work_token);
 

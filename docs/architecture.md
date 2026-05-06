@@ -141,6 +141,55 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | `INTERVIEWER_ADAPT_INSTRUCTIONS` (botão "Adaptar ao enunciado") | [server.js:660](../server.js#L660) | string literal usada como `instructions` na chamada da Responses API |
 | Base TA (carregada por `loadSystemPrompt`) | [server.js:88](../server.js#L88) | [config/system_prompt.txt](../config/system_prompt.txt) |
 | `/finalize` (gera relatório) | [server.js:1192](../server.js#L1192) | strings inline na função `calculateRubricScores` (a ser extraídas, ver TODO abaixo) |
+| `ConfigAssistantAgent` (chat do assistente de configuração, chamado em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | [systemPrompt :31](../agents/ConfigAssistantAgent.js#L31) |
+| `EnunciadoCoherenceAgent` (avalia adequação do enunciado, chamado em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | [systemPrompt :40](../agents/EnunciadoCoherenceAgent.js#L40) |
+
+## Configuração do trabalho (página do professor)
+
+Fluxo independente do ciclo `/chat` do aluno. O professor abre `/w/:workToken`,
+edita os campos manualmente E/OU consulta um assistente conversacional que
+sugere personas, explica metodologia e despacha avaliação de coerência do
+enunciado. O assistente NUNCA salva — só propõe; o professor aplica via UI.
+
+```mermaid
+flowchart LR
+  ProfUI(["/w/:workToken<br/>(professor.html)"]) --> ChatHandler["POST /config-chat"]
+  ProfUI --> CoherenceHandler["POST /enunciado/coherence"]
+
+  ChatHandler --> ConfigAgent["ConfigAssistantAgent<br/>(fast_model, JSON action)"]
+  ConfigAgent --> ActExplain>"action=null<br/>(explica metodologia)"]
+  ConfigAgent --> ActPersona>"action=recommend_persona<br/>(carrega template no editor)"]
+  ConfigAgent --> ActYaml>"action=propose_interviewer_yaml<br/>(YAML customizado para revisar)"]
+  ConfigAgent --> ActCheck>"action=request_assignment_check<br/>(dispara /coherence)"]
+  ActCheck -.-> CoherenceHandler
+
+  CoherenceHandler --> Cache{"Cache em<br/>works.enunciado_coherence_json?"}
+  Cache -- "hit" --> OutCached>"Relatório do cache"]
+  Cache -- "miss" --> CoherenceAgent["EnunciadoCoherenceAgent<br/>(principal_reasoning_model, input_file=PDF)"]
+  CoherenceAgent --> OutFresh>"Relatório novo + cache"]
+
+  classDef agent fill:#eaf0f7,stroke:#1e3a5f,color:#0f1b2d;
+  classDef gate  fill:#fff4dc,stroke:#8a6100,color:#0f1b2d;
+  classDef out   fill:#e7f4eb,stroke:#1f6c3b,color:#0f1b2d;
+  classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
+  class ChatHandler,CoherenceHandler,ConfigAgent,CoherenceAgent agent
+  class Cache gate
+  class ActExplain,ActPersona,ActYaml,ActCheck,OutCached,OutFresh out
+  class ProfUI entry
+
+  click ProfUI "vscode://file/c:/Users/glads/src/super-ta/static/professor.html" "Abre a página do professor"
+  click ChatHandler "vscode://file/c:/Users/glads/src/super-ta/server.js" "Abre /config-chat handler"
+  click CoherenceHandler "vscode://file/c:/Users/glads/src/super-ta/server.js" "Abre /enunciado/coherence handler"
+  click ConfigAgent "vscode://file/c:/Users/glads/src/super-ta/agents/ConfigAssistantAgent.js:31" "Abre o systemPrompt do ConfigAssistantAgent"
+  click CoherenceAgent "vscode://file/c:/Users/glads/src/super-ta/agents/EnunciadoCoherenceAgent.js:40" "Abre o systemPrompt do EnunciadoCoherenceAgent"
+```
+
+Características:
+
+- **Sem persistência de chat**: histórico vive só na aba do navegador; cada turno o cliente reenvia o histórico inteiro (sem Conversations API, ver CLAUDE.md).
+- **Cache de coerência**: `works.enunciado_coherence_json` guarda o último relatório do `EnunciadoCoherenceAgent`. É invalidado automaticamente quando o PDF do enunciado é substituído (`POST /enunciado` chama `db.clearCoherenceCache`).
+- **Estado injetado no system prompt**: o `ConfigAssistantAgent` recebe um `state_block` com nome do trabalho, presença do PDF, último diagnóstico de coerência e identidade do template salvo. Construído por `buildConfigStateBlock` em [server.js](../server.js).
+- **Validação rígida das ações**: ações com filename de persona inválido, YAML vazio ou `based_on` desconhecido são rejeitadas no agente antes de chegarem à UI.
 
 ## Índice completo de prompts
 
@@ -160,6 +209,8 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [QuestionRelevanceAgent.js#L23](../agents/QuestionRelevanceAgent.js#L23) — modelo: `fast_model`
    - [AnswerSufficiencyAgent.js#L33](../agents/AnswerSufficiencyAgent.js#L33) — modelo: `principal_reasoning_model` (abortável via `signal`)
    - [IntroductionAgent.js#L30](../agents/IntroductionAgent.js#L30) — modelo: `fast_model` (fase social, persona em [lib/personas.js](../lib/personas.js))
+   - [ConfigAssistantAgent.js#L31](../agents/ConfigAssistantAgent.js#L31) — modelo: `fast_model` (chat do assistente de configuração na página do professor)
+   - [EnunciadoCoherenceAgent.js#L40](../agents/EnunciadoCoherenceAgent.js#L40) — modelo: `principal_reasoning_model` (avalia adequação do enunciado ao processo, recebe PDF via `input_file`)
 3. **Strings inline em `server.js`**:
    - [INTERVIEWER_ADAPT_INSTRUCTIONS — linha 660](../server.js#L660) — instruções para "Adaptar ao enunciado".
    - **TODO**: as instruções de C2/C3 dentro de `calculateRubricScores` ainda são strings inline. Quando extraídas para um arquivo dedicado, atualizar este índice.

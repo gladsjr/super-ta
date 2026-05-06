@@ -15,9 +15,12 @@ import { MetaInterventionAgent } from "./agents/MetaInterventionAgent.js";
 import { QuestionRelevanceAgent } from "./agents/QuestionRelevanceAgent.js";
 import { AnswerSufficiencyAgent } from "./agents/AnswerSufficiencyAgent.js";
 import { IntroductionAgent } from "./agents/IntroductionAgent.js";
+import { ConfigAssistantAgent } from "./agents/ConfigAssistantAgent.js";
+import { EnunciadoCoherenceAgent } from "./agents/EnunciadoCoherenceAgent.js";
 import { pickPersona } from "./lib/personas.js";
 import {
   sessionMiddleware,
+  applySchema,
   seedInitialUsers,
   seedInterviewerTemplates,
   loginHandler,
@@ -270,6 +273,8 @@ const metaInterventionAgent = new MetaInterventionAgent(openai, FAST_MODEL);
 const questionRelevanceAgent = new QuestionRelevanceAgent(openai, FAST_MODEL);
 const answerSufficiencyAgent = new AnswerSufficiencyAgent(openai, PRINCIPAL_REASONING_MODEL);
 const introductionAgent = new IntroductionAgent(openai, FAST_MODEL);
+const configAssistantAgent = new ConfigAssistantAgent(openai, FAST_MODEL);
+const enunciadoCoherenceAgent = new EnunciadoCoherenceAgent(openai, PRINCIPAL_REASONING_MODEL);
 
 const INTRO_TURN_CAP = 3;
 
@@ -785,6 +790,8 @@ app.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("fi
   if (!req.file) return res.status(400).json({ error: "file required" });
   try {
     await db.setEnunciadoBlob(req.work.id, req.file.buffer, req.file.originalname);
+    // Cache de coerência fica obsoleto quando o PDF é substituído.
+    await db.clearCoherenceCache(req.work.id);
     log.info("WORK", `enunciado uploaded work=${req.work.work_token} bytes=${req.file.size} name=${req.file.originalname}`);
     res.json({ ok: true });
   } catch (err) {
@@ -792,6 +799,120 @@ app.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("fi
     res.status(500).json({ error: "failed to save enunciado" });
   }
 });
+
+// ---- Coerência do enunciado (assistente de configuração) ----
+// Avalia se o enunciado está bem encaixado no processo de entrevista.
+// NUNCA avalia a qualidade pedagógica/técnica do trabalho em si.
+// Resultado é cacheado em works.enunciado_coherence_json até o PDF ser substituído.
+app.post("/w/:workToken/enunciado/coherence", requireWorkToken, async (req, res) => {
+  const force = String(req.query?.force ?? "").toLowerCase() === "true";
+
+  try {
+    if (!force) {
+      const cached = await db.getCoherenceCache(req.work.id);
+      if (cached) {
+        log.info("COHERENCE", `cache hit work=${req.work.work_token}`);
+        return res.json({ ...cached, cached: true });
+      }
+    }
+
+    const enunciadoBlob = await db.getEnunciadoBlob(req.work.id);
+    if (!enunciadoBlob) {
+      return res.status(400).json({ error: "envie o enunciado do trabalho antes de avaliar" });
+    }
+
+    log.info("COHERENCE", `start work=${req.work.work_token} force=${force}`);
+    const fileUpload = await openai.files.create({
+      file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
+      purpose: "user_data",
+    });
+    log.info("COHERENCE", `uploaded enunciado file=${fileUpload.id}`);
+
+    const report = await enunciadoCoherenceAgent.evaluate({ openaiFileId: fileUpload.id });
+    await db.setCoherenceCache(req.work.id, report);
+    log.info("COHERENCE", `ok work=${req.work.work_token} overall=${report.overall}`);
+    res.json({ ...report, cached: false });
+  } catch (err) {
+    log.error("COHERENCE", `failed: ${err.message}`);
+    res.status(500).json({ error: "falha ao avaliar coerência do enunciado", detail: err.message });
+  }
+});
+
+// ---- Chat ephemero do assistente de configuração ----
+// Histórico vem do cliente em cada turno. Sem persistência server-side e sem
+// tocar a Conversations API (ver CLAUDE.md). Modelo: fast_model.
+app.post("/w/:workToken/config-chat", requireWorkToken, express.json({ limit: "256kb" }), async (req, res) => {
+  const message = String(req.body?.message ?? "").trim();
+  if (!message) return res.status(400).json({ error: "message required" });
+
+  const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+  const history = rawHistory
+    .filter(m => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+    .map(m => ({ role: m.role, content: m.content }))
+    .slice(-30); // bound por segurança
+
+  try {
+    const stateBlock = await buildConfigStateBlock(req.work);
+    const result = await configAssistantAgent.evaluate({ history, message, stateBlock });
+    res.json(result);
+  } catch (err) {
+    log.error("CONFIG_CHAT", `failed: ${err.message}`);
+    res.status(500).json({ error: "falha no assistente de configuração", detail: err.message });
+  }
+});
+
+async function buildConfigStateBlock(work) {
+  const coherence = await db.getCoherenceCache(work.id);
+  const interviewerYaml = await db.getInterviewerYaml(work.id);
+
+  let originLine = "nenhum (professor ainda não salvou)";
+  if (interviewerYaml) {
+    const matchedTemplate = await findMatchingTemplateName(interviewerYaml);
+    originLine = matchedTemplate
+      ? `salvo (baseado em "${matchedTemplate}")`
+      : "salvo (customizado ou adaptado — não corresponde byte-a-byte a nenhuma das 6 personas prontas)";
+  }
+
+  const header = `- Nome do trabalho: ${work.name}
+- Enunciado enviado: ${work.assignment_pdf ? "sim" : "não"}
+- Persona/YAML do entrevistador: ${originLine}
+- Templates disponíveis: Teacher Assistant.yaml, Business Owner.yaml, Hiring Manager.yaml, Investor.yaml, Executive Sponsor.yaml, Journalist.yaml`;
+
+  if (!coherence) {
+    return `${header}
+- Diagnóstico de coerência do enunciado: ainda não avaliado (você pode emitir action.type=request_assignment_check se o professor pedir avaliação)`;
+  }
+
+  const findingsBlock = (coherence.findings || []).map(f =>
+    `    - ${f.criterion} [${f.status}]: ${f.comment}`
+  ).join("\n");
+  const personasBlock = (coherence.suggested_personas || []).map(p =>
+    `    - ${p.filename} (fit=${p.fit}): ${p.reason}`
+  ).join("\n");
+  const fixesBlock = (coherence.fix_suggestions || []).map(s => `    - ${s}`).join("\n");
+
+  return `${header}
+- Diagnóstico de coerência do enunciado JÁ DISPONÍVEL (NÃO emita request_assignment_check de novo — comente este relatório):
+    overall: ${coherence.overall}
+    summary: ${coherence.summary}
+  Achados por critério:
+${findingsBlock || "    (nenhum)"}
+  Personas sugeridas:
+${personasBlock || "    (nenhuma)"}
+  Sugestões de correção do enunciado:
+${fixesBlock || "    (nenhuma)"}`;
+}
+
+async function findMatchingTemplateName(savedYamlText) {
+  // Best-effort: identifica se o YAML salvo é byte-identical a um dos 6 templates.
+  // Se não for, devolvemos null (provavelmente foi adaptado ou customizado).
+  const templates = await db.listInterviewerTemplates();
+  for (const t of templates) {
+    const tplText = await db.getInterviewerTemplate(t.filename);
+    if (tplText && tplText.trim() === savedYamlText.trim()) return t.filename;
+  }
+  return null;
+}
 
 app.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
   let baseLabel;
@@ -1629,6 +1750,10 @@ app.listen(PORT, "0.0.0.0", async () => {
   if (!process.env.OPENAI_API_KEY) {
     log.warn("BOOT", "OPENAI_API_KEY ausente no .env");
   }
+  // schema.sql é idempotente e sempre reaplicado no boot (CREATE/ALTER ...
+  // IF NOT EXISTS). Fail-fast: se o schema não converge, nada do resto faz
+  // sentido. Ver "Schema do banco — diretriz permanente" em CLAUDE.md.
+  await applySchema();
   try {
     await seedInitialUsers();
   } catch (err) {
