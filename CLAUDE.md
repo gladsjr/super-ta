@@ -12,30 +12,41 @@ Convenções de prompt para agentes:
 - Contexto de conversa curto e bem-delimitado (ex.: turno corrente + intervenções) vem do estado local em `SESSIONS` (`sess.turnLog`), não da Conversations API. O parâmetro `conversation:` das Responses polui o `conv_chat` remoto com turnos internos; evite.
 
 Schema do banco — diretriz permanente:
-- O schema vive em um único arquivo idempotente: `schema.sql`. Ele é reaplicado a cada boot do servidor por `applySchema()` em `auth.js` (chamada em `server.js`, antes dos seeds). Isso converge o banco em dev local, Replit e qualquer prod sem aplicação manual de patches.
-- Operações permitidas em `schema.sql` (idempotentes por construção):
-  - `CREATE TABLE IF NOT EXISTS ...`
-  - `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`
-  - `CREATE INDEX IF NOT EXISTS ...`
-- Convenção ao adicionar uma coluna nova: atualize **ambos** — a definição dentro do bloco `CREATE TABLE IF NOT EXISTS` (para setups greenfield) E adicione um `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` logo abaixo (para bancos já existentes).
 
-GATILHO PARA TROCAR PARA MIGRATIONS — Claude deve detectar e avisar o usuário:
-Se uma mudança de schema exigir QUALQUER uma das operações abaixo, **pare de adicionar ao `schema.sql`** e proponha explicitamente ao usuário a migração para a abordagem de migrations (descrita no fim desta seção). Não tente espremer essas operações no schema idempotente — elas vão rodar a cada boot e causar dano.
-- `DROP COLUMN` ou `DROP TABLE`
-- `ALTER COLUMN ... TYPE ...` (mudança de tipo)
-- `RENAME COLUMN` ou `RENAME TABLE`
-- `ALTER COLUMN ... SET NOT NULL` em coluna que pode ter linhas com NULL
-- Adição de constraint que pode falhar em dados existentes (`UNIQUE`, `CHECK`, `FOREIGN KEY`)
-- Data migration: qualquer `UPDATE`/`INSERT` que dependa de estado pré-existente para backfill ou correção
-- Reordenação de operações que afete semântica entre versões
+Migrations file-per-change. Toda mudança de schema vai num arquivo novo em `migrations/`, nunca em arquivo já aplicado.
 
-Abordagem de migrations (a aplicar quando o gatilho disparar):
-1. Criar `migrations/` com arquivos numerados: `001_init.sql`, `002_descricao.sql`, ... — em ordem de aplicação.
-2. Criar tabela `schema_migrations(version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())` na própria primeira migration.
-3. Substituir `applySchema()` por `runMigrations()`: lista versões aplicadas, roda cada arquivo pendente em ordem dentro de uma transação (uma migration = uma transação), registra na tabela ao final de cada uma.
-4. `001_init.sql` é o snapshot atual de `schema.sql`. Migrations seguintes são deltas (DROP, ALTER TYPE, etc.).
-5. `schema.sql` deixa de ser executado no boot — pode ser mantido apenas como referência documental do estado final desejado, ou removido.
-6. A troca é não-trivial: faça em PR isolado, com plano detalhado antes de mudar código.
+Mecânica:
+- Arquivos: `migrations/NNN_descricao.sql`, NNN com zero-padding em 3 dígitos (`001`, `002`, ..., `999`). Aplicados em ordem alfabética = ordem numérica.
+- Runner: `lib/migrations.js#runMigrations()`, chamado no boot do servidor antes dos seeds. Cada arquivo roda em sua própria transação. Falha em qualquer migration = rollback dela + boot abortado.
+- Tabela de controle: `schema_migrations(version, filename, applied_at)`. Criada automaticamente. Cada migration aplicada com sucesso é registrada com sua versão.
+- CLI: `npm run db:migrate` aplica pendentes; `npm run db:migrate -- status` lista status sem aplicar.
+- O servidor também aplica no boot — em dev e Replit, geralmente não se usa o CLI.
+
+Workflow para qualquer mudança de schema (aditiva ou destrutiva):
+1. Olhar último número em `migrations/`. Criar `migrations/NNN+1_descricao.sql`.
+2. Escrever SQL direto, SEM `IF NOT EXISTS` ou guards de idempotência — cada migration roda exatamente uma vez por banco.
+3. Reiniciar server local → runner aplica → testar.
+4. Commit + push. Em qualquer ambiente (Replit, prod), o boot reaplicará as pendentes.
+
+Regras duras (Claude deve respeitar e avisar o usuário se ele propor o contrário):
+- **Nunca editar uma migration depois de qualquer deploy.** Mesmo um typo em comentário. A tabela `schema_migrations` confia em "filename já aplicado"; editar quebra reproducibilidade entre ambientes.
+- **Para corrigir bug em migration JÁ aplicada**: criar uma migration corretiva (NNN+1). Nunca editar a anterior.
+- **Para corrigir bug em migration que falhou (rollback, não registrada)**: editar é OK — não foi aplicada em lugar nenhum ainda.
+- **Migration falha em prod = bug bloqueante.** Tabela `schema_migrations` não recebe a versão, o boot vai tentar e falhar a cada reinício até alguém investigar e subir uma correção. Tratar como incidente.
+- **Seeds são separados de migrations.** `seedInitialUsers()` e `seedInterviewerTemplates()` continuam em `auth.js` e rodam DEPOIS das migrations. Migrations cuidam de schema; seeds cuidam de dados de bootstrap. Não misturar.
+- **`001_init.sql` é o snapshot bootstrap** — escrito com `IF NOT EXISTS` em tudo, justamente porque pode rodar contra um banco legado que veio do antigo `schema.sql`. Migrations a partir da 002 são deltas puros.
+
+Operações que migrations habilitam (que o esquema antigo não suportava):
+- `DROP COLUMN`, `DROP TABLE`
+- `ALTER COLUMN ... TYPE ...`
+- `RENAME COLUMN`, `RENAME TABLE`
+- `ALTER COLUMN ... SET NOT NULL` (após backfill)
+- Adição de constraint com possível conflito em dados existentes (`UNIQUE`, `CHECK`, `FOREIGN KEY`)
+- Data migrations (`UPDATE`/`INSERT` para backfill ou correção)
+
+Limites:
+- Migrations zero-padded em 3 dígitos cobrem 999 mudanças. Se chegar perto, expandir para 4 dígitos via migration corretiva (renomear arquivos antigos exige cuidado — ver "nunca editar"). Improvável precisar.
+- O runner é serial e simples — não suporta migrations em paralelo nem rollback automático de uma migration aplicada com sucesso (se precisar reverter, criar a migration inversa).
 
 Mapa de prompts — regra permanente:
 - Todo prompt enviado à LLM deve ser alcançável a partir do diagrama em `docs/architecture.md`. Sem exceção.

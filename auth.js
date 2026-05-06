@@ -36,30 +36,6 @@ export const sessionMiddleware = session({
   },
 });
 
-// ---------------------------------------------------------------------
-// Apply schema.sql at boot.
-//
-// schema.sql é idempotente (CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD
-// COLUMN IF NOT EXISTS, CREATE INDEX IF NOT EXISTS) e é reaplicado a cada
-// boot. Isso elimina a necessidade de aplicar migrações manualmente quando
-// o schema evolui (dev, Replit, prod — todos convergem no boot).
-//
-// IMPORTANTE: esta abordagem só funciona enquanto as mudanças forem
-// ADITIVAS. Para DROP/RENAME/ALTER TYPE ou data migrations, ver
-// "Schema do banco — diretriz permanente" em CLAUDE.md (gatilho para
-// migrar para migrations file-per-change).
-// ---------------------------------------------------------------------
-const SCHEMA_PATH = path.join(__dirname, "schema.sql");
-
-export async function applySchema() {
-  if (!fs.existsSync(SCHEMA_PATH)) {
-    throw new Error(`schema.sql não encontrado em ${SCHEMA_PATH}`);
-  }
-  const sql = fs.readFileSync(SCHEMA_PATH, "utf8");
-  await pool.query(sql);
-  console.log("✓ schema.sql aplicado");
-}
-
 export async function seedInitialUsers() {
   const raw = process.env.INITIAL_USERS;
   if (!raw) {

@@ -20,7 +20,6 @@ import { EnunciadoCoherenceAgent } from "./agents/EnunciadoCoherenceAgent.js";
 import { pickPersona } from "./lib/personas.js";
 import {
   sessionMiddleware,
-  applySchema,
   seedInitialUsers,
   seedInterviewerTemplates,
   loginHandler,
@@ -40,6 +39,7 @@ import {
   PROJECT_ROOT,
 } from "./lib/middleware.js";
 import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt.js";
+import { runMigrations } from "./lib/migrations.js";
 import {
   writeConversationLog,
   deleteConversationLog,
@@ -1750,10 +1750,10 @@ app.listen(PORT, "0.0.0.0", async () => {
   if (!process.env.OPENAI_API_KEY) {
     log.warn("BOOT", "OPENAI_API_KEY ausente no .env");
   }
-  // schema.sql é idempotente e sempre reaplicado no boot (CREATE/ALTER ...
-  // IF NOT EXISTS). Fail-fast: se o schema não converge, nada do resto faz
-  // sentido. Ver "Schema do banco — diretriz permanente" em CLAUDE.md.
-  await applySchema();
+  // Aplica migrations pendentes antes de qualquer coisa. Fail-fast: se
+  // qualquer migration falha, o servidor não sobe. Ver "Schema do banco —
+  // diretriz permanente" em CLAUDE.md.
+  await runMigrations();
   try {
     await seedInitialUsers();
   } catch (err) {

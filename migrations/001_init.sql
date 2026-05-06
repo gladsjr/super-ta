@@ -1,10 +1,15 @@
--- SuperTA — database schema for local bootstrap.
--- Apply once (idempotent): psql "$DATABASE_URL" -f schema.sql
+-- 001_init.sql — Initial schema snapshot.
 --
--- Works, submissions, interviewer templates and the conversation log all
--- live in PostgreSQL. PDFs are stored as BYTEA on the row. The database is
--- the only source of truth; the legacy filesystem layout under data/works/
--- exists only as a migration source.
+-- This is the bootstrap migration. It must be IDEMPOTENT: it may run on a
+-- completely empty database (greenfield) or on a database that already has
+-- some/all of the schema (legacy environment that ran the old `schema.sql`
+-- before the migrations runner existed). All statements use IF NOT EXISTS
+-- so either case converges to the same target state. Once recorded in
+-- `schema_migrations`, it never runs again.
+--
+-- Future schema changes go into NEW files (002_*.sql, 003_*.sql, ...) — do
+-- NOT edit this file after deploy. See CLAUDE.md "Schema do banco" for the
+-- full convention.
 
 -- App users. Password hashes are bcrypt; seeded by seedInitialUsers() in auth.js
 -- from the INITIAL_USERS env var on boot.
@@ -49,7 +54,8 @@ CREATE TABLE IF NOT EXISTS works (
   updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Migration: add enunciado_coherence_json on existing works tables.
+-- Patch for legacy DBs that pre-date the enunciado_coherence_json column.
+-- No-op on greenfield (column already created above).
 ALTER TABLE works ADD COLUMN IF NOT EXISTS enunciado_coherence_json TEXT;
 
 CREATE INDEX IF NOT EXISTS works_token_idx ON works (work_token);
