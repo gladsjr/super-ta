@@ -35,6 +35,7 @@ import {
   requireAdmin,
   requireWorkToken,
   requireSubmissionToken,
+  requireWithinBudget,
   sanitizeLabel,
   PROJECT_ROOT,
 } from "./lib/middleware.js";
@@ -42,6 +43,16 @@ import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt
 import { runMigrations } from "./lib/migrations.js";
 import { transcribeAudio, synthesizeSpeech, AudioCache } from "./lib/audio.js";
 import { VOICES, isValidVoice } from "./config/voices.js";
+import {
+  loadPricing,
+  validatePricingCoverage,
+  getDefaultWorkBudgetUsd,
+  meteredResponses,
+  meteredStt,
+  meteredTts,
+  getWorkBalance,
+  isWorkBudgetExceeded,
+} from "./lib/billing.js";
 import {
   writeConversationLog,
   deleteConversationLog,
@@ -95,6 +106,17 @@ if (!TTS_MODEL || typeof TTS_MODEL !== "string") {
 const TRIAGE_THRESHOLD = Number(policy?.triage?.intensity_threshold ?? 6);
 
 log.info("CONFIG", `principal_reasoning_model=${PRINCIPAL_REASONING_MODEL} fast_model=${FAST_MODEL} stt_model=${STT_MODEL} tts_model=${TTS_MODEL} triage_threshold=${TRIAGE_THRESHOLD}`);
+
+// Pricing — fonte única de verdade em config/pricing.yaml. Fail-fast se algum
+// modelo declarado em policy.yaml não tiver entrada de preço.
+loadPricing();
+validatePricingCoverage({
+  textModels: [PRINCIPAL_REASONING_MODEL, FAST_MODEL],
+  sttModels: [STT_MODEL],
+  ttsModels: [TTS_MODEL],
+});
+const DEFAULT_WORK_BUDGET_USD = getDefaultWorkBudgetUsd();
+log.info("CONFIG", `default_work_budget_usd=$${DEFAULT_WORK_BUDGET_USD.toFixed(2)}`);
 
 // Fixed for now; becomes configurable later.
 const INTERVIEW_QUESTION_COUNT = 10;
@@ -286,6 +308,14 @@ const introductionAgent = new IntroductionAgent(openai, FAST_MODEL);
 const configAssistantAgent = new ConfigAssistantAgent(openai, FAST_MODEL);
 const enunciadoCoherenceAgent = new EnunciadoCoherenceAgent(openai, PRINCIPAL_REASONING_MODEL);
 
+// Helper para construir o contexto de cobrança a partir de uma sessão. Os
+// agentes recebem `meterCtx` no último parâmetro e o repassam ao
+// meteredResponses() em lib/billing.js, que registra o custo no work_token.
+function sessionMeterCtx(sess) {
+  if (!sess) return null;
+  return { workId: sess.workId ?? null, submissionId: sess.submissionId ?? null };
+}
+
 const INTRO_TURN_CAP = 3;
 
 // Cap on consecutive skips by the relevance agent. With a 10-question plan
@@ -327,19 +357,22 @@ async function runEvaluators(session, studentResponse) {
     throw new Error('Missing conversationId_eval for evaluators');
   }
 
+  const meterCtx = sessionMeterCtx(session);
   // Run both evaluator agents in parallel
   const [comprehensionSignal, clarificationSignal] = await Promise.all([
     comprehensionEvaluator.evaluate(
       session.conversationId_eval,
       session.vectorStoreId,
       session.documentMap,
-      studentResponse
+      studentResponse,
+      meterCtx
     ),
     clarificationEvaluator.evaluate(
       session.conversationId_eval,
       session.vectorStoreId,
       session.documentMap,
-      studentResponse
+      studentResponse,
+      meterCtx
     )
   ]);
 
@@ -465,7 +498,10 @@ Retorne APENAS a pergunta, sem texto adicional.`;
 
     log.prompt("QUESTION_GEN", prompt);
     const response = await log.span("QUESTION_GEN", "responses.create", () =>
-      openai.responses.create(payload)
+      meteredResponses(
+        { ...sessionMeterCtx(session), agentLabel: "QUESTION_GEN", model: PRINCIPAL_REASONING_MODEL },
+        () => openai.responses.create(payload)
+      )
     );
 
     return response.output_text || "Pode me explicar melhor esse ponto do seu trabalho?";
@@ -542,14 +578,46 @@ app.post("/admin/works", requireAdmin, async (req, res) => {
   let name;
   try { name = sanitizeLabel(req.body?.name); }
   catch (err) { return res.status(400).json({ error: err.message }); }
+  // Orçamento opcional na criação; se ausente, usa o default de pricing.yaml.
+  let budget = DEFAULT_WORK_BUDGET_USD;
+  if (req.body?.budget_usd !== undefined && req.body?.budget_usd !== null && req.body?.budget_usd !== "") {
+    const parsed = Number(req.body.budget_usd);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return res.status(400).json({ error: "budget_usd must be a non-negative number" });
+    }
+    budget = parsed;
+  }
   try {
-    const work = await db.createWork(name);
-    log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" by=${req.session.user.username}`);
+    const work = await db.createWork(name, budget);
+    log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
     res.json({ work });
   } catch (err) {
     log.error("ADMIN", `create work failed: ${err.message}`);
     res.status(500).json({ error: "failed to create work" });
   }
+});
+
+app.patch("/admin/works/:workToken/budget", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+  const workToken = String(req.params.workToken || "").toLowerCase();
+  const parsed = Number(req.body?.budget_usd);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return res.status(400).json({ error: "budget_usd must be a non-negative number" });
+  }
+  try {
+    const work = await db.getWorkByToken(workToken);
+    if (!work) return res.status(404).json({ error: "work not found" });
+    const updated = await db.updateWorkBudget(work.id, parsed);
+    log.info("ADMIN", `work budget updated token=${workToken} budget=$${Number(updated.budget_usd).toFixed(2)} by=${req.session.user.username}`);
+    res.json({ ok: true, budget_usd: updated.budget_usd, spent_usd: updated.spent_usd });
+  } catch (err) {
+    log.error("ADMIN", `update work budget failed: ${err.message}`);
+    res.status(500).json({ error: "failed to update budget" });
+  }
+});
+
+// Defaults expostos para o frontend admin pré-preencher campos.
+app.get("/admin/defaults", requireAdmin, (_req, res) => {
+  res.json({ default_work_budget_usd: DEFAULT_WORK_BUDGET_USD });
 });
 
 // ---- User management (every authenticated user is an admin) ----
@@ -609,6 +677,7 @@ app.delete("/admin/users/:id", requireAdmin, async (req, res) => {
 app.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
   try {
     const submissions = await db.listSubmissionsForWork(req.work.id);
+    const balance = await getWorkBalance(req.work.id);
     res.json({
       work: {
         name: req.work.name,
@@ -616,6 +685,10 @@ app.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
         has_interviewer: !!req.work.has_interviewer,
         interaction_mode: req.work.interaction_mode,
         voice: req.work.voice,
+        budget_usd: balance?.budget_usd ?? 0,
+        spent_usd: balance?.spent_usd ?? 0,
+        remaining_usd: balance?.remaining_usd ?? 0,
+        percent_used: balance?.percent_used ?? 100,
       },
       submissions,
     });
@@ -641,7 +714,7 @@ function hashText(s) {
   return String(h);
 }
 
-app.post("/w/:workToken/voices/preview", requireWorkToken, express.json({ limit: "16kb" }), async (req, res) => {
+app.post("/w/:workToken/voices/preview", requireWorkToken, requireWithinBudget, express.json({ limit: "16kb" }), async (req, res) => {
   const voiceId = String(req.body?.voiceId ?? "");
   const text = String(req.body?.text ?? PREVIEW_DEFAULT_TEXT).slice(0, 200);
   if (!isValidVoice(voiceId)) return res.status(400).json({ error: "voz inválida" });
@@ -650,7 +723,10 @@ app.post("/w/:workToken/voices/preview", requireWorkToken, express.json({ limit:
   let buffer = previewCache.get(cacheKey);
   if (!buffer) {
     try {
-      buffer = await synthesizeSpeech(openai, TTS_MODEL, text, voiceId);
+      buffer = await meteredTts(
+        { workId: req.work.id, model: TTS_MODEL, inputText: text },
+        () => synthesizeSpeech(openai, TTS_MODEL, text, voiceId)
+      );
       previewCache.set(cacheKey, buffer);
     } catch (err) {
       log.error("VOICES", `preview failed: ${err.message}`);
@@ -792,7 +868,7 @@ function stripYamlFence(text) {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
-app.post("/w/:workToken/interviewer/adapt", requireWorkToken, express.json({ limit: "256kb" }), async (req, res) => {
+app.post("/w/:workToken/interviewer/adapt", requireWorkToken, requireWithinBudget, express.json({ limit: "256kb" }), async (req, res) => {
   const genericYaml = String(req.body?.yaml ?? "");
   if (!genericYaml.trim()) return res.status(400).json({ error: "yaml content required" });
   try {
@@ -815,17 +891,20 @@ app.post("/w/:workToken/interviewer/adapt", requireWorkToken, express.json({ lim
     log.info("INTERVIEWER_ADAPT", `uploaded enunciado file=${fileUpload.id}`);
 
     const response = await log.span("INTERVIEWER_ADAPT", "responses.create", () =>
-      openai.responses.create({
-        model: PRINCIPAL_REASONING_MODEL,
-        instructions: INTERVIEWER_ADAPT_INSTRUCTIONS,
-        input: [{
-          role: "user",
-          content: [
-            { type: "input_text", text: `YAML genérico:\n\n${genericYaml}\n\nEnunciado em anexo. Gere o YAML adaptado.` },
-            { type: "input_file", file_id: fileUpload.id },
-          ],
-        }],
-      })
+      meteredResponses(
+        { workId: req.work.id, agentLabel: "INTERVIEWER_ADAPT", model: PRINCIPAL_REASONING_MODEL },
+        () => openai.responses.create({
+          model: PRINCIPAL_REASONING_MODEL,
+          instructions: INTERVIEWER_ADAPT_INSTRUCTIONS,
+          input: [{
+            role: "user",
+            content: [
+              { type: "input_text", text: `YAML genérico:\n\n${genericYaml}\n\nEnunciado em anexo. Gere o YAML adaptado.` },
+              { type: "input_file", file_id: fileUpload.id },
+            ],
+          }],
+        })
+      )
     );
 
     const adaptedYaml = stripYamlFence(response.output_text || "");
@@ -879,7 +958,7 @@ app.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("fi
 // Avalia se o enunciado está bem encaixado no processo de entrevista.
 // NUNCA avalia a qualidade pedagógica/técnica do trabalho em si.
 // Resultado é cacheado em works.enunciado_coherence_json até o PDF ser substituído.
-app.post("/w/:workToken/enunciado/coherence", requireWorkToken, async (req, res) => {
+app.post("/w/:workToken/enunciado/coherence", requireWorkToken, requireWithinBudget, async (req, res) => {
   const force = String(req.query?.force ?? "").toLowerCase() === "true";
 
   try {
@@ -903,7 +982,10 @@ app.post("/w/:workToken/enunciado/coherence", requireWorkToken, async (req, res)
     });
     log.info("COHERENCE", `uploaded enunciado file=${fileUpload.id}`);
 
-    const report = await enunciadoCoherenceAgent.evaluate({ openaiFileId: fileUpload.id });
+    const report = await enunciadoCoherenceAgent.evaluate({
+      openaiFileId: fileUpload.id,
+      meterCtx: { workId: req.work.id },
+    });
     await db.setCoherenceCache(req.work.id, report);
     log.info("COHERENCE", `ok work=${req.work.work_token} overall=${report.overall}`);
     res.json({ ...report, cached: false });
@@ -916,7 +998,7 @@ app.post("/w/:workToken/enunciado/coherence", requireWorkToken, async (req, res)
 // ---- Chat ephemero do assistente de configuração ----
 // Histórico vem do cliente em cada turno. Sem persistência server-side e sem
 // tocar a Conversations API (ver CLAUDE.md). Modelo: fast_model.
-app.post("/w/:workToken/config-chat", requireWorkToken, express.json({ limit: "256kb" }), async (req, res) => {
+app.post("/w/:workToken/config-chat", requireWorkToken, requireWithinBudget, express.json({ limit: "256kb" }), async (req, res) => {
   const message = String(req.body?.message ?? "").trim();
   if (!message) return res.status(400).json({ error: "message required" });
 
@@ -928,7 +1010,12 @@ app.post("/w/:workToken/config-chat", requireWorkToken, express.json({ limit: "2
 
   try {
     const stateBlock = await buildConfigStateBlock(req.work);
-    const result = await configAssistantAgent.evaluate({ history, message, stateBlock });
+    const result = await configAssistantAgent.evaluate({
+      history,
+      message,
+      stateBlock,
+      meterCtx: { workId: req.work.id },
+    });
     res.json(result);
   } catch (err) {
     log.error("CONFIG_CHAT", `failed: ${err.message}`);
@@ -1035,7 +1122,10 @@ async function attachAudio(sess, content) {
     return { audio_error: "no_voice_configured" };
   }
   try {
-    const buffer = await synthesizeSpeech(openai, TTS_MODEL, content, sess.voice);
+    const buffer = await meteredTts(
+      { ...sessionMeterCtx(sess), model: TTS_MODEL, inputText: content },
+      () => synthesizeSpeech(openai, TTS_MODEL, content, sess.voice)
+    );
     const turnId = String(sess.audioTurnIdCounter++);
     sess.audioCache.set(turnId, buffer);
     return { audio_url: `/s/${encodeURIComponent(sess.submissionToken)}/audio/${turnId}` };
@@ -1064,6 +1154,8 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
         systemPrompt,
         submissionToken: token,
         workToken: req.work.work_token,
+        workId: req.work.id,
+        submissionId: req.submission.id,
         conversationId_chat: chatConversation.id,
         conversationId_eval: evalConversation.id,
         conv_chat: [],
@@ -1116,7 +1208,7 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
   }
 });
 
-app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.single("file"), async (req, res) => {
+app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudget, studentUpload.single("file"), async (req, res) => {
   const token = req.submission.submission_token;
   if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
   const sess = SESSIONS.get(token);
@@ -1184,22 +1276,26 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
     );
     log.prompt("UPLOAD:interview_plan", renderedPrompt);
 
+    const meterCtx = sessionMeterCtx(sess);
     sess.interviewPreparation = (async () => {
       const [docMap, planResp] = await Promise.all([
-        mapBuilderAgent.generateDocumentMap(sess.conversationId_eval, sess.openaiFileId),
+        mapBuilderAgent.generateDocumentMap(sess.conversationId_eval, sess.openaiFileId, meterCtx),
         log.span("UPLOAD", "interview plan responses.create", () =>
-          openai.responses.create({
-            model: PRINCIPAL_REASONING_MODEL,
-            instructions: renderedPrompt,
-            input: [{
-              role: "user",
-              content: [
-                { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
-                { type: "input_file", file_id: enunciadoFile.id },
-                { type: "input_file", file_id: studentFile.id },
-              ],
-            }],
-          })
+          meteredResponses(
+            { ...meterCtx, agentLabel: "UPLOAD:interview_plan", model: PRINCIPAL_REASONING_MODEL },
+            () => openai.responses.create({
+              model: PRINCIPAL_REASONING_MODEL,
+              instructions: renderedPrompt,
+              input: [{
+                role: "user",
+                content: [
+                  { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
+                  { type: "input_file", file_id: enunciadoFile.id },
+                  { type: "input_file", file_id: studentFile.id },
+                ],
+              }],
+            })
+          )
         ),
       ]);
       sess.documentMap = docMap;
@@ -1243,6 +1339,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
       mainReady: false,
       introTurnCount: 0,
       introTurnCap: INTRO_TURN_CAP,
+      meterCtx,
     });
 
     const greetingEntry = { role: "assistant", content: greeting.message, at: new Date().toISOString() };
@@ -1294,7 +1391,7 @@ app.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, res) 
   res.send(buffer);
 });
 
-app.post("/s/:submissionToken/chat", requireSubmissionToken, audioUpload.single("audio"), async (req, res) => {
+app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget, audioUpload.single("audio"), async (req, res) => {
   const token = req.submission.submission_token;
   if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
   const sess = SESSIONS.get(token);
@@ -1321,7 +1418,11 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, audioUpload.single(
   let message;
   if (hasAudio) {
     try {
-      message = await transcribeAudio(openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm");
+      const sttResult = await meteredStt(
+        { ...sessionMeterCtx(sess), model: STT_MODEL },
+        () => transcribeAudio(openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm")
+      );
+      message = sttResult.text;
     } catch (err) {
       log.error("CHAT", `STT failed: ${err.message}`);
       return res.status(400).json({ error: "transcription_failed", detail: "Não consegui entender o áudio. Tente gravar de novo." });
@@ -1370,6 +1471,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, audioUpload.single(
         mainReady,
         introTurnCount,
         introTurnCap: INTRO_TURN_CAP,
+        meterCtx: sessionMeterCtx(sess),
       });
     } catch (err) {
       log.error("AGENT:Introduction", `failed, forcing transition: ${err.message}`);
@@ -1472,6 +1574,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, audioUpload.single(
       currentTurn,
       studentMessage: message,
       vectorStoreId: sess.vectorStoreId,
+      meterCtx: sessionMeterCtx(sess),
     };
 
     const sufficiencyAbort = new AbortController();
@@ -1482,6 +1585,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, audioUpload.single(
       studentMessage: message,
       vectorStoreId: sess.vectorStoreId,
       signal: sufficiencyAbort.signal,
+      meterCtx: sessionMeterCtx(sess),
     }).catch(err => {
       const aborted = err?.name === "APIUserAbortError"
         || err?.constructor?.name === "APIUserAbortError"
@@ -1672,6 +1776,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, audioUpload.single(
           interviewerYamlText: sess.interviewerYamlText ?? "",
           turnLog: sess.turnLog,
           candidateQuestion: candidate,
+          meterCtx: sessionMeterCtx(sess),
         });
       } catch (err) {
         log.error("AGENT:QuestionRelevance", `failed, defaulting to ask: ${err.message}`);
@@ -1820,11 +1925,14 @@ Retorne JSON:
   try {
     log.prompt("EVAL:Methodology", prompt);
     const response = await log.span("EVAL:Methodology", "responses.create", () =>
-      openai.responses.create({
-        model: PRINCIPAL_REASONING_MODEL,
-        instructions: prompt,
-        input: [{ role: "user", content: "Avalie a metodologia." }]
-      })
+      meteredResponses(
+        { ...sessionMeterCtx(session), agentLabel: "EVAL:Methodology", model: PRINCIPAL_REASONING_MODEL },
+        () => openai.responses.create({
+          model: PRINCIPAL_REASONING_MODEL,
+          instructions: prompt,
+          input: [{ role: "user", content: "Avalie a metodologia." }]
+        })
+      )
     );
 
     const outputText = response.output_text || "";
@@ -1864,11 +1972,14 @@ Retorne JSON:
   try {
     log.prompt("EVAL:Parameters", prompt);
     const response = await log.span("EVAL:Parameters", "responses.create", () =>
-      openai.responses.create({
-        model: PRINCIPAL_REASONING_MODEL,
-        instructions: prompt,
-        input: [{ role: "user", content: "Avalie os parâmetros." }]
-      })
+      meteredResponses(
+        { ...sessionMeterCtx(session), agentLabel: "EVAL:Parameters", model: PRINCIPAL_REASONING_MODEL },
+        () => openai.responses.create({
+          model: PRINCIPAL_REASONING_MODEL,
+          instructions: prompt,
+          input: [{ role: "user", content: "Avalie os parâmetros." }]
+        })
+      )
     );
 
     const outputText = response.output_text || "";

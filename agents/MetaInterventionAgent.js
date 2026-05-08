@@ -1,6 +1,7 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatQuestionBlock, formatTurnHistoryBlock } from "../lib/triagePrompt.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * MetaInterventionAgent
@@ -56,7 +57,7 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, studentMessage /*, vectorStoreId */ }) {
+    async evaluate({ interviewerYamlText, currentTurn, studentMessage, meterCtx = null /*, vectorStoreId */ }) {
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatTurnHistoryBlock(currentTurn);
@@ -85,7 +86,10 @@ Avalie se esta mensagem é uma meta-mensagem dirigida ao sistema/processo. Retor
 
         log.prompt("AGENT:MetaIntervention", this.systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:MetaIntervention", "responses.create", () =>
-            this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:MetaIntervention", model: this.model },
+                () => this.client.responses.create(payload)
+            )
         );
         const text = response.output_text || "";
         const match = text.match(/\{[\s\S]*\}/);

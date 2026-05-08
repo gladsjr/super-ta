@@ -1,6 +1,7 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatQuestionBlock, formatFullConversation } from "../lib/triagePrompt.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * AnswerSufficiencyAgent
@@ -99,7 +100,7 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, turnLog, studentMessage, vectorStoreId, signal }) {
+    async evaluate({ interviewerYamlText, currentTurn, turnLog, studentMessage, vectorStoreId, signal, meterCtx = null }) {
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatFullConversation(turnLog);
@@ -129,7 +130,10 @@ Decida accept ou follow_up considerando a agenda. Use file_search se precisar co
 
         log.prompt("AGENT:AnswerSufficiency", this.systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:AnswerSufficiency", "responses.create", () =>
-            signal ? this.client.responses.create(payload, { signal }) : this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:AnswerSufficiency", model: this.model },
+                () => signal ? this.client.responses.create(payload, { signal }) : this.client.responses.create(payload)
+            )
         );
         const text = response.output_text || "";
         const match = text.match(/\{[\s\S]*\}/);

@@ -1,6 +1,7 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatFullConversation } from "../lib/triagePrompt.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * QuestionRelevanceAgent
@@ -49,7 +50,7 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, turnLog, candidateQuestion }) {
+    async evaluate({ interviewerYamlText, turnLog, candidateQuestion, meterCtx = null }) {
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const historyBlock = formatFullConversation(turnLog);
         const candidateBlock = this.formatCandidate(candidateQuestion);
@@ -73,7 +74,10 @@ Decida ask ou skip. Retorne apenas o JSON.`;
 
         log.prompt("AGENT:QuestionRelevance", this.systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:QuestionRelevance", "responses.create", () =>
-            this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:QuestionRelevance", model: this.model },
+                () => this.client.responses.create(payload)
+            )
         );
         const text = response.output_text || "";
         const match = text.match(/\{[\s\S]*\}/);

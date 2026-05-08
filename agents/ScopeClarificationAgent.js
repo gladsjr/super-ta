@@ -1,6 +1,7 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatQuestionBlock, formatTurnHistoryBlock } from "../lib/triagePrompt.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * ScopeClarificationAgent
@@ -49,7 +50,7 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId }) {
+    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId, meterCtx = null }) {
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatTurnHistoryBlock(currentTurn);
@@ -79,7 +80,10 @@ Avalie se esta mensagem caracteriza necessidade de esclarecimento de escopo. Ret
 
         log.prompt("AGENT:ScopeClarification", this.systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:ScopeClarification", "responses.create", () =>
-            this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:ScopeClarification", model: this.model },
+                () => this.client.responses.create(payload)
+            )
         );
         const text = response.output_text || "";
         const match = text.match(/\{[\s\S]*\}/);

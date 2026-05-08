@@ -1,0 +1,62 @@
+# Tabela de preços (USD) — fonte única de verdade para cálculo de custo de
+# cada chamada LLM. Carregada uma vez no boot por lib/billing.js. Fail-fast
+# se um modelo declarado em policy.yaml não tiver entrada aqui.
+#
+# Valores conservadores: quando a documentação diverge ou o desconto exato
+# (ex.: cache hit) é ambíguo, escolhemos o lado que sobre-estima o custo,
+# para que o orçamento estoure cedo demais em vez de tarde demais.
+#
+# Atualizar quando trocar de modelo ou quando a OpenAI mudar tabela.
+
+# Orçamento default (USD) atribuído a cada work_token recém-criado pelo admin.
+# Calibrado para cobrir ~3 entrevistas em modo áudio (mais caro que texto):
+#   - MapBuilder (1 chamada com PDF anexado): ~$0.03
+#   - 12 turnos × (Comprehension + Clarification + QuestionGen) ≈ $0.55
+#   - Outros agentes (intro, scope, etc) eventuais: ~$0.10
+#   - Final report: ~$0.06
+#   - TTS (~12 min de fala do entrevistador): ~$0.18
+#   - STT (~12 min de fala do aluno): ~$0.10
+#   Total por entrevista em áudio: ~$1.00; texto: ~$0.75.
+#   3 entrevistas em áudio: ~$3.00. Margem de segurança → 4.00.
+default_work_budget_usd: 4.00
+
+# ---------------------------------------------------------------------------
+# Modelos de texto (Responses API). Custo = input_tokens × input_per_mtok
+# + cached_tokens × input_cached_per_mtok + output_tokens × output_per_mtok,
+# tudo dividido por 1.000.000.
+#
+# Observação sobre cached: a documentação oficial costuma definir cache hit
+# como ~10% do preço de input padrão. Adotamos 50% (mais caro que o real)
+# como margem; o orçamento estoura cedo, nunca tarde.
+# ---------------------------------------------------------------------------
+text:
+  gpt-5.4:
+    input_per_mtok: 2.50
+    input_cached_per_mtok: 1.25
+    output_per_mtok: 15.00
+  gpt-5.4-mini:
+    input_per_mtok: 0.75
+    input_cached_per_mtok: 0.375
+    output_per_mtok: 4.50
+
+# ---------------------------------------------------------------------------
+# STT (audio.transcriptions). gpt-4o-transcribe usa pricing por token. A API
+# pode retornar `usage.type === 'tokens'` ou `'duration'`; tratamos os dois
+# casos.
+# - tokens:   cost = input_tokens × input_per_mtok + output_tokens × output_per_mtok
+# - duration: cost = seconds × per_second_usd  (fallback estimado)
+# ---------------------------------------------------------------------------
+stt:
+  gpt-4o-transcribe:
+    input_per_mtok: 2.50
+    output_per_mtok: 10.00
+    per_second_usd: 0.006   # ~$0.36/min — usado se a API só devolver duration
+
+# ---------------------------------------------------------------------------
+# TTS (audio.speech). A API NÃO retorna usage; cobramos por caractere de
+# input. Conversão: ~$0.015/min de fala ≈ ~750 chars/min ≈ $20/M chars.
+# Conservador: $25/M chars.
+# ---------------------------------------------------------------------------
+tts:
+  gpt-4o-mini-tts:
+    text_per_mchar: 25.00

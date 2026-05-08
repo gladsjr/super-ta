@@ -10,6 +10,12 @@
   .sub-form { display: grid; grid-template-columns: 1fr 100px auto; gap: var(--sp-3); align-items: end; }
   @media (max-width: 680px) { .sub-form { grid-template-columns: 1fr; } }
   .yaml-ta { min-height: 22rem; }
+  .budget-line { display: inline-flex; align-items: center; gap: var(--sp-2); }
+  .budget-amount { font-variant-numeric: tabular-nums; }
+  .budget-bar { display: inline-block; width: 100px; height: 6px; background: var(--c-bg-2, #e5e7eb); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+  .budget-bar > span { display: block; height: 100%; background: var(--c-accent, #2563eb); transition: width .2s ease; }
+  .budget-bar.warn > span { background: #f59e0b; }
+  .budget-bar.exhausted > span { background: #dc2626; }
 </style>
 </head>
 <body>
@@ -230,11 +236,26 @@ async function load() {
   const pending = j.submissions.filter(s => s.status === 'pending').length;
   const inprog = j.submissions.filter(s => s.status === 'in_progress').length;
   const finalized = j.submissions.filter(s => s.status === 'finalized').length;
+  const budget = Number(j.work.budget_usd || 0);
+  const spent = Number(j.work.spent_usd || 0);
+  const pct = Number(j.work.percent_used ?? (budget > 0 ? (spent / budget) * 100 : 100));
+  let barClass = '';
+  if (budget > 0 && spent >= budget) barClass = 'exhausted';
+  else if (pct >= 80) barClass = 'warn';
+  const exhaustedNote = (budget > 0 && spent >= budget)
+    ? '<span class="badge badge-pending" title="Sem saldo — operações serão bloqueadas até o admin aumentar o orçamento.">orçamento esgotado</span>'
+    : '';
   metaEl.innerHTML = `
     <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
     <span class="badge badge-in_progress">${inprog} em andamento</span>
     <span class="badge badge-finalized">${finalized} finalizado${finalized === 1 ? '' : 's'}</span>
     <span class="muted">Token do trabalho: <code class="token-chip">${escapeHtml(workToken)}</code></span>
+    <span class="budget-line" title="Saldo gasto / orçamento total deste trabalho.">
+      <span class="muted">Saldo:</span>
+      <span class="budget-amount"><strong>$${spent.toFixed(4)}</strong> / $${budget.toFixed(2)}</span>
+      <span class="budget-bar ${barClass}"><span style="width:${Math.min(100, pct).toFixed(1)}%"></span></span>
+      ${exhaustedNote}
+    </span>
   `;
 
   const tbody = document.querySelector('#sub-table tbody');

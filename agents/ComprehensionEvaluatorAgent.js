@@ -12,6 +12,7 @@
  */
 
 import log from "../lib/logger.js";
+import { meteredResponses } from "../lib/billing.js";
 
 export class ComprehensionEvaluatorAgent {
     constructor(openaiClient, model) {
@@ -63,7 +64,7 @@ Seja criterioso mas justo. Use citações do documento quando relevante.`;
      * @returns {Promise<Object>} Evaluation signal with confidence and evidence
      * @throws {Error} If agent fails
      */
-    async evaluate(conversationId, vectorStoreId, documentMap, studentResponse) {
+    async evaluate(conversationId, vectorStoreId, documentMap, studentResponse, meterCtx = null) {
         try {
             if (!conversationId) {
                 throw new Error('Missing conversationId for ComprehensionEvaluatorAgent');
@@ -108,7 +109,10 @@ Retorne APENAS o JSON.`
 
             log.prompt("AGENT:Comprehension", this.systemPrompt + "\n\n" + payload.input[0].content);
             const response = await log.span("AGENT:Comprehension", "responses.create", () =>
-                this.client.responses.create(payload)
+                meteredResponses(
+                    { ...meterCtx, agentLabel: "AGENT:Comprehension", model: this.model },
+                    () => this.client.responses.create(payload)
+                )
             );
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
 

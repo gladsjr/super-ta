@@ -1,5 +1,6 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * IntroductionAgent
@@ -69,7 +70,7 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, persona, introHistory, studentMessage, mainReady, introTurnCount, introTurnCap }) {
+    async evaluate({ interviewerYamlText, persona, introHistory, studentMessage, mainReady, introTurnCount, introTurnCap, meterCtx = null }) {
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const personaBlock = `Nome: ${persona.name}
 Cidade de origem (RESERVA — só mencione se a conversa puxar; NÃO aparece no cumprimento de abertura): ${persona.city}
@@ -108,7 +109,10 @@ Decida e produza a próxima mensagem ao aluno. Retorne apenas o JSON.`;
 
         log.prompt("AGENT:Introduction", this.systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:Introduction", "responses.create", () =>
-            this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:Introduction", model: this.model },
+                () => this.client.responses.create(payload)
+            )
         );
         const text = response.output_text || "";
         const match = text.match(/\{[\s\S]*\}/);

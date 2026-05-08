@@ -1,4 +1,5 @@
 import log from "../lib/logger.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * EnunciadoCoherenceAgent
@@ -84,7 +85,7 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
 }`;
     }
 
-    async evaluate({ openaiFileId }) {
+    async evaluate({ openaiFileId, meterCtx = null }) {
         if (!openaiFileId) throw new Error("Missing openaiFileId for EnunciadoCoherenceAgent");
 
         const userText = `Analise o ENUNCIADO em anexo e produza o relatório JSON conforme o contrato. Lembre-se: você avalia apenas a adequação do enunciado ao processo de entrevista, NUNCA a qualidade pedagógica do trabalho.`;
@@ -103,7 +104,10 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
 
         log.prompt("AGENT:EnunciadoCoherence", this.systemPrompt + "\n\n" + userText);
         const response = await log.span("AGENT:EnunciadoCoherence", "responses.create", () =>
-            this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:EnunciadoCoherence", model: this.model },
+                () => this.client.responses.create(payload)
+            )
         );
 
         const text = response.output_text || "";

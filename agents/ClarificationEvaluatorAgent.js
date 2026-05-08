@@ -107,7 +107,10 @@ Retorne APENAS o JSON.`
 
             log.prompt("AGENT:Clarification", this.systemPrompt + "\n\n" + payload.input[0].content);
             const response = await log.span("AGENT:Clarification", "responses.create", () =>
-                this.client.responses.create(payload)
+                meteredResponses(
+                    { ...meterCtx, agentLabel: "AGENT:Clarification", model: this.model },
+                    () => this.client.responses.create(payload)
+                )
             );
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");
 

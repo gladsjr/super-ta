@@ -11,6 +11,16 @@
   .work-card h3 { margin: 0 0 var(--sp-2) 0; }
   .work-stats { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-1); }
   .work-token-block .label { margin-bottom: var(--sp-1); }
+  .budget-block { margin-top: var(--sp-3); }
+  .budget-line { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; font-size: 0.92em; }
+  .budget-amount { font-variant-numeric: tabular-nums; }
+  .budget-bar { flex: 1; min-width: 140px; height: 6px; background: var(--c-bg-2, #e5e7eb); border-radius: 3px; overflow: hidden; }
+  .budget-bar > span { display: block; height: 100%; background: var(--c-accent, #2563eb); transition: width .2s ease; }
+  .budget-bar.warn > span { background: #f59e0b; }
+  .budget-bar.exhausted > span { background: #dc2626; }
+  .budget-edit-row { display: none; gap: var(--sp-2); margin-top: var(--sp-2); }
+  .budget-edit-row.open { display: flex; flex-wrap: wrap; }
+  .budget-edit-row input { width: 120px; }
 </style>
 </head>
 <body>
@@ -55,8 +65,10 @@
       <h3 class="card-title">Novo trabalho</h3>
       <div class="row">
         <input id="new-work-name" class="input" placeholder="Nome do trabalho (ex.: Prova 1)" style="flex:1; min-width: 260px"/>
+        <input id="new-work-budget" class="input" type="number" min="0" step="0.5" placeholder="Orçamento USD" style="width: 160px" title="Orçamento total deste trabalho em dólares — limite de gasto com o modelo, somando criação + entrevistas dos alunos."/>
         <button id="create-work" class="btn btn-primary">Criar</button>
       </div>
+      <div class="hint">Orçamento default cobre ~3 entrevistas. Pode ser ajustado depois pelo botão "Editar orçamento" do trabalho.</div>
       <div id="create-msg" class="hint"></div>
     </div>
 
@@ -99,12 +111,23 @@
 
 <script>
 let currentUser = null;
+let DEFAULT_BUDGET_USD = null;
 async function checkAuth() {
   try {
     const r = await fetch('/me');
-    if (r.ok) { const j = await r.json(); showApp(j.user); loadWorks(); loadUsers(); }
+    if (r.ok) { const j = await r.json(); showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); }
     else showLogin();
   } catch { showLogin(); }
+}
+async function loadDefaults() {
+  try {
+    const r = await fetch('/admin/defaults');
+    if (!r.ok) return;
+    const j = await r.json();
+    DEFAULT_BUDGET_USD = Number(j.default_work_budget_usd);
+    const el = document.getElementById('new-work-budget');
+    if (el && !el.value && Number.isFinite(DEFAULT_BUDGET_USD)) el.placeholder = `Orçamento USD (default ${DEFAULT_BUDGET_USD.toFixed(2)})`;
+  } catch { /* silencioso */ }
 }
 function showLogin() {
   document.getElementById('login-screen').classList.remove('hidden');
@@ -130,7 +153,7 @@ document.getElementById('login-btn').onclick = async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadWorks(); loadUsers(); }
+    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); }
     else errEl.textContent = 'Usuário ou senha inválidos';
   } catch { errEl.textContent = 'Falha na comunicação'; }
 };
@@ -145,18 +168,26 @@ document.getElementById('logout-btn').onclick = async () => {
 
 document.getElementById('create-work').onclick = async () => {
   const name = document.getElementById('new-work-name').value.trim();
+  const budgetRaw = document.getElementById('new-work-budget').value.trim();
   const msg = document.getElementById('create-msg');
   msg.textContent = '';
   if (!name) { msg.textContent = 'Nome obrigatório'; return; }
+  const body = { name };
+  if (budgetRaw !== '') {
+    const n = Number(budgetRaw);
+    if (!Number.isFinite(n) || n < 0) { msg.textContent = 'Orçamento inválido'; return; }
+    body.budget_usd = n;
+  }
   try {
     const r = await fetch('/admin/works', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify(body)
     });
     if (r.status === 401) return showLogin();
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao criar'); return; }
     document.getElementById('new-work-name').value = '';
+    document.getElementById('new-work-budget').value = '';
     msg.textContent = 'Trabalho criado.';
     loadWorks();
   } catch { msg.textContent = 'Falha na comunicação'; }
@@ -179,8 +210,17 @@ async function loadWorks() {
     const enunBadge = w.assignment_pdf
       ? '<span class="badge badge-accent">enunciado ✓</span>'
       : '<span class="badge">sem enunciado</span>';
+    const budget = Number(w.budget_usd || 0);
+    const spent = Number(w.spent_usd || 0);
+    const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 100;
+    let barClass = '';
+    if (budget > 0 && spent >= budget) barClass = 'exhausted';
+    else if (pct >= 80) barClass = 'warn';
+    const exhaustedNote = (budget > 0 && spent >= budget)
+      ? ' <span class="badge badge-pending" title="Sem saldo">orçamento esgotado</span>'
+      : '';
     return `
-      <div class="card work-card">
+      <div class="card work-card" data-token="${escapeHtml(w.work_token)}">
         <div>
           <h3>${escapeHtml(w.name)}</h3>
           <div class="work-stats">
@@ -188,6 +228,21 @@ async function loadWorks() {
             <span class="badge badge-in_progress">${inprog} em andamento</span>
             <span class="badge badge-finalized">${finalized} finalizado${finalized === 1 ? '' : 's'}</span>
             ${enunBadge}
+          </div>
+          <div class="budget-block">
+            <div class="budget-line">
+              <span class="muted">Saldo:</span>
+              <span class="budget-amount"><strong>$${spent.toFixed(4)}</strong> / $${budget.toFixed(2)}</span>
+              <div class="budget-bar ${barClass}"><span style="width:${pct.toFixed(1)}%"></span></div>
+              <button class="btn btn-ghost btn-sm" onclick="toggleBudgetEdit('${w.work_token}')">Editar orçamento</button>
+              ${exhaustedNote}
+            </div>
+            <div class="budget-edit-row" id="bedit-${w.work_token}">
+              <input type="number" class="input" min="0" step="0.5" value="${budget.toFixed(2)}" id="bedit-input-${w.work_token}"/>
+              <button class="btn btn-primary btn-sm" onclick="saveBudget('${w.work_token}')">Salvar</button>
+              <button class="btn btn-ghost btn-sm" onclick="toggleBudgetEdit('${w.work_token}')">Cancelar</button>
+              <span class="hint" id="bedit-msg-${w.work_token}"></span>
+            </div>
           </div>
         </div>
         <div class="work-token-block">
@@ -200,6 +255,31 @@ async function loadWorks() {
         </div>
       </div>`;
   }).join('');
+}
+
+function toggleBudgetEdit(token) {
+  const row = document.getElementById('bedit-' + token);
+  if (row) row.classList.toggle('open');
+}
+
+async function saveBudget(token) {
+  const input = document.getElementById('bedit-input-' + token);
+  const msg = document.getElementById('bedit-msg-' + token);
+  if (!input) return;
+  const n = Number(input.value);
+  if (!Number.isFinite(n) || n < 0) { msg.textContent = 'Valor inválido'; return; }
+  msg.textContent = 'Salvando...';
+  try {
+    const r = await fetch('/admin/works/' + encodeURIComponent(token) + '/budget', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ budget_usd: n })
+    });
+    if (r.status === 401) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'erro'); return; }
+    msg.textContent = '';
+    loadWorks();
+  } catch { msg.textContent = 'Falha na comunicação'; }
 }
 
 async function copyToken(btn, token) {

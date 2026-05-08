@@ -11,6 +11,7 @@
  */
 
 import log from "../lib/logger.js";
+import { meteredResponses } from "../lib/billing.js";
 
 export class MapBuilderAgent {
     constructor(openaiClient, model) {
@@ -51,7 +52,7 @@ Retorne SEMPRE JSON válido no formato especificado.`;
      * @returns {Promise<Object>} DocumentMap with validated structure
      * @throws {Error} If agent fails or returns invalid structure
      */
-    async generateDocumentMap(conversationId, openaiFileId) {
+    async generateDocumentMap(conversationId, openaiFileId, meterCtx = null) {
         try {
             if (!conversationId) {
                 throw new Error('Missing conversationId for MapBuilderAgent');
@@ -92,7 +93,10 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.${contextBlock}`
 
             log.prompt("AGENT:MapBuilder", this.systemPrompt + "\n\n" + payload.input[0].content[0].text);
             const response = await log.span("AGENT:MapBuilder", "responses.create", () =>
-                this.client.responses.create(payload)
+                meteredResponses(
+                    { ...meterCtx, agentLabel: "AGENT:MapBuilder", model: this.model },
+                    () => this.client.responses.create(payload)
+                )
             );
 
             const responseText = response.output_text || (Array.isArray(response.output) ? response.output.map(o => o?.content?.[0]?.text).filter(Boolean).join("\n") : "");

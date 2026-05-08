@@ -1,6 +1,7 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatQuestionBlock, formatTurnHistoryBlock } from "../lib/triagePrompt.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * OffTopicRedirectAgent
@@ -46,7 +47,7 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId }) {
+    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId, meterCtx = null }) {
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatTurnHistoryBlock(currentTurn);
@@ -76,7 +77,10 @@ Avalie se esta mensagem caracteriza mudança de assunto ou resposta sem relaçã
 
         log.prompt("AGENT:OffTopicRedirect", this.systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:OffTopicRedirect", "responses.create", () =>
-            this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:OffTopicRedirect", model: this.model },
+                () => this.client.responses.create(payload)
+            )
         );
         const text = response.output_text || "";
         const match = text.match(/\{[\s\S]*\}/);

@@ -1,4 +1,5 @@
 import log from "../lib/logger.js";
+import { meteredResponses } from "../lib/billing.js";
 
 /**
  * ConfigAssistantAgent
@@ -88,7 +89,7 @@ Payloads:
 Filenames válidos para personas: "Teacher Assistant.yaml", "Business Owner.yaml", "Hiring Manager.yaml", "Investor.yaml", "Executive Sponsor.yaml", "Journalist.yaml".`;
     }
 
-    async evaluate({ history, message, stateBlock }) {
+    async evaluate({ history, message, stateBlock, meterCtx = null }) {
         const safeHistory = Array.isArray(history) ? history : [];
         const historyBlock = safeHistory.length === 0
             ? "(nenhuma mensagem anterior — esta é a primeira interação)"
@@ -122,7 +123,10 @@ Responda apenas o JSON conforme o contrato.`;
 
         log.prompt("AGENT:ConfigAssistant", this.systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:ConfigAssistant", "responses.create", () =>
-            this.client.responses.create(payload)
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:ConfigAssistant", model: this.model },
+                () => this.client.responses.create(payload)
+            )
         );
 
         const text = response.output_text || "";
