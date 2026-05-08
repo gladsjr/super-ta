@@ -40,6 +40,8 @@ import {
 } from "./lib/middleware.js";
 import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt.js";
 import { runMigrations } from "./lib/migrations.js";
+import { transcribeAudio, synthesizeSpeech, AudioCache } from "./lib/audio.js";
+import { VOICES, isValidVoice } from "./config/voices.js";
 import {
   writeConversationLog,
   deleteConversationLog,
@@ -82,9 +84,17 @@ const FAST_MODEL = policy?.models?.fast_model;
 if (!FAST_MODEL || typeof FAST_MODEL !== "string") {
   throw new Error("config/policy.yaml must define models.fast_model");
 }
+const STT_MODEL = policy?.models?.stt_model;
+if (!STT_MODEL || typeof STT_MODEL !== "string") {
+  throw new Error("config/policy.yaml must define models.stt_model");
+}
+const TTS_MODEL = policy?.models?.tts_model;
+if (!TTS_MODEL || typeof TTS_MODEL !== "string") {
+  throw new Error("config/policy.yaml must define models.tts_model");
+}
 const TRIAGE_THRESHOLD = Number(policy?.triage?.intensity_threshold ?? 6);
 
-log.info("CONFIG", `principal_reasoning_model=${PRINCIPAL_REASONING_MODEL} fast_model=${FAST_MODEL} triage_threshold=${TRIAGE_THRESHOLD}`);
+log.info("CONFIG", `principal_reasoning_model=${PRINCIPAL_REASONING_MODEL} fast_model=${FAST_MODEL} stt_model=${STT_MODEL} tts_model=${TTS_MODEL} triage_threshold=${TRIAGE_THRESHOLD}`);
 
 // Fixed for now; becomes configurable later.
 const INTERVIEW_QUESTION_COUNT = 10;
@@ -508,6 +518,12 @@ const studentUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: UPLOAD_LIMIT_BYTES },
 });
+// Áudio do aluno: limite menor (mensagens de voz raramente passam de 1-2 min).
+const AUDIO_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024; // 10 MB
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AUDIO_UPLOAD_LIMIT_BYTES },
+});
 
 // ============================================================================
 // ADMIN ROUTES
@@ -598,12 +614,71 @@ app.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
         name: req.work.name,
         has_enunciado: !!req.work.assignment_pdf,
         has_interviewer: !!req.work.has_interviewer,
+        interaction_mode: req.work.interaction_mode,
+        voice: req.work.voice,
       },
       submissions,
     });
   } catch (err) {
     log.error("WORK", `info failed: ${err.message}`);
     res.status(500).json({ error: "failed to load work info" });
+  }
+});
+
+// ---- Modo de interação (texto vs áudio) e voz ----
+
+app.get("/w/:workToken/voices", requireWorkToken, (req, res) => {
+  res.json({ voices: VOICES.map(v => ({ id: v.id, label: v.label, gender: v.gender })) });
+});
+
+const PREVIEW_DEFAULT_TEXT = "Olá, sou seu entrevistador. Vamos começar?";
+const previewCache = new AudioCache(20); // chave: voiceId|textHash
+
+function hashText(s) {
+  // Hash leve, suficiente pra chave de cache em memória.
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return String(h);
+}
+
+app.post("/w/:workToken/voices/preview", requireWorkToken, express.json({ limit: "16kb" }), async (req, res) => {
+  const voiceId = String(req.body?.voiceId ?? "");
+  const text = String(req.body?.text ?? PREVIEW_DEFAULT_TEXT).slice(0, 200);
+  if (!isValidVoice(voiceId)) return res.status(400).json({ error: "voz inválida" });
+
+  const cacheKey = `${voiceId}|${hashText(text)}`;
+  let buffer = previewCache.get(cacheKey);
+  if (!buffer) {
+    try {
+      buffer = await synthesizeSpeech(openai, TTS_MODEL, text, voiceId);
+      previewCache.set(cacheKey, buffer);
+    } catch (err) {
+      log.error("VOICES", `preview failed: ${err.message}`);
+      return res.status(500).json({ error: "falha ao gerar prévia", detail: err.message });
+    }
+  }
+  res.type("audio/mpeg");
+  res.send(buffer);
+});
+
+app.post("/w/:workToken/interaction", requireWorkToken, express.json({ limit: "16kb" }), async (req, res) => {
+  const mode = String(req.body?.mode ?? "");
+  const voice = req.body?.voice ? String(req.body.voice) : null;
+
+  if (mode !== "text" && mode !== "audio") {
+    return res.status(400).json({ error: "mode deve ser 'text' ou 'audio'" });
+  }
+  if (mode === "audio" && !isValidVoice(voice)) {
+    return res.status(400).json({ error: "voz inválida ou ausente para o modo áudio" });
+  }
+
+  try {
+    await db.setInteractionMode(req.work.id, mode, voice);
+    log.info("WORK", `interaction mode=${mode} voice=${voice ?? "-"} work=${req.work.work_token}`);
+    res.json({ ok: true, interaction_mode: mode, voice: mode === "audio" ? voice : null });
+  } catch (err) {
+    log.error("WORK", `set interaction failed: ${err.message}`);
+    res.status(500).json({ error: "falha ao salvar modo de interação", detail: err.message });
   }
 });
 
@@ -942,8 +1017,32 @@ function sessionToClientState(sess) {
     currentPhase: sess.currentPhase,
     questionCount: sess.questionCount,
     hasUpload: !!sess.submissionPath,
+    interactionMode: sess.interactionMode || "text",
+    voice: sess.voice || null,
     chat: sess.conv_chat.map(m => ({ role: m.role, content: m.content })),
   };
+}
+
+// Gera TTS para um trecho do entrevistador, caches em memória, e devolve
+// { audio_url } pra anexar à resposta JSON. No modo texto, retorna {} —
+// nenhum custo, nenhuma chamada à OpenAI. No modo áudio, falha de TTS é
+// tratada como degradação graciosa: retorna { audio_error } e o frontend
+// mostra o texto como fallback.
+async function attachAudio(sess, content) {
+  if (!content || sess.interactionMode !== "audio") return {};
+  if (!sess.voice) {
+    log.warn("AUDIO", `audio mode without voice (sess=${sess.submissionToken})`);
+    return { audio_error: "no_voice_configured" };
+  }
+  try {
+    const buffer = await synthesizeSpeech(openai, TTS_MODEL, content, sess.voice);
+    const turnId = String(sess.audioTurnIdCounter++);
+    sess.audioCache.set(turnId, buffer);
+    return { audio_url: `/s/${encodeURIComponent(sess.submissionToken)}/audio/${turnId}` };
+  } catch (err) {
+    log.error("AUDIO", `TTS failed: ${err.message}`);
+    return { audio_error: "tts_failed" };
+  }
 }
 
 app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) => {
@@ -981,11 +1080,29 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
         introLog: [],
         introTransitionedAt: null,
         interviewPreparation: null,
+        // Modo de interação congelado no /start. Mudança posterior na
+        // configuração do trabalho não afeta sessões já iniciadas.
+        interactionMode: req.work.interaction_mode || "text",
+        voice: req.work.voice || null,
+        audioCache: new AudioCache(10),
+        audioTurnIdCounter: 0,
       };
       SESSIONS.set(token, sess);
-      log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} persona=${interviewerPersona.name}/${interviewerPersona.city} chat=${chatConversation.id} eval=${evalConversation.id}`);
+      log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"} persona=${interviewerPersona.name}/${interviewerPersona.city} chat=${chatConversation.id} eval=${evalConversation.id}`);
     } else {
-      log.info("SUBMISSION", `resume token=${token} phase=${sess.currentPhase} qn=${sess.questionCount}`);
+      // Init defensivo para sessões anteriores ao feature de áudio.
+      if (!sess.audioCache) sess.audioCache = new AudioCache(10);
+      if (typeof sess.audioTurnIdCounter !== "number") sess.audioTurnIdCounter = 0;
+      if (!sess.interactionMode) sess.interactionMode = "text";
+      // O "freeze" do modo só vale a partir do upload do trabalho. Antes
+      // disso, é seguro (e desejável) re-sincronizar com a configuração
+      // atual do trabalho — assim o professor pode mudar o modo entre dois
+      // acessos do aluno sem upload e o aluno pega a mudança.
+      if (sess.currentPhase === "awaiting_upload") {
+        sess.interactionMode = req.work.interaction_mode || "text";
+        sess.voice = req.work.voice || null;
+      }
+      log.info("SUBMISSION", `resume token=${token} phase=${sess.currentPhase} qn=${sess.questionCount} mode=${sess.interactionMode}`);
     }
 
     res.json({
@@ -1016,6 +1133,13 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
   sess.skippedQuestions = [];
   sess.conversationStartedAt = new Date().toISOString();
   sess.conversationCompleted = false;
+  // Re-sincroniza modo de interação e voz com o estado atual do trabalho.
+  // Cada upload é uma nova tentativa de entrevista — pega o modo
+  // configurado AGORA. Durante a entrevista (após este upload), o modo
+  // fica imutável até o próximo upload.
+  sess.interactionMode = req.work.interaction_mode || "text";
+  sess.voice = req.work.voice || null;
+  log.info("SUBMISSION", `upload token=${token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"}`);
   try { await deleteConversationLog(req.submission.id); }
   catch (err) { log.error("LOG", `delete old conversation log failed: ${err.message}`); }
 
@@ -1149,14 +1273,28 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, studentUpload.sin
       req.submission.student_label,
     );
 
-    res.json({ ok: true, assistant: greeting.message });
+    const audio = await attachAudio(sess, greeting.message);
+    res.json({ ok: true, assistant: greeting.message, ...audio });
   } catch (error) {
     log.error("UPLOAD", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
   }
 });
 
-app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) => {
+// Endpoint que serve o áudio do entrevistador a partir do cache em memória.
+// Retorna 404 se o turno foi evictado (cache LRU) — frontend mostra o texto
+// como fallback.
+app.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, res) => {
+  const token = req.submission.submission_token;
+  const sess = SESSIONS.get(token);
+  if (!sess) return res.status(404).json({ error: "session not found" });
+  const buffer = sess.audioCache?.get(String(req.params.turnId));
+  if (!buffer) return res.status(404).json({ error: "audio expired or not found" });
+  res.type("audio/mpeg");
+  res.send(buffer);
+});
+
+app.post("/s/:submissionToken/chat", requireSubmissionToken, audioUpload.single("audio"), async (req, res) => {
   const token = req.submission.submission_token;
   if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
   const sess = SESSIONS.get(token);
@@ -1169,7 +1307,28 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     return res.status(400).json({ error: "envie o trabalho (PDF) antes de iniciar a conversa" });
   }
 
-  const message = (req.body?.message || "").toString();
+  // Coerência de modo: se a sessão é áudio, espera áudio; se é texto,
+  // espera texto. Sem mistura no mesmo turno.
+  const isAudioMode = sess.interactionMode === "audio";
+  const hasAudio = !!req.file;
+  if (isAudioMode && !hasAudio) {
+    return res.status(400).json({ error: "esta entrevista está em modo áudio — envie uma gravação" });
+  }
+  if (!isAudioMode && hasAudio) {
+    return res.status(400).json({ error: "esta entrevista está em modo texto — envie uma mensagem escrita" });
+  }
+
+  let message;
+  if (hasAudio) {
+    try {
+      message = await transcribeAudio(openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm");
+    } catch (err) {
+      log.error("CHAT", `STT failed: ${err.message}`);
+      return res.status(400).json({ error: "transcription_failed", detail: "Não consegui entender o áudio. Tente gravar de novo." });
+    }
+  } else {
+    message = (req.body?.message || "").toString();
+  }
   if (!message) return res.status(400).json({ error: "empty message" });
 
   const persist = () => persistConversationLog(
@@ -1237,7 +1396,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
       log.info("CHAT", `intro continue ${log.preview(intro.message, 120)}`);
       await logLastConvItem(sess.conversationId_chat, "CONV:chat");
       persist();
-      return res.json({ channel: "chat", assistant: intro.message });
+      const audio = await attachAudio(sess, intro.message);
+      return res.json({ channel: "chat", assistant: intro.message, ...audio });
     }
 
     // Transition: ensure the plan is ready (may need to await the background
@@ -1282,7 +1442,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     log.info("CHAT", `intro transition + first plan question ${log.preview(combined, 160)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
     persist();
-    return res.json({ channel: "chat", assistant: combined });
+    const audio = await attachAudio(sess, combined);
+    return res.json({ channel: "chat", assistant: combined, ...audio });
   }
 
   const planHasMoreQuestions = sess.questionIndex < (sess.interviewPlan?.questions?.length ?? 0);
@@ -1383,10 +1544,12 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
           log.error("CHAT", `remote eval write (meta) failed: ${err.message}`);
         }
         persist();
+        const audio = await attachAudio(sess, winner.assistant_response);
         return res.json({
           channel: "modal",
           assistant_response: winner.assistant_response,
           restore_input: message,
+          ...audio,
         });
       }
 
@@ -1416,7 +1579,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
       log.info("CHAT", `user (triaged=${winner.type}) ${log.preview(message, 140)}`);
       await logLastConvItem(sess.conversationId_chat, "CONV:chat");
       persist();
-      return res.json({ channel: "chat", assistant: winner.assistant_response });
+      const audio = await attachAudio(sess, winner.assistant_response);
+      return res.json({ channel: "chat", assistant: winner.assistant_response, ...audio });
     }
 
     // No triage winner — sufficiency now blocks the move to the next turn.
@@ -1459,7 +1623,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
       log.info("CHAT", `user (follow_up=${sufficiency.issue}) ${log.preview(message, 140)}`);
       await logLastConvItem(sess.conversationId_chat, "CONV:chat");
       persist();
-      return res.json({ channel: "chat", assistant: intervention.assistant_response });
+      const audio = await attachAudio(sess, intervention.assistant_response);
+      return res.json({ channel: "chat", assistant: intervention.assistant_response, ...audio });
     }
     // accept (or aborted/failed defaulting to accept). Capture the transition
     // phrase generated by sufficiency so the normal flow can prepend it to
@@ -1563,7 +1728,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, async (req, res) =>
     log.info("CHAT", `assistant ${log.preview(assistantResponse, 140)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    res.json({ channel: "chat", assistant: assistantResponse });
+    const audio = await attachAudio(sess, assistantResponse);
+    res.json({ channel: "chat", assistant: assistantResponse, ...audio });
   } catch (error) {
     log.error("CHAT", `failed: ${error.message}`);
     res.status(500).json({ error: "Erro ao processar mensagem" });

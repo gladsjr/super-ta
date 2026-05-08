@@ -62,6 +62,31 @@
     </div>
 
     <div class="card">
+      <h3 class="card-title">Modo de interação com o aluno</h3>
+      <p class="card-sub">Define como o aluno conversa com o entrevistador. Esta escolha vale para novas submissões — entrevistas já em andamento mantêm o modo com que começaram.</p>
+      <div class="row" style="gap: var(--sp-4); margin-bottom: var(--sp-3)">
+        <label style="display:flex; align-items:center; gap: var(--sp-2)">
+          <input type="radio" name="interaction-mode" value="text" id="mode-text" checked/>
+          <span>Texto (chat escrito)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap: var(--sp-2)">
+          <input type="radio" name="interaction-mode" value="audio" id="mode-audio"/>
+          <span>Áudio (mensagens de voz)</span>
+        </label>
+      </div>
+      <div id="voice-row" class="row hidden">
+        <label class="label" for="voice-select" style="margin:0">Voz do entrevistador:</label>
+        <select id="voice-select" class="select" style="flex:1; min-width:240px"></select>
+        <button id="voice-preview" class="btn" type="button" title="Ouvir uma frase de exemplo">▶ Ouvir prévia</button>
+        <audio id="voice-audio" preload="none" style="display:none"></audio>
+      </div>
+      <div class="row" style="margin-top: var(--sp-3)">
+        <button id="save-interaction" class="btn btn-primary">Salvar modo</button>
+        <span id="interaction-msg" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="card">
       <h3 class="card-title">Tokens de envio para alunos</h3>
       <p class="card-sub">Gere tokens para cada aluno e compartilhe com eles. Cada token abre uma entrevista independente.</p>
       <div class="sub-form">
@@ -198,6 +223,8 @@ async function load() {
   avaliarBtn.title = j.work.has_enunciado
     ? 'Avaliar a clareza e completude do enunciado enviado'
     : 'Envie o enunciado antes de avaliar';
+
+  applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -337,6 +364,79 @@ document.getElementById('adapt-interviewer').onclick = async () => {
     btn.disabled = false;
     btn.textContent = prevText;
   }
+};
+
+// ---- Modo de interação (texto vs áudio) ----
+
+async function loadVoices() {
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/voices`);
+  if (!r.ok) return;
+  const j = await r.json();
+  const sel = document.getElementById('voice-select');
+  sel.innerHTML = j.voices.map(v => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.label)}</option>`).join('');
+}
+
+function applyInteractionStateToUI(mode, voice) {
+  const isAudio = mode === 'audio';
+  document.getElementById(isAudio ? 'mode-audio' : 'mode-text').checked = true;
+  document.getElementById('voice-row').classList.toggle('hidden', !isAudio);
+  if (voice) {
+    const sel = document.getElementById('voice-select');
+    if ([...sel.options].some(o => o.value === voice)) sel.value = voice;
+  }
+}
+
+document.querySelectorAll('input[name="interaction-mode"]').forEach(el => {
+  el.addEventListener('change', (e) => {
+    const isAudio = e.target.value === 'audio';
+    document.getElementById('voice-row').classList.toggle('hidden', !isAudio);
+  });
+});
+
+document.getElementById('voice-preview').onclick = async () => {
+  const btn = document.getElementById('voice-preview');
+  const audioEl = document.getElementById('voice-audio');
+  const voiceId = document.getElementById('voice-select').value;
+  if (!voiceId) return;
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = 'Carregando…';
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/voices/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voiceId }),
+    });
+    if (!r.ok) {
+      btn.textContent = 'Falha';
+      setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
+      return;
+    }
+    const blob = await r.blob();
+    audioEl.src = URL.createObjectURL(blob);
+    await audioEl.play();
+    btn.textContent = prev;
+    btn.disabled = false;
+  } catch (e) {
+    btn.textContent = 'Falha';
+    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
+  }
+};
+
+document.getElementById('save-interaction').onclick = async () => {
+  const msg = document.getElementById('interaction-msg');
+  msg.textContent = '';
+  const mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
+  const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
+  if (mode === 'audio' && !voice) { msg.textContent = 'Escolha uma voz.'; return; }
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/interaction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, voice }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = 'Erro: ' + (j.error || 'falha ao salvar'); return; }
+  msg.textContent = 'Modo salvo.';
 };
 
 document.getElementById('save-interviewer').onclick = async () => {
@@ -719,9 +819,14 @@ async function copyToken(btn, token) {
   setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
 }
 
-load();
-loadInterviewerTemplates();
-loadCurrentInterviewer();
+// loadVoices() popula o dropdown de vozes; load() aplica a voz salva. A
+// ordem importa: precisamos das opções no DOM antes de tentar selecionar.
+(async () => {
+  await loadVoices();
+  load();
+  loadInterviewerTemplates();
+  loadCurrentInterviewer();
+})();
 </script>
 </body>
 </html>

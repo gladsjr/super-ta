@@ -55,7 +55,21 @@ The system integrates with OpenAI using the following APIs:
 - **Vector Stores API**: For indexing documents for RAG and `file_search`.
 - **Conversations API**: To persist `conv_chat` and `conv_eval` server-side.
 - **Responses API**: For all generation tasks, including DocumentMap creation, evaluator signals, next questions, and scoring.
+- **Audio Transcriptions API** (STT): Converts student voice messages to text when the work is configured for audio mode.
+- **Audio Speech API** (TTS): Generates the interviewer's voice response when the work is configured for audio mode.
 The system uses `openai@^6.17.0` and does **not** use the Assistants API.
+
+### Interaction Modes (text vs audio)
+Each work is configured by the professor as either `text` (default) or `audio`. Mode is stored in `works.interaction_mode`; when audio, `works.voice` holds one of the fixed voices defined in `config/voices.js`.
+
+**Critical principle: analysis is always done on text.** Audio is the "last-mile" interface with the student only:
+- Inbound (student): voice → STT → text → identical pipeline as text mode.
+- Outbound (interviewer): LLM-generated text → TTS → audio served to the student.
+- All agents, evaluators, document map, vector store, conversation log and final report operate on text exclusively.
+
+Audio is not persisted in the database. TTS output is cached per-session in memory (LRU of size 10) and served via `GET /s/:submissionToken/audio/:turnId`. When the cache evicts or the server restarts, old turns gracefully degrade to text-only display.
+
+Mode is **re-synced with the current work configuration at two points**: (1) when a new session is created in `/s/:t/start`, and (2) on each `/s/:t/upload` (each upload is a fresh interview attempt — turnLog reset, etc.). Between these points, the mode is immutable for the in-flight interview. Professor changes affect: new students opening the link, students who haven't uploaded a PDF yet, and students who re-upload their PDF.
 
 ### Database
 - **PostgreSQL**: Used for user authentication (bcrypt-hashed passwords in `users` table) and session management (`app_session` table via `connect-pg-simple`).

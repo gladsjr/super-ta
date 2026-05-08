@@ -11,6 +11,13 @@ Convenções de prompt para agentes:
 - Qualquer agente novo que precise da agenda do entrevistador usa `renderInterviewerAgenda(yamlText)`. Não recrie a estrutura.
 - Contexto de conversa curto e bem-delimitado (ex.: turno corrente + intervenções) vem do estado local em `SESSIONS` (`sess.turnLog`), não da Conversations API. O parâmetro `conversation:` das Responses polui o `conv_chat` remoto com turnos internos; evite.
 
+Modo de interação (texto vs áudio) — diretriz permanente:
+- Análise é sempre em texto. Áudio existe apenas como última-milha da interface com o aluno (STT na entrada, TTS na saída). Agentes, evaluators, document map, vector store, log da conversa e relatório final operam só em texto. Nunca passar áudio para um agente.
+- Áudio não é persistido. TTS vai num cache LRU em memória de sessão (`sess.audioCache`, `lib/audio.js#AudioCache`) e é servido por `GET /s/:t/audio/:turnId`. Se o cache evict ou o servidor reiniciar, o frontend degrada para texto.
+- Modo de interação é re-sincronizado com a configuração atual do trabalho em **dois momentos**: (1) quando uma sessão nova é criada em `/s/:t/start`, e (2) a cada `/s/:t/upload` (cada upload é uma nova tentativa de entrevista — reset do turnLog, etc.). Entre esses dois pontos, o modo fica imutável durante a entrevista em andamento. Mudanças no painel do professor afetam: novos alunos abrindo o link, alunos que ainda não enviaram PDF, ou alunos que reenviarem o PDF.
+- Modelos STT e TTS vivem em `config/policy.yaml` (`stt_model`, `tts_model`). Fail-fast no boot se ausentes, igual aos outros.
+- Vozes ficam em `config/voices.js`. Adicionar uma voz nova = editar o array. Validação via `isValidVoice()` em qualquer ponto que aceite voiceId.
+
 Schema do banco — diretriz permanente:
 
 Migrations file-per-change. Toda mudança de schema vai num arquivo novo em `migrations/`, nunca em arquivo já aplicado.
