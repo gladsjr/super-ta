@@ -1,6 +1,6 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
-import { formatQuestionBlock, formatFullConversation } from "../lib/triagePrompt.js";
+import { formatQuestionBlock, formatFullConversation, formatCurrentTurnInterventions } from "../lib/triagePrompt.js";
 import { meteredResponses } from "../lib/billing.js";
 
 /**
@@ -64,10 +64,24 @@ Em entrevistadores pragmáticos, orientados à decisão ou objetivos, o critéri
 
 Quando interaction_style e evaluation_mode puxam para direções opostas (ex.: "pragmático" + "cobra justificativa de números"), interaction_style desempata em entrevistadores orientados à decisão: a forma de conduzir vence o modo de avaliação. Pragmático cobra justificativa só até a decisão estar clara, não além.
 
-PRINCÍPIO DOS RETORNOS DECRESCENTES:
-Examine os interventions[] do turno corrente que você recebe no histórico. Se a mesma lacuna já foi cobrada em follow-ups anteriores e o aluno triangulou a resposta por ângulos distintos — reformulações, estimativas direcionais, recomendações práticas — sem que cada nova rodada traga ganho informacional efetivamente novo, você está em retornos decrescentes. Continuar a cobrar custa engajamento do aluno e não altera a decisão que o entrevistador tomaria. Aceite. O ponto pode permanecer parcialmente aberto sem prejuízo da entrevista; o registro dos follow-ups anteriores já cumpre o papel de auditoria.
+PRINCÍPIO DOS RETORNOS DECRESCENTES (leia antes de decidir):
+Você recebe um bloco dedicado **HISTÓRICO DE INTERVENÇÕES NESTE TURNO** com a lista numerada e completa das tentativas anteriores do agente neste mesmo turno (follow-ups e clarificações), incluindo o que o aluno disse e o que o agente respondeu a cada uma. Use ESSE bloco — não tente recontar a partir do histórico geral.
+
+Antes de decidir, você é OBRIGADO a articular sua leitura desse histórico no campo "diminishing_returns_check" da saída JSON. Ele deve responder, em 1-2 frases honestas: a mesma lacuna já foi cobrada antes neste turno? quantas vezes? cada nova tentativa do aluno trouxe ângulo efetivamente novo ou foi reformulação/triangulação? esta nova mensagem mudaria a leitura do entrevistador?
+
+Se a mesma lacuna já foi cobrada ≥2 vezes neste turno e as tentativas do aluno por ângulos distintos não trouxeram ganho informacional novo, você está em retornos decrescentes. Decision=accept com transition_phrase humilde. O ponto fica registrado como parcialmente coberto nas interventions; isso já cumpre o papel de auditoria. Continuar a cobrar custa engajamento do aluno e não altera a decisão do entrevistador.
 
 Este princípio vale mesmo para entrevistadores rigorosos: ninguém pressiona indefinidamente o mesmo ponto sem ganho — passa a ser teimosia, não rigor.
+
+SINAIS EXPLÍCITOS DE PARADA DO ALUNO:
+Quando o aluno sinaliza verbalmente que não tem mais o que oferecer sobre o ponto cobrado, isso é gatilho forte para decision=accept com transition_phrase humilde, MESMO que tecnicamente ainda exista lacuna. Exemplos de sinais (não exaustivo):
+- "não sei se tem mais o que explicar (além disso)"
+- "é isso (mesmo)" / "é isso que eu tenho"
+- "isso você já falou" / "isso eu já disse"
+- "acho que respondi" / "não sei o que mais (acrescentar/dizer)"
+- resposta muito curta e sem substância nova depois de ter dito o essencial em turnos anteriores
+
+Insistir após esse tipo de sinal não traz informação nova, frustra o aluno e degrada a entrevista. Em pragmáticos e em orientados à decisão, esses sinais quase sempre coincidem com "decisão suficiente já tomada".
 
 PRIORIDADE EM CASO DE AMBOS:
 Se houver tanto incoerência quanto incompletude, marque "incoherence" no campo "issue" (mais grave) e foque a follow_up nela. Se quiser cobrir os dois pontos, faça uma pergunta de complemento curta que ataca o ponto da incoerência primeiro.
@@ -90,8 +104,9 @@ Em ambos os casos:
 - 1 frase só, máximo 2.
 - NÃO inclua a próxima pergunta — o servidor anexa a pergunta automaticamente após a transition_phrase.
 
-Formato de saída — retorne APENAS JSON válido, sem markdown:
+Formato de saída — retorne APENAS JSON válido, sem markdown. A ORDEM DOS CAMPOS importa: primeiro o check dos retornos decrescentes (você é obrigado a articulá-lo antes de decidir), só depois decision:
 {
+  "diminishing_returns_check": "<1-2 frases honestas lendo o HISTÓRICO DE INTERVENÇÕES NESTE TURNO: a mesma lacuna já foi cobrada antes? quantas vezes? a nova mensagem traz ângulo efetivamente novo? — escreva 'primeira resposta deste turno' se não há intervenções anteriores>",
   "decision": "follow_up" | "accept",
   "issue": "incoherence" | "incomplete" | "none",
   "follow_up_question": "<texto da pergunta de complemento ou null>",
@@ -104,6 +119,7 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatFullConversation(turnLog);
+        const turnInterventionsBlock = formatCurrentTurnInterventions(currentTurn);
 
         const userContent = `**AGENDA DO ENTREVISTADOR**
 ${agendaBlock}
@@ -114,12 +130,15 @@ ${questionBlock}
 **HISTÓRICO COMPLETO DA CONVERSA**
 ${historyBlock}
 
+**HISTÓRICO DE INTERVENÇÕES NESTE TURNO**
+${turnInterventionsBlock}
+
 **ÚLTIMA MENSAGEM DO ALUNO (a ser avaliada)**
 """
 ${studentMessage}
 """
 
-Decida accept ou follow_up considerando a agenda. Use file_search se precisar confirmar incoerência com o trabalho. Retorne apenas o JSON.`;
+Decida accept ou follow_up considerando a agenda. Antes da decisão, articule no campo diminishing_returns_check sua leitura honesta do HISTÓRICO DE INTERVENÇÕES NESTE TURNO. Use file_search se precisar confirmar incoerência com o trabalho. Retorne apenas o JSON.`;
 
         const payload = {
             model: this.model,
@@ -153,7 +172,10 @@ Decida accept ou follow_up considerando a agenda. Use file_search se precisar co
         const transitionPhrase = decision === "accept"
             ? (parsed.transition_phrase ? String(parsed.transition_phrase).trim() : null)
             : null;
-        log.info("AGENT:AnswerSufficiency", `decision=${decision} issue=${issue}${transitionPhrase ? ` phrase="${log.preview(transitionPhrase, 80)}"` : ""}`);
+        const diminishingReturnsCheck = parsed.diminishing_returns_check
+            ? String(parsed.diminishing_returns_check).trim()
+            : null;
+        log.info("AGENT:AnswerSufficiency", `decision=${decision} issue=${issue}${diminishingReturnsCheck ? ` check="${log.preview(diminishingReturnsCheck, 120)}"` : ""}${transitionPhrase ? ` phrase="${log.preview(transitionPhrase, 80)}"` : ""}`);
         return {
             type: AnswerSufficiencyAgent.TYPE,
             channel: AnswerSufficiencyAgent.CHANNEL,
@@ -162,6 +184,7 @@ Decida accept ou follow_up considerando a agenda. Use file_search se precisar co
             follow_up_question: parsed.follow_up_question ?? null,
             transition_phrase: transitionPhrase,
             reason: String(parsed.reason ?? ""),
+            diminishing_returns_check: diminishingReturnsCheck,
         };
     }
 }

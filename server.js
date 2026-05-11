@@ -316,6 +316,108 @@ function sessionMeterCtx(sess) {
   return { workId: sess.workId ?? null, submissionId: sess.submissionId ?? null };
 }
 
+// Pré-processamento que roda em background no /upload, em paralelo com a
+// saudação: PDF do aluno no DB, uploads para a OpenAI, vector store,
+// document map e plano de entrevista. Atualiza `sess.interviewPlan` etc.
+//
+// Cada etapa envolvida em uma "step" rotulada para que o erro identifique
+// exatamente o que falhou. A promessa REJEITA em caso de falha (não usamos
+// `.catch` engolidor) — quem aguarda recebe a causa raiz. Pode ser invocada
+// novamente em retry usando `sess.preparationInputs` (o handler de chat
+// dispara um retry quando a primeira execução falhou).
+function startInterviewPreparation(sess) {
+  const params = sess.preparationInputs;
+  if (!params) throw new Error("startInterviewPreparation: missing preparationInputs");
+  sess.interviewPreparationError = null;
+  sess.interviewPreparation = (async () => {
+    try {
+      log.info("PREP", `step=upload start submission=${params.token}`);
+      const [, studentFile, enunciadoFile] = await Promise.all([
+        db.setStudentPdf(params.submissionId, params.studentBuffer, params.studentFilename),
+        openai.files.create({
+          file: await OpenAI.toFile(params.studentBuffer, params.studentFilename),
+          purpose: "user_data",
+        }),
+        openai.files.create({
+          file: await OpenAI.toFile(params.enunciadoBlob.pdf, params.enunciadoBlob.filename || "enunciado.pdf"),
+          purpose: "user_data",
+        }),
+      ]).catch(err => { throw new Error(`step=upload failed: ${err.message}`); });
+      sess.openaiFileId = studentFile.id;
+      log.info("PREP", `step=upload ok student=${studentFile.id} enunciado=${enunciadoFile.id}`);
+
+      log.info("PREP", "step=parallel(vector_store,document_map,plan) start");
+      const settled = await Promise.allSettled([
+        createVectorStoreWithFile(studentFile.id, params.token),
+        mapBuilderAgent.generateDocumentMap(sess.conversationId_eval, studentFile.id, params.meterCtx),
+        log.span("UPLOAD", "interview plan responses.create", () =>
+          meteredResponses(
+            { ...params.meterCtx, agentLabel: "UPLOAD:interview_plan", model: PRINCIPAL_REASONING_MODEL },
+            () => openai.responses.create({
+              model: PRINCIPAL_REASONING_MODEL,
+              instructions: params.renderedPrompt,
+              input: [{
+                role: "user",
+                content: [
+                  { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
+                  { type: "input_file", file_id: enunciadoFile.id },
+                  { type: "input_file", file_id: studentFile.id },
+                ],
+              }],
+            })
+          )
+        ),
+      ]);
+      const stepLabels = ["vector_store", "document_map", "plan"];
+      const failures = settled
+        .map((r, i) => r.status === "rejected" ? `${stepLabels[i]}: ${r.reason?.message ?? r.reason}` : null)
+        .filter(Boolean);
+      if (failures.length > 0) {
+        throw new Error(`step=parallel failed (${failures.join(" | ")})`);
+      }
+      const [vsRes, mapRes, planRes] = settled;
+      sess.vectorStoreId = vsRes.value;
+      sess.documentMap = mapRes.value;
+      const planResp = planRes.value;
+      log.info("PREP", `step=parallel ok vector_store=${sess.vectorStoreId}`);
+
+      try {
+        await openai.conversations.items.create(sess.conversationId_eval, {
+          items: [{ role: "developer", content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}` }],
+        });
+        await logLastConvItem(sess.conversationId_eval, "CONV:eval");
+      } catch (err) {
+        // Conversation log remoto não é fatal — só registra.
+        log.error("PREP", `remote eval write (document_map) failed: ${err.message}`);
+      }
+
+      let plan;
+      try {
+        plan = parseQuestionsJSON(planResp.output_text || "");
+      } catch (err) {
+        log.error("PREP", `step=parse_plan failed: ${err.message}`);
+        log.error("PREP", `raw plan output: ${planResp.output_text}`);
+        throw new Error(`step=parse_plan failed: ${err.message}`);
+      }
+      const firstQuestion = plan?.questions?.[0]?.question;
+      if (!firstQuestion || typeof firstQuestion !== "string") {
+        throw new Error("step=validate_plan failed: plano sem primeira pergunta válida");
+      }
+      log.info("INTERVIEW_PLAN", `submission=${params.token} questions=${plan?.questions?.length ?? 0}`);
+      log.info("INTERVIEW_PLAN", `full plan:\n${JSON.stringify(plan, null, 2)}`);
+      sess.interviewPlan = plan;
+      log.info("PREP", `done submission=${params.token}`);
+    } catch (err) {
+      log.error("PREP", `prep failed submission=${params.token}: ${err.message}`);
+      sess.interviewPreparationError = err;
+      throw err;
+    }
+  })();
+  // .catch silencioso para evitar UnhandledPromiseRejection — quem realmente
+  // precisa do erro chama `await sess.interviewPreparation` num try/catch.
+  sess.interviewPreparation.catch(() => {});
+}
+
 const INTRO_TURN_CAP = 3;
 
 // Cap on consecutive skips by the relevance agent. With a 10-question plan
@@ -1235,40 +1337,36 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
   try { await deleteConversationLog(req.submission.id); }
   catch (err) { log.error("LOG", `delete old conversation log failed: ${err.message}`); }
 
-  const interviewerYamlText = await db.getInterviewerYaml(req.work.id);
+  // Reads do DB em paralelo (são leves, mas não há razão para sequenciar).
+  const [interviewerYamlText, enunciadoBlob] = await Promise.all([
+    db.getInterviewerYaml(req.work.id),
+    db.getEnunciadoBlob(req.work.id),
+  ]);
   if (!interviewerYamlText) {
     return res.status(400).json({ error: "O professor ainda não configurou o entrevistador para este trabalho." });
   }
-  const enunciadoBlob = await db.getEnunciadoBlob(req.work.id);
   if (!enunciadoBlob) {
     return res.status(400).json({ error: "O professor ainda não enviou o enunciado para este trabalho." });
   }
 
   try {
     log.info("UPLOAD", `student file=${studentFilename} bytes=${studentBuffer.length} submission=${token}`);
-    await db.setStudentPdf(req.submission.id, studentBuffer, studentFilename);
-
-    const studentFile = await openai.files.create({
-      file: await OpenAI.toFile(studentBuffer, studentFilename),
-      purpose: "user_data",
-    });
-    sess.openaiFileId = studentFile.id;
-    log.info("UPLOAD", `openai student file=${studentFile.id}`);
-
-    const enunciadoFile = await openai.files.create({
-      file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
-      purpose: "user_data",
-    });
-    log.info("UPLOAD", `openai enunciado file=${enunciadoFile.id}`);
-
-    sess.vectorStoreId = await createVectorStoreWithFile(studentFile.id, token);
 
     sess.interviewerYamlText = interviewerYamlText;
+    sess.currentPhase = "intro";
+    sess.questionIndex = 1;
+    const meterCtx = sessionMeterCtx(sess);
 
-    // Heavy work (document map + interview plan generation) launched in
-    // background. The student is kept busy with the intro phase while these
-    // run. The promise lands on sess.interviewPlan when ready; if the intro
-    // hits its cap before, the chat handler awaits this same promise.
+    // ESTRATÉGIA DE LATÊNCIA: o cumprimento de abertura usa apenas o YAML do
+    // entrevistador e a persona — nada do upload do aluno, nada do vector
+    // store. Disparamos a saudação (fast model, ~1-2s) em paralelo com TODA
+    // a preparação pesada (uploads de PDF, vector store, document map, plano
+    // de entrevista). O caminho crítico até o aluno ver a saudação fica em
+    // O(saudação), em vez de O(uploads + vector store + saudação).
+    //
+    // O resultado da prep aterrissa em sess.interviewPlan/documentMap/etc;
+    // se o intro chegar ao cap antes da prep terminar, o handler de chat
+    // aguarda sess.interviewPreparation explicitamente.
     const renderedPrompt = renderInterviewPrompt(
       loadInterviewPromptTemplate(),
       interviewerYamlText,
@@ -1276,61 +1374,22 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
     );
     log.prompt("UPLOAD:interview_plan", renderedPrompt);
 
-    const meterCtx = sessionMeterCtx(sess);
-    sess.interviewPreparation = (async () => {
-      const [docMap, planResp] = await Promise.all([
-        mapBuilderAgent.generateDocumentMap(sess.conversationId_eval, sess.openaiFileId, meterCtx),
-        log.span("UPLOAD", "interview plan responses.create", () =>
-          meteredResponses(
-            { ...meterCtx, agentLabel: "UPLOAD:interview_plan", model: PRINCIPAL_REASONING_MODEL },
-            () => openai.responses.create({
-              model: PRINCIPAL_REASONING_MODEL,
-              instructions: renderedPrompt,
-              input: [{
-                role: "user",
-                content: [
-                  { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
-                  { type: "input_file", file_id: enunciadoFile.id },
-                  { type: "input_file", file_id: studentFile.id },
-                ],
-              }],
-            })
-          )
-        ),
-      ]);
-      sess.documentMap = docMap;
-      try {
-        await openai.conversations.items.create(sess.conversationId_eval, {
-          items: [{ role: "developer", content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}` }],
-        });
-        await logLastConvItem(sess.conversationId_eval, "CONV:eval");
-      } catch (err) {
-        log.error("UPLOAD", `remote eval write (document_map) failed: ${err.message}`);
-      }
-      let plan;
-      try {
-        plan = parseQuestionsJSON(planResp.output_text || "");
-      } catch (err) {
-        log.error("UPLOAD", `failed to parse interview plan JSON: ${err.message}`);
-        log.error("UPLOAD", `raw output: ${planResp.output_text}`);
-        throw new Error("O modelo não retornou JSON válido para o plano de entrevista.");
-      }
-      log.info("INTERVIEW_PLAN", `submission=${token} questions=${plan?.questions?.length ?? 0}`);
-      log.info("INTERVIEW_PLAN", `full plan:\n${JSON.stringify(plan, null, 2)}`);
-      const firstQuestion = plan?.questions?.[0]?.question;
-      if (!firstQuestion || typeof firstQuestion !== "string") {
-        throw new Error("O plano de entrevista não contém uma primeira pergunta válida.");
-      }
-      sess.interviewPlan = plan;
-    })().catch(err => {
-      log.error("UPLOAD", `background prep failed: ${err.message}`);
-      sess.interviewPreparationError = err;
-    });
+    // Inputs da prep ficam guardados na sessão para permitir retry caso a
+    // primeira execução em background falhe (ex.: timeout transitório de
+    // rede). Sem isso, uma falha durante a fase intro deixaria o aluno preso.
+    sess.preparationInputs = {
+      submissionId: req.submission.id,
+      studentBuffer,
+      studentFilename,
+      enunciadoBlob,
+      renderedPrompt,
+      meterCtx,
+      token,
+    };
+    startInterviewPreparation(sess);
 
-    // Intro phase: greet the student with the persona. Fast model, runs
-    // while the heavy preparation above is still in flight.
-    sess.currentPhase = "intro";
-    sess.questionIndex = 1;
+    // Cumprimento — disparado em paralelo com a prep pesada acima. É só esse
+    // que precisa terminar para responder ao aluno.
     const greeting = await introductionAgent.evaluate({
       interviewerYamlText,
       persona: sess.interviewerPersona,
@@ -1396,11 +1455,13 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
   if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
   const sess = SESSIONS.get(token);
   if (!sess) return res.status(400).json({ error: "call /start first" });
-  // documentMap is populated by background prep — only vectorStoreId is required
-  // synchronously (created in /upload before the response). The intro phase does
-  // not depend on documentMap; the interviewing phase only starts once the plan
-  // (and therefore the documentMap, set in the same background task) is ready.
-  if (!sess.vectorStoreId) {
+  // O /upload move a sessão de "awaiting_upload" para "intro" e dispara
+  // sess.interviewPreparation (uploads de arquivo + vector store + plan +
+  // documentMap) em paralelo com a saudação. Durante intro, nada disso é
+  // necessário — o IntroductionAgent só usa o YAML do entrevistador. A
+  // transição para "interviewing" aguarda explicitamente a prep terminar
+  // (ver mais abaixo no handler).
+  if (sess.currentPhase === "awaiting_upload") {
     return res.status(400).json({ error: "envie o trabalho (PDF) antes de iniciar a conversa" });
   }
 
@@ -1502,21 +1563,31 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
       return res.json({ channel: "chat", assistant: intro.message, ...audio });
     }
 
-    // Transition: ensure the plan is ready (may need to await the background
-    // prep if the cap fired before it finished), then push the first plan
-    // turn and combine the transition phrase with the first question.
+    // Transition: garantir que o plano está pronto. Se a prep ainda está
+    // rodando, esperamos. Se já falhou, tentamos uma vez de novo. Se mesmo
+    // assim falhar, devolvemos o erro REAL (não a mensagem genérica) — útil
+    // pra debug quando algo trava em produção.
     if (!sess.interviewPlan) {
-      log.info("INTRO", "transitioning but plan not ready — awaiting interviewPreparation");
-      try {
-        await sess.interviewPreparation;
-      } catch (err) {
-        log.error("INTRO", `interviewPreparation failed during transition: ${err.message}`);
-        return res.status(500).json({ error: "Falha ao preparar a entrevista. Tente novamente." });
+      // Aguarda execução em curso (resolve com sucesso ou rejeita silenciosamente).
+      try { await sess.interviewPreparation; }
+      catch (err) { log.error("INTRO", `interviewPreparation failed: ${err.message}`); }
+
+      // Se falhou e temos os inputs guardados, dispara uma retry em foreground.
+      if (!sess.interviewPlan && sess.interviewPreparationError && sess.preparationInputs) {
+        log.info("INTRO", `retrying interview preparation after failure: ${sess.interviewPreparationError.message}`);
+        startInterviewPreparation(sess);
+        try { await sess.interviewPreparation; }
+        catch (err) { log.error("INTRO", `interviewPreparation retry failed: ${err.message}`); }
       }
-    }
-    if (!sess.interviewPlan) {
-      log.error("INTRO", "interviewPlan still missing after await");
-      return res.status(500).json({ error: "Falha ao preparar a entrevista. Tente novamente." });
+
+      if (!sess.interviewPlan) {
+        const detail = sess.interviewPreparationError?.message || "plano indisponível";
+        log.error("INTRO", `transition aborted: ${detail}`);
+        return res.status(500).json({
+          error: "Falha ao preparar a entrevista. Tente novamente.",
+          detail,
+        });
+      }
     }
 
     const firstPlanQuestion = sess.interviewPlan.questions[0];
@@ -1698,6 +1769,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
         assistant_response: sufficiency.follow_up_question,
         channel: "chat",
         reason: sufficiency.reason,
+        diminishing_returns_check: sufficiency.diminishing_returns_check ?? null,
         at: new Date().toISOString(),
       };
       if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
