@@ -42,6 +42,7 @@ import {
 import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt.js";
 import { runMigrations } from "./lib/migrations.js";
 import { transcribeAudio, synthesizeSpeech, AudioCache } from "./lib/audio.js";
+import { getAudioDurationSeconds } from "./lib/audioMeta.js";
 import { VOICES, isValidVoice } from "./config/voices.js";
 import {
   loadPricing,
@@ -1230,7 +1231,11 @@ async function attachAudio(sess, content) {
     );
     const turnId = String(sess.audioTurnIdCounter++);
     sess.audioCache.set(turnId, buffer);
-    return { audio_url: `/s/${encodeURIComponent(sess.submissionToken)}/audio/${turnId}` };
+    const durationSec = await getAudioDurationSeconds(buffer, "audio/mpeg");
+    return {
+      audio_url: `/s/${encodeURIComponent(sess.submissionToken)}/audio/${turnId}`,
+      audio_duration_seconds: durationSec,
+    };
   } catch (err) {
     log.error("AUDIO", `TTS failed: ${err.message}`);
     return { audio_error: "tts_failed" };
@@ -1401,7 +1406,14 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
       meterCtx,
     });
 
-    const greetingEntry = { role: "assistant", content: greeting.message, at: new Date().toISOString() };
+    // TTS antes do push para podermos persistir a duração junto com o item.
+    const audio = await attachAudio(sess, greeting.message);
+    const greetingEntry = {
+      role: "assistant",
+      content: greeting.message,
+      at: new Date().toISOString(),
+      audio_duration_seconds: audio.audio_duration_seconds ?? null,
+    };
     sess.introLog.push(greetingEntry);
     sess.conv_chat.push({ role: "assistant", content: greeting.message });
     sess.conv_eval.push({ role: "assistant", content: greeting.message, metadata: { phase: "intro", persona: sess.interviewerPersona, timestamp: Date.now() } });
@@ -1429,7 +1441,6 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
       req.submission.student_label,
     );
 
-    const audio = await attachAudio(sess, greeting.message);
     res.json({ ok: true, assistant: greeting.message, ...audio });
   } catch (error) {
     log.error("UPLOAD", `failed: ${error.message}`);
@@ -1477,8 +1488,15 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
   }
 
   let message;
+  // Duração da mensagem de voz do aluno (segundos). Em modo texto fica null.
+  // Probada do buffer original antes do STT — não depende do shape do response.
+  let studentAudioDurationSec = null;
   if (hasAudio) {
     try {
+      studentAudioDurationSec = await getAudioDurationSeconds(
+        req.file.buffer,
+        req.file.mimetype || null,
+      );
       const sttResult = await meteredStt(
         { ...sessionMeterCtx(sess), model: STT_MODEL },
         () => transcribeAudio(openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm")
@@ -1508,7 +1526,12 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
   // the interview proper. Triage/sufficiency/relevance do not run here.
   // ------------------------------------------------------------------
   if (sess.currentPhase === "intro") {
-    sess.introLog.push({ role: "user", content: message, at: new Date().toISOString() });
+    sess.introLog.push({
+      role: "user",
+      content: message,
+      at: new Date().toISOString(),
+      audio_duration_seconds: studentAudioDurationSec,
+    });
     sess.conv_chat.push({ role: "user", content: message });
     sess.conv_eval.push({ role: "user", content: message, metadata: { phase: "intro", timestamp: Date.now() } });
     sess.history = sess.conv_chat;
@@ -1546,7 +1569,13 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     }
 
     if (intro.decision === "continue_intro") {
-      sess.introLog.push({ role: "assistant", content: intro.message, at: new Date().toISOString() });
+      const audio = await attachAudio(sess, intro.message);
+      sess.introLog.push({
+        role: "assistant",
+        content: intro.message,
+        at: new Date().toISOString(),
+        audio_duration_seconds: audio.audio_duration_seconds ?? null,
+      });
       sess.conv_chat.push({ role: "assistant", content: intro.message });
       sess.conv_eval.push({ role: "assistant", content: intro.message, metadata: { phase: "intro", timestamp: Date.now() } });
       sess.history = sess.conv_chat;
@@ -1559,7 +1588,6 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
       log.info("CHAT", `intro continue ${log.preview(intro.message, 120)}`);
       await logLastConvItem(sess.conversationId_chat, "CONV:chat");
       persist();
-      const audio = await attachAudio(sess, intro.message);
       return res.json({ channel: "chat", assistant: intro.message, ...audio });
     }
 
@@ -1593,9 +1621,21 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     const firstPlanQuestion = sess.interviewPlan.questions[0];
     const combined = `${intro.message}\n\n${firstPlanQuestion.question}`;
 
-    sess.introLog.push({ role: "assistant", content: intro.message, at: new Date().toISOString() });
+    // TTS antes do push para podermos persistir a duração no turno e no
+    // intro log de uma vez só.
+    const audio = await attachAudio(sess, combined);
+    const transitionAudioSec = audio.audio_duration_seconds ?? null;
+
+    sess.introLog.push({
+      role: "assistant",
+      content: intro.message,
+      at: new Date().toISOString(),
+      audio_duration_seconds: transitionAudioSec,
+    });
     sess.introTransitionedAt = new Date().toISOString();
-    sess.turnLog.push(turnFromPlanQuestion(0, firstPlanQuestion));
+    const firstTurn = turnFromPlanQuestion(0, firstPlanQuestion);
+    firstTurn.question_audio_duration_seconds = transitionAudioSec;
+    sess.turnLog.push(firstTurn);
     sess.questionIndex = 1;
     sess.currentPhase = "interviewing";
 
@@ -1615,7 +1655,6 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     log.info("CHAT", `intro transition + first plan question ${log.preview(combined, 160)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
     persist();
-    const audio = await attachAudio(sess, combined);
     return res.json({ channel: "chat", assistant: combined, ...audio });
   }
 
@@ -1690,6 +1729,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     if (winner) {
       sufficiencyAbort.abort();
       log.info("TRIAGE", `winner=${winner.type} intensity=${winner.intensity} channel=${winner.channel}`);
+      // TTS antes do push para anexar a duração ao intervention.
+      const audio = await attachAudio(sess, winner.assistant_response);
       const intervention = {
         type: winner.type,
         student_message: message,
@@ -1698,6 +1739,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
         channel: winner.channel,
         scores,
         at: new Date().toISOString(),
+        student_audio_duration_seconds: studentAudioDurationSec,
+        assistant_audio_duration_seconds: audio.audio_duration_seconds ?? null,
       };
       if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
       currentTurn.interventions.push(intervention);
@@ -1719,7 +1762,6 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
           log.error("CHAT", `remote eval write (meta) failed: ${err.message}`);
         }
         persist();
-        const audio = await attachAudio(sess, winner.assistant_response);
         return res.json({
           channel: "modal",
           assistant_response: winner.assistant_response,
@@ -1754,7 +1796,6 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
       log.info("CHAT", `user (triaged=${winner.type}) ${log.preview(message, 140)}`);
       await logLastConvItem(sess.conversationId_chat, "CONV:chat");
       persist();
-      const audio = await attachAudio(sess, winner.assistant_response);
       return res.json({ channel: "chat", assistant: winner.assistant_response, ...audio });
     }
 
@@ -1762,6 +1803,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     const sufficiency = await sufficiencyPromise;
     if (sufficiency.decision === "follow_up" && sufficiency.follow_up_question) {
       log.info("AGENT:AnswerSufficiency", `follow_up issue=${sufficiency.issue}`);
+      // TTS antes do push para anexar a duração ao intervention.
+      const audio = await attachAudio(sess, sufficiency.follow_up_question);
       const intervention = {
         type: "follow_up",
         issue: sufficiency.issue,
@@ -1771,6 +1814,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
         reason: sufficiency.reason,
         diminishing_returns_check: sufficiency.diminishing_returns_check ?? null,
         at: new Date().toISOString(),
+        student_audio_duration_seconds: studentAudioDurationSec,
+        assistant_audio_duration_seconds: audio.audio_duration_seconds ?? null,
       };
       if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
       currentTurn.interventions.push(intervention);
@@ -1799,7 +1844,6 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
       log.info("CHAT", `user (follow_up=${sufficiency.issue}) ${log.preview(message, 140)}`);
       await logLastConvItem(sess.conversationId_chat, "CONV:chat");
       persist();
-      const audio = await attachAudio(sess, intervention.assistant_response);
       return res.json({ channel: "chat", assistant: intervention.assistant_response, ...audio });
     }
     // accept (or aborted/failed defaulting to accept). Capture the transition
@@ -1822,6 +1866,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
   if (currentTurn && currentTurn.answer == null) {
     currentTurn.answer = message;
     currentTurn.answered_at = new Date().toISOString();
+    currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
     if (acceptedTransitionPhrase) {
       currentTurn.transition_to_next = acceptedTransitionPhrase;
     }
@@ -1877,6 +1922,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     }
 
     let assistantResponse;
+    let nextTurnRef = null;
     if (sess.questionIndex < sess.interviewPlan.questions.length) {
       const planQuestion = sess.interviewPlan.questions[sess.questionIndex];
       const nextQuestion = planQuestion?.question;
@@ -1885,7 +1931,8 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
       }
       const phrase = acceptedTransitionPhrase || "Próxima pergunta.";
       assistantResponse = `${phrase}\n\n${nextQuestion}`;
-      sess.turnLog.push(turnFromPlanQuestion(sess.turnLog.length, planQuestion));
+      nextTurnRef = turnFromPlanQuestion(sess.turnLog.length, planQuestion);
+      sess.turnLog.push(nextTurnRef);
       sess.questionIndex++;
       persist();
       log.info("TURN", `q#${sess.questionIndex} (sequential from plan)${acceptedTransitionPhrase ? " with sufficiency phrase" : " with default phrase"}`);
@@ -1906,6 +1953,12 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
     const audio = await attachAudio(sess, assistantResponse);
+    // Persiste a duração do TTS no novo turno (quando há próximo turno do plano)
+    // — essa é a duração do áudio da pergunta + frase de transição.
+    if (nextTurnRef) {
+      nextTurnRef.question_audio_duration_seconds = audio.audio_duration_seconds ?? null;
+      persist();
+    }
     res.json({ channel: "chat", assistant: assistantResponse, ...audio });
   } catch (error) {
     log.error("CHAT", `failed: ${error.message}`);
