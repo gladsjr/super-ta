@@ -2,6 +2,7 @@ import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatFullConversation } from "../lib/triagePrompt.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 /**
  * QuestionRelevanceAgent
@@ -21,8 +22,10 @@ export class QuestionRelevanceAgent {
         if (!model) throw new Error("Missing model for QuestionRelevanceAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você é um auxiliar de uma entrevista oral.
-Sua única tarefa é decidir se a próxima pergunta planejada do entrevistador
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Audience orchestrator_only — saída só para outras
+        // partes do sistema, modo da interação irrelevante aqui.
+        this.systemPromptBody = `Sua função específica: decidir se a próxima pergunta planejada do entrevistador
 ainda deve ser feita ao aluno, considerando toda a conversa que já aconteceu.
 
 Sua decisão é binária: "ask" ou "skip".
@@ -51,6 +54,9 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
     }
 
     async evaluate({ interviewerYamlText, turnLog, candidateQuestion, meterCtx = null }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "orchestrator_only" })}
+
+${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const historyBlock = formatFullConversation(turnLog);
         const candidateBlock = this.formatCandidate(candidateQuestion);
@@ -68,11 +74,11 @@ Decida ask ou skip. Retorne apenas o JSON.`;
 
         const payload = {
             model: this.model,
-            instructions: this.systemPrompt,
+            instructions: systemPrompt,
             input: [{ role: "user", content: userContent }],
         };
 
-        log.prompt("AGENT:QuestionRelevance", this.systemPrompt + "\n\n" + userContent);
+        log.prompt("AGENT:QuestionRelevance", systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:QuestionRelevance", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:QuestionRelevance", model: this.model },

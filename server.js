@@ -7,6 +7,7 @@ import multer from "multer";
 import yaml from "js-yaml";
 import OpenAI from "openai";
 import { MapBuilderAgent } from "./agents/MapBuilderAgent.js";
+import { PlanBuilderAgent } from "./agents/PlanBuilderAgent.js";
 import { ComprehensionEvaluatorAgent } from "./agents/ComprehensionEvaluatorAgent.js";
 import { ClarificationEvaluatorAgent } from "./agents/ClarificationEvaluatorAgent.js";
 import { ScopeClarificationAgent } from "./agents/ScopeClarificationAgent.js";
@@ -39,7 +40,6 @@ import {
   sanitizeLabel,
   PROJECT_ROOT,
 } from "./lib/middleware.js";
-import { renderInterviewPrompt, parseQuestionsJSON } from "./lib/interviewPrompt.js";
 import { runMigrations } from "./lib/migrations.js";
 import { transcribeAudio, synthesizeSpeech, AudioCache } from "./lib/audio.js";
 import { getAudioDurationSeconds } from "./lib/audioMeta.js";
@@ -137,17 +137,6 @@ function loadSystemPrompt() {
   const cfgDir = path.join(__dirname, "config");
   const systemPrompt = fs.readFileSync(path.join(cfgDir, "system_prompt.txt"), "utf-8");
   return systemPrompt;
-}
-
-let _interviewTemplateCache = null;
-function loadInterviewPromptTemplate() {
-  if (_interviewTemplateCache == null) {
-    _interviewTemplateCache = fs.readFileSync(
-      path.join(__dirname, "config", "interview_prompt_template.txt"),
-      "utf-8"
-    );
-  }
-  return _interviewTemplateCache;
 }
 
 async function getConversationContext(conversationId, limit = 12) {
@@ -298,6 +287,7 @@ async function createVectorStoreWithFile(fileId, sessionId) {
 
 // Initialize agents (singletons) with configured models
 const mapBuilderAgent = new MapBuilderAgent(openai, PRINCIPAL_REASONING_MODEL);
+const planBuilderAgent = new PlanBuilderAgent(openai, PRINCIPAL_REASONING_MODEL);
 const comprehensionEvaluator = new ComprehensionEvaluatorAgent(openai, PRINCIPAL_REASONING_MODEL);
 const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, PRINCIPAL_REASONING_MODEL);
 const scopeClarificationAgent = new ScopeClarificationAgent(openai, FAST_MODEL);
@@ -351,23 +341,13 @@ function startInterviewPreparation(sess) {
       const settled = await Promise.allSettled([
         createVectorStoreWithFile(studentFile.id, params.token),
         mapBuilderAgent.generateDocumentMap(sess.conversationId_eval, studentFile.id, params.meterCtx),
-        log.span("UPLOAD", "interview plan responses.create", () =>
-          meteredResponses(
-            { ...params.meterCtx, agentLabel: "UPLOAD:interview_plan", model: PRINCIPAL_REASONING_MODEL },
-            () => openai.responses.create({
-              model: PRINCIPAL_REASONING_MODEL,
-              instructions: params.renderedPrompt,
-              input: [{
-                role: "user",
-                content: [
-                  { type: "input_text", text: "Enunciado do trabalho e trabalho do estudante em anexo. Gere o JSON solicitado." },
-                  { type: "input_file", file_id: enunciadoFile.id },
-                  { type: "input_file", file_id: studentFile.id },
-                ],
-              }],
-            })
-          )
-        ),
+        planBuilderAgent.generatePlan({
+          interviewerYamlText: sess.interviewerYamlText,
+          enunciadoFileId: enunciadoFile.id,
+          studentFileId: studentFile.id,
+          questionCount: INTERVIEW_QUESTION_COUNT,
+          meterCtx: params.meterCtx,
+        }),
       ]);
       const stepLabels = ["vector_store", "document_map", "plan"];
       const failures = settled
@@ -379,8 +359,10 @@ function startInterviewPreparation(sess) {
       const [vsRes, mapRes, planRes] = settled;
       sess.vectorStoreId = vsRes.value;
       sess.documentMap = mapRes.value;
-      const planResp = planRes.value;
+      sess.interviewPlan = planRes.value;
       log.info("PREP", `step=parallel ok vector_store=${sess.vectorStoreId}`);
+      log.info("INTERVIEW_PLAN", `submission=${params.token} questions=${sess.interviewPlan.questions.length}`);
+      log.info("INTERVIEW_PLAN", `full plan:\n${JSON.stringify(sess.interviewPlan, null, 2)}`);
 
       try {
         await openai.conversations.items.create(sess.conversationId_eval, {
@@ -392,21 +374,6 @@ function startInterviewPreparation(sess) {
         log.error("PREP", `remote eval write (document_map) failed: ${err.message}`);
       }
 
-      let plan;
-      try {
-        plan = parseQuestionsJSON(planResp.output_text || "");
-      } catch (err) {
-        log.error("PREP", `step=parse_plan failed: ${err.message}`);
-        log.error("PREP", `raw plan output: ${planResp.output_text}`);
-        throw new Error(`step=parse_plan failed: ${err.message}`);
-      }
-      const firstQuestion = plan?.questions?.[0]?.question;
-      if (!firstQuestion || typeof firstQuestion !== "string") {
-        throw new Error("step=validate_plan failed: plano sem primeira pergunta válida");
-      }
-      log.info("INTERVIEW_PLAN", `submission=${params.token} questions=${plan?.questions?.length ?? 0}`);
-      log.info("INTERVIEW_PLAN", `full plan:\n${JSON.stringify(plan, null, 2)}`);
-      sess.interviewPlan = plan;
       log.info("PREP", `done submission=${params.token}`);
     } catch (err) {
       log.error("PREP", `prep failed submission=${params.token}: ${err.message}`);
@@ -1372,13 +1339,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
     // O resultado da prep aterrissa em sess.interviewPlan/documentMap/etc;
     // se o intro chegar ao cap antes da prep terminar, o handler de chat
     // aguarda sess.interviewPreparation explicitamente.
-    const renderedPrompt = renderInterviewPrompt(
-      loadInterviewPromptTemplate(),
-      interviewerYamlText,
-      INTERVIEW_QUESTION_COUNT
-    );
-    log.prompt("UPLOAD:interview_plan", renderedPrompt);
-
+    //
     // Inputs da prep ficam guardados na sessão para permitir retry caso a
     // primeira execução em background falhe (ex.: timeout transitório de
     // rede). Sem isso, uma falha durante a fase intro deixaria o aluno preso.
@@ -1387,7 +1348,6 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
       studentBuffer,
       studentFilename,
       enunciadoBlob,
-      renderedPrompt,
       meterCtx,
       token,
     };
@@ -1404,6 +1364,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
       introTurnCount: 0,
       introTurnCap: INTRO_TURN_CAP,
       meterCtx,
+      interactionMode: sess.interactionMode,
     });
 
     // TTS antes do push para podermos persistir a duração junto com o item.
@@ -1556,6 +1517,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
         introTurnCount,
         introTurnCap: INTRO_TURN_CAP,
         meterCtx: sessionMeterCtx(sess),
+        interactionMode: sess.interactionMode,
       });
     } catch (err) {
       log.error("AGENT:Introduction", `failed, forcing transition: ${err.message}`);
@@ -1685,6 +1647,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
       studentMessage: message,
       vectorStoreId: sess.vectorStoreId,
       meterCtx: sessionMeterCtx(sess),
+      interactionMode: sess.interactionMode,
     };
 
     const sufficiencyAbort = new AbortController();
@@ -1696,6 +1659,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
       vectorStoreId: sess.vectorStoreId,
       signal: sufficiencyAbort.signal,
       meterCtx: sessionMeterCtx(sess),
+      interactionMode: sess.interactionMode,
     }).catch(err => {
       const aborted = err?.name === "APIUserAbortError"
         || err?.constructor?.name === "APIUserAbortError"

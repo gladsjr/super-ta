@@ -2,6 +2,7 @@ import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatQuestionBlock, formatTurnHistoryBlock } from "../lib/triagePrompt.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 /**
  * MetaInterventionAgent
@@ -22,8 +23,9 @@ export class MetaInterventionAgent {
         if (!model) throw new Error("Missing model for MetaInterventionAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você é um auxiliar de triagem em uma entrevista oral.
-Seu papel exclusivo é detectar se a última mensagem do aluno é uma META-MENSAGEM
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Preâmbulo composto por chamada (depende do modo).
+        this.systemPromptBody = `Sua função específica: detectar se a última mensagem do aluno é uma META-MENSAGEM
 dirigida ao sistema ou à entrevista em si, e não uma resposta à pergunta do
 entrevistador.
 
@@ -57,7 +59,10 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, studentMessage, meterCtx = null /*, vectorStoreId */ }) {
+    async evaluate({ interviewerYamlText, currentTurn, studentMessage, meterCtx = null, interactionMode = "text" /*, vectorStoreId */ }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode })}
+
+${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatTurnHistoryBlock(currentTurn);
@@ -80,11 +85,11 @@ Avalie se esta mensagem é uma meta-mensagem dirigida ao sistema/processo. Retor
 
         const payload = {
             model: this.model,
-            instructions: this.systemPrompt,
+            instructions: systemPrompt,
             input: [{ role: "user", content: userContent }],
         };
 
-        log.prompt("AGENT:MetaIntervention", this.systemPrompt + "\n\n" + userContent);
+        log.prompt("AGENT:MetaIntervention", systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:MetaIntervention", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:MetaIntervention", model: this.model },

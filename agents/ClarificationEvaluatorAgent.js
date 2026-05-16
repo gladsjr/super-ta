@@ -12,6 +12,8 @@
  */
 
 import log from "../lib/logger.js";
+import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 export class ClarificationEvaluatorAgent {
     constructor(openaiClient, model) {
@@ -20,7 +22,10 @@ export class ClarificationEvaluatorAgent {
         }
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você é um assistente que identifica aspectos não claros, incompletos ou que precisam de esclarecimento em trabalhos acadêmicos.
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Audience orchestrator_only — saída usada como sinal
+        // pelo orquestrador para escolher follow-ups, nunca mostrada ao aluno.
+        this.systemPromptBody = `Sua função específica: identificar aspectos não claros, incompletos ou que precisam de esclarecimento em trabalhos acadêmicos.
 
 **Sua tarefa:**
 Analisar o documento e as respostas do aluno para identificar pontos que merecem questionamento.
@@ -63,7 +68,10 @@ A pergunta sugerida deve ser direcionada e evidencial (ex: "Na seção X, você 
      * @returns {Promise<Object>} Evaluation signal with unclear aspects
      * @throws {Error} If agent fails
      */
-    async evaluate(conversationId, vectorStoreId, documentMap, studentResponse) {
+    async evaluate(conversationId, vectorStoreId, documentMap, studentResponse, meterCtx = null) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "orchestrator_only" })}
+
+${this.systemPromptBody}`;
         try {
             if (!conversationId) {
                 throw new Error('Missing conversationId for ClarificationEvaluatorAgent');
@@ -75,7 +83,7 @@ A pergunta sugerida deve ser direcionada e evidencial (ex: "Na seção X, você 
 
             const payload = {
                 model: this.model,
-                instructions: this.systemPrompt,
+                instructions: systemPrompt,
                 input: [{
                     role: "user",
                     content: `**Contexto do Documento (DocumentMap):**
@@ -105,7 +113,7 @@ Retorne APENAS o JSON.`
                 }]
             };
 
-            log.prompt("AGENT:Clarification", this.systemPrompt + "\n\n" + payload.input[0].content);
+            log.prompt("AGENT:Clarification", systemPrompt + "\n\n" + payload.input[0].content);
             const response = await log.span("AGENT:Clarification", "responses.create", () =>
                 meteredResponses(
                     { ...meterCtx, agentLabel: "AGENT:Clarification", model: this.model },

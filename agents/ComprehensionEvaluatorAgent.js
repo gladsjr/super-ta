@@ -13,6 +13,7 @@
 
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 export class ComprehensionEvaluatorAgent {
     constructor(openaiClient, model) {
@@ -21,7 +22,10 @@ export class ComprehensionEvaluatorAgent {
         }
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você é um avaliador especializado em verificar se estudantes genuinamente compreendem seus próprios trabalhos.
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Audience orchestrator_only — sua saída alimenta a
+        // rubrica final e nunca é mostrada diretamente ao aluno.
+        this.systemPromptBody = `Sua função específica: verificar se o estudante genuinamente compreende seu próprio trabalho. Você é um dos evaluators que alimentam a rubrica C1 ao final da entrevista.
 
 **Critério de Avaliação (C1 - 40% do peso total):**
 Compreensão do conteúdo do próprio trabalho entregue.
@@ -65,6 +69,9 @@ Seja criterioso mas justo. Use citações do documento quando relevante.`;
      * @throws {Error} If agent fails
      */
     async evaluate(conversationId, vectorStoreId, documentMap, studentResponse, meterCtx = null) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "orchestrator_only" })}
+
+${this.systemPromptBody}`;
         try {
             if (!conversationId) {
                 throw new Error('Missing conversationId for ComprehensionEvaluatorAgent');
@@ -76,7 +83,7 @@ Seja criterioso mas justo. Use citações do documento quando relevante.`;
 
             const payload = {
                 model: this.model,
-                instructions: this.systemPrompt,
+                instructions: systemPrompt,
                 input: [{
                     role: "user",
                     content: `**Contexto do Documento (DocumentMap):**
@@ -107,7 +114,7 @@ Retorne APENAS o JSON.`
                 }]
             };
 
-            log.prompt("AGENT:Comprehension", this.systemPrompt + "\n\n" + payload.input[0].content);
+            log.prompt("AGENT:Comprehension", systemPrompt + "\n\n" + payload.input[0].content);
             const response = await log.span("AGENT:Comprehension", "responses.create", () =>
                 meteredResponses(
                     { ...meterCtx, agentLabel: "AGENT:Comprehension", model: this.model },

@@ -1,5 +1,6 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 /**
  * ConfigAssistantAgent
@@ -29,7 +30,10 @@ export class ConfigAssistantAgent {
         if (!model) throw new Error("Missing model for ConfigAssistantAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você é um assistente de configuração para professores que usam o SuperTA, um sistema que conduz entrevistas automatizadas para avaliar autoria e compreensão de trabalhos acadêmicos. Sua tarefa é ajudar o professor a preparar a configuração de um trabalho específico.
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Audience professor_via_ui — você conversa com o
+        // professor na página de configuração do trabalho.
+        this.systemPromptBody = `Sua função específica: ajudar o professor a preparar a configuração de um trabalho — explicar a metodologia, avaliar adequação do enunciado ao processo de entrevista, e ajudar a escolher ou customizar a persona do entrevistador.
 
 Você atua em três frentes:
 
@@ -90,6 +94,9 @@ Filenames válidos para personas: "Teacher Assistant.yaml", "Business Owner.yaml
     }
 
     async evaluate({ history, message, stateBlock, meterCtx = null }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
+
+${this.systemPromptBody}`;
         const safeHistory = Array.isArray(history) ? history : [];
         const historyBlock = safeHistory.length === 0
             ? "(nenhuma mensagem anterior — esta é a primeira interação)"
@@ -117,11 +124,11 @@ Responda apenas o JSON conforme o contrato.`;
 
         const payload = {
             model: this.model,
-            instructions: this.systemPrompt,
+            instructions: systemPrompt,
             input: [{ role: "user", content: userContent }],
         };
 
-        log.prompt("AGENT:ConfigAssistant", this.systemPrompt + "\n\n" + userContent);
+        log.prompt("AGENT:ConfigAssistant", systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:ConfigAssistant", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:ConfigAssistant", model: this.model },

@@ -12,6 +12,7 @@
 
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 export class MapBuilderAgent {
     constructor(openaiClient, model) {
@@ -20,7 +21,11 @@ export class MapBuilderAgent {
         }
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você é um especialista em análise estruturada de documentos acadêmicos e técnicos.
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Audience orchestrator_only — o DocumentMap que você
+        // produz alimenta evaluators (Comprehension, Clarification) e o
+        // gerador de plano de entrevista downstream, nunca é mostrado ao aluno.
+        this.systemPromptBody = `Sua função específica: analisar o documento entregue pelo estudante e produzir um DocumentMap estruturado que servirá como contexto global compactado para os agentes downstream (evaluators de compreensão e clarificação, e o gerador do plano de entrevista).
 
 Sua tarefa é analisar documentos e extrair um mapa estruturado com:
 
@@ -53,6 +58,9 @@ Retorne SEMPRE JSON válido no formato especificado.`;
      * @throws {Error} If agent fails or returns invalid structure
      */
     async generateDocumentMap(conversationId, openaiFileId, meterCtx = null) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "orchestrator_only" })}
+
+${this.systemPromptBody}`;
         try {
             if (!conversationId) {
                 throw new Error('Missing conversationId for MapBuilderAgent');
@@ -67,7 +75,7 @@ Retorne SEMPRE JSON válido no formato especificado.`;
 
             const payload = {
                 model: this.model,
-                instructions: this.systemPrompt,
+                instructions: systemPrompt,
                 input: [{
                     role: "user",
                     content: [
@@ -91,7 +99,7 @@ Retorne APENAS o JSON, sem markdown ou texto adicional.${contextBlock}`
                 }]
             };
 
-            log.prompt("AGENT:MapBuilder", this.systemPrompt + "\n\n" + payload.input[0].content[0].text);
+            log.prompt("AGENT:MapBuilder", systemPrompt + "\n\n" + payload.input[0].content[0].text);
             const response = await log.span("AGENT:MapBuilder", "responses.create", () =>
                 meteredResponses(
                     { ...meterCtx, agentLabel: "AGENT:MapBuilder", model: this.model },

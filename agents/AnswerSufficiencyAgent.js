@@ -2,6 +2,7 @@ import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatQuestionBlock, formatFullConversation, formatCurrentTurnInterventions } from "../lib/triagePrompt.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 /**
  * AnswerSufficiencyAgent
@@ -31,7 +32,10 @@ export class AnswerSufficiencyAgent {
         if (!model) throw new Error("Missing model for AnswerSufficiencyAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você decide se a resposta atual do aluno foi suficiente para que a entrevista possa avançar para a próxima pergunta planejada.
+        // O system prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body específico do papel. O preâmbulo é composto por chamada
+        // porque depende do modo de interação (texto vs. áudio) da sessão.
+        this.systemPromptBody = `Sua função específica: decidir se a resposta atual do aluno foi suficiente para que a entrevista possa avançar para a próxima pergunta planejada.
 
 Você atua DEPOIS dos guardrails de triagem. Assuma que a mensagem do aluno é uma tentativa genuína de responder à pergunta do turno; se fosse off-topic, meta ou pedido de esclarecimento, outro agente já teria intervido.
 
@@ -50,7 +54,7 @@ QUE CONTA COMO INCOMPLETUDE — sempre relativa à pergunta do turno:
 A pergunta original, junto com seus objectives e information_needs, define o escopo do que conta como cobertura. Se a resposta esquivou parte da pergunta ou abordou só parcialmente o que era pedido, é incomplete. Não amplie o escopo da pergunta original — peça apenas o que estava no escopo e ficou faltando.
 
 CALIBRAÇÃO DO RIGOR — faça SEMPRE:
-Sua exigência sai da agenda do entrevistador.
+Sua exigência advém da agenda do entrevistador.
 - interaction_style "cético"/"exigente"/"investigativo" → barra alta para aceitar.
 - interaction_style "colaborativo"/"diplomático"/"facilitador" → barra baixa, deixa passar respostas razoavelmente completas mesmo com pequenas lacunas.
 - interaction_style "pragmático"/"objetivo"/"orientado à decisão" → barra calibrada por DECISÃO SUFICIENTE (próximo princípio), não por completude.
@@ -115,7 +119,10 @@ Formato de saída — retorne APENAS JSON válido, sem markdown. A ORDEM DOS CAM
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, turnLog, studentMessage, vectorStoreId, signal, meterCtx = null }) {
+    async evaluate({ interviewerYamlText, currentTurn, turnLog, studentMessage, vectorStoreId, signal, meterCtx = null, interactionMode = "text" }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode })}
+
+${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatFullConversation(turnLog);
@@ -142,12 +149,12 @@ Decida accept ou follow_up considerando a agenda. Antes da decisão, articule no
 
         const payload = {
             model: this.model,
-            instructions: this.systemPrompt,
+            instructions: systemPrompt,
             input: [{ role: "user", content: userContent }],
             tools: vectorStoreId ? [{ type: "file_search", vector_store_ids: [vectorStoreId] }] : [],
         };
 
-        log.prompt("AGENT:AnswerSufficiency", this.systemPrompt + "\n\n" + userContent);
+        log.prompt("AGENT:AnswerSufficiency", systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:AnswerSufficiency", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:AnswerSufficiency", model: this.model },

@@ -1,5 +1,6 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 /**
  * EnunciadoCoherenceAgent
@@ -38,7 +39,10 @@ export class EnunciadoCoherenceAgent {
         if (!model) throw new Error("Missing model for EnunciadoCoherenceAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você avalia se o ENUNCIADO de um trabalho (PDF anexado) está bem encaixado no processo de entrevista do SuperTA. Você NÃO avalia qualidade pedagógica, dificuldade, didática ou correção do trabalho — apenas se o enunciado fornece base suficiente para que o aluno se prepare e o entrevistador automatizado conduza uma arguição produtiva.
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Audience professor_via_ui — o relatório é lido pelo
+        // professor na página de configuração do trabalho.
+        this.systemPromptBody = `Sua função específica: avaliar se o ENUNCIADO de um trabalho (PDF anexado) está bem encaixado no processo de entrevista do SuperTA. Você NÃO avalia qualidade pedagógica, dificuldade, didática ou correção do trabalho — apenas se o enunciado fornece base suficiente para que o aluno se prepare e o entrevistador automatizado conduza uma arguição produtiva.
 
 PREMISSA CENTRAL DO SUPERTA — leia com atenção:
 O entrevistador do SuperTA não é um banca acadêmica genérica. Ele assume uma POSIÇÃO DE NEGÓCIO (cliente, investidor, gestor de contratação, sponsor executivo, jornalista, etc.) e arguiu o aluno a partir desse papel. O que se espera do aluno é (i) sustentar o que está no trabalho com argumentos próprios e (ii) preparar-se para o perfil de negócio do entrevistador. Por isso, o que precisa estar claro no enunciado é, antes de tudo, o CONTEXTO DE NEGÓCIO em que o trabalho será defendido. Critérios de avaliação detalhados e perfil completo do entrevistador são bem-vindos, mas OPCIONAIS — o aluno pode (e deve) inferi-los do contexto.
@@ -86,13 +90,16 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
     }
 
     async evaluate({ openaiFileId, meterCtx = null }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
+
+${this.systemPromptBody}`;
         if (!openaiFileId) throw new Error("Missing openaiFileId for EnunciadoCoherenceAgent");
 
         const userText = `Analise o ENUNCIADO em anexo e produza o relatório JSON conforme o contrato. Lembre-se: você avalia apenas a adequação do enunciado ao processo de entrevista, NUNCA a qualidade pedagógica do trabalho.`;
 
         const payload = {
             model: this.model,
-            instructions: this.systemPrompt,
+            instructions: systemPrompt,
             input: [{
                 role: "user",
                 content: [
@@ -102,7 +109,7 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
             }],
         };
 
-        log.prompt("AGENT:EnunciadoCoherence", this.systemPrompt + "\n\n" + userText);
+        log.prompt("AGENT:EnunciadoCoherence", systemPrompt + "\n\n" + userText);
         const response = await log.span("AGENT:EnunciadoCoherence", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:EnunciadoCoherence", model: this.model },

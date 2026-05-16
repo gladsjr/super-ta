@@ -11,10 +11,14 @@ triagem em paralelo (3 agentes), agente de relevância (loop de skip) e progress
 
 ```mermaid
 flowchart TD
-  %% UPLOAD: PDF do aluno entra; o agente abre socialmente.
+  %% UPLOAD: PDF do aluno entra; saudação e prep pesada disparam em paralelo.
   Upload([Aluno envia PDF]) --> UploadHandler["/upload"]
   UploadHandler --> IntroAgent1["IntroductionAgent"]
   IntroAgent1 --> OutGreeting>"Cumprimento ao aluno"]
+  UploadHandler -.-> Prep(("Prep em background"))
+  Prep --> MapBuilder["MapBuilderAgent"]
+  Prep --> PlanBuilder["PlanBuilderAgent"]
+  Prep --> VectorStore["createVectorStoreWithFile"]
 
   %% CHAT: dispara o ciclo principal a cada mensagem do aluno.
   Start([Aluno envia mensagem]) --> ChatHandler["/chat"]
@@ -71,7 +75,7 @@ flowchart TD
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
   classDef tpl   fill:#f3f5f8,stroke:#5a6b80,color:#0f1b2d,stroke-dasharray: 4 2;
 
-  class UploadHandler,ChatHandler,IntroAgent1,IntroAgent2,Scope,OffTopic,Meta,Sufficiency,Relevance,Parallel agent
+  class UploadHandler,ChatHandler,IntroAgent1,IntroAgent2,Scope,OffTopic,Meta,Sufficiency,Relevance,Parallel,MapBuilder,PlanBuilder,VectorStore,Prep agent
   class PhaseGate,IntroDecision,CheckPlan,Pick,SufDecision,RelDecision gate
   class OutGreeting,OutContinue,OutFirstQ,OutWrap,OutTriageChat,OutTriageModal,OutFollowUp,OutNext out
   class Upload,Start entry
@@ -96,6 +100,9 @@ flowchart TD
   click OutNext "vscode://file/c:/Users/glads/src/super-ta/server.js:1399" "Abre a montagem da transição + próxima pergunta"
   click OutWrap "vscode://file/c:/Users/glads/src/super-ta/server.js:1406" "Abre a string da mensagem de fechamento"
   click AgendaTpl "vscode://file/c:/Users/glads/src/super-ta/config/interviewer_agenda_template.txt" "Abre o template da agenda do entrevistador"
+  click MapBuilder "vscode://file/c:/Users/glads/src/super-ta/agents/MapBuilderAgent.js" "Abre MapBuilderAgent (DocumentMap)"
+  click PlanBuilder "vscode://file/c:/Users/glads/src/super-ta/agents/PlanBuilderAgent.js" "Abre PlanBuilderAgent (plano de entrevista)"
+  click VectorStore "vscode://file/c:/Users/glads/src/super-ta/server.js" "Abre createVectorStoreWithFile"
 ```
 
 ## Tabela de navegação — código e prompt lado a lado
@@ -105,7 +112,9 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | Bloco | Código | Prompt enviado à LLM |
 |---|---|---|
 | Handler do `/upload` | [server.js:864](../server.js#L864) | — |
-| Preparação em background (mapBuilder + plano) | [server.js:918](../server.js#L918) | [interview_prompt_template.txt](../config/interview_prompt_template.txt) + agenda |
+| Preparação em background (MapBuilder + PlanBuilder + vector store, em paralelo) | [server.js — startInterviewPreparation](../server.js) | ver agentes correspondentes |
+| `MapBuilderAgent` (DocumentMap, chamado em paralelo na prep) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `systemPromptBody` |
+| `PlanBuilderAgent` (plano de N perguntas, chamado em paralelo na prep) | [agents/PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado |
 | `IntroductionAgent` (fast, fase social) | [agents/IntroductionAgent.js](../agents/IntroductionAgent.js) | [systemPrompt :30](../agents/IntroductionAgent.js#L30) + persona + agenda + histórico do intro |
 | Sortição da persona | [lib/personas.js](../lib/personas.js) | — |
 | Handler do `/chat` | [server.js:1014](../server.js#L1014) | — |
@@ -134,8 +143,8 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 
 | Bloco | Código | Prompt enviado à LLM |
 |---|---|---|
-| `/upload` (gera plano de entrevista) | [server.js:847](../server.js#L847) | [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado via [lib/interviewPrompt.js](../lib/interviewPrompt.js) |
-| `MapBuilderAgent` (chamado em `/upload`) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | [systemPrompt :22](../agents/MapBuilderAgent.js#L22) |
+| `MapBuilderAgent` (chamado em `/upload`, parte da prep paralela) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `systemPromptBody` |
+| `PlanBuilderAgent` (chamado em `/upload`, parte da prep paralela — gera o plano de entrevista) | [agents/PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado via [lib/interviewPrompt.js](../lib/interviewPrompt.js) |
 | `ComprehensionEvaluatorAgent` (chamado em `/finalize`) | [agents/ComprehensionEvaluatorAgent.js](../agents/ComprehensionEvaluatorAgent.js) | [systemPrompt :23](../agents/ComprehensionEvaluatorAgent.js#L23) |
 | `ClarificationEvaluatorAgent` (chamado em `/finalize`) | [agents/ClarificationEvaluatorAgent.js](../agents/ClarificationEvaluatorAgent.js) | [systemPrompt :23](../agents/ClarificationEvaluatorAgent.js#L23) |
 | `INTERVIEWER_ADAPT_INSTRUCTIONS` (botão "Adaptar ao enunciado") | [server.js:660](../server.js#L660) | string literal usada como `instructions` na chamada da Responses API |
@@ -197,20 +206,23 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
 
 1. **Templates `.txt`** ([config/](../config/)):
    - [system_prompt.txt](../config/system_prompt.txt) — base TA.
-   - [interview_prompt_template.txt](../config/interview_prompt_template.txt) — geração do plano de entrevista (em `/upload`).
+   - [interview_prompt_template.txt](../config/interview_prompt_template.txt) — renderizado pelo `PlanBuilderAgent` para gerar o plano de entrevista.
    - [interviewer_agenda_template.txt](../config/interviewer_agenda_template.txt) — bloco de agenda compartilhado por triagem e relevância.
-2. **`systemPrompt` em classes de agente** ([agents/](../agents/)):
-   - [MapBuilderAgent.js#L22](../agents/MapBuilderAgent.js#L22) — modelo: `principal_reasoning_model`
-   - [ComprehensionEvaluatorAgent.js#L23](../agents/ComprehensionEvaluatorAgent.js#L23) — modelo: `principal_reasoning_model`
-   - [ClarificationEvaluatorAgent.js#L23](../agents/ClarificationEvaluatorAgent.js#L23) — modelo: `principal_reasoning_model`
-   - [ScopeClarificationAgent.js#L23](../agents/ScopeClarificationAgent.js#L23) — modelo: `fast_model`
-   - [OffTopicRedirectAgent.js#L20](../agents/OffTopicRedirectAgent.js#L20) — modelo: `fast_model`
-   - [MetaInterventionAgent.js#L24](../agents/MetaInterventionAgent.js#L24) — modelo: `fast_model`
-   - [QuestionRelevanceAgent.js#L23](../agents/QuestionRelevanceAgent.js#L23) — modelo: `fast_model`
-   - [AnswerSufficiencyAgent.js#L33](../agents/AnswerSufficiencyAgent.js#L33) — modelo: `principal_reasoning_model` (abortável via `signal`)
-   - [IntroductionAgent.js#L30](../agents/IntroductionAgent.js#L30) — modelo: `fast_model` (fase social, persona em [lib/personas.js](../lib/personas.js))
-   - [ConfigAssistantAgent.js#L31](../agents/ConfigAssistantAgent.js#L31) — modelo: `fast_model` (chat do assistente de configuração na página do professor)
-   - [EnunciadoCoherenceAgent.js#L40](../agents/EnunciadoCoherenceAgent.js#L40) — modelo: `principal_reasoning_model` (avalia adequação do enunciado ao processo, recebe PDF via `input_file`)
+2. **`systemPromptBody` + preâmbulo padronizado em classes de agente** ([agents/](../agents/)):
+    Todo agente compõe seu system prompt como `renderAgentPreamble({audience, interactionMode})` + `this.systemPromptBody`. O preâmbulo enquadra a cena (SuperTA, identidade dupla, audience, modo). Ver [lib/agentPreamble.js](../lib/agentPreamble.js).
+
+   - [MapBuilderAgent.js](../agents/MapBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`
+   - [PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`, body é o template `interview_prompt_template.txt` renderizado por chamada
+   - [ComprehensionEvaluatorAgent.js](../agents/ComprehensionEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`
+   - [ClarificationEvaluatorAgent.js](../agents/ClarificationEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`
+   - [ScopeClarificationAgent.js](../agents/ScopeClarificationAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
+   - [OffTopicRedirectAgent.js](../agents/OffTopicRedirectAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
+   - [MetaInterventionAgent.js](../agents/MetaInterventionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
+   - [QuestionRelevanceAgent.js](../agents/QuestionRelevanceAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`
+   - [AnswerSufficiencyAgent.js](../agents/AnswerSufficiencyAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice` (abortável via `signal`)
+   - [IntroductionAgent.js](../agents/IntroductionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice` (fase social, persona em [lib/personas.js](../lib/personas.js))
+   - [ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) — modelo: `fast_model`, audience: `professor_via_ui` (chat do assistente de configuração na página do professor)
+   - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado ao processo, recebe PDF via `input_file`)
 3. **Strings inline em `server.js`**:
    - [INTERVIEWER_ADAPT_INSTRUCTIONS — linha 660](../server.js#L660) — instruções para "Adaptar ao enunciado".
    - **TODO**: as instruções de C2/C3 dentro de `calculateRubricScores` ainda são strings inline. Quando extraídas para um arquivo dedicado, atualizar este índice.

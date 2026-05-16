@@ -2,6 +2,7 @@ import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { formatQuestionBlock, formatTurnHistoryBlock } from "../lib/triagePrompt.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 /**
  * ScopeClarificationAgent
@@ -21,8 +22,9 @@ export class ScopeClarificationAgent {
         if (!model) throw new Error("Missing model for ScopeClarificationAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você é um auxiliar de triagem em uma entrevista oral.
-Seu papel exclusivo é detectar se a última mensagem do aluno indica que ele
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Preâmbulo composto por chamada (depende do modo).
+        this.systemPromptBody = `Sua função específica: detectar se a última mensagem do aluno indica que ele
 precisa de um ESCLARECIMENTO DE ESCOPO sobre a pergunta do turno corrente.
 
 Situações que contam como "precisa de esclarecimento de escopo":
@@ -50,7 +52,10 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId, meterCtx = null }) {
+    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId, meterCtx = null, interactionMode = "text" }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode })}
+
+${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const questionBlock = formatQuestionBlock(currentTurn);
         const historyBlock = formatTurnHistoryBlock(currentTurn);
@@ -73,12 +78,12 @@ Avalie se esta mensagem caracteriza necessidade de esclarecimento de escopo. Ret
 
         const payload = {
             model: this.model,
-            instructions: this.systemPrompt,
+            instructions: systemPrompt,
             input: [{ role: "user", content: userContent }],
             tools: vectorStoreId ? [{ type: "file_search", vector_store_ids: [vectorStoreId] }] : [],
         };
 
-        log.prompt("AGENT:ScopeClarification", this.systemPrompt + "\n\n" + userContent);
+        log.prompt("AGENT:ScopeClarification", systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:ScopeClarification", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:ScopeClarification", model: this.model },

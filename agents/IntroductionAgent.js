@@ -1,6 +1,7 @@
 import log from "../lib/logger.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { meteredResponses } from "../lib/billing.js";
+import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 /**
  * IntroductionAgent
@@ -28,7 +29,10 @@ export class IntroductionAgent {
         if (!model) throw new Error("Missing model for IntroductionAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPrompt = `Você está abrindo uma entrevista oral acadêmica. Sua tarefa NESTA fase é breve e social, NÃO técnica. Você assume o papel descrito na agenda recebida; sua identidade pessoal (nome e cidade de origem) é fornecida no prompt.
+        // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
+        // + este body. Preâmbulo é composto por chamada porque depende do
+        // modo de interação (texto/áudio) da sessão.
+        this.systemPromptBody = `Sua função específica: você está na fase de ABERTURA da entrevista. Esta fase é breve e social, NÃO técnica. Você assume o papel descrito na agenda recebida; sua identidade pessoal (nome e cidade de origem) é fornecida no prompt.
 
 USO DA IDENTIDADE PESSOAL:
 - Diga seu NOME na apresentação inicial.
@@ -70,7 +74,10 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, persona, introHistory, studentMessage, mainReady, introTurnCount, introTurnCap, meterCtx = null }) {
+    async evaluate({ interviewerYamlText, persona, introHistory, studentMessage, mainReady, introTurnCount, introTurnCap, meterCtx = null, interactionMode = "text" }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode })}
+
+${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const personaBlock = `Nome: ${persona.name}
 Cidade de origem (RESERVA — só mencione se a conversa puxar; NÃO aparece no cumprimento de abertura): ${persona.city}
@@ -103,11 +110,11 @@ Decida e produza a próxima mensagem ao aluno. Retorne apenas o JSON.`;
 
         const payload = {
             model: this.model,
-            instructions: this.systemPrompt,
+            instructions: systemPrompt,
             input: [{ role: "user", content: userContent }],
         };
 
-        log.prompt("AGENT:Introduction", this.systemPrompt + "\n\n" + userContent);
+        log.prompt("AGENT:Introduction", systemPrompt + "\n\n" + userContent);
         const response = await log.span("AGENT:Introduction", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:Introduction", model: this.model },
