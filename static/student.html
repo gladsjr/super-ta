@@ -138,7 +138,7 @@
             <button id="stop-btn" class="record-btn secondary hidden" type="button">⏹ Parar</button>
             <button id="stop-send-btn" class="record-btn recording hidden" type="button">⏹ Parar e enviar</button>
           </div>
-          <div id="record-status" class="record-status">Clique no botão para começar a gravar.</div>
+          <div id="record-status" class="record-status">Clique no botão para gravar sua resposta.</div>
         </div>
       </div>
     </div>
@@ -455,7 +455,7 @@ async function stopRecordingDiscard() {
   if (!mr) return;
   // Detach handler first so any final dataavailable is ignored.
   mr.ondataavailable = null;
-  try { mr.stop(); } catch {}
+  try { mr.stop(); } catch (e) { console.warn('discard: mr.stop() failed', e); }
   teardownRecording();
   setRecordingUI('idle');
   setRecordStatus('Gravação descartada. Clique no botão para gravar nova resposta.');
