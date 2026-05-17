@@ -61,6 +61,16 @@ import {
 import * as db from "./lib/db.js";
 import log from "./lib/logger.js";
 
+// Mapeia voiceId → gênero ("f" | "m" | "neutro") para alinhar o sorteio do
+// nome do entrevistador com a voz escolhida no modo áudio. Em modo texto
+// (voice == null) ou voz desconhecida, devolve null e o sorteio cai no
+// caminho aleatório balanceado de pickPersona().
+function voiceGenderOf(voiceId) {
+  if (!voiceId) return null;
+  const v = VOICES.find(x => x.id === voiceId);
+  return v ? v.gender : null;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -1223,7 +1233,7 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
         openai.conversations.create({ metadata: { submission_token: token, type: "chat" } }),
         openai.conversations.create({ metadata: { submission_token: token, type: "eval" } }),
       ]);
-      const interviewerPersona = pickPersona();
+      const interviewerPersona = pickPersona({ voiceGender: voiceGenderOf(req.work.voice) });
       sess = {
         systemPrompt,
         submissionToken: token,
@@ -1267,6 +1277,16 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
       if (sess.currentPhase === "awaiting_upload") {
         sess.interactionMode = req.work.interaction_mode || "text";
         sess.voice = req.work.voice || null;
+        // Se o professor trocou a voz por uma de gênero diferente entre o
+        // /start anterior e este /start, o nome sorteado pode estar
+        // dissonante. Re-sorteia para manter alinhado.
+        const newVoiceGender = voiceGenderOf(sess.voice);
+        if (
+          (newVoiceGender === "f" || newVoiceGender === "m") &&
+          sess.interviewerPersona?.gender !== newVoiceGender
+        ) {
+          sess.interviewerPersona = pickPersona({ voiceGender: newVoiceGender });
+        }
       }
       log.info("SUBMISSION", `resume token=${token} phase=${sess.currentPhase} qn=${sess.questionCount} mode=${sess.interactionMode}`);
     }
@@ -1305,7 +1325,11 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
   // fica imutável até o próximo upload.
   sess.interactionMode = req.work.interaction_mode || "text";
   sess.voice = req.work.voice || null;
-  log.info("SUBMISSION", `upload token=${token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"}`);
+  // Cada upload reinicia a entrevista. Re-sorteia a persona alinhada com a
+  // voz atual: voz feminina → nome feminino, voz masculina → nome masculino;
+  // voz neutra ou modo texto → sorteio balanceado.
+  sess.interviewerPersona = pickPersona({ voiceGender: voiceGenderOf(sess.voice) });
+  log.info("SUBMISSION", `upload token=${token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"} persona=${sess.interviewerPersona.name}/${sess.interviewerPersona.city}`);
   try { await deleteConversationLog(req.submission.id); }
   catch (err) { log.error("LOG", `delete old conversation log failed: ${err.message}`); }
 
