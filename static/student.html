@@ -77,6 +77,10 @@
   .record-btn { padding: var(--sp-4); font-size: var(--fs-lg); border-radius: var(--r-md); border: 1px solid var(--accent-700); background: var(--accent-700); color: #fff; cursor: pointer; }
   .record-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
   .record-btn.recording { background: var(--danger-700); border-color: var(--danger-700); animation: pulse 1.4s infinite; }
+  .record-btn.secondary { background: transparent; color: var(--ink-700); border-color: var(--ink-300); }
+  .record-btn.secondary:hover:not([disabled]) { background: var(--ink-50); }
+  .record-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+  .record-actions .record-btn { flex: 1 1 200px; }
   @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(164,32,32,0.5); } 50% { box-shadow: 0 0 0 12px rgba(164,32,32,0); } }
   .record-status { text-align: center; font-size: var(--fs-sm); color: var(--ink-500); min-height: 1.4em; }
   .record-status.err { color: var(--danger-700); }
@@ -129,7 +133,11 @@
           </div>
         </div>
         <div class="input-area-audio hidden" id="input-audio">
-          <button id="record-btn" class="record-btn" type="button">🎙️ Gravar resposta</button>
+          <div class="record-actions">
+            <button id="record-btn" class="record-btn" type="button">🎙️ Gravar resposta</button>
+            <button id="stop-btn" class="record-btn secondary hidden" type="button">⏹ Parar</button>
+            <button id="stop-send-btn" class="record-btn recording hidden" type="button">⏹ Parar e enviar</button>
+          </div>
           <div id="record-status" class="record-status">Clique no botão para começar a gravar.</div>
         </div>
       </div>
@@ -402,23 +410,80 @@ async function startRecording() {
   mediaRecorder.start();
   recordStartedAt = Date.now();
   recordTimer = setInterval(() => {
-    setRecordStatus(`🔴 Gravando... ${fmtElapsed(Date.now() - recordStartedAt)} — clique de novo para parar e enviar.`);
+    setRecordStatus(`🔴 Gravando... ${fmtElapsed(Date.now() - recordStartedAt)} — clique em "Parar e enviar" para mandar, ou "Parar" para descartar.`);
   }, 250);
   return true;
 }
 
-async function stopRecordingAndSend() {
-  if (!mediaRecorder) return;
-  const blob = await new Promise((resolve) => {
-    mediaRecorder.addEventListener('stop', () => {
-      const b = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
-      resolve(b);
-    }, { once: true });
-    mediaRecorder.stop();
-  });
+function teardownRecording() {
   if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-  mediaRecorder = null;
+  if (mediaRecorder) {
+    // Detach handlers so any late dataavailable from this recorder can't
+    // contaminate the chunks of the next recording.
+    mediaRecorder.ondataavailable = null;
+    mediaRecorder = null;
+  }
+  recordedChunks = [];
+}
+
+function setRecordingUI(state) {
+  // state: 'idle' | 'recording' | 'sending'
+  const recBtn = document.getElementById('record-btn');
+  const stopBtn = document.getElementById('stop-btn');
+  const sendBtn = document.getElementById('stop-send-btn');
+  if (state === 'idle') {
+    recBtn.classList.remove('hidden');
+    recBtn.disabled = false;
+    recBtn.classList.remove('recording');
+    recBtn.textContent = '🎙️ Gravar resposta';
+    stopBtn.classList.add('hidden'); stopBtn.disabled = false;
+    sendBtn.classList.add('hidden'); sendBtn.disabled = false;
+  } else if (state === 'recording') {
+    recBtn.classList.add('hidden');
+    stopBtn.classList.remove('hidden'); stopBtn.disabled = false;
+    sendBtn.classList.remove('hidden'); sendBtn.disabled = false;
+  } else if (state === 'sending') {
+    recBtn.classList.add('hidden');
+    stopBtn.classList.remove('hidden'); stopBtn.disabled = true;
+    sendBtn.classList.remove('hidden'); sendBtn.disabled = true;
+  }
+}
+
+async function stopRecordingDiscard() {
+  const mr = mediaRecorder;
+  if (!mr) return;
+  // Detach handler first so any final dataavailable is ignored.
+  mr.ondataavailable = null;
+  try { mr.stop(); } catch {}
+  teardownRecording();
+  setRecordingUI('idle');
+  setRecordStatus('Gravação descartada. Clique no botão para gravar nova resposta.');
+}
+
+async function stopRecordingAndSend() {
+  const mr = mediaRecorder;
+  if (!mr) {
+    setRecordingUI('idle');
+    setRecordStatus('Clique no botão para gravar nova resposta.');
+    return;
+  }
+  let blob;
+  try {
+    blob = await new Promise((resolve) => {
+      mr.addEventListener('stop', () => {
+        const b = new Blob(recordedChunks, { type: mr.mimeType });
+        resolve(b);
+      }, { once: true });
+      mr.stop();
+    });
+  } catch (e) {
+    teardownRecording();
+    setRecordingUI('idle');
+    setRecordStatus('Não foi possível encerrar a gravação. Tente de novo.', true);
+    return;
+  }
+  teardownRecording();
 
   setRecordStatus('Transcrevendo e processando...');
   const userPlaceholder = appendUser('🎙️ (mensagem de voz enviada)');
@@ -432,38 +497,41 @@ async function stopRecordingAndSend() {
   } catch {
     setRecordStatus('Falha de comunicação. Tente gravar de novo.', true);
     if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
+    setRecordingUI('idle');
     return;
   }
   if (j.error) {
     setRecordStatus(j.detail || j.error, true);
     if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
+    setRecordingUI('idle');
     return;
   }
   if (j.channel === 'modal') {
     if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
+    setRecordingUI('idle');
     setRecordStatus('Clique no botão para gravar nova resposta.');
     showMetaDialog(j.assistant_response ?? '', j.audio_url);
     return;
   }
   appendTA(j.assistant, j.audio_url);
   if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
+  setRecordingUI('idle');
   setRecordStatus('Clique no botão para gravar nova resposta.');
 }
 
 document.getElementById('record-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('record-btn');
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    btn.disabled = true;
-    btn.classList.remove('recording');
-    btn.textContent = '🎙️ Gravar resposta';
-    await stopRecordingAndSend();
-    btn.disabled = false;
-  } else {
-    const ok = await startRecording();
-    if (!ok) return;
-    btn.classList.add('recording');
-    btn.textContent = '⏹ Parar e enviar';
-  }
+  const ok = await startRecording();
+  if (!ok) return;
+  setRecordingUI('recording');
+});
+
+document.getElementById('stop-btn').addEventListener('click', async () => {
+  await stopRecordingDiscard();
+});
+
+document.getElementById('stop-send-btn').addEventListener('click', async () => {
+  setRecordingUI('sending');
+  await stopRecordingAndSend();
 });
 
 document.getElementById('finalize').onclick = async () => {
