@@ -1403,7 +1403,9 @@ async function initOrResumeSession(req) {
   // Caso 1: sem PDF do aluno ainda → sessão fresca em awaiting_upload.
   // (Cenário comum: aluno abriu o link mas ainda não enviou o trabalho.)
   if (!studentBlobPresent) {
-    return { sess: await createFreshSession(req), pendingAudio: null };
+    const sess = await createFreshSession(req);
+    SESSIONS.set(token, sess);
+    return { sess, pendingAudio: null };
   }
 
   // Caso 2: PDF presente → tenta retomar do banco.
