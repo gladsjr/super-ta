@@ -55,9 +55,10 @@ import {
   isWorkBudgetExceeded,
 } from "./lib/billing.js";
 import {
-  writeConversationLog,
+  readConversationLog,
   deleteConversationLog,
 } from "./lib/conversationLog.js";
+import { dehydrate, hydrate } from "./lib/sessionState.js";
 import * as db from "./lib/db.js";
 import log from "./lib/logger.js";
 
@@ -243,11 +244,11 @@ function turnFromPlanQuestion(index, q) {
 }
 
 // Serialize the professor-facing conversation log from the live session.
-function buildConversationLogPayload(sess, workToken, subToken, studentLabel) {
+function buildConversationLogPayload(sess) {
   return {
-    submission_token: subToken,
-    work_token: workToken,
-    student_label: studentLabel,
+    submission_token: sess.submissionToken,
+    work_token: sess.workToken,
+    student_label: sess.studentLabel ?? null,
     interviewer_persona: sess.interviewerPersona ?? null,
     intro: {
       messages: sess.introLog ?? [],
@@ -262,13 +263,23 @@ function buildConversationLogPayload(sess, workToken, subToken, studentLabel) {
   };
 }
 
-// Best-effort persistence. A log write failure must never abort the interview.
-async function persistConversationLog(sess, submissionId, workToken, subToken, studentLabel) {
+// Best-effort persistence. UPDATE atômico que combina conversation_json (o
+// log visível ao professor) com as cinco colunas de runtime (necessárias
+// para retomada após restart). Falha não pode abortar a entrevista.
+async function persistConversationLog(sess) {
   try {
-    const payload = buildConversationLogPayload(sess, workToken, subToken, studentLabel);
-    await writeConversationLog(submissionId, payload);
+    const payload = buildConversationLogPayload(sess);
+    const runtime = dehydrate(sess);
+    await db.persistSubmissionState(sess.submissionId, {
+      conversationJsonText: JSON.stringify(payload, null, 2),
+      currentPhase: runtime.currentPhase,
+      questionIndex: runtime.questionIndex,
+      frozenInteractionMode: runtime.frozenInteractionMode,
+      frozenVoice: runtime.frozenVoice,
+      runtimeState: runtime.runtimeState,
+    });
   } catch (err) {
-    log.error("LOG", `persist conversation failed submission=${subToken}: ${err.message}`);
+    log.error("LOG", `persist conversation failed submission=${sess.submissionToken}: ${err.message}`);
   }
 }
 
@@ -384,6 +395,11 @@ function startInterviewPreparation(sess) {
         log.error("PREP", `remote eval write (document_map) failed: ${err.message}`);
       }
 
+      // Persist agora para capturar interview_plan/document_map/vector_store_id
+      // no runtime_state. Sem isso, um restart do servidor entre prep-completa e
+      // o próximo /chat perderia o plano e forçaria reconstrução desnecessária.
+      await persistConversationLog(sess);
+
       log.info("PREP", `done submission=${params.token}`);
     } catch (err) {
       log.error("PREP", `prep failed submission=${params.token}: ${err.message}`);
@@ -394,6 +410,151 @@ function startInterviewPreparation(sess) {
   // .catch silencioso para evitar UnhandledPromiseRejection — quem realmente
   // precisa do erro chama `await sess.interviewPreparation` num try/catch.
   sess.interviewPreparation.catch(() => {});
+}
+
+// Classifica um erro de retrieve da OpenAI. "not_found" → recurso sumiu,
+// precisa rebuild. "transient" → rede/5xx/timeout: NÃO faz rebuild (caro e
+// irreversível); melhor 503 e o aluno recarrega a página. "other" → cai no
+// caminho transient para segurança (não rebuilda à toa).
+function classifyOpenAIError(err) {
+  if (!err) return "transient";
+  const status = err.status ?? err.statusCode ?? null;
+  if (status === 404) return "not_found";
+  const msg = String(err.message || "").toLowerCase();
+  if (msg.includes("not found") || msg.includes("no such")) return "not_found";
+  return "transient";
+}
+
+// Verifica em paralelo se os quatro recursos OpenAI guardados na sessão
+// rehidratada ainda existem (e estão usáveis). Devolve { ok, missing } onde
+// missing é a lista de razões para rebuild (ex.: "vector_store_404",
+// "vector_store_inactive", "conversation_chat_404", "file_404"). Erros
+// transientes (rede/5xx) viram throw — o caller traduz para 503.
+async function validateResources(sess) {
+  const results = await Promise.allSettled([
+    openai.vectorStores.retrieve(sess.vectorStoreId),
+    openai.files.retrieve(sess.openaiFileId),
+    openai.conversations.retrieve(sess.conversationId_chat),
+    openai.conversations.retrieve(sess.conversationId_eval),
+  ]);
+  const missing = [];
+  const labels = ["vector_store", "file", "conversation_chat", "conversation_eval"];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === "fulfilled") {
+      // vector store pode existir mas estar inativo (limpeza por inatividade
+      // prolongada da OpenAI); usa-lo nesse estado quebra file_search.
+      if (labels[i] === "vector_store") {
+        const st = r.value?.status;
+        if (st && st !== "completed" && st !== "in_progress") {
+          missing.push("vector_store_inactive");
+        }
+      }
+      continue;
+    }
+    const kind = classifyOpenAIError(r.reason);
+    if (kind === "not_found") {
+      missing.push(`${labels[i]}_404`);
+    } else {
+      const detail = r.reason?.message || String(r.reason);
+      throw new Error(`validateResources: ${labels[i]} transient error: ${detail}`);
+    }
+  }
+  return { ok: missing.length === 0, missing };
+}
+
+// Reconstrói os recursos OpenAI que sumiram (vector store + files + conversations),
+// re-injeta o document_map (reusado do runtime_state) e o último EVALUATION_SIGNALS
+// no novo conversationId_eval, e faz replay do histórico visível nas duas conversations
+// novas. Mutates `sess`. Não dispara PlanBuilder de novo — o plano vem do runtime.
+async function rebuildSession(sess, reason) {
+  log.info("REBUILD", `submission=${sess.submissionToken} reason=${reason}`);
+  const [studentBlob, enunciadoBlob] = await Promise.all([
+    db.getStudentPdfBlob(sess.submissionId),
+    db.getEnunciadoBlob(sess.workId),
+  ]);
+  if (!studentBlob) throw new Error("rebuildSession: student_pdf ausente no DB");
+  if (!enunciadoBlob) throw new Error("rebuildSession: enunciado_pdf ausente no DB");
+
+  const meterCtx = sessionMeterCtx(sess);
+
+  // Em paralelo: re-upload dos dois PDFs, criar duas Conversations novas.
+  const [studentFile, enunciadoFile, chatConversation, evalConversation] = await Promise.all([
+    openai.files.create({
+      file: await OpenAI.toFile(studentBlob.pdf, studentBlob.filename || "student.pdf"),
+      purpose: "user_data",
+    }),
+    openai.files.create({
+      file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
+      purpose: "user_data",
+    }),
+    openai.conversations.create({ metadata: { submission_token: sess.submissionToken, type: "chat", rebuilt: "1" } }),
+    openai.conversations.create({ metadata: { submission_token: sess.submissionToken, type: "eval", rebuilt: "1" } }),
+  ]);
+
+  // Vector store sai depois porque precisa do studentFile.id.
+  const vectorStoreId = await createVectorStoreWithFile(studentFile.id, sess.submissionToken);
+
+  sess.openaiFileId = studentFile.id;
+  sess.vectorStoreId = vectorStoreId;
+  sess.conversationId_chat = chatConversation.id;
+  sess.conversationId_eval = evalConversation.id;
+  // Pré-aproveitamos enunciadoFile somente como upload paralelo — ele já foi
+  // consumido pelo PlanBuilder original; o plano vem do runtime e não roda
+  // de novo. (O enunciadoFile fica "órfão" na OpenAI; é barato.)
+  void enunciadoFile;
+
+  // Re-injeta DOCUMENT_MAP no novo eval (mesmo padrão da prep original).
+  if (sess.documentMap) {
+    try {
+      await openai.conversations.items.create(sess.conversationId_eval, {
+        items: [{ role: "developer", content: `[DOCUMENT_MAP] ${JSON.stringify(sess.documentMap, null, 2)}` }],
+      });
+    } catch (err) {
+      log.error("REBUILD", `re-inject document_map failed: ${err.message}`);
+    }
+  }
+  // Último sinal de avaliação, se houver.
+  const tailSignals = Array.isArray(sess.evaluationSignals) && sess.evaluationSignals.length > 0
+    ? sess.evaluationSignals.slice(-2)
+    : null;
+  if (tailSignals) {
+    try {
+      await openai.conversations.items.create(sess.conversationId_eval, {
+        items: [{ role: "developer", content: `[EVALUATION SIGNALS] ${JSON.stringify(tailSignals, null, 2)}` }],
+      });
+    } catch (err) {
+      log.error("REBUILD", `re-inject evaluation_signals failed: ${err.message}`);
+    }
+  }
+
+  // Replay do histórico visível em ambas as conversations. Um único create por
+  // conversation com todos os items, na ordem que a hydrate reconstruiu.
+  if (sess.conv_chat.length > 0) {
+    try {
+      await openai.conversations.items.create(sess.conversationId_chat, {
+        items: sess.conv_chat.map(m => ({ role: m.role, content: m.content })),
+      });
+    } catch (err) {
+      log.error("REBUILD", `replay chat failed: ${err.message}`);
+    }
+  }
+  if (sess.conv_eval.length > 0) {
+    try {
+      await openai.conversations.items.create(sess.conversationId_eval, {
+        items: sess.conv_eval.map(m => ({ role: m.role, content: m.content })),
+      });
+    } catch (err) {
+      log.error("REBUILD", `replay eval failed: ${err.message}`);
+    }
+  }
+
+  sess.rebuilt = true;
+  sess.rebuildReason = reason;
+  log.info("REBUILD", `submission=${sess.submissionToken} ok vs=${vectorStoreId} chat=${chatConversation.id} eval=${evalConversation.id}`);
+
+  // Persist imediato para os novos IDs sobreviverem a outro restart.
+  await persistConversationLog(sess);
 }
 
 const INTRO_TURN_CAP = 3;
@@ -1187,6 +1348,11 @@ function sessionToClientState(sess) {
     interactionMode: sess.interactionMode || "text",
     voice: sess.voice || null,
     chat: sess.conv_chat.map(m => ({ role: m.role, content: m.content })),
+    // Os três campos abaixo são populados só no caminho de rehidratação após
+    // restart. Permanecem false/null na sessão em memória normal.
+    resumed: !!sess.resumed,
+    rebuilt: !!sess.rebuilt,
+    rebuild_reason: sess.rebuildReason ?? null,
   };
 }
 
@@ -1219,6 +1385,194 @@ async function attachAudio(sess, content) {
   }
 }
 
+// Lock por submission_token enquanto o /start está rodando o caminho de
+// retomada/rebuild. Sem isso, duas abas concorrentes do mesmo aluno poderiam
+// detectar simultaneamente que os recursos OpenAI sumiram e cada uma iniciaria
+// seu próprio rebuild — criando vector stores e conversations órfãs.
+const startLocks = new Map(); // token → Promise<sess>
+
+// Caminho "novo" do /start: sessão inexistente em memória, mas pode haver
+// estado persistido no banco (retomada após restart). Retorna o sess
+// pronto e o áudio da pergunta pendente (modo áudio) quando aplicável.
+//
+// IMPORTANTE: roda dentro do startLocks; concorrentes aguardam o resultado.
+async function initOrResumeSession(req) {
+  const token = req.submission.submission_token;
+  const studentBlobPresent = await db.hasStudentPdf(req.submission.id);
+
+  // Caso 1: sem PDF do aluno ainda → sessão fresca em awaiting_upload.
+  // (Cenário comum: aluno abriu o link mas ainda não enviou o trabalho.)
+  if (!studentBlobPresent) {
+    return { sess: await createFreshSession(req), pendingAudio: null };
+  }
+
+  // Caso 2: PDF presente → tenta retomar do banco.
+  const runtimeRow = await db.getSubmissionRuntimeState(req.submission.id);
+  if (!runtimeRow || !runtimeRow.runtime_state || !runtimeRow.runtime_state.schema_version) {
+    // PDF foi enviado em uma versão anterior do sistema (sem runtime_state).
+    // Preferimos falhar explícito a tentar reconstruir cegamente.
+    const err = new Error("legacy_submission");
+    err.statusCode = 409;
+    err.publicMessage = "Esta entrevista foi iniciada em uma versão anterior do sistema. Peça ao professor para gerar um novo envio.";
+    throw err;
+  }
+
+  const conversationLog = await readConversationLog(req.submission.id);
+  if (!conversationLog) {
+    const err = new Error("missing_conversation_log");
+    err.statusCode = 409;
+    err.publicMessage = "Estado inconsistente da entrevista. Peça ao professor para gerar um novo envio.";
+    throw err;
+  }
+
+  const systemPrompt = loadSystemPrompt();
+  const sess = hydrate({
+    submission: req.submission,
+    work: req.work,
+    runtimeRow,
+    conversationLog,
+    systemPrompt,
+  });
+  sess.studentLabel = req.submission.student_label;
+  log.info("SUBMISSION", `resume(db) token=${token} phase=${sess.currentPhase} qn=${sess.questionCount} mode=${sess.interactionMode}`);
+
+  // Valida recursos OpenAI em paralelo. Erro transiente → 503 (não rebuild).
+  // 404 ou inativo → reconstrói.
+  let validation;
+  try {
+    validation = await validateResources(sess);
+  } catch (err) {
+    const wrapped = new Error(`openai_transient: ${err.message}`);
+    wrapped.statusCode = 503;
+    wrapped.publicMessage = "Falha temporária ao validar a entrevista. Tente recarregar a página.";
+    throw wrapped;
+  }
+  if (!validation.ok) {
+    const reason = validation.missing[0];
+    await rebuildSession(sess, reason);
+  }
+
+  // Cenário "morri durante a prep": current_phase=intro mas interview_plan=null.
+  // Reconstrói preparationInputs e dispara em background — o handler de intro
+  // (em /chat) já tem o loop de await/retry sobre sess.interviewPreparation.
+  if (sess.currentPhase === "intro" && sess.interviewPlan == null) {
+    const [interviewerYamlText, enunciadoBlob, studentBlob] = await Promise.all([
+      db.getInterviewerYaml(req.work.id),
+      db.getEnunciadoBlob(req.work.id),
+      db.getStudentPdfBlob(req.submission.id),
+    ]);
+    if (interviewerYamlText && enunciadoBlob && studentBlob) {
+      sess.interviewerYamlText ??= interviewerYamlText;
+      sess.preparationInputs = {
+        submissionId: req.submission.id,
+        studentBuffer: studentBlob.pdf,
+        studentFilename: studentBlob.filename || "student.pdf",
+        enunciadoBlob,
+        meterCtx: sessionMeterCtx(sess),
+        token,
+      };
+      log.info("SUBMISSION", `resume: re-disparando prep que ficou em vôo (token=${token})`);
+      startInterviewPreparation(sess);
+    } else {
+      log.warn("SUBMISSION", `resume: prep em vôo mas inputs incompletos (yaml=${!!interviewerYamlText} enunciado=${!!enunciadoBlob} student=${!!studentBlob})`);
+    }
+  }
+
+  // Modo áudio: re-TTS apenas da pergunta pendente, para o aluno ouvir.
+  // Histórico anterior fica em texto (cache de áudio antigo foi perdido).
+  const pendingAudio = await maybeRebuildPendingQuestionAudio(sess);
+
+  SESSIONS.set(token, sess);
+  return { sess, pendingAudio };
+}
+
+// Cria a sessão "fresca" (awaiting_upload) — caminho original do /start
+// quando não há nada no banco para retomar.
+async function createFreshSession(req) {
+  const token = req.submission.submission_token;
+  const systemPrompt = loadSystemPrompt();
+  const [chatConversation, evalConversation] = await Promise.all([
+    openai.conversations.create({ metadata: { submission_token: token, type: "chat" } }),
+    openai.conversations.create({ metadata: { submission_token: token, type: "eval" } }),
+  ]);
+  const interviewerPersona = pickPersona({ voiceGender: voiceGenderOf(req.work.voice) });
+  const sess = {
+    systemPrompt,
+    submissionToken: token,
+    workToken: req.work.work_token,
+    workId: req.work.id,
+    submissionId: req.submission.id,
+    studentLabel: req.submission.student_label,
+    conversationId_chat: chatConversation.id,
+    conversationId_eval: evalConversation.id,
+    conv_chat: [],
+    conv_eval: [],
+    history: [],
+    documentMap: null,
+    submissionPath: null,
+    openaiFileId: null,
+    vectorStoreId: null,
+    currentPhase: "awaiting_upload",
+    questionIndex: 0,
+    questionCount: 0,
+    evaluationSignals: [],
+    interviewerPersona,
+    introLog: [],
+    introTransitionedAt: null,
+    interviewPreparation: null,
+    interactionMode: req.work.interaction_mode || "text",
+    voice: req.work.voice || null,
+    audioCache: new AudioCache(10),
+    audioTurnIdCounter: 0,
+    resumed: false,
+    rebuilt: false,
+    rebuildReason: null,
+  };
+  log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"} persona=${interviewerPersona.name}/${interviewerPersona.city} chat=${chatConversation.id} eval=${evalConversation.id}`);
+  return sess;
+}
+
+// Re-TTS da pergunta pendente para o aluno ouvir ao reabrir a entrevista
+// em modo áudio. Não regenerа áudio do histórico anterior (custo proibitivo
+// e prosódia diferente após troca de voice se houvesse). Em modo texto,
+// no-op.
+async function maybeRebuildPendingQuestionAudio(sess) {
+  if (sess.interactionMode !== "audio") return null;
+  let pendingText = null;
+  if (sess.currentPhase === "intro") {
+    // Última msg do entrevistador no introLog.
+    for (let i = sess.introLog.length - 1; i >= 0; i--) {
+      if (sess.introLog[i].role === "assistant") {
+        pendingText = sess.introLog[i].content;
+        break;
+      }
+    }
+  } else if (sess.currentPhase === "interviewing") {
+    // Último turno cuja answer está null → ainda pendente.
+    const last = sess.turnLog[sess.turnLog.length - 1];
+    if (last && last.answer == null) {
+      // O conteúdo "visível" pode ser "frase de transição + pergunta" — o que
+      // o aluno ouve. Como não persistimos esse combinado separadamente, usamos
+      // a última msg assistant em conv_chat (que foi reconstruída pelo replay).
+      for (let i = sess.conv_chat.length - 1; i >= 0; i--) {
+        if (sess.conv_chat[i].role === "assistant") {
+          pendingText = sess.conv_chat[i].content;
+          break;
+        }
+      }
+    }
+  }
+  if (!pendingText) return null;
+  const audio = await attachAudio(sess, pendingText);
+  if (audio.audio_url) {
+    return {
+      audio_url: audio.audio_url,
+      audio_duration_seconds: audio.audio_duration_seconds ?? null,
+    };
+  }
+  return null;
+}
+
 app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) => {
   const token = req.submission.submission_token;
   if (req.submission.status === "finalized") {
@@ -1227,59 +1581,32 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
 
   try {
     let sess = SESSIONS.get(token);
+    let pendingAudio = null;
     if (!sess) {
-      const systemPrompt = loadSystemPrompt();
-      const [chatConversation, evalConversation] = await Promise.all([
-        openai.conversations.create({ metadata: { submission_token: token, type: "chat" } }),
-        openai.conversations.create({ metadata: { submission_token: token, type: "eval" } }),
-      ]);
-      const interviewerPersona = pickPersona({ voiceGender: voiceGenderOf(req.work.voice) });
-      sess = {
-        systemPrompt,
-        submissionToken: token,
-        workToken: req.work.work_token,
-        workId: req.work.id,
-        submissionId: req.submission.id,
-        conversationId_chat: chatConversation.id,
-        conversationId_eval: evalConversation.id,
-        conv_chat: [],
-        conv_eval: [],
-        history: [],
-        documentMap: null,
-        submissionPath: null,
-        openaiFileId: null,
-        vectorStoreId: null,
-        currentPhase: "awaiting_upload",
-        questionCount: 0,
-        evaluationSignals: [],
-        interviewerPersona,
-        introLog: [],
-        introTransitionedAt: null,
-        interviewPreparation: null,
-        // Modo de interação congelado no /start. Mudança posterior na
-        // configuração do trabalho não afeta sessões já iniciadas.
-        interactionMode: req.work.interaction_mode || "text",
-        voice: req.work.voice || null,
-        audioCache: new AudioCache(10),
-        audioTurnIdCounter: 0,
-      };
-      SESSIONS.set(token, sess);
-      log.info("SUBMISSION", `start token=${token} work=${req.work.work_token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"} persona=${interviewerPersona.name}/${interviewerPersona.city} chat=${chatConversation.id} eval=${evalConversation.id}`);
+      // Lock em memória por token: dois /start concorrentes (ex.: duas abas)
+      // não podem cada um disparar seu próprio rebuild.
+      let lock = startLocks.get(token);
+      if (!lock) {
+        lock = initOrResumeSession(req).finally(() => {
+          // O lock deve sair do mapa quando termina (sucesso ou erro), senão
+          // tentativas seguintes ficariam presas a uma promise resolvida com
+          // sessão potencialmente desatualizada.
+          startLocks.delete(token);
+        });
+        startLocks.set(token, lock);
+      }
+      const result = await lock;
+      sess = result.sess;
+      pendingAudio = result.pendingAudio;
     } else {
-      // Init defensivo para sessões anteriores ao feature de áudio.
+      // SESSIONS hit (mesma sessão de memória): caminho legado, só
+      // re-sincroniza mode/voice quando ainda em awaiting_upload.
       if (!sess.audioCache) sess.audioCache = new AudioCache(10);
       if (typeof sess.audioTurnIdCounter !== "number") sess.audioTurnIdCounter = 0;
       if (!sess.interactionMode) sess.interactionMode = "text";
-      // O "freeze" do modo só vale a partir do upload do trabalho. Antes
-      // disso, é seguro (e desejável) re-sincronizar com a configuração
-      // atual do trabalho — assim o professor pode mudar o modo entre dois
-      // acessos do aluno sem upload e o aluno pega a mudança.
       if (sess.currentPhase === "awaiting_upload") {
         sess.interactionMode = req.work.interaction_mode || "text";
         sess.voice = req.work.voice || null;
-        // Se o professor trocou a voz por uma de gênero diferente entre o
-        // /start anterior e este /start, o nome sorteado pode estar
-        // dissonante. Re-sorteia para manter alinhado.
         const newVoiceGender = voiceGenderOf(sess.voice);
         if (
           (newVoiceGender === "f" || newVoiceGender === "m") &&
@@ -1288,17 +1615,26 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
           sess.interviewerPersona = pickPersona({ voiceGender: newVoiceGender });
         }
       }
-      log.info("SUBMISSION", `resume token=${token} phase=${sess.currentPhase} qn=${sess.questionCount} mode=${sess.interactionMode}`);
+      log.info("SUBMISSION", `resume(mem) token=${token} phase=${sess.currentPhase} qn=${sess.questionCount} mode=${sess.interactionMode}`);
     }
 
     res.json({
       work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
       submission: { status: req.submission.status === "pending" ? "in_progress" : req.submission.status, student_label: req.submission.student_label },
-      session: sessionToClientState(sess),
+      session: {
+        ...sessionToClientState(sess),
+        pending_question_audio: pendingAudio,
+      },
     });
+    // One-shot: o banner "Sessão recomposta" deve aparecer só uma vez. Se o
+    // aluno recarregar a página depois (cache hit em SESSIONS), não queremos
+    // mostrar de novo.
+    if (sess.rebuilt) { sess.rebuilt = false; sess.rebuildReason = null; }
   } catch (err) {
-    log.error("SUBMISSION", `start failed: ${err.message}`);
-    res.status(500).json({ error: "failed to start submission" });
+    const status = err.statusCode || 500;
+    const message = err.publicMessage || "failed to start submission";
+    log.error("SUBMISSION", `start failed (status=${status}): ${err.message}`);
+    res.status(status).json({ error: message });
   }
 });
 
@@ -1309,9 +1645,23 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
   if (!sess) return res.status(400).json({ error: "call /start first" });
   if (!req.file) return res.status(400).json({ error: "file required" });
 
+  // Bloqueia re-upload quando já existe entrevista em andamento. O contrato é:
+  // para reiniciar, o professor gera um novo envio. Fonte de verdade é o BD
+  // (não o SESSIONS em memória), porque após restart a entrevista ainda existe
+  // mesmo que a memória esteja vazia. Note: o /start já hidrata o sess antes
+  // de chegar aqui, então em prática sess.currentPhase também já refletiria,
+  // mas confiar no BD evita janelas de tempo onde a sessão acabou de morrer.
+  const rt = await db.getSubmissionRuntimeState(req.submission.id);
+  if (rt && rt.current_phase && rt.current_phase !== "awaiting_upload") {
+    return res.status(409).json({
+      error: "Uma entrevista já foi iniciada para este link. Para reiniciar, peça ao professor um novo envio.",
+    });
+  }
+
   const studentBuffer = req.file.buffer;
   const studentFilename = req.file.originalname;
   sess.submissionPath = studentFilename;
+  sess.studentLabel = req.submission.student_label;
 
   // New upload = new interview attempt. Reset log state and wipe any previous
   // conversation log so the professor only ever sees the current attempt.
@@ -1418,13 +1768,7 @@ app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudg
     log.info("CHAT", `intro greeting persona=${sess.interviewerPersona.name}/${sess.interviewerPersona.city} ${log.preview(greeting.message, 120)}`);
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
-    await persistConversationLog(
-      sess,
-      req.submission.id,
-      req.work.work_token,
-      token,
-      req.submission.student_label,
-    );
+    await persistConversationLog(sess);
 
     res.json({ ok: true, assistant: greeting.message, ...audio });
   } catch (error) {
@@ -1496,13 +1840,7 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
   }
   if (!message) return res.status(400).json({ error: "empty message" });
 
-  const persist = () => persistConversationLog(
-    sess,
-    req.submission.id,
-    req.work.work_token,
-    token,
-    req.submission.student_label,
-  );
+  const persist = () => persistConversationLog(sess);
 
   // ------------------------------------------------------------------
   // Intro phase: short social opening from the persona-bearing agent
@@ -1973,13 +2311,8 @@ app.post("/s/:submissionToken/finalize", requireSubmissionToken, async (req, res
     log.info("FINAL", `submission=${token} C1=${report.breakdown.C1_compreensao} C2=${report.breakdown.C2_metodologia} C3=${report.breakdown.C3_parametros} total=${report.score_total}`);
 
     sess.conversationCompleted = true;
-    await persistConversationLog(
-      sess,
-      req.submission.id,
-      req.work.work_token,
-      token,
-      req.submission.student_label,
-    );
+    await persistConversationLog(sess);
+    await db.clearSubmissionRuntimeState(req.submission.id);
 
     SESSIONS.delete(token);
     res.json(report);

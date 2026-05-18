@@ -105,6 +105,7 @@
 
   <div id="notfound" class="notice notice-error hidden">Token inválido ou trabalho não encontrado. Confira o link.</div>
   <div id="finalized-notice" class="notice notice-success hidden">Esta avaliação já foi finalizada. Veja o resultado abaixo.</div>
+  <div id="resumed-banner" class="notice hidden">Sessão recomposta. Você pode continuar.</div>
 
   <div id="main" class="hidden">
     <div class="page-header">
@@ -287,19 +288,47 @@ async function start() {
     document.getElementById('input-audio').classList.remove('hidden');
   }
 
-  for (const m of (j.session.chat || [])) {
-    // Histórico restaurado: cache de áudio do servidor pode ter sido evictado
-    // ou o servidor pode ter reiniciado. Mostra sempre como texto neste caso.
+  // Banner de "sessão recomposta" só quando o servidor de fato reconstruiu
+  // recursos OpenAI (rebuild=true). Resumes simples não mostram nada — o
+  // próprio histórico renderizado já comunica a continuidade.
+  if (j.session.rebuilt) {
+    const banner = document.getElementById('resumed-banner');
+    banner.classList.remove('hidden');
+    setTimeout(() => banner.classList.add('hidden'), 4000);
+  }
+
+  // Modo áudio + retomada: o servidor re-gerou TTS apenas da pergunta pendente
+  // (último item assistant aguardando resposta). Renderiza o histórico como
+  // texto e a última msg assistant com player de áudio.
+  const pendingAudio = j.session.pending_question_audio;
+  const chatItems = j.session.chat || [];
+  let lastAssistantIdx = -1;
+  if (pendingAudio && interactionMode === 'audio') {
+    for (let i = chatItems.length - 1; i >= 0; i--) {
+      if (chatItems[i].role === 'assistant') { lastAssistantIdx = i; break; }
+    }
+  }
+  for (let i = 0; i < chatItems.length; i++) {
+    const m = chatItems[i];
     if (m.role === 'assistant') {
-      const wrap = document.createElement('div');
-      wrap.className = 'msg ta';
-      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${renderMessage(m.content)}</div>`;
-      chat.appendChild(wrap);
+      if (i === lastAssistantIdx) {
+        // Player de áudio + transcrição oculta (mesmo padrão de appendTA).
+        appendTA(m.content, pendingAudio.audio_url);
+      } else {
+        // Histórico anterior: cache de áudio antigo perdido (LRU/restart);
+        // mostra como texto.
+        const wrap = document.createElement('div');
+        wrap.className = 'msg ta';
+        wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${renderMessage(m.content)}</div>`;
+        chat.appendChild(wrap);
+      }
     } else appendUser(m.content);
   }
   chat.scrollTop = chat.scrollHeight;
 
-  if (j.session.hasUpload) {
+  // Esconde área de upload uma vez que a entrevista esteja em andamento.
+  // Fonte: currentPhase (estado real no servidor), não um booleano derivado.
+  if (phase !== 'awaiting_upload') {
     document.getElementById('upload-area').classList.add('hidden');
   }
 }

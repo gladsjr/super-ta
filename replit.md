@@ -33,6 +33,9 @@ Student documents are processed via:
 #### Turn Dynamics
 The system follows an invariant loop: Student responds -> Response stored -> Internal evaluators run -> Signals consolidated -> Orchestrator decides next action -> SuperTA asks next question. Evaluation only runs after student input.
 
+#### Session Persistence
+Each turn writes a single atomic `UPDATE` to `submissions` covering both `conversation_json` (the professor-facing log) and the runtime state needed to resume the interview after a server restart: `current_phase`, `question_index`, `frozen_interaction_mode`, `frozen_voice`, and `runtime_state_json` (a JSONB blob holding the OpenAI resource IDs, interview plan, document map and last evaluation signals). On `POST /s/:t/start` for a submission whose PDF is already in the DB, the server rehydrates the session, validates the four OpenAI resources (vector store, file, two conversations) in parallel, and reconstructs them from the student PDF if any have been deleted; the student sees a "Sessão recomposta" banner only in this rebuild path. `POST /s/:t/upload` rejects with 409 once an interview is in flight — to restart, the professor generates a new submission. `runtime_state_json IS NULL` is the canonical "no in-flight attempt" marker (also the post-`/finalize` state).
+
 ### Cognitive Agents
 All agents are classes under `agents/` and utilize the Responses API, designed to fail fast.
 - **MapBuilderAgent**: Generates the structured DocumentMap. Must succeed for system operation.
@@ -67,12 +70,13 @@ Each work is configured by the professor as either `text` (default) or `audio`. 
 - Outbound (interviewer): LLM-generated text → TTS → audio served to the student.
 - All agents, evaluators, document map, vector store, conversation log and final report operate on text exclusively.
 
-Audio is not persisted in the database. TTS output is cached per-session in memory (LRU of size 10) and served via `GET /s/:submissionToken/audio/:turnId`. When the cache evicts or the server restarts, old turns gracefully degrade to text-only display.
+Audio is not persisted in the database. TTS output is cached per-session in memory (LRU of size 10) and served via `GET /s/:submissionToken/audio/:turnId`. When the cache evicts or the server restarts, old turns gracefully degrade to text-only display. On resume the pending question (if any) is re-TTS'd once; past audio is not regenerated.
 
 Mode is **re-synced with the current work configuration at two points**: (1) when a new session is created in `/s/:t/start`, and (2) on each `/s/:t/upload` (each upload is a fresh interview attempt — turnLog reset, etc.). Between these points, the mode is immutable for the in-flight interview. Professor changes affect: new students opening the link, students who haven't uploaded a PDF yet, and students who re-upload their PDF.
 
 ### Database
 - **PostgreSQL**: Used for user authentication (bcrypt-hashed passwords in `users` table) and session management (`app_session` table via `connect-pg-simple`).
+- `submissions.runtime_state_json` (JSONB) holds the in-flight interview snapshot for resume-after-restart; cleared on `/finalize`.
 
 ### Authentication
 - `bcrypt`: For hashing user passwords.
