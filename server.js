@@ -409,7 +409,7 @@ function startInterviewPreparation(sess) {
   })();
   // .catch silencioso para evitar UnhandledPromiseRejection — quem realmente
   // precisa do erro chama `await sess.interviewPreparation` num try/catch.
-  sess.interviewPreparation.catch(() => {});
+  sess.interviewPreparation.catch(() => { });
 }
 
 // Classifica um erro de retrieve da OpenAI. "not_found" → recurso sumiu,
@@ -576,7 +576,7 @@ function pickTriageWinner(results) {
     if (!best) { best = r; continue; }
     if (r.intensity > best.intensity) { best = r; continue; }
     if (r.intensity === best.intensity &&
-        TRIAGE_PRIORITY.indexOf(r.type) < TRIAGE_PRIORITY.indexOf(best.type)) {
+      TRIAGE_PRIORITY.indexOf(r.type) < TRIAGE_PRIORITY.indexOf(best.type)) {
       best = r;
     }
   }
@@ -1341,13 +1341,17 @@ app.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
 // ============================================================================
 
 function sessionToClientState(sess) {
+  // Modo áudio: ao reentrar, o aluno só ouve o último áudio do entrevistador.
+  // Não enviamos histórico transcrito (regra do projeto: transcrição facilita
+  // o uso de IA pelo aluno para responder). Em modo texto, mantém o histórico.
+  const isAudio = (sess.interactionMode || "text") === "audio";
   return {
     currentPhase: sess.currentPhase,
     questionCount: sess.questionCount,
     hasUpload: !!sess.submissionPath,
     interactionMode: sess.interactionMode || "text",
     voice: sess.voice || null,
-    chat: sess.conv_chat.map(m => ({ role: m.role, content: m.content })),
+    chat: isAudio ? [] : sess.conv_chat.map(m => ({ role: m.role, content: m.content })),
     // Os três campos abaixo são populados só no caminho de rehidratação após
     // restart. Permanecem false/null na sessão em memória normal.
     resumed: !!sess.resumed,
@@ -1375,6 +1379,9 @@ async function attachAudio(sess, content) {
     const turnId = String(sess.audioTurnIdCounter++);
     sess.audioCache.set(turnId, buffer);
     const durationSec = await getAudioDurationSeconds(buffer, "audio/mpeg");
+    // Lembra o último áudio do entrevistador para o re-entry: reload sem restart
+    // reaproveita o buffer no cache, sem chamar TTS de novo.
+    sess.lastInterviewerAudio = { turnId, durationSec };
     return {
       audio_url: `/s/${encodeURIComponent(sess.submissionToken)}/audio/${turnId}`,
       audio_duration_seconds: durationSec,
@@ -1526,6 +1533,7 @@ async function createFreshSession(req) {
     voice: req.work.voice || null,
     audioCache: new AudioCache(10),
     audioTurnIdCounter: 0,
+    lastInterviewerAudio: null,
     resumed: false,
     rebuilt: false,
     rebuildReason: null,
@@ -1534,15 +1542,33 @@ async function createFreshSession(req) {
   return sess;
 }
 
-// Re-TTS da pergunta pendente para o aluno ouvir ao reabrir a entrevista
-// em modo áudio. Não regenerа áudio do histórico anterior (custo proibitivo
-// e prosódia diferente após troca de voice se houvesse). Em modo texto,
-// no-op.
+// Devolve o áudio do último turno do entrevistador para o aluno ouvir ao
+// reentrar. Caminho rápido: se ainda há buffer em sess.audioCache (reload
+// no mesmo processo), reaproveita sem chamar TTS. Caminho lento: re-TTS
+// da pergunta pendente (após restart do servidor ou LRU evict). Em modo
+// texto, no-op.
+//
+// Retornos possíveis:
+//   { audio_url, audio_duration_seconds }  → ok, tocar
+//   { error: "tts_failed" }                → falha, frontend mostra retry
+//   null                                    → sem áudio pendente (janela
+//                                             entre resposta do aluno e
+//                                             próxima pergunta) ou modo texto
 async function maybeRebuildPendingQuestionAudio(sess) {
   if (sess.interactionMode !== "audio") return null;
+
+  // Caminho rápido: aproveitar o áudio já gerado.
+  const cached = sess.lastInterviewerAudio;
+  if (cached && sess.audioCache?.has(cached.turnId)) {
+    return {
+      audio_url: `/s/${encodeURIComponent(sess.submissionToken)}/audio/${cached.turnId}`,
+      audio_duration_seconds: cached.durationSec ?? null,
+    };
+  }
+
+  // Caminho lento: identificar o texto pendente e re-TTS.
   let pendingText = null;
   if (sess.currentPhase === "intro") {
-    // Última msg do entrevistador no introLog.
     for (let i = sess.introLog.length - 1; i >= 0; i--) {
       if (sess.introLog[i].role === "assistant") {
         pendingText = sess.introLog[i].content;
@@ -1550,12 +1576,10 @@ async function maybeRebuildPendingQuestionAudio(sess) {
       }
     }
   } else if (sess.currentPhase === "interviewing") {
-    // Último turno cuja answer está null → ainda pendente.
     const last = sess.turnLog[sess.turnLog.length - 1];
     if (last && last.answer == null) {
-      // O conteúdo "visível" pode ser "frase de transição + pergunta" — o que
-      // o aluno ouve. Como não persistimos esse combinado separadamente, usamos
-      // a última msg assistant em conv_chat (que foi reconstruída pelo replay).
+      // Conteúdo "visível" (frase de transição + pergunta) está na última msg
+      // assistant em conv_chat — reconstruída pelo replay quando hydrate.
       for (let i = sess.conv_chat.length - 1; i >= 0; i--) {
         if (sess.conv_chat[i].role === "assistant") {
           pendingText = sess.conv_chat[i].content;
@@ -1572,6 +1596,7 @@ async function maybeRebuildPendingQuestionAudio(sess) {
       audio_duration_seconds: audio.audio_duration_seconds ?? null,
     };
   }
+  if (audio.audio_error) return { error: "tts_failed" };
   return null;
 }
 
@@ -1618,6 +1643,9 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
         }
       }
       log.info("SUBMISSION", `resume(mem) token=${token} phase=${sess.currentPhase} qn=${sess.questionCount} mode=${sess.interactionMode}`);
+      // SESSIONS-hit em modo áudio também precisa do último áudio para tocar
+      // (reload da aba). Reaproveita o buffer cacheado quando possível.
+      pendingAudio = await maybeRebuildPendingQuestionAudio(sess);
     }
 
     res.json({
