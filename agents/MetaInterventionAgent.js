@@ -40,9 +40,10 @@ NÃO é esta situação:
 - O aluno pediu esclarecimento sobre a pergunta (isso é outro agente).
 - O aluno mudou de assunto dentro do conteúdo do trabalho (isso é outro agente).
 - O aluno está respondendo a pergunta, mesmo que mal.
+- O aluno expressou incerteza ou limitação pessoal (ex.: "não sei responder", "não consigo pensar em mais nada").
 
 Instruções para julgamento:
-- Avalie com INTENSIDADE de 0 a 10. Só dê intensity >= 6 se o sinal for forte.
+- Avalie com INTENSIDADE de 0 a 10. Só dê intensity >= 6 se o sinal for forte e claramente se enquadrar nas situações listadas acima.
 - Se intensity < 6, deixe "assistant_response" como string vazia.
 - Quando intensity >= 6, formule uma resposta curta que:
   (a) explique que este tipo de pergunta não deve ser feita a este agente;
@@ -81,7 +82,7 @@ ${historyBlock}
 ${studentMessage}
 """
 
-Avalie se esta mensagem é uma meta-mensagem dirigida ao sistema/processo. Retorne apenas o JSON.`;
+Avalie se esta mensagem é uma meta-mensagem dirigida ao sistema/processo. Se sim, explique por que ela foi classificada como tal e oriente o aluno a reformular ou procurar o professor. Retorne apenas o JSON.`;
 
         const payload = {
             model: this.model,

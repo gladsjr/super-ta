@@ -152,6 +152,7 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | `/finalize` (gera relatório) | [server.js:1192](../server.js#L1192) | strings inline na função `calculateRubricScores` (a ser extraídas, ver TODO abaixo) |
 | `ConfigAssistantAgent` (chat do assistente de configuração, chamado em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | [systemPrompt :31](../agents/ConfigAssistantAgent.js#L31) |
 | `EnunciadoCoherenceAgent` (avalia adequação do enunciado, chamado em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | [systemPrompt :40](../agents/EnunciadoCoherenceAgent.js#L40) |
+| Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [server.js — initOrResumeSession / validateResources / rebuildSession](../server.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `document_map` salvo no `runtime_state_json` |
 
 ## Configuração do trabalho (página do professor)
 

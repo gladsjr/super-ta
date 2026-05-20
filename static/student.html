@@ -1,549 +1,783 @@
 <!doctype html>
 <html lang="pt-br">
+
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>SuperTA — Aluno</title>
-<link rel="stylesheet" href="/static/css/app.css"/>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"/>
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<style>
-  #chat-card { padding: 0; overflow: hidden; }
-  #chat {
-    padding: var(--sp-4) var(--sp-5);
-    min-height: 320px;
-    max-height: 60vh;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-4);
-    background: var(--bg-muted);
-  }
-  .msg { display: flex; flex-direction: column; max-width: 78%; }
-  .msg.ta  { align-self: flex-start; }
-  .msg.you { align-self: flex-end; }
-  .msg .who { font-size: var(--fs-xs); color: var(--ink-500); margin-bottom: var(--sp-1); font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
-  .msg .bubble {
-    padding: 0.65rem 0.9rem;
-    border-radius: var(--r-lg);
-    line-height: 1.55;
-    word-wrap: break-word;
-    font-size: var(--fs-md);
-    border: 1px solid;
-  }
-  .msg.ta .bubble  { background: var(--bg-raised); border-color: var(--ink-100); color: var(--ink-900); border-top-left-radius: 4px; }
-  .msg.you .bubble { background: var(--accent-50); border-color: var(--accent-50); color: var(--ink-900); border-top-right-radius: 4px; }
-  .msg .bubble p:first-child { margin-top: 0; }
-  .msg .bubble p:last-child  { margin-bottom: 0; }
-  .msg .bubble pre { background: var(--ink-50); border-color: var(--ink-100); }
-  .msg .bubble code { background: var(--ink-100); }
-  .msg.you .bubble code { background: rgba(255,255,255,0.6); }
-  .katex-display { margin: 0.6em 0; overflow-x: auto; }
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SuperTA — Aluno</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    #chat-card {
+      padding: 0;
+      overflow: hidden;
+    }
 
-  .sys-line { align-self: center; color: var(--ink-500); font-size: var(--fs-sm); font-style: italic; padding: var(--sp-1) var(--sp-3); }
-  .sys-line.err { color: var(--danger-700); background: var(--danger-50); border-radius: var(--r-md); font-style: normal; }
+    #chat {
+      padding: var(--sp-4) var(--sp-5);
+      min-height: 320px;
+      max-height: 60vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-4);
+      background: var(--bg-muted);
+    }
 
-  .input-area {
-    border-top: 1px solid var(--ink-100);
-    padding: var(--sp-4) var(--sp-5);
-    background: var(--bg-raised);
-  }
-  .input-area textarea {
-    width: 100%;
-    min-height: 5.5rem;
-    max-height: 14rem;
-    resize: vertical;
-    padding: 0.7rem 0.85rem;
-    border: 1px solid var(--ink-200);
-    border-radius: var(--r-md);
-    font-family: inherit;
-    font-size: var(--fs-md);
-    line-height: 1.55;
-    color: var(--ink-900);
-    background: var(--bg-raised);
-    transition: border-color 0.12s, box-shadow 0.12s;
-  }
-  .input-area textarea:focus { outline: none; border-color: var(--accent-500); box-shadow: var(--focus-ring); }
-  .input-footer { display: flex; justify-content: space-between; align-items: center; margin-top: var(--sp-3); gap: var(--sp-3); }
-  .input-footer .hint { margin: 0; }
+    .msg {
+      display: flex;
+      flex-direction: column;
+      max-width: 78%;
+    }
 
-  .finalize-card { text-align: left; }
-  #result { background: var(--ink-50); border: 1px solid var(--ink-100); padding: var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-sm); overflow-x: auto; margin-top: var(--sp-3); }
-  #result:empty { display: none; }
+    .msg.ta {
+      align-self: flex-start;
+    }
 
-  /* Audio mode */
-  .input-area-audio { padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--ink-100); background: var(--bg-raised); display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-3); }
-  .record-btn { padding: var(--sp-4); font-size: var(--fs-lg); border-radius: var(--r-md); border: 1px solid var(--accent-700); background: var(--accent-700); color: #fff; cursor: pointer; }
-  .record-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
-  .record-btn.recording { background: var(--danger-700); border-color: var(--danger-700); animation: pulse 1.4s infinite; }
-  .record-btn.secondary { background: transparent; color: var(--ink-700); border-color: var(--ink-300); }
-  .record-btn.secondary:hover:not([disabled]) { background: var(--ink-50); }
-  .record-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-  .record-actions .record-btn { flex: 1 1 200px; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(164,32,32,0.5); } 50% { box-shadow: 0 0 0 12px rgba(164,32,32,0); } }
-  .record-status { text-align: center; font-size: var(--fs-sm); color: var(--ink-500); min-height: 1.4em; }
-  .record-status.err { color: var(--danger-700); }
+    .msg.you {
+      align-self: flex-end;
+    }
 
-  .msg.ta .audio-row { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
-  .msg.ta .audio-row audio { flex: 1; height: 36px; }
-  .msg.ta .transcript-toggle { font-size: var(--fs-xs); color: var(--accent-700); cursor: pointer; user-select: none; background: none; border: none; padding: 0; align-self: flex-start; }
-  .msg.ta .transcript-toggle:hover { text-decoration: underline; }
-  .msg.ta .transcript { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px dashed var(--ink-100); font-size: var(--fs-sm); color: var(--ink-700); }
-</style>
+    .msg .who {
+      font-size: var(--fs-xs);
+      color: var(--ink-500);
+      margin-bottom: var(--sp-1);
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .msg .bubble {
+      padding: 0.65rem 0.9rem;
+      border-radius: var(--r-lg);
+      line-height: 1.55;
+      word-wrap: break-word;
+      font-size: var(--fs-md);
+      border: 1px solid;
+    }
+
+    .msg.ta .bubble {
+      background: var(--bg-raised);
+      border-color: var(--ink-100);
+      color: var(--ink-900);
+      border-top-left-radius: 4px;
+    }
+
+    .msg.you .bubble {
+      background: var(--accent-50);
+      border-color: var(--accent-50);
+      color: var(--ink-900);
+      border-top-right-radius: 4px;
+    }
+
+    .msg .bubble p:first-child {
+      margin-top: 0;
+    }
+
+    .msg .bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    .msg .bubble pre {
+      background: var(--ink-50);
+      border-color: var(--ink-100);
+    }
+
+    .msg .bubble code {
+      background: var(--ink-100);
+    }
+
+    .msg.you .bubble code {
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    .katex-display {
+      margin: 0.6em 0;
+      overflow-x: auto;
+    }
+
+    .sys-line {
+      align-self: center;
+      color: var(--ink-500);
+      font-size: var(--fs-sm);
+      font-style: italic;
+      padding: var(--sp-1) var(--sp-3);
+    }
+
+    .sys-line.err {
+      color: var(--danger-700);
+      background: var(--danger-50);
+      border-radius: var(--r-md);
+      font-style: normal;
+    }
+
+    .input-area {
+      border-top: 1px solid var(--ink-100);
+      padding: var(--sp-4) var(--sp-5);
+      background: var(--bg-raised);
+    }
+
+    .input-area textarea {
+      width: 100%;
+      min-height: 5.5rem;
+      max-height: 14rem;
+      resize: vertical;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid var(--ink-200);
+      border-radius: var(--r-md);
+      font-family: inherit;
+      font-size: var(--fs-md);
+      line-height: 1.55;
+      color: var(--ink-900);
+      background: var(--bg-raised);
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+
+    .input-area textarea:focus {
+      outline: none;
+      border-color: var(--accent-500);
+      box-shadow: var(--focus-ring);
+    }
+
+    .input-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: var(--sp-3);
+      gap: var(--sp-3);
+    }
+
+    .input-footer .hint {
+      margin: 0;
+    }
+
+    .finalize-card {
+      text-align: left;
+    }
+
+    #result {
+      background: var(--ink-50);
+      border: 1px solid var(--ink-100);
+      padding: var(--sp-3);
+      border-radius: var(--r-md);
+      font-size: var(--fs-sm);
+      overflow-x: auto;
+      margin-top: var(--sp-3);
+    }
+
+    #result:empty {
+      display: none;
+    }
+
+    /* Audio mode */
+    .input-area-audio {
+      padding: var(--sp-4) var(--sp-5);
+      border-top: 1px solid var(--ink-100);
+      background: var(--bg-raised);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--sp-3);
+    }
+
+    .record-btn {
+      padding: var(--sp-4);
+      font-size: var(--fs-lg);
+      border-radius: var(--r-md);
+      border: 1px solid var(--accent-700);
+      background: var(--accent-700);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .record-btn[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .record-btn.recording {
+      background: var(--danger-700);
+      border-color: var(--danger-700);
+      animation: pulse 1.4s infinite;
+    }
+
+    .record-btn.secondary {
+      background: transparent;
+      color: var(--ink-700);
+      border-color: var(--ink-300);
+    }
+
+    .record-btn.secondary:hover:not([disabled]) {
+      background: var(--ink-50);
+    }
+
+    .record-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-3);
+    }
+
+    .record-actions .record-btn {
+      flex: 1 1 200px;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(164, 32, 32, 0.5);
+      }
+
+      50% {
+        box-shadow: 0 0 0 12px rgba(164, 32, 32, 0);
+      }
+    }
+
+    .record-status {
+      text-align: center;
+      font-size: var(--fs-sm);
+      color: var(--ink-500);
+      min-height: 1.4em;
+    }
+
+    .record-status.err {
+      color: var(--danger-700);
+    }
+
+    .msg.ta .audio-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      margin-bottom: var(--sp-2);
+    }
+
+    .msg.ta .audio-row audio {
+      flex: 1;
+      height: 36px;
+    }
+
+    .msg.ta .transcript-toggle {
+      font-size: var(--fs-xs);
+      color: var(--accent-700);
+      cursor: pointer;
+      user-select: none;
+      background: none;
+      border: none;
+      padding: 0;
+      align-self: flex-start;
+    }
+
+    .msg.ta .transcript-toggle:hover {
+      text-decoration: underline;
+    }
+
+    .msg.ta .transcript {
+      margin-top: var(--sp-2);
+      padding-top: var(--sp-2);
+      border-top: 1px dashed var(--ink-100);
+      font-size: var(--fs-sm);
+      color: var(--ink-700);
+    }
+  </style>
 </head>
+
 <body>
 
-<header class="topbar">
-  <div class="topbar-inner">
-    <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
-    <span class="topbar-context" id="tb-context">Entrevista do aluno</span>
-  </div>
-</header>
-
-<main class="page">
-
-  <div id="notfound" class="notice notice-error hidden">Token inválido ou trabalho não encontrado. Confira o link.</div>
-  <div id="finalized-notice" class="notice notice-success hidden">Esta avaliação já foi finalizada. Veja o resultado abaixo.</div>
-
-  <div id="main" class="hidden">
-    <div class="page-header">
-      <h1 id="work-name">—</h1>
-      <div class="subtitle" id="meta">Responda com clareza e profundidade. Você pode editar sua resposta antes de enviar.</div>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
+      <span class="topbar-context" id="tb-context">Entrevista do aluno</span>
     </div>
+  </header>
 
-    <div id="upload-area" class="card">
-      <h3 class="card-title">Envio do trabalho</h3>
-      <p class="card-sub">Envie o PDF do seu trabalho para iniciar a entrevista.</p>
-      <div class="row">
-        <input type="file" id="file" class="input" accept="application/pdf" style="flex:1; min-width:260px"/>
-        <button id="sendFile" class="btn btn-primary">Enviar</button>
+  <main class="page">
+
+    <div id="notfound" class="notice notice-error hidden">Token inválido ou trabalho não encontrado. Confira o link.
+    </div>
+    <div id="finalized-notice" class="notice notice-success hidden">Esta avaliação já foi finalizada. Veja o resultado
+      abaixo.</div>
+    <div id="resumed-banner" class="notice hidden">Sessão recomposta. Você pode continuar.</div>
+
+    <div id="main" class="hidden">
+      <div class="page-header">
+        <h1 id="work-name">—</h1>
+        <div class="subtitle" id="meta">Responda com clareza e profundidade. Você pode editar sua resposta antes de
+          enviar.</div>
       </div>
-      <div id="fileRef" class="hint"></div>
-    </div>
 
-    <div id="chat-area">
-      <div id="chat-card" class="card">
-        <div id="chat"></div>
-        <div class="input-area" id="input-text">
-          <textarea id="msg" placeholder="Escreva sua resposta..."></textarea>
-          <div class="input-footer">
-            <span class="hint">Enter envia · Shift+Enter quebra linha</span>
-            <button id="send" class="btn btn-primary">Enviar</button>
+      <div id="upload-area" class="card">
+        <h3 class="card-title">Envio do trabalho</h3>
+        <p class="card-sub">Envie o PDF do seu trabalho para iniciar a entrevista.</p>
+        <div class="row">
+          <input type="file" id="file" class="input" accept="application/pdf" style="flex:1; min-width:260px" />
+          <button id="sendFile" class="btn btn-primary">Enviar</button>
+        </div>
+        <div id="fileRef" class="hint"></div>
+      </div>
+
+      <div id="chat-area">
+        <div id="chat-card" class="card">
+          <div id="chat"></div>
+          <div class="input-area" id="input-text">
+            <textarea id="msg" placeholder="Escreva sua resposta..."></textarea>
+            <div class="input-footer">
+              <span class="hint">Enter envia · Shift+Enter quebra linha</span>
+              <button id="send" class="btn btn-primary">Enviar</button>
+            </div>
+          </div>
+          <div class="input-area-audio hidden" id="input-audio">
+            <div class="record-actions">
+              <button id="record-btn" class="record-btn" type="button">🎙️ Gravar resposta</button>
+              <button id="stop-btn" class="record-btn secondary hidden" type="button">⏹ Parar</button>
+              <button id="stop-send-btn" class="record-btn recording hidden" type="button">⏹ Parar e enviar</button>
+            </div>
+            <div id="record-status" class="record-status">Clique no botão para gravar sua resposta.</div>
           </div>
         </div>
-        <div class="input-area-audio hidden" id="input-audio">
-          <div class="record-actions">
-            <button id="record-btn" class="record-btn" type="button">🎙️ Gravar resposta</button>
-            <button id="stop-btn" class="record-btn secondary hidden" type="button">⏹ Parar</button>
-            <button id="stop-send-btn" class="record-btn recording hidden" type="button">⏹ Parar e enviar</button>
-          </div>
-          <div id="record-status" class="record-status">Clique no botão para gravar sua resposta.</div>
-        </div>
+      </div>
+
+      <div class="card finalize-card">
+        <h3 class="card-title">Finalizar entrevista</h3>
+        <p class="card-sub">Quando o entrevistador avisar que tem informações suficientes, clique abaixo para gerar sua
+          avaliação. Depois disso a conversa é encerrada.</p>
+        <button id="finalize" class="btn">Gerar avaliação</button>
+        <pre id="result"></pre>
       </div>
     </div>
 
-    <div class="card finalize-card">
-      <h3 class="card-title">Finalizar entrevista</h3>
-      <p class="card-sub">Quando o entrevistador avisar que tem informações suficientes, clique abaixo para gerar sua avaliação. Depois disso a conversa é encerrada.</p>
-      <button id="finalize" class="btn">Gerar avaliação</button>
-      <pre id="result"></pre>
+  </main>
+
+  <dialog id="meta-dialog">
+    <div class="dlg-body">
+      <h3>Esta pergunta é para o professor</h3>
+      <div id="meta-dialog-text" style="white-space: pre-wrap; line-height: 1.55;"></div>
     </div>
-  </div>
+    <div class="dlg-actions">
+      <button id="meta-dialog-close" class="btn btn-primary">Entendi</button>
+    </div>
+  </dialog>
 
-</main>
+  <script>
+    const submissionToken = location.pathname.split('/').filter(Boolean)[1];
+    let phase = 'awaiting_upload';
+    let finalized = false;
+    let interactionMode = 'text';
+    const chat = document.getElementById('chat');
 
-<dialog id="meta-dialog">
-  <div class="dlg-body">
-    <h3>Esta pergunta é para o professor</h3>
-    <div id="meta-dialog-text" style="white-space: pre-wrap; line-height: 1.55;"></div>
-  </div>
-  <div class="dlg-actions">
-    <button id="meta-dialog-close" class="btn btn-primary">Entendi</button>
-  </div>
-</dialog>
-
-<script>
-const submissionToken = location.pathname.split('/').filter(Boolean)[1];
-let phase = 'awaiting_upload';
-let finalized = false;
-let interactionMode = 'text';
-const chat = document.getElementById('chat');
-
-function renderMessage(text) {
-  let html = text;
-  html = html.replace(/\\\[([\s\S]*?)\\\]/g, (m, f) => {
-    try { return katex.renderToString(f.trim(), { displayMode: true, throwOnError: false }); } catch { return m; }
-  });
-  html = html.replace(/\\\(([\s\S]*?)\\\)/g, (m, f) => {
-    try { return katex.renderToString(f.trim(), { displayMode: false, throwOnError: false }); } catch { return m; }
-  });
-  return marked.parse(html);
-}
-function appendTA(text, audioUrl) {
-  const wrap = document.createElement('div');
-  wrap.className = 'msg ta';
-  let bubbleInner;
-  if (interactionMode === 'audio' && audioUrl) {
-    // Modo áudio: player visível, transcrição oculta com toggle.
-    bubbleInner = `
+    function renderMessage(text) {
+      let html = text;
+      html = html.replace(/\\\[([\s\S]*?)\\\]/g, (m, f) => {
+        try { return katex.renderToString(f.trim(), { displayMode: true, throwOnError: false }); } catch { return m; }
+      });
+      html = html.replace(/\\\(([\s\S]*?)\\\)/g, (m, f) => {
+        try { return katex.renderToString(f.trim(), { displayMode: false, throwOnError: false }); } catch { return m; }
+      });
+      return marked.parse(html);
+    }
+    function appendTA(text, audioUrl) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg ta';
+      let bubbleInner;
+      if (interactionMode === 'audio' && audioUrl) {
+        // Modo áudio: player visível, transcrição oculta com toggle.
+        bubbleInner = `
       <div class="audio-row">
         <audio controls preload="auto" autoplay src="${audioUrl}"></audio>
       </div>
       <button class="transcript-toggle" type="button">ver transcrição</button>
       <div class="transcript hidden">${renderMessage(text)}</div>
     `;
-  } else {
-    bubbleInner = renderMessage(text);
-  }
-  wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${bubbleInner}</div>`;
-  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+      } else {
+        bubbleInner = renderMessage(text);
+      }
+      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${bubbleInner}</div>`;
+      chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
 
-  const toggle = wrap.querySelector('.transcript-toggle');
-  if (toggle) {
-    toggle.addEventListener('click', () => {
-      const t = wrap.querySelector('.transcript');
-      t.classList.toggle('hidden');
-      toggle.textContent = t.classList.contains('hidden') ? 'ver transcrição' : 'ocultar transcrição';
-    });
-  }
-  // Tenta autoplay; se browser bloquear (sem gesto do usuário), o aluno
-  // ainda pode clicar no controle nativo do <audio>.
-  const a = wrap.querySelector('audio');
-  if (a) a.play().catch(() => {});
-  return wrap;
-}
-function appendUser(text) {
-  const wrap = document.createElement('div');
-  wrap.className = 'msg you';
-  const safe = String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  wrap.innerHTML = `<span class="who">Você</span><div class="bubble">${safe.replace(/\n/g, '<br>')}</div>`;
-  chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
-  return wrap;
-}
-function appendStatus(text, isError = false) {
-  const div = document.createElement('div');
-  div.className = 'sys-line' + (isError ? ' err' : '');
-  div.textContent = text;
-  chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
-  return div;
-}
-function showMetaDialog(text, audioUrl) {
-  const container = document.getElementById('meta-dialog-text');
-  container.innerHTML = '';
-  if (interactionMode === 'audio' && audioUrl) {
-    const audio = document.createElement('audio');
-    audio.controls = true; audio.autoplay = true; audio.preload = 'auto';
-    audio.src = audioUrl;
-    audio.style.width = '100%';
-    container.appendChild(audio);
-    const tx = document.createElement('div');
-    tx.style.marginTop = '0.75rem';
-    tx.style.fontSize = 'var(--fs-sm)';
-    tx.style.color = 'var(--ink-700)';
-    tx.textContent = text;
-    container.appendChild(tx);
-  } else {
-    container.textContent = text;
-  }
-  const dlg = document.getElementById('meta-dialog');
-  if (typeof dlg.showModal === 'function') dlg.showModal();
-  else alert(text);
-}
-document.getElementById('meta-dialog-close').onclick = () => {
-  document.getElementById('meta-dialog').close();
-};
-
-async function start() {
-  const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/start`, { method: 'POST' });
-  if (r.status === 404) {
-    document.getElementById('notfound').classList.remove('hidden');
-    return;
-  }
-  if (r.status === 403) {
-    finalized = true;
-    document.getElementById('finalized-notice').classList.remove('hidden');
-    document.getElementById('main').classList.remove('hidden');
-    document.getElementById('upload-area').classList.add('hidden');
-    document.getElementById('chat-area').classList.add('hidden');
-    return;
-  }
-  if (!r.ok) {
-    const nf = document.getElementById('notfound');
-    nf.textContent = 'Erro ao iniciar. Tente novamente.';
-    nf.classList.remove('hidden');
-    return;
-  }
-  const j = await r.json();
-  document.getElementById('main').classList.remove('hidden');
-  document.getElementById('work-name').textContent = j.work.name;
-  document.getElementById('tb-context').textContent = j.work.name + (j.submission?.student_label ? ` · ${j.submission.student_label}` : '');
-  phase = j.session.currentPhase;
-  interactionMode = j.session.interactionMode || 'text';
-
-  // Aplica modo na UI: texto ou áudio. Esconde a área não usada.
-  if (interactionMode === 'audio') {
-    document.getElementById('input-text').classList.add('hidden');
-    document.getElementById('input-audio').classList.remove('hidden');
-  }
-
-  for (const m of (j.session.chat || [])) {
-    // Histórico restaurado: cache de áudio do servidor pode ter sido evictado
-    // ou o servidor pode ter reiniciado. Mostra sempre como texto neste caso.
-    if (m.role === 'assistant') {
+      const toggle = wrap.querySelector('.transcript-toggle');
+      if (toggle) {
+        toggle.addEventListener('click', () => {
+          const t = wrap.querySelector('.transcript');
+          t.classList.toggle('hidden');
+          toggle.textContent = t.classList.contains('hidden') ? 'ver transcrição' : 'ocultar transcrição';
+        });
+      }
+      // Tenta autoplay; se browser bloquear (sem gesto do usuário), o aluno
+      // ainda pode clicar no controle nativo do <audio>.
+      const a = wrap.querySelector('audio');
+      if (a) a.play().catch(() => { });
+      return wrap;
+    }
+    function appendUser(text) {
       const wrap = document.createElement('div');
-      wrap.className = 'msg ta';
-      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${renderMessage(m.content)}</div>`;
-      chat.appendChild(wrap);
-    } else appendUser(m.content);
-  }
-  chat.scrollTop = chat.scrollHeight;
+      wrap.className = 'msg you';
+      const safe = String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      wrap.innerHTML = `<span class="who">Você</span><div class="bubble">${safe.replace(/\n/g, '<br>')}</div>`;
+      chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+      return wrap;
+    }
+    function appendStatus(text, isError = false) {
+      const div = document.createElement('div');
+      div.className = 'sys-line' + (isError ? ' err' : '');
+      div.textContent = text;
+      chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+      return div;
+    }
+    function showMetaDialog(text, audioUrl) {
+      const container = document.getElementById('meta-dialog-text');
+      container.innerHTML = '';
+      if (interactionMode === 'audio' && audioUrl) {
+        const audio = document.createElement('audio');
+        audio.controls = true; audio.autoplay = true; audio.preload = 'auto';
+        audio.src = audioUrl;
+        audio.style.width = '100%';
+        container.appendChild(audio);
+        const tx = document.createElement('div');
+        tx.style.marginTop = '0.75rem';
+        tx.style.fontSize = 'var(--fs-sm)';
+        tx.style.color = 'var(--ink-700)';
+        tx.textContent = text;
+        container.appendChild(tx);
+      } else {
+        container.textContent = text;
+      }
+      const dlg = document.getElementById('meta-dialog');
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else alert(text);
+    }
+    document.getElementById('meta-dialog-close').onclick = () => {
+      document.getElementById('meta-dialog').close();
+    };
 
-  if (j.session.hasUpload) {
-    document.getElementById('upload-area').classList.add('hidden');
-  }
-}
+    async function start() {
+      const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/start`, { method: 'POST' });
+      if (r.status === 404) {
+        document.getElementById('notfound').classList.remove('hidden');
+        return;
+      }
+      if (r.status === 403) {
+        finalized = true;
+        document.getElementById('finalized-notice').classList.remove('hidden');
+        document.getElementById('main').classList.remove('hidden');
+        document.getElementById('upload-area').classList.add('hidden');
+        document.getElementById('chat-area').classList.add('hidden');
+        return;
+      }
+      if (!r.ok) {
+        const nf = document.getElementById('notfound');
+        try {
+          const j = await r.json();
+          nf.textContent = j.error || 'Erro ao iniciar. Tente novamente.';
+        } catch {
+          nf.textContent = 'Erro ao iniciar. Tente novamente.';
+        }
+        nf.classList.remove('hidden');
+        return;
+      }
+      const j = await r.json();
+      document.getElementById('main').classList.remove('hidden');
+      document.getElementById('work-name').textContent = j.work.name;
+      document.getElementById('tb-context').textContent = j.work.name + (j.submission?.student_label ? ` · ${j.submission.student_label}` : '');
+      phase = j.session.currentPhase;
+      interactionMode = j.session.interactionMode || 'text';
 
-document.getElementById('sendFile').onclick = async () => {
-  const f = document.getElementById('file').files[0];
-  if (!f) return alert('Escolha um arquivo.');
-  const sendBtn = document.getElementById('sendFile');
-  sendBtn.disabled = true;
-  const status = appendStatus('Enviando arquivo...');
-  const form = new FormData();
-  form.append('file', f);
-  status.textContent = 'Analisando trabalho...';
-  try {
-    const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form });
-    const j = await r.json();
-    document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
-    status.remove();
-    if (j.error) appendStatus(j.error, true);
-    else if (j.assistant) {
+      // Aplica modo na UI: texto ou áudio. Esconde a área não usada.
+      if (interactionMode === 'audio') {
+        document.getElementById('input-text').classList.add('hidden');
+        document.getElementById('input-audio').classList.remove('hidden');
+      }
+
+      // Banner "Sessão recomposta": só em modo texto. Em áudio não há histórico
+      // visível para "recompor" — o aluno simplesmente ouve a última pergunta.
+      if (j.session.rebuilt && interactionMode !== 'audio') {
+        const banner = document.getElementById('resumed-banner');
+        banner.classList.remove('hidden');
+        setTimeout(() => banner.classList.add('hidden'), 4000);
+      }
+
+      const pendingAudio = j.session.pending_question_audio;
+      const chatItems = j.session.chat || [];
+
+      if (interactionMode === 'audio') {
+        // Áudio: sem histórico. Só o último áudio do entrevistador.
+        if (pendingAudio && pendingAudio.audio_url) {
+          // appendTA já renderiza player + transcrição oculta + autoplay.
+          appendTA('', pendingAudio.audio_url);
+        } else if (pendingAudio && pendingAudio.error === 'tts_failed') {
+          const div = document.createElement('div');
+          div.className = 'sys-line err';
+          div.innerHTML = 'Não consegui gerar o áudio agora. ';
+          const btn = document.createElement('button');
+          btn.className = 'btn';
+          btn.textContent = 'Tentar novamente';
+          btn.onclick = () => { chat.innerHTML = ''; start(); };
+          div.appendChild(btn);
+          chat.appendChild(div);
+        } else if (phase === 'interviewing' || phase === 'intro') {
+          appendStatus('Carregando próxima pergunta...');
+        }
+      } else {
+        // Texto: renderiza o histórico completo como antes.
+        for (const m of chatItems) {
+          if (m.role === 'assistant') {
+            const wrap = document.createElement('div');
+            wrap.className = 'msg ta';
+            wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${renderMessage(m.content)}</div>`;
+            chat.appendChild(wrap);
+          } else appendUser(m.content);
+        }
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      // Esconde área de upload uma vez que a entrevista esteja em andamento.
+      // Fonte: currentPhase (estado real no servidor), não um booleano derivado.
+      if (phase !== 'awaiting_upload') {
+        document.getElementById('upload-area').classList.add('hidden');
+      }
+    }
+
+    document.getElementById('sendFile').onclick = async () => {
+      const f = document.getElementById('file').files[0];
+      if (!f) return alert('Escolha um arquivo.');
+      const sendBtn = document.getElementById('sendFile');
+      sendBtn.disabled = true;
+      const status = appendStatus('Enviando arquivo...');
+      const form = new FormData();
+      form.append('file', f);
+      status.textContent = 'Analisando trabalho...';
+      try {
+        const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form });
+        const j = await r.json();
+        document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
+        status.remove();
+        if (j.error) appendStatus(j.error, true);
+        else if (j.assistant) {
+          appendTA(j.assistant, j.audio_url);
+          if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
+          document.getElementById('upload-area').classList.add('hidden');
+        }
+      } catch {
+        status.remove();
+        appendStatus('Falha na comunicação com o servidor', true);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
+
+    document.getElementById('send').onclick = async () => {
+      const input = document.getElementById('msg');
+      const m = input.value.trim();
+      if (!m) return;
+      const userNode = appendUser(m);
+      input.value = '';
+      let r, j;
+      try {
+        r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: m })
+        });
+        j = await r.json();
+      } catch {
+        appendStatus('Falha na comunicação com o servidor', true);
+        return;
+      }
+      if (j.error) { appendStatus(j.error, true); return; }
+      if (j.channel === 'modal') {
+        if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
+        input.value = j.restore_input ?? m;
+        input.focus();
+        showMetaDialog(j.assistant_response ?? '', j.audio_url);
+        return;
+      }
       appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
-      document.getElementById('upload-area').classList.add('hidden');
+    };
+
+    document.getElementById('msg').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById('send').click();
+      }
+    });
+
+    // ---- Modo áudio: gravação via MediaRecorder ----
+
+    let mediaRecorder = null;
+    let mediaStream = null;
+    let recordedChunks = [];
+    let recordTimer = null;
+    let recordStartedAt = 0;
+
+    function setRecordStatus(text, isError) {
+      const el = document.getElementById('record-status');
+      el.textContent = text;
+      el.classList.toggle('err', !!isError);
     }
-  } catch {
-    status.remove();
-    appendStatus('Falha na comunicação com o servidor', true);
-  } finally {
-    sendBtn.disabled = false;
-  }
-};
 
-document.getElementById('send').onclick = async () => {
-  const input = document.getElementById('msg');
-  const m = input.value.trim();
-  if (!m) return;
-  const userNode = appendUser(m);
-  input.value = '';
-  let r, j;
-  try {
-    r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: m })
+    function fmtElapsed(ms) {
+      const s = Math.floor(ms / 1000);
+      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      return `${mm}:${ss}`;
+    }
+
+    async function startRecording() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setRecordStatus('Seu navegador não suporta gravação de áudio.', true);
+        return false;
+      }
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        setRecordStatus('Permissão de microfone negada.', true);
+        return false;
+      }
+      // Codec: webm/opus é universalmente suportado pelos browsers modernos e
+      // aceito pela API de transcrição da OpenAI.
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm';
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+      mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunks.push(e.data); };
+      mediaRecorder.start();
+      recordStartedAt = Date.now();
+      recordTimer = setInterval(() => {
+        setRecordStatus(`🔴 Gravando... ${fmtElapsed(Date.now() - recordStartedAt)} — clique em "Parar e enviar" para mandar, ou "Parar" para descartar.`);
+      }, 250);
+      return true;
+    }
+
+    function teardownRecording() {
+      if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      if (mediaRecorder) {
+        // Detach handlers so any late dataavailable from this recorder can't
+        // contaminate the chunks of the next recording.
+        mediaRecorder.ondataavailable = null;
+        mediaRecorder = null;
+      }
+      recordedChunks = [];
+    }
+
+    function setRecordingUI(state) {
+      // state: 'idle' | 'recording' | 'sending'
+      const recBtn = document.getElementById('record-btn');
+      const stopBtn = document.getElementById('stop-btn');
+      const sendBtn = document.getElementById('stop-send-btn');
+      if (state === 'idle') {
+        recBtn.classList.remove('hidden');
+        recBtn.disabled = false;
+        recBtn.classList.remove('recording');
+        recBtn.textContent = '🎙️ Gravar resposta';
+        stopBtn.classList.add('hidden'); stopBtn.disabled = false;
+        sendBtn.classList.add('hidden'); sendBtn.disabled = false;
+      } else if (state === 'recording') {
+        recBtn.classList.add('hidden');
+        stopBtn.classList.remove('hidden'); stopBtn.disabled = false;
+        sendBtn.classList.remove('hidden'); sendBtn.disabled = false;
+      } else if (state === 'sending') {
+        recBtn.classList.add('hidden');
+        stopBtn.classList.remove('hidden'); stopBtn.disabled = true;
+        sendBtn.classList.remove('hidden'); sendBtn.disabled = true;
+      }
+    }
+
+    async function stopRecordingDiscard() {
+      const mr = mediaRecorder;
+      if (!mr) return;
+      // Detach handler first so any final dataavailable is ignored.
+      mr.ondataavailable = null;
+      try { mr.stop(); } catch (e) { console.warn('discard: mr.stop() failed', e); }
+      teardownRecording();
+      setRecordingUI('idle');
+      setRecordStatus('Gravação descartada. Clique no botão para gravar nova resposta.');
+    }
+
+    async function stopRecordingAndSend() {
+      const mr = mediaRecorder;
+      if (!mr) {
+        setRecordingUI('idle');
+        setRecordStatus('Clique no botão para gravar nova resposta.');
+        return;
+      }
+      let blob;
+      try {
+        blob = await new Promise((resolve) => {
+          mr.addEventListener('stop', () => {
+            const b = new Blob(recordedChunks, { type: mr.mimeType });
+            resolve(b);
+          }, { once: true });
+          mr.stop();
+        });
+      } catch (e) {
+        teardownRecording();
+        setRecordingUI('idle');
+        setRecordStatus('Não foi possível encerrar a gravação. Tente de novo.', true);
+        return;
+      }
+      teardownRecording();
+
+      setRecordStatus('Transcrevendo e processando...');
+      const userPlaceholder = appendUser('🎙️ (mensagem de voz enviada)');
+
+      const form = new FormData();
+      form.append('audio', blob, 'student.webm');
+      let r, j;
+      try {
+        r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, { method: 'POST', body: form });
+        j = await r.json();
+      } catch {
+        setRecordStatus('Falha de comunicação. Tente gravar de novo.', true);
+        if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
+        setRecordingUI('idle');
+        return;
+      }
+      if (j.error) {
+        setRecordStatus(j.detail || j.error, true);
+        if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
+        setRecordingUI('idle');
+        return;
+      }
+      if (j.channel === 'modal') {
+        if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
+        setRecordingUI('idle');
+        setRecordStatus('Clique no botão para gravar nova resposta.');
+        showMetaDialog(j.assistant_response ?? '', j.audio_url);
+        return;
+      }
+      appendTA(j.assistant, j.audio_url);
+      if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
+      setRecordingUI('idle');
+      setRecordStatus('Clique no botão para gravar nova resposta.');
+    }
+
+    document.getElementById('record-btn').addEventListener('click', async () => {
+      const ok = await startRecording();
+      if (!ok) return;
+      setRecordingUI('recording');
     });
-    j = await r.json();
-  } catch {
-    appendStatus('Falha na comunicação com o servidor', true);
-    return;
-  }
-  if (j.error) { appendStatus(j.error, true); return; }
-  if (j.channel === 'modal') {
-    if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
-    input.value = j.restore_input ?? m;
-    input.focus();
-    showMetaDialog(j.assistant_response ?? '', j.audio_url);
-    return;
-  }
-  appendTA(j.assistant, j.audio_url);
-  if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
-};
 
-document.getElementById('msg').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    document.getElementById('send').click();
-  }
-});
-
-// ---- Modo áudio: gravação via MediaRecorder ----
-
-let mediaRecorder = null;
-let mediaStream = null;
-let recordedChunks = [];
-let recordTimer = null;
-let recordStartedAt = 0;
-
-function setRecordStatus(text, isError) {
-  const el = document.getElementById('record-status');
-  el.textContent = text;
-  el.classList.toggle('err', !!isError);
-}
-
-function fmtElapsed(ms) {
-  const s = Math.floor(ms / 1000);
-  const mm = String(Math.floor(s / 60)).padStart(2, '0');
-  const ss = String(s % 60).padStart(2, '0');
-  return `${mm}:${ss}`;
-}
-
-async function startRecording() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    setRecordStatus('Seu navegador não suporta gravação de áudio.', true);
-    return false;
-  }
-  try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    setRecordStatus('Permissão de microfone negada.', true);
-    return false;
-  }
-  // Codec: webm/opus é universalmente suportado pelos browsers modernos e
-  // aceito pela API de transcrição da OpenAI.
-  let mimeType = 'audio/webm;codecs=opus';
-  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm';
-  recordedChunks = [];
-  mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
-  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunks.push(e.data); };
-  mediaRecorder.start();
-  recordStartedAt = Date.now();
-  recordTimer = setInterval(() => {
-    setRecordStatus(`🔴 Gravando... ${fmtElapsed(Date.now() - recordStartedAt)} — clique em "Parar e enviar" para mandar, ou "Parar" para descartar.`);
-  }, 250);
-  return true;
-}
-
-function teardownRecording() {
-  if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
-  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-  if (mediaRecorder) {
-    // Detach handlers so any late dataavailable from this recorder can't
-    // contaminate the chunks of the next recording.
-    mediaRecorder.ondataavailable = null;
-    mediaRecorder = null;
-  }
-  recordedChunks = [];
-}
-
-function setRecordingUI(state) {
-  // state: 'idle' | 'recording' | 'sending'
-  const recBtn = document.getElementById('record-btn');
-  const stopBtn = document.getElementById('stop-btn');
-  const sendBtn = document.getElementById('stop-send-btn');
-  if (state === 'idle') {
-    recBtn.classList.remove('hidden');
-    recBtn.disabled = false;
-    recBtn.classList.remove('recording');
-    recBtn.textContent = '🎙️ Gravar resposta';
-    stopBtn.classList.add('hidden'); stopBtn.disabled = false;
-    sendBtn.classList.add('hidden'); sendBtn.disabled = false;
-  } else if (state === 'recording') {
-    recBtn.classList.add('hidden');
-    stopBtn.classList.remove('hidden'); stopBtn.disabled = false;
-    sendBtn.classList.remove('hidden'); sendBtn.disabled = false;
-  } else if (state === 'sending') {
-    recBtn.classList.add('hidden');
-    stopBtn.classList.remove('hidden'); stopBtn.disabled = true;
-    sendBtn.classList.remove('hidden'); sendBtn.disabled = true;
-  }
-}
-
-async function stopRecordingDiscard() {
-  const mr = mediaRecorder;
-  if (!mr) return;
-  // Detach handler first so any final dataavailable is ignored.
-  mr.ondataavailable = null;
-  try { mr.stop(); } catch (e) { console.warn('discard: mr.stop() failed', e); }
-  teardownRecording();
-  setRecordingUI('idle');
-  setRecordStatus('Gravação descartada. Clique no botão para gravar nova resposta.');
-}
-
-async function stopRecordingAndSend() {
-  const mr = mediaRecorder;
-  if (!mr) {
-    setRecordingUI('idle');
-    setRecordStatus('Clique no botão para gravar nova resposta.');
-    return;
-  }
-  let blob;
-  try {
-    blob = await new Promise((resolve) => {
-      mr.addEventListener('stop', () => {
-        const b = new Blob(recordedChunks, { type: mr.mimeType });
-        resolve(b);
-      }, { once: true });
-      mr.stop();
+    document.getElementById('stop-btn').addEventListener('click', async () => {
+      await stopRecordingDiscard();
     });
-  } catch (e) {
-    teardownRecording();
-    setRecordingUI('idle');
-    setRecordStatus('Não foi possível encerrar a gravação. Tente de novo.', true);
-    return;
-  }
-  teardownRecording();
 
-  setRecordStatus('Transcrevendo e processando...');
-  const userPlaceholder = appendUser('🎙️ (mensagem de voz enviada)');
+    document.getElementById('stop-send-btn').addEventListener('click', async () => {
+      setRecordingUI('sending');
+      await stopRecordingAndSend();
+    });
 
-  const form = new FormData();
-  form.append('audio', blob, 'student.webm');
-  let r, j;
-  try {
-    r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, { method: 'POST', body: form });
-    j = await r.json();
-  } catch {
-    setRecordStatus('Falha de comunicação. Tente gravar de novo.', true);
-    if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
-    setRecordingUI('idle');
-    return;
-  }
-  if (j.error) {
-    setRecordStatus(j.detail || j.error, true);
-    if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
-    setRecordingUI('idle');
-    return;
-  }
-  if (j.channel === 'modal') {
-    if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
-    setRecordingUI('idle');
-    setRecordStatus('Clique no botão para gravar nova resposta.');
-    showMetaDialog(j.assistant_response ?? '', j.audio_url);
-    return;
-  }
-  appendTA(j.assistant, j.audio_url);
-  if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
-  setRecordingUI('idle');
-  setRecordStatus('Clique no botão para gravar nova resposta.');
-}
+    document.getElementById('finalize').onclick = async () => {
+      const btn = document.getElementById('finalize');
+      btn.disabled = true;
+      const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/finalize`, { method: 'POST' });
+      const j = await r.json();
+      document.getElementById('result').textContent = JSON.stringify(j, null, 2);
+      btn.disabled = false;
+    };
 
-document.getElementById('record-btn').addEventListener('click', async () => {
-  const ok = await startRecording();
-  if (!ok) return;
-  setRecordingUI('recording');
-});
-
-document.getElementById('stop-btn').addEventListener('click', async () => {
-  await stopRecordingDiscard();
-});
-
-document.getElementById('stop-send-btn').addEventListener('click', async () => {
-  setRecordingUI('sending');
-  await stopRecordingAndSend();
-});
-
-document.getElementById('finalize').onclick = async () => {
-  const btn = document.getElementById('finalize');
-  btn.disabled = true;
-  const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/finalize`, { method: 'POST' });
-  const j = await r.json();
-  document.getElementById('result').textContent = JSON.stringify(j, null, 2);
-  btn.disabled = false;
-};
-
-start();
-</script>
+    start();
+  </script>
 </body>
+
 </html>
