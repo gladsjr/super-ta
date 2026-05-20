@@ -8,8 +8,6 @@ import yaml from "js-yaml";
 import OpenAI from "openai";
 import { MapBuilderAgent } from "./agents/MapBuilderAgent.js";
 import { PlanBuilderAgent } from "./agents/PlanBuilderAgent.js";
-import { ComprehensionEvaluatorAgent } from "./agents/ComprehensionEvaluatorAgent.js";
-import { ClarificationEvaluatorAgent } from "./agents/ClarificationEvaluatorAgent.js";
 import { ScopeClarificationAgent } from "./agents/ScopeClarificationAgent.js";
 import { OffTopicRedirectAgent } from "./agents/OffTopicRedirectAgent.js";
 import { MetaInterventionAgent } from "./agents/MetaInterventionAgent.js";
@@ -309,8 +307,6 @@ async function createVectorStoreWithFile(fileId, sessionId) {
 // Initialize agents (singletons) with configured models
 const mapBuilderAgent = new MapBuilderAgent(openai, PRINCIPAL_REASONING_MODEL);
 const planBuilderAgent = new PlanBuilderAgent(openai, PRINCIPAL_REASONING_MODEL);
-const comprehensionEvaluator = new ComprehensionEvaluatorAgent(openai, PRINCIPAL_REASONING_MODEL);
-const clarificationEvaluator = new ClarificationEvaluatorAgent(openai, PRINCIPAL_REASONING_MODEL);
 const scopeClarificationAgent = new ScopeClarificationAgent(openai, FAST_MODEL);
 const offTopicRedirectAgent = new OffTopicRedirectAgent(openai, FAST_MODEL);
 const metaInterventionAgent = new MetaInterventionAgent(openai, FAST_MODEL);
@@ -514,20 +510,6 @@ async function rebuildSession(sess, reason) {
       log.error("REBUILD", `re-inject document_map failed: ${err.message}`);
     }
   }
-  // Último sinal de avaliação, se houver.
-  const tailSignals = Array.isArray(sess.evaluationSignals) && sess.evaluationSignals.length > 0
-    ? sess.evaluationSignals.slice(-2)
-    : null;
-  if (tailSignals) {
-    try {
-      await openai.conversations.items.create(sess.conversationId_eval, {
-        items: [{ role: "developer", content: `[EVALUATION SIGNALS] ${JSON.stringify(tailSignals, null, 2)}` }],
-      });
-    } catch (err) {
-      log.error("REBUILD", `re-inject evaluation_signals failed: ${err.message}`);
-    }
-  }
-
   // Replay do histórico visível em ambas as conversations. Um único create por
   // conversation com todos os items, na ordem que a hydrate reconstruiu.
   if (sess.conv_chat.length > 0) {
@@ -586,171 +568,6 @@ function pickTriageWinner(results) {
 // ============================================================================
 // EVALUATORS INFRASTRUCTURE
 // ============================================================================
-
-/**
- * Run all evaluators after student response
- * Uses agent-based evaluators with file_search
- */
-async function runEvaluators(session, studentResponse) {
-  const signals = [];
-
-  if (!session.conversationId_eval) {
-    throw new Error('Missing conversationId_eval for evaluators');
-  }
-
-  const meterCtx = sessionMeterCtx(session);
-  // Run both evaluator agents in parallel
-  const [comprehensionSignal, clarificationSignal] = await Promise.all([
-    comprehensionEvaluator.evaluate(
-      session.conversationId_eval,
-      session.vectorStoreId,
-      session.documentMap,
-      studentResponse,
-      meterCtx
-    ),
-    clarificationEvaluator.evaluate(
-      session.conversationId_eval,
-      session.vectorStoreId,
-      session.documentMap,
-      studentResponse,
-      meterCtx
-    )
-  ]);
-
-  signals.push(comprehensionSignal, clarificationSignal);
-
-  // Store signals in session
-  session.evaluationSignals.push(...signals);
-
-  // Log to eval conversation
-  session.conv_eval.push({
-    role: "system",
-    content: `[EVALUATION SIGNALS] ${JSON.stringify(signals, null, 2)}`,
-    metadata: { signals, timestamp: Date.now() }
-  });
-
-  await openai.conversations.items.create(session.conversationId_eval, {
-    items: [{
-      role: "developer",
-      content: `[EVALUATION SIGNALS] ${JSON.stringify(signals, null, 2)}`
-    }]
-  });
-
-  await logLastConvItem(session.conversationId_eval, "CONV:eval");
-
-  return signals;
-}
-
-/**
- * Orchestrator: Decides next action based on evaluation signals
- */
-async function orchestrateNextAction(session, signals) {
-  const MAX_QUESTIONS = 8;
-  const FOLLOWUP_THRESHOLD = 0.5;
-
-  // Check if we've reached question limit
-  if (session.questionCount >= MAX_QUESTIONS) {
-    return { action: 'finalize', question: null };
-  }
-
-  // Check for low comprehension - needs follow-up
-  const comprehensionSignal = signals.find(s => s.type === 'comprehension');
-  if (comprehensionSignal && comprehensionSignal.confidence < FOLLOWUP_THRESHOLD) {
-    if (comprehensionSignal.data.suggestedFollowUp) {
-      return {
-        action: 'followup',
-        question: comprehensionSignal.data.suggestedFollowUp
-      };
-    }
-  }
-
-  // Check for clarification needs
-  const clarificationSignal = signals.find(s => s.type === 'clarification');
-  if (clarificationSignal && clarificationSignal.data.needsClarification) {
-    if (clarificationSignal.data.suggestedQuestion) {
-      return {
-        action: 'followup',
-        question: clarificationSignal.data.suggestedQuestion
-      };
-    }
-  }
-
-  // Continue with new question
-  return { action: 'continue', question: null };
-}
-
-/**
- * Generate next question using LLM with full context
- */
-async function generateNextQuestion(session) {
-  const documentContext = session.documentMap ?
-    `**Resumo do Documento:**\n${JSON.stringify(session.documentMap, null, 2)}\n\n` : "";
-
-  if (!session.conversationId_chat) {
-    throw new Error('Missing conversationId_chat for chat generation');
-  }
-
-  const recentChat = await getConversationContext(session.conversationId_chat, 12);
-
-  const prompt = `${session.systemPrompt}
-
-${documentContext}
-
-**Conversa até agora:**
-${recentChat}
-
-**Tarefa:** Gere a próxima pergunta para o aluno. Foque em:
-- Aspectos não claros ou fracos do documento
-- Compreensão de metodologia e cálculos
-- Justificativas para escolhas feitas
-
-Retorne APENAS a pergunta, sem texto adicional.`;
-
-  try {
-    const tools = session.vectorStoreId ? [{
-      type: "file_search",
-      vector_store_ids: [session.vectorStoreId]
-    }] : [];
-
-    // If no vector store, attach file directly
-    const input = [];
-    if (session.vectorStoreId) {
-      // Use vector store for RAG
-      input.push({ role: "user", content: "Gere a próxima pergunta." });
-    } else if (session.openaiFileId) {
-      // Fallback: attach file directly
-      input.push({
-        role: "user",
-        content: [
-          { type: "input_text", text: "Gere a próxima pergunta." },
-          { type: "input_file", file_id: session.openaiFileId }
-        ]
-      });
-    } else {
-      input.push({ role: "user", content: "Gere a próxima pergunta." });
-    }
-
-    const payload = {
-      model: PRINCIPAL_REASONING_MODEL,
-      instructions: prompt,
-      tools,
-      input
-    };
-
-    log.prompt("QUESTION_GEN", prompt);
-    const response = await log.span("QUESTION_GEN", "responses.create", () =>
-      meteredResponses(
-        { ...sessionMeterCtx(session), agentLabel: "QUESTION_GEN", model: PRINCIPAL_REASONING_MODEL },
-        () => openai.responses.create(payload)
-      )
-    );
-
-    return response.output_text || "Pode me explicar melhor esse ponto do seu trabalho?";
-  } catch (error) {
-    log.error("QUESTION_GEN", `failed: ${error.message}`);
-    throw error;
-  }
-}
 
 // ============================================================================
 // ROUTES
@@ -1524,7 +1341,6 @@ async function createFreshSession(req) {
     currentPhase: "awaiting_upload",
     questionIndex: 0,
     questionCount: 0,
-    evaluationSignals: [],
     interviewerPersona,
     introLog: [],
     introTransitionedAt: null,
@@ -1602,9 +1418,6 @@ async function maybeRebuildPendingQuestionAudio(sess) {
 
 app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) => {
   const token = req.submission.submission_token;
-  if (req.submission.status === "finalized") {
-    return res.status(403).json({ error: "submission already finalized" });
-  }
 
   try {
     let sess = SESSIONS.get(token);
@@ -1670,7 +1483,6 @@ app.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) =
 
 app.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudget, studentUpload.single("file"), async (req, res) => {
   const token = req.submission.submission_token;
-  if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
   const sess = SESSIONS.get(token);
   if (!sess) return res.status(400).json({ error: "call /start first" });
   if (!req.file) return res.status(400).json({ error: "file required" });
@@ -1822,7 +1634,6 @@ app.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, res) 
 
 app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget, audioUpload.single("audio"), async (req, res) => {
   const token = req.submission.submission_token;
-  if (req.submission.status === "finalized") return res.status(403).json({ error: "finalized" });
   const sess = SESSIONS.get(token);
   if (!sess) return res.status(400).json({ error: "call /start first" });
   // O /upload move a sessão de "awaiting_upload" para "intro" e dispara
@@ -2321,183 +2132,6 @@ app.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget
     res.status(500).json({ error: "Erro ao processar mensagem" });
   }
 });
-
-app.post("/s/:submissionToken/finalize", requireSubmissionToken, async (req, res) => {
-  const token = req.submission.submission_token;
-  if (req.submission.status === "finalized" && req.submission.final_report) {
-    return res.json(req.submission.final_report);
-  }
-  const sess = SESSIONS.get(token);
-  if (!sess) return res.status(400).json({ error: "no active session; start and complete the interview first" });
-
-  try {
-    log.info("FINAL", `start submission=${token} signals=${sess.evaluationSignals.length} questions=${sess.questionCount}`);
-
-    const rubricScores = await calculateRubricScores(sess, sess.evaluationSignals);
-    const report = generateFinalReport(sess, rubricScores);
-
-    await db.setFinalReport(req.submission.id, JSON.stringify(report, null, 2));
-
-    log.info("FINAL", `submission=${token} C1=${report.breakdown.C1_compreensao} C2=${report.breakdown.C2_metodologia} C3=${report.breakdown.C3_parametros} total=${report.score_total}`);
-
-    sess.conversationCompleted = true;
-    await persistConversationLog(sess);
-    await db.clearSubmissionRuntimeState(req.submission.id);
-
-    SESSIONS.delete(token);
-    res.json(report);
-  } catch (error) {
-    log.error("FINAL", `failed: ${error.message}`);
-    res.status(500).json({ error: "Erro ao gerar avaliação final" });
-  }
-});
-
-/**
- * Calculate scores based on rubric criteria
- */
-async function calculateRubricScores(session, signals) {
-  // C1: Compreensão do conteúdo (40%)
-  const comprehensionSignals = signals.filter(s => s.type === 'comprehension');
-  const avgComprehension = comprehensionSignals.length > 0
-    ? comprehensionSignals.reduce((sum, s) => sum + s.confidence, 0) / comprehensionSignals.length
-    : 0.5;
-
-  // C2: Correção da metodologia (40%) - requires deeper analysis
-  const c2Score = await evaluateMethodology(session);
-
-  // C3: Valores adequados para parâmetros (20%)
-  const c3Score = await evaluateParameters(session);
-
-  return {
-    C1: { score: avgComprehension * 10, weight: 0.4 },
-    C2: { score: c2Score, weight: 0.4 },
-    C3: { score: c3Score, weight: 0.2 }
-  };
-}
-
-/**
- * Evaluate methodology correctness (C2)
- */
-async function evaluateMethodology(session) {
-  const documentContext = session.documentMap ? JSON.stringify(session.documentMap, null, 2) : "";
-  const conversationSummary = session.conv_chat.slice(-10).map(m =>
-    `${m.role}: ${m.content}`
-  ).join('\n');
-
-  const prompt = `Avalie a correção da metodologia usada no trabalho.
-
-**Documento:**
-${documentContext}
-
-**Conversa com o aluno:**
-${conversationSummary}
-
-Retorne JSON:
-{
-  "score": 0-10,
-  "rationale": "Justificativa breve"
-}`;
-
-  try {
-    log.prompt("EVAL:Methodology", prompt);
-    const response = await log.span("EVAL:Methodology", "responses.create", () =>
-      meteredResponses(
-        { ...sessionMeterCtx(session), agentLabel: "EVAL:Methodology", model: PRINCIPAL_REASONING_MODEL },
-        () => openai.responses.create({
-          model: PRINCIPAL_REASONING_MODEL,
-          instructions: prompt,
-          input: [{ role: "user", content: "Avalie a metodologia." }]
-        })
-      )
-    );
-
-    const outputText = response.output_text || "";
-    const jsonMatch = outputText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Methodology evaluator returned no parseable JSON");
-    }
-    const result = JSON.parse(jsonMatch[0]);
-    if (typeof result.score !== "number") {
-      throw new Error("Methodology evaluator returned invalid score");
-    }
-    log.info("EVAL:Methodology", `score=${result.score}`);
-    return result.score;
-  } catch (error) {
-    log.error("EVAL:Methodology", `failed: ${error.message}`);
-    throw error; // Fail fast - critical scoring component
-  }
-}
-
-/**
- * Evaluate parameter adequacy (C3)
- */
-async function evaluateParameters(session) {
-  const documentContext = session.documentMap ? JSON.stringify(session.documentMap, null, 2) : "";
-
-  const prompt = `Avalie se os parâmetros/valores usados no trabalho são adequados.
-
-**Documento:**
-${documentContext}
-
-Retorne JSON:
-{
-  "score": 0-10,
-  "rationale": "Justificativa breve"
-}`;
-
-  try {
-    log.prompt("EVAL:Parameters", prompt);
-    const response = await log.span("EVAL:Parameters", "responses.create", () =>
-      meteredResponses(
-        { ...sessionMeterCtx(session), agentLabel: "EVAL:Parameters", model: PRINCIPAL_REASONING_MODEL },
-        () => openai.responses.create({
-          model: PRINCIPAL_REASONING_MODEL,
-          instructions: prompt,
-          input: [{ role: "user", content: "Avalie os parâmetros." }]
-        })
-      )
-    );
-
-    const outputText = response.output_text || "";
-    const jsonMatch = outputText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Parameters evaluator returned no parseable JSON");
-    }
-    const result = JSON.parse(jsonMatch[0]);
-    if (typeof result.score !== "number") {
-      throw new Error("Parameters evaluator returned invalid score");
-    }
-    log.info("EVAL:Parameters", `score=${result.score}`);
-    return result.score;
-  } catch (error) {
-    log.error("EVAL:Parameters", `failed: ${error.message}`);
-    throw error; // Fail fast - critical scoring component
-  }
-}
-
-/**
- * Generate final evaluation report
- */
-function generateFinalReport(session, rubricScores) {
-  // Calculate weighted total
-  const total = Object.entries(rubricScores).reduce((sum, [key, data]) => {
-    return sum + (data.score * data.weight);
-  }, 0);
-
-  return {
-    score_total: Math.round(total * 10) / 10,
-    breakdown: {
-      C1_compreensao: Math.round(rubricScores.C1.score * 10) / 10,
-      C2_metodologia: Math.round(rubricScores.C2.score * 10) / 10,
-      C3_parametros: Math.round(rubricScores.C3.score * 10) / 10
-    },
-    metadata: {
-      questionCount: session.questionCount,
-      totalSignals: session.evaluationSignals.length,
-      phase: session.currentPhase
-    }
-  };
-}
 
 app.listen(PORT, "0.0.0.0", async () => {
   if (!process.env.OPENAI_API_KEY) {

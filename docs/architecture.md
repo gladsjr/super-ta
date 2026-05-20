@@ -145,11 +145,8 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 |---|---|---|
 | `MapBuilderAgent` (chamado em `/upload`, parte da prep paralela) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `systemPromptBody` |
 | `PlanBuilderAgent` (chamado em `/upload`, parte da prep paralela — gera o plano de entrevista) | [agents/PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado via [lib/interviewPrompt.js](../lib/interviewPrompt.js) |
-| `ComprehensionEvaluatorAgent` (chamado em `/finalize`) | [agents/ComprehensionEvaluatorAgent.js](../agents/ComprehensionEvaluatorAgent.js) | [systemPrompt :23](../agents/ComprehensionEvaluatorAgent.js#L23) |
-| `ClarificationEvaluatorAgent` (chamado em `/finalize`) | [agents/ClarificationEvaluatorAgent.js](../agents/ClarificationEvaluatorAgent.js) | [systemPrompt :23](../agents/ClarificationEvaluatorAgent.js#L23) |
 | `INTERVIEWER_ADAPT_INSTRUCTIONS` (botão "Adaptar ao enunciado") | [server.js:660](../server.js#L660) | string literal usada como `instructions` na chamada da Responses API |
 | Base TA (carregada por `loadSystemPrompt`) | [server.js:88](../server.js#L88) | [config/system_prompt.txt](../config/system_prompt.txt) |
-| `/finalize` (gera relatório) | [server.js:1192](../server.js#L1192) | strings inline na função `calculateRubricScores` (a ser extraídas, ver TODO abaixo) |
 | `ConfigAssistantAgent` (chat do assistente de configuração, chamado em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | [systemPrompt :31](../agents/ConfigAssistantAgent.js#L31) |
 | `EnunciadoCoherenceAgent` (avalia adequação do enunciado, chamado em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | [systemPrompt :40](../agents/EnunciadoCoherenceAgent.js#L40) |
 | Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [server.js — initOrResumeSession / validateResources / rebuildSession](../server.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `document_map` salvo no `runtime_state_json` |
@@ -214,8 +211,6 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
 
    - [MapBuilderAgent.js](../agents/MapBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`
    - [PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`, body é o template `interview_prompt_template.txt` renderizado por chamada
-   - [ComprehensionEvaluatorAgent.js](../agents/ComprehensionEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`
-   - [ClarificationEvaluatorAgent.js](../agents/ClarificationEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`
    - [ScopeClarificationAgent.js](../agents/ScopeClarificationAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
    - [OffTopicRedirectAgent.js](../agents/OffTopicRedirectAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
    - [MetaInterventionAgent.js](../agents/MetaInterventionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
@@ -226,7 +221,6 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado ao processo, recebe PDF via `input_file`)
 3. **Strings inline em `server.js`**:
    - [INTERVIEWER_ADAPT_INSTRUCTIONS — linha 660](../server.js#L660) — instruções para "Adaptar ao enunciado".
-   - **TODO**: as instruções de C2/C3 dentro de `calculateRubricScores` ainda são strings inline. Quando extraídas para um arquivo dedicado, atualizar este índice.
 
 ## Convenção do esquema `vscode://`
 

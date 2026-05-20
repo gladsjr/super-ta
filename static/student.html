@@ -153,10 +153,6 @@
       margin: 0;
     }
 
-    .finalize-card {
-      text-align: left;
-    }
-
     #result {
       background: var(--ink-50);
       border: 1px solid var(--ink-100);
@@ -296,8 +292,6 @@
 
     <div id="notfound" class="notice notice-error hidden">Token inválido ou trabalho não encontrado. Confira o link.
     </div>
-    <div id="finalized-notice" class="notice notice-success hidden">Esta avaliação já foi finalizada. Veja o resultado
-      abaixo.</div>
     <div id="resumed-banner" class="notice hidden">Sessão recomposta. Você pode continuar.</div>
 
     <div id="main" class="hidden">
@@ -338,13 +332,6 @@
         </div>
       </div>
 
-      <div class="card finalize-card">
-        <h3 class="card-title">Finalizar entrevista</h3>
-        <p class="card-sub">Quando o entrevistador avisar que tem informações suficientes, clique abaixo para gerar sua
-          avaliação. Depois disso a conversa é encerrada.</p>
-        <button id="finalize" class="btn">Gerar avaliação</button>
-        <pre id="result"></pre>
-      </div>
     </div>
 
   </main>
@@ -362,7 +349,6 @@
   <script>
     const submissionToken = location.pathname.split('/').filter(Boolean)[1];
     let phase = 'awaiting_upload';
-    let finalized = false;
     let interactionMode = 'text';
     const chat = document.getElementById('chat');
 
@@ -454,14 +440,6 @@
       const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/start`, { method: 'POST' });
       if (r.status === 404) {
         document.getElementById('notfound').classList.remove('hidden');
-        return;
-      }
-      if (r.status === 403) {
-        finalized = true;
-        document.getElementById('finalized-notice').classList.remove('hidden');
-        document.getElementById('main').classList.remove('hidden');
-        document.getElementById('upload-area').classList.add('hidden');
-        document.getElementById('chat-area').classList.add('hidden');
         return;
       }
       if (!r.ok) {
@@ -766,15 +744,6 @@
       setRecordingUI('sending');
       await stopRecordingAndSend();
     });
-
-    document.getElementById('finalize').onclick = async () => {
-      const btn = document.getElementById('finalize');
-      btn.disabled = true;
-      const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/finalize`, { method: 'POST' });
-      const j = await r.json();
-      document.getElementById('result').textContent = JSON.stringify(j, null, 2);
-      btn.disabled = false;
-    };
 
     start();
   </script>

@@ -206,7 +206,6 @@ async function loadWorks() {
     const profUrl = '/w/' + encodeURIComponent(w.work_token);
     const pending = Number(w.pending || 0);
     const inprog = Number(w.in_progress || 0);
-    const finalized = Number(w.finalized || 0);
     const enunBadge = w.assignment_pdf
       ? '<span class="badge badge-accent">enunciado ✓</span>'
       : '<span class="badge">sem enunciado</span>';
@@ -226,7 +225,6 @@ async function loadWorks() {
           <div class="work-stats">
             <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
             <span class="badge badge-in_progress">${inprog} em andamento</span>
-            <span class="badge badge-finalized">${finalized} finalizado${finalized === 1 ? '' : 's'}</span>
             ${enunBadge}
           </div>
           <div class="budget-block">
