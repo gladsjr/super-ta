@@ -276,6 +276,51 @@
       font-size: var(--fs-sm);
       color: var(--ink-700);
     }
+
+    /* Consent dialog (Pacote A do plano de conformidade MEC/LGPD). */
+    #consent-dialog {
+      max-width: 640px;
+    }
+
+    #consent-dialog .dlg-body {
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    #consent-dialog h4 {
+      margin: var(--sp-4) 0 var(--sp-2);
+      font-size: var(--fs-md);
+    }
+
+    #consent-dialog ul {
+      margin: var(--sp-2) 0;
+      padding-left: 1.4rem;
+    }
+
+    #consent-dialog .consent-check {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--sp-2);
+      margin-top: var(--sp-5);
+      padding: var(--sp-3);
+      background: var(--bg-muted);
+      border-radius: var(--r-md);
+      font-size: var(--fs-md);
+      cursor: pointer;
+      line-height: 1.45;
+    }
+
+    #consent-dialog .consent-check input[type="checkbox"] {
+      margin-top: 0.25rem;
+      flex: 0 0 auto;
+    }
+
+    #consent-dialog .dlg-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--sp-3);
+    }
   </style>
 </head>
 
@@ -343,6 +388,21 @@
     </div>
     <div class="dlg-actions">
       <button id="meta-dialog-close" class="btn btn-primary">Entendi</button>
+    </div>
+  </dialog>
+
+  <dialog id="consent-dialog">
+    <div class="dlg-body">
+      <h3>Antes de começar</h3>
+      <div id="consent-text"></div>
+      <label class="consent-check" for="consent-checkbox">
+        <input type="checkbox" id="consent-checkbox" />
+        <span>Li e concordo com o tratamento dos meus dados nos termos acima.</span>
+      </label>
+    </div>
+    <div class="dlg-actions">
+      <button id="consent-cancel" class="btn" type="button">Cancelar</button>
+      <button id="consent-accept" class="btn btn-primary" type="button" disabled>Aceito e quero começar</button>
     </div>
   </dialog>
 
@@ -436,6 +496,69 @@
       document.getElementById('meta-dialog').close();
     };
 
+    // ---- Consentimento (Pacote A, plano MEC/LGPD) ----
+    // Texto e versão vêm de /api/consent (fonte: config/consent.js).
+    // Persistência do aceite hoje é em sessionStorage; o Pacote B substitui
+    // por aceite registrado no banco (POST /s/:t/consent) com gating no
+    // /upload (403 consent_required) — daí o modal não pode ser burlado.
+    function consentKey(token, version) { return `consent:${token}:${version}`; }
+    function hasAcceptedConsent(token, version) {
+      try { return sessionStorage.getItem(consentKey(token, version)) === '1'; }
+      catch { return false; }
+    }
+    function recordLocalConsent(token, version) {
+      try { sessionStorage.setItem(consentKey(token, version), '1'); } catch { }
+    }
+    async function ensureConsent(interactionMode) {
+      let consent;
+      try {
+        const r = await fetch('/api/consent');
+        consent = await r.json();
+      } catch {
+        // Sem termo carregado não dá pra prosseguir com segurança.
+        appendStatus('Não consegui carregar o termo de consentimento. Recarregue a página.', true);
+        return false;
+      }
+      if (hasAcceptedConsent(submissionToken, consent.version)) return true;
+
+      const dlg = document.getElementById('consent-dialog');
+      const textEl = document.getElementById('consent-text');
+      const checkbox = document.getElementById('consent-checkbox');
+      const acceptBtn = document.getElementById('consent-accept');
+      const cancelBtn = document.getElementById('consent-cancel');
+
+      const audioBlock = interactionMode === 'audio' ? (consent.audioAdditionHtml || '') : '';
+      textEl.innerHTML = (consent.textHtml || '') + audioBlock;
+      checkbox.checked = false;
+      acceptBtn.disabled = true;
+
+      return new Promise((resolve) => {
+        const onChange = () => { acceptBtn.disabled = !checkbox.checked; };
+        const onAccept = () => {
+          recordLocalConsent(submissionToken, consent.version);
+          cleanup();
+          dlg.close();
+          resolve(true);
+        };
+        const onCancel = () => {
+          cleanup();
+          dlg.close();
+          window.location.href = '/envio';
+          resolve(false);
+        };
+        function cleanup() {
+          checkbox.removeEventListener('change', onChange);
+          acceptBtn.removeEventListener('click', onAccept);
+          cancelBtn.removeEventListener('click', onCancel);
+        }
+        checkbox.addEventListener('change', onChange);
+        acceptBtn.addEventListener('click', onAccept);
+        cancelBtn.addEventListener('click', onCancel);
+        if (typeof dlg.showModal === 'function') dlg.showModal();
+        else { onAccept(); /* fallback se browser não suporta <dialog> */ }
+      });
+    }
+
     async function start() {
       const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/start`, { method: 'POST' });
       if (r.status === 404) {
@@ -512,6 +635,11 @@
       // Fonte: currentPhase (estado real no servidor), não um booleano derivado.
       if (phase !== 'awaiting_upload') {
         document.getElementById('upload-area').classList.add('hidden');
+      } else {
+        // Modal bloqueante de consentimento antes do upload. Se o aluno
+        // recusar, é redirecionado para /envio.
+        const ok = await ensureConsent(interactionMode);
+        if (!ok) return;
       }
     }
 
