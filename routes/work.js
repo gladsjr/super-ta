@@ -126,14 +126,37 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
         if (!found || found.work_id !== req.work.id) {
             return res.status(404).json({ error: "submission not found" });
         }
+        const [text, runtime] = await Promise.all([
+            db.getConversationJson(found.id),
+            db.getSubmissionRuntimeState(found.id),
+        ]);
         let conversation = null;
-        const text = await db.getConversationJson(found.id);
         if (text) {
             try { conversation = JSON.parse(text); }
             catch (err) {
                 log.error("WORK", `conversation parse failed submission=${subToken}: ${err.message}`);
                 return res.status(500).json({ error: "failed to read conversation" });
             }
+        }
+        // Acrescenta as perguntas planejadas que ainda não foram feitas. O plano
+        // original vive em runtime_state.interview_plan; o cursor question_index
+        // aponta para a próxima a considerar (tanto perguntas feitas quanto
+        // puladas avançam o cursor). Skipped ficam abaixo do cursor — já são
+        // expostos por outra seção. Slice(cursor) é exatamente o "futuro".
+        const planQuestions = runtime?.runtime_state?.interview_plan?.questions;
+        if (conversation && Array.isArray(planQuestions)) {
+            const cursor = typeof runtime.question_index === "number" ? runtime.question_index : 0;
+            conversation.pending_questions = planQuestions.slice(cursor).map((q, i) => ({
+                index: cursor + i,
+                id: q?.id ?? null,
+                question: q?.question ?? "",
+                rationale: q?.rationale ?? "",
+                objectives: q?.objectives ?? [],
+                concerns: q?.concerns ?? [],
+                decision_criteria: q?.decision_criteria ?? [],
+                information_needs: q?.information_needs ?? [],
+                evaluation_mode: q?.evaluation_mode ?? [],
+            }));
         }
         res.json({
             work: { work_token: req.work.work_token, name: req.work.name },

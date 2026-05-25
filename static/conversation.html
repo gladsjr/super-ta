@@ -126,6 +126,35 @@
   .skipped-q { color: var(--ink-700); }
   .skipped-reason { color: var(--ink-500); margin-top: var(--sp-1); font-style: italic; }
   .skipped-meta { color: var(--ink-400); font-size: var(--fs-xs); margin-top: var(--sp-1); }
+
+  .pending-section { margin-top: var(--sp-6); }
+  .pending-section-title { font-size: var(--fs-md); font-weight: 600; color: var(--ink-700); margin: 0 0 var(--sp-1); }
+  .pending-section-note { color: var(--ink-500); font-size: var(--fs-sm); font-style: italic; margin-bottom: var(--sp-3); }
+  .pending-turn {
+    background: var(--bg-muted);
+    border: 1px dashed var(--ink-300);
+    border-radius: var(--r-lg);
+    padding: var(--sp-4) var(--sp-5);
+    margin-top: var(--sp-3);
+    opacity: 0.92;
+  }
+  .pending-turn .turn-header { border-bottom-color: var(--ink-200); }
+  .pending-turn .turn-header h2 { color: var(--ink-700); }
+  .pending-badge {
+    display: inline-block;
+    background: var(--ink-100);
+    color: var(--ink-700);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--r-sm);
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-left: var(--sp-2);
+    vertical-align: middle;
+  }
+  .pending-turn .block.question { background: var(--bg-raised); border-left-color: var(--ink-300); }
+  .pending-turn .block.rationale { background: var(--bg-raised); border-left-color: var(--ink-300); }
 </style>
 </head>
 <body>
@@ -165,6 +194,16 @@
   </details>
 
   <div id="turns"></div>
+
+  <section id="pending-section" class="pending-section hidden">
+    <h2 class="pending-section-title" id="pending-section-title">Perguntas planejadas (ainda não feitas)</h2>
+    <p class="pending-section-note">
+      Em ordem do plano. O agente de relevância decide turno a turno se pula
+      alguma por já ter sido coberta na conversa — então esta é a lista
+      candidata, não o roteiro garantido.
+    </p>
+    <div id="pending-body"></div>
+  </section>
 
 </main>
 
@@ -292,6 +331,37 @@ function renderTurn(turn) {
     </section>`;
 }
 
+function renderPendingQuestion(q) {
+  const metaRows = [
+    ['Objectives', q.objectives],
+    ['Concerns', q.concerns],
+    ['Decision criteria', q.decision_criteria],
+    ['Information needs', q.information_needs],
+    ['Evaluation mode', q.evaluation_mode],
+  ].map(([label, v]) => `<dt>${label}</dt><dd>${listBlock(v)}</dd>`).join('');
+  const rBlock = q.rationale ? `
+    <div class="block rationale">
+      <div class="label">Justificativa</div>
+      <div class="content">${escapeHtml(q.rationale)}</div>
+    </div>` : '';
+  return `
+    <section class="turn pending-turn">
+      <div class="turn-header">
+        <h2>Próxima pergunta ${q.index + 1}${q.id != null ? ` · plan id ${escapeHtml(q.id)}` : ''}<span class="pending-badge">Pendente</span></h2>
+        <span class="time">—</span>
+      </div>
+      <div class="block question">
+        <div class="label">Pergunta planejada</div>
+        <div class="content">${escapeHtml(q.question)}</div>
+      </div>
+      ${rBlock}
+      <details class="meta">
+        <summary>Metadados da pergunta</summary>
+        <dl>${metaRows}</dl>
+      </details>
+    </section>`;
+}
+
 async function load() {
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/conversation`);
   if (r.status === 404) {
@@ -367,9 +437,17 @@ async function load() {
   const turns = Array.isArray(conv.turns) ? conv.turns : [];
   if (turns.length === 0) {
     turnsEl.innerHTML = '<div class="notice notice-info">Entrevista iniciada, mas ainda sem perguntas registradas.</div>';
-    return;
+  } else {
+    turnsEl.innerHTML = turns.map(renderTurn).join('');
   }
-  turnsEl.innerHTML = turns.map(renderTurn).join('');
+
+  const pending = Array.isArray(conv.pending_questions) ? conv.pending_questions : [];
+  if (pending.length > 0) {
+    document.getElementById('pending-section-title').textContent =
+      `Perguntas planejadas (ainda não feitas) — ${pending.length}`;
+    document.getElementById('pending-body').innerHTML = pending.map(renderPendingQuestion).join('');
+    document.getElementById('pending-section').classList.remove('hidden');
+  }
 }
 
 load();
