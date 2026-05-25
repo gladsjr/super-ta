@@ -10,4 +10,8 @@
 -- Eventuais rows que tinham final_report_json populado revertem para
 -- 'in_progress' (intencional).
 
-ALTER TABLE submissions DROP COLUMN final_report_json;
+-- IF EXISTS porque o banco de produção foi criado sem essa coluna
+-- (provavelmente removida manualmente antes do regime de migrations).
+-- Em dev a coluna já foi removida pela versão anterior desta migration,
+-- então o IF EXISTS é seguro nos dois ambientes.
+ALTER TABLE submissions DROP COLUMN IF EXISTS final_report_json;
