@@ -16,6 +16,28 @@
   .budget-bar > span { display: block; height: 100%; background: var(--c-accent, #2563eb); transition: width .2s ease; }
   .budget-bar.warn > span { background: #f59e0b; }
   .budget-bar.exhausted > span { background: #dc2626; }
+
+  .sub-mode-divider { margin: var(--sp-4) 0 var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3); color: var(--ink-500); font-size: var(--fs-sm); }
+  .sub-bulk-ta { min-height: 8rem; font-family: var(--font-mono, monospace); font-size: var(--fs-sm); }
+  .sub-bulk-row { display: flex; gap: var(--sp-3); align-items: flex-start; }
+  .sub-bulk-row > div:first-child { flex: 1; }
+  .table-toolbar { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-2); flex-wrap: wrap; }
+  .table-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
+  .table-toolbar .spacer { flex: 1; }
+
+  .badge-blocked {
+    background: #fde2e2;
+    color: #8a1c1c;
+    border: 1px solid #f3b8b8;
+    border-radius: var(--r-sm);
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-left: var(--sp-1);
+  }
+  tr.row-blocked td { opacity: 0.65; }
+  tr.row-blocked td:last-child { opacity: 1; }
 </style>
 </head>
 <body>
@@ -107,12 +129,34 @@
         <button id="create-subs" class="btn btn-primary">Gerar</button>
       </div>
       <div id="sub-msg" class="hint"></div>
+
+      <div class="sub-mode-divider">Ou cole uma lista de nomes (um por linha) para criar de uma vez:</div>
+      <div class="sub-bulk-row">
+        <div>
+          <label class="label" for="sub-bulk">Lista de nomes</label>
+          <textarea id="sub-bulk" class="textarea sub-bulk-ta" placeholder="Maria Souza&#10;João Pereira&#10;..." spellcheck="false"></textarea>
+        </div>
+        <button id="create-bulk" class="btn btn-primary" style="margin-top: 1.5rem">Gerar do lote</button>
+      </div>
+      <div id="sub-bulk-msg" class="hint"></div>
+
       <div style="margin-top: var(--sp-4)">
+        <div class="table-toolbar">
+          <label class="filter-label" for="sub-filter">Mostrar:</label>
+          <select id="sub-filter" class="select">
+            <option value="all">Todas</option>
+            <option value="active" selected>Ativas</option>
+            <option value="blocked">Bloqueadas</option>
+          </select>
+          <span class="spacer"></span>
+          <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
+        </div>
         <table id="sub-table" class="table hidden">
-          <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th></tr></thead>
+          <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
+        <div id="sub-filtered-empty" class="table-empty hidden">Nenhuma entrevista neste filtro.</div>
       </div>
     </div>
   </div>
@@ -256,34 +300,80 @@ async function load() {
     </span>
   `;
 
+  lastSubmissions = j.submissions;
+  renderSubmissionsTable();
+}
+
+let lastSubmissions = [];
+
+function renderSubmissionsTable() {
   const tbody = document.querySelector('#sub-table tbody');
-  if (j.submissions.length === 0) {
-    document.getElementById('sub-table').classList.add('hidden');
-    document.getElementById('sub-empty').classList.remove('hidden');
-  } else {
-    document.getElementById('sub-table').classList.remove('hidden');
-    document.getElementById('sub-empty').classList.add('hidden');
-    tbody.innerHTML = j.submissions.map(s => {
-      const url = '/s/' + encodeURIComponent(s.submission_token);
-      const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token);
-      const hasConv = s.status === 'in_progress';
-      const convCell = hasConv
-        ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">Ver conversa ↗</a>`
-        : `<span class="muted">—</span>`;
-      return `<tr>
-        <td>
-          <div class="row-tight">
-            <code class="token-chip">${escapeHtml(s.submission_token)}</code>
-            <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${s.submission_token}')">📋</button>
-            <a href="${url}" target="_blank" title="Abrir página do aluno">abrir ↗</a>
-          </div>
-        </td>
-        <td>${escapeHtml(s.student_label || '—')}</td>
-        <td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span></td>
-        <td>${convCell}</td>
-      </tr>`;
-    }).join('');
+  const filter = document.getElementById('sub-filter').value;
+  const tableEl = document.getElementById('sub-table');
+  const emptyEl = document.getElementById('sub-empty');
+  const filteredEmptyEl = document.getElementById('sub-filtered-empty');
+
+  if (lastSubmissions.length === 0) {
+    tableEl.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+    filteredEmptyEl.classList.add('hidden');
+    return;
   }
+  emptyEl.classList.add('hidden');
+
+  const filtered = lastSubmissions.filter(s => {
+    if (filter === 'active') return !s.is_blocked;
+    if (filter === 'blocked') return !!s.is_blocked;
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    tableEl.classList.add('hidden');
+    filteredEmptyEl.classList.remove('hidden');
+    return;
+  }
+  filteredEmptyEl.classList.add('hidden');
+  tableEl.classList.remove('hidden');
+
+  tbody.innerHTML = filtered.map(s => {
+    const url = '/s/' + encodeURIComponent(s.submission_token);
+    const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token);
+    const hasConv = s.status === 'in_progress';
+    const convCell = hasConv
+      ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">Ver conversa ↗</a>`
+      : `<span class="muted">—</span>`;
+    const blockedBadge = s.is_blocked ? `<span class="badge-blocked">bloqueada</span>` : '';
+    const actionBtn = s.is_blocked
+      ? `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta entrevista">Liberar</button>`
+      : `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', true)" title="Pausa a entrevista; o aluno perde acesso até você liberar">Bloquear</button>`;
+    return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
+      <td>
+        <div class="row-tight">
+          <code class="token-chip">${escapeHtml(s.submission_token)}</code>
+          <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${s.submission_token}')">📋</button>
+          <a href="${url}" target="_blank" title="Abrir página do aluno">abrir ↗</a>
+        </div>
+      </td>
+      <td>${escapeHtml(s.student_label || '—')}</td>
+      <td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span>${blockedBadge}</td>
+      <td>${convCell}</td>
+      <td>${actionBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function toggleBlock(submissionToken, isBlocked) {
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(submissionToken)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_blocked: isBlocked }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    alert('Falha: ' + (j.error || 'ao alterar bloqueio'));
+    return;
+  }
+  load();
 }
 
 function statusLabel(s) {
@@ -486,6 +576,40 @@ document.getElementById('create-subs').onclick = async () => {
   if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
   msg.textContent = `${j.submissions.length} token(s) gerados.`;
   load();
+};
+
+document.getElementById('create-bulk').onclick = async () => {
+  const msg = document.getElementById('sub-bulk-msg');
+  const ta = document.getElementById('sub-bulk');
+  const labels = ta.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  msg.textContent = '';
+  if (labels.length === 0) { msg.textContent = 'Cole pelo menos um nome.'; return; }
+  const dups = labels.filter((x, i) => labels.indexOf(x) !== i);
+  if (dups.length > 0 && !confirm(`${dups.length} nome(s) repetido(s) na lista. Criar mesmo assim?`)) return;
+  const btn = document.getElementById('create-bulk');
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = 'Gerando…';
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels }),
+    });
+    const j = await r.json();
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
+    msg.textContent = `${j.submissions.length} entrevista(s) criada(s).`;
+    ta.value = '';
+    load();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+};
+
+document.getElementById('sub-filter').addEventListener('change', renderSubmissionsTable);
+
+document.getElementById('download-csv').onclick = () => {
+  window.location.href = `/w/${encodeURIComponent(workToken)}/submissions.csv`;
 };
 
 function escapeHtml(s) {

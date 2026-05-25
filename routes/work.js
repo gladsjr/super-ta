@@ -473,7 +473,42 @@ async function findMatchingTemplateName(savedYamlText) {
 // ============================================================================
 // Criação de submissions
 // ============================================================================
+// Aceita dois modos:
+//   { label, count }   — modo single legado: cria N submissões com labels
+//                        derivados do baseLabel (label, label-2, label-3...).
+//   { labels: [...] }  — modo lote por nomes: cria uma submissão por linha,
+//                        com o nome cru como rótulo. Sanitização linha a linha;
+//                        duplicatas são permitidas (token é o ID único).
+// Quando `labels` está presente ele vence; `label`/`count` são ignorados.
+const BULK_LABEL_CAP = 200;
 router.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
+    const rawLabels = req.body?.labels;
+    if (Array.isArray(rawLabels)) {
+        const sanitized = [];
+        for (let i = 0; i < rawLabels.length; i++) {
+            const raw = String(rawLabels[i] ?? "").trim();
+            if (!raw) continue; // ignora linhas vazias silenciosamente
+            try { sanitized.push(sanitizeLabel(raw)); }
+            catch (err) {
+                return res.status(400).json({ error: `linha ${i + 1}: ${err.message}` });
+            }
+        }
+        if (sanitized.length === 0) {
+            return res.status(400).json({ error: "lista vazia (nenhum nome válido)" });
+        }
+        if (sanitized.length > BULK_LABEL_CAP) {
+            return res.status(400).json({ error: `máximo de ${BULK_LABEL_CAP} nomes por envio` });
+        }
+        try {
+            const rows = await db.createSubmissionsFromLabels(req.work.id, sanitized);
+            log.info("SUBMISSION", `created ${rows.length} submission(s) from labels for work=${req.work.work_token}`);
+            return res.json({ submissions: rows });
+        } catch (err) {
+            log.error("SUBMISSION", `create-from-labels failed: ${err.message}`);
+            return res.status(500).json({ error: "failed to create submissions" });
+        }
+    }
+
     let baseLabel;
     try { baseLabel = sanitizeLabel(req.body?.label); }
     catch (err) { return res.status(400).json({ error: err.message }); }
@@ -488,6 +523,62 @@ router.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
     } catch (err) {
         log.error("SUBMISSION", `create failed: ${err.message}`);
         res.status(500).json({ error: "failed to create submissions" });
+    }
+});
+
+// Bloqueio/liberação da entrevista. A checagem efetiva acontece em
+// requireSubmissionToken (lib/middleware.js) — todos os endpoints /s/:t/*
+// passam por lá e devolvem 403 quando is_blocked=true.
+router.patch("/w/:workToken/submissions/:subToken", requireWorkToken, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    if (typeof req.body?.is_blocked !== "boolean") {
+        return res.status(400).json({ error: "is_blocked (boolean) required" });
+    }
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        const newValue = await db.setSubmissionBlocked(found.id, req.body.is_blocked);
+        log.info("SUBMISSION", `${newValue ? "blocked" : "unblocked"} submission=${subToken} work=${req.work.work_token}`);
+        res.json({ submission_token: subToken, is_blocked: newValue });
+    } catch (err) {
+        log.error("SUBMISSION", `block toggle failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "failed to update submission" });
+    }
+});
+
+// Export CSV com label + token + URL para o aluno. URL é montada com base no
+// Host header — atrás de proxy reverso pode exigir app.set("trust proxy", true)
+// no server.js para refletir o host externo.
+function csvField(value) {
+    const s = String(value ?? "");
+    if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+}
+router.get("/w/:workToken/submissions.csv", requireWorkToken, async (req, res) => {
+    try {
+        const rows = await db.listSubmissionsForWork(req.work.id);
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        const header = ["student_label", "submission_token", "student_url", "status", "is_blocked"];
+        const lines = [header.join(",")];
+        for (const r of rows) {
+            lines.push([
+                csvField(r.student_label),
+                csvField(r.submission_token),
+                csvField(`${baseUrl}/s/${r.submission_token}`),
+                csvField(r.status),
+                csvField(r.is_blocked ? "true" : "false"),
+            ].join(","));
+        }
+        const csv = lines.join("\r\n") + "\r\n";
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="submissoes-${req.work.work_token}.csv"`);
+        // UTF-8 BOM ajuda o Excel a abrir acentos corretamente.
+        res.send("﻿" + csv);
+    } catch (err) {
+        log.error("WORK", `csv export failed: ${err.message}`);
+        res.status(500).json({ error: "failed to export csv" });
     }
 });
 

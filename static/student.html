@@ -569,7 +569,7 @@
         const nf = document.getElementById('notfound');
         try {
           const j = await r.json();
-          nf.textContent = j.error || 'Erro ao iniciar. Tente novamente.';
+          nf.textContent = j.message || j.error || 'Erro ao iniciar. Tente novamente.';
         } catch {
           nf.textContent = 'Erro ao iniciar. Tente novamente.';
         }
@@ -657,7 +657,7 @@
         const j = await r.json();
         document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
         status.remove();
-        if (j.error) appendStatus(j.error, true);
+        if (j.error) appendStatus(j.message || j.error, true);
         else if (j.assistant) {
           appendTA(j.assistant, j.audio_url);
           if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
@@ -688,7 +688,7 @@
         appendStatus('Falha na comunicação com o servidor', true);
         return;
       }
-      if (j.error) { appendStatus(j.error, true); return; }
+      if (j.error) { appendStatus(j.message || j.error, true); return; }
       if (j.channel === 'modal') {
         if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
         input.value = j.restore_input ?? m;
@@ -840,7 +840,7 @@
         return;
       }
       if (j.error) {
-        setRecordStatus(j.detail || j.error, true);
+        setRecordStatus(j.message || j.detail || j.error, true);
         if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
         setRecordingUI('idle');
         return;
