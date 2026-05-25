@@ -412,6 +412,27 @@
     let interactionMode = 'text';
     const chat = document.getElementById('chat');
 
+    // Cobre dois cenários em que a sessão em memória do servidor sumiu sob nós:
+    //   (a) deploy multi-instância onde o /chat caiu numa instância diferente
+    //       da que processou o /start original;
+    //   (b) restart do servidor no meio da entrevista.
+    // Em ambos os casos o servidor devolve 400 "call /start first". Aqui
+    // rehidratamos silenciosamente via /start e retentamos o request original
+    // uma vez. Se a recuperação falhar, devolvemos o erro original para o caller
+    // tratar como sempre tratou. `factory` precisa devolver uma Promise<Response>
+    // fresca a cada chamada (não passar a mesma Response).
+    async function sessionAwareFetch(factory) {
+      let r = await factory();
+      if (r.ok) return r;
+      let body;
+      try { body = await r.clone().json(); } catch { return r; }
+      const isColdSession = r.status === 400 && body?.error === 'call /start first';
+      if (!isColdSession) return r;
+      const startR = await fetch(`/s/${encodeURIComponent(submissionToken)}/start`, { method: 'POST' });
+      if (!startR.ok) return r;
+      return await factory();
+    }
+
     function renderMessage(text) {
       let html = text;
       html = html.replace(/\\\[([\s\S]*?)\\\]/g, (m, f) => {
@@ -653,7 +674,7 @@
       form.append('file', f);
       status.textContent = 'Analisando trabalho...';
       try {
-        const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form });
+        const r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form }));
         const j = await r.json();
         document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
         status.remove();
@@ -679,10 +700,10 @@
       input.value = '';
       let r, j;
       try {
-        r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
+        r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: m })
-        });
+        }));
         j = await r.json();
       } catch {
         appendStatus('Falha na comunicação com o servidor', true);
@@ -831,7 +852,7 @@
       form.append('audio', blob, 'student.webm');
       let r, j;
       try {
-        r = await fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, { method: 'POST', body: form });
+        r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, { method: 'POST', body: form }));
         j = await r.json();
       } catch {
         setRecordStatus('Falha de comunicação. Tente gravar de novo.', true);
