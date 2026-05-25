@@ -35,7 +35,10 @@ agent:
     - "tese de investimento do investidor define o tipo de oportunidade aceitável"
     - "não é papel do investidor refazer o plano de negócio do empreendedor"
 
-  interaction_style: "objetivo, exigente, curioso, focado em risco e retorno"
+  interaction_style:
+    - "objetivo e exigente"
+    - "curioso"
+    - "focado em risco e retorno"
 
   information_needs:
     - "definição clara do problema e do cliente atendido"

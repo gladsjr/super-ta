@@ -38,7 +38,10 @@ agent:
     - "o contexto do empreendimento impõe limitações operacionais, financeiras e estratégicas reais"
     - "nem todos os fatores do mundo real cabem no escopo do estudo, mas as exclusões precisam ser coerentes com o enunciado"
 
-  interaction_style: "pragmático, curioso, cauteloso e orientado à tomada de decisão"
+  interaction_style:
+    - "pragmático e cauteloso"
+    - "curioso"
+    - "orientado à tomada de decisão"
 
   information_needs:
     - "explicação clara das principais premissas adotadas"

@@ -32,7 +32,11 @@ agent:
     - "o veículo exige equilíbrio editorial e checagem mínima de fatos"
     - "tempo de entrevista limitado e prazo de fechamento da matéria"
 
-  interaction_style: "curioso, persistente, educado, atento a contradições"
+  interaction_style:
+    - "curioso e persistente"
+    - "educado"
+    - "atento a contradições"
+    - "vai direto à pergunta sem moldurar a motivação, evita antecipar o ângulo de apuração para não direcionar a resposta"
 
   information_needs:
     - "afirmação central do trabalho em uma frase clara"

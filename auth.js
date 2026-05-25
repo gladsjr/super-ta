@@ -74,7 +74,10 @@ export async function seedInitialUsers() {
 
 // ---------------------------------------------------------------------
 // Bootstrap interviewer templates from config/interviewers/*.yaml.
-// Idempotent: ON CONFLICT DO NOTHING preserves any edits made via the app.
+// Filesystem is the source of truth — cada boot ressincroniza o banco:
+// arquivos novos viram linhas, arquivos alterados sobrescrevem a linha,
+// arquivos removidos somem do banco. Não há editor de templates na UI:
+// o YAML que o professor customiza vive em works.interviewer_yaml.
 // ---------------------------------------------------------------------
 const INTERVIEWERS_DIR = path.join(__dirname, "config", "interviewers");
 
@@ -95,14 +98,29 @@ export async function seedInterviewerTemplates() {
     const r = await pool.query(
       `INSERT INTO interviewer_templates (filename, yaml_text)
        VALUES ($1, $2)
-       ON CONFLICT (filename) DO NOTHING`,
+       ON CONFLICT (filename) DO UPDATE
+         SET yaml_text = EXCLUDED.yaml_text
+         WHERE interviewer_templates.yaml_text IS DISTINCT FROM EXCLUDED.yaml_text
+       RETURNING (xmax = 0) AS inserted`,
       [filename, yamlText]
     );
-    if (r.rowCount > 0) {
-      console.log(`✓ Template inicial criado: ${filename}`);
+    if (r.rowCount === 0) {
+      console.log(`• Template inalterado: ${filename}`);
+    } else if (r.rows[0].inserted) {
+      console.log(`✓ Template criado: ${filename}`);
     } else {
-      console.log(`• Template já existente, mantido sem alterações: ${filename}`);
+      console.log(`↻ Template sincronizado a partir do filesystem: ${filename}`);
     }
+  }
+
+  const deleted = await pool.query(
+    `DELETE FROM interviewer_templates
+     WHERE filename <> ALL($1::text[])
+     RETURNING filename`,
+    [entries]
+  );
+  for (const row of deleted.rows) {
+    console.log(`✗ Template removido do banco (não existe mais no filesystem): ${row.filename}`);
   }
 }
 

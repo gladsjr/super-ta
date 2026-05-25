@@ -219,8 +219,9 @@ Regras rígidas:
   item para soar específico ao trabalho.
 - Onde o YAML genérico usar expressões abstratas ("o trabalho", "o aluno
   deve"), substitua por formulações ancoradas no enunciado.
-- Campos inerentemente genéricos (ex.: interaction_style: "investigativo")
-  podem ser mantidos se não houver base no enunciado para especializá-los.
+- Campos inerentemente genéricos (ex.: interaction_style com item
+  "investigativo") podem ser mantidos se não houver base no enunciado para
+  especializá-los.
 - O campo scenario.case_context.summary deve descrever, em 1–2 frases, o
   caso concreto entregue pelo aluno conforme o enunciado.
 
