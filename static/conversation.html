@@ -155,6 +155,21 @@
   }
   .pending-turn .block.question { background: var(--bg-raised); border-left-color: var(--ink-300); }
   .pending-turn .block.rationale { background: var(--bg-raised); border-left-color: var(--ink-300); }
+
+  .finalization-card {
+    margin-top: var(--sp-4);
+    background: var(--bg-muted);
+    border: 1px solid var(--ink-100);
+    border-left: 4px solid var(--ink-400);
+    border-radius: var(--r-md);
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .finalization-card.give_up { border-left-color: #b8732a; }
+  .finalization-card.complete { border-left-color: var(--accent-400); }
+  .finalization-card .head { font-size: var(--fs-sm); color: var(--ink-500); margin-bottom: var(--sp-1); }
+  .finalization-card .reason { font-weight: 600; color: var(--ink-900); }
+  .finalization-card .comment { white-space: pre-wrap; margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg-raised); border-radius: var(--r-sm); }
+  .finalization-card .no-comment { color: var(--ink-400); font-style: italic; margin-top: var(--sp-2); }
 </style>
 </head>
 <body>
@@ -192,6 +207,11 @@
     <summary id="skipped-summary">Perguntas descartadas pelo agente de relevância</summary>
     <div id="skipped-body"></div>
   </details>
+
+  <div id="finalization" class="finalization-card hidden">
+    <div class="head" id="finalization-head"></div>
+    <div id="finalization-body"></div>
+  </div>
 
   <div id="turns"></div>
 
@@ -431,6 +451,24 @@ async function load() {
         <div class="skipped-meta">Descartada em ${fmtTime(s.at)}</div>
       </div>`).join('');
     sk.classList.remove('hidden');
+  }
+
+  const fin = conv.finalization;
+  if (fin) {
+    const finEl = document.getElementById('finalization');
+    finEl.classList.remove('hidden');
+    finEl.classList.add(fin.completion_reason);
+    const reasonLabel = fin.completion_reason === 'give_up'
+      ? 'Aluno desistiu da entrevista'
+      : 'Entrevista concluída naturalmente';
+    document.getElementById('finalization-head').innerHTML =
+      `<span class="reason">${escapeHtml(reasonLabel)}</span> · encerrada em ${fmtTime(fin.completed_at)}`;
+    const body = document.getElementById('finalization-body');
+    if (fin.student_comment) {
+      body.innerHTML = `<div class="comment">${escapeHtml(fin.student_comment)}</div>`;
+    } else {
+      body.innerHTML = `<div class="no-comment">Aluno não deixou comentário.</div>`;
+    }
   }
 
   const turnsEl = document.getElementById('turns');

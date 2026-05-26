@@ -321,6 +321,28 @@
       align-items: center;
       gap: var(--sp-3);
     }
+
+    .topbar-actions { display: flex; gap: var(--sp-2); align-items: center; }
+    .topbar-actions .btn-give-up { color: #b8732a; }
+    .topbar-actions .btn-give-up:hover { color: #8a4f10; }
+
+    #instructions-dialog { max-width: 640px; line-height: 1.55; }
+    #instructions-dialog h3 { margin-top: 0; }
+    #instructions-dialog h4 { margin-top: var(--sp-4); margin-bottom: var(--sp-1); color: var(--ink-700); }
+    #instructions-dialog ul { margin: var(--sp-1) 0; padding-left: 1.4rem; }
+    #instructions-dialog li { margin-bottom: var(--sp-1); }
+
+    #comment-card { margin-top: var(--sp-4); }
+    #comment-card h3 { margin-top: 0; }
+    #comment-textarea { width: 100%; min-height: 8rem; resize: vertical; }
+    .comment-footer { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); }
+    .comment-footer .char-count { color: var(--ink-400); font-size: var(--fs-xs); }
+    .comment-footer .actions { display: flex; gap: var(--sp-2); }
+
+    #final-screen { padding: var(--sp-6) var(--sp-4); text-align: center; }
+    #final-screen .check { font-size: 3rem; color: var(--success-700); margin-bottom: var(--sp-3); }
+    #final-screen h1 { margin: 0 0 var(--sp-2); }
+    #final-screen .lead { color: var(--ink-500); font-size: var(--fs-md); }
   </style>
 </head>
 
@@ -330,6 +352,10 @@
     <div class="topbar-inner">
       <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
       <span class="topbar-context" id="tb-context">Entrevista do aluno</span>
+      <div class="topbar-right topbar-actions">
+        <button id="btn-instructions" class="btn btn-ghost btn-sm hidden" type="button">Instruções</button>
+        <button id="btn-give-up" class="btn btn-ghost btn-sm btn-give-up hidden" type="button">Desistir da entrevista</button>
+      </div>
     </div>
   </header>
 
@@ -377,9 +403,47 @@
         </div>
       </div>
 
+      <div id="comment-card" class="card hidden">
+        <h3 id="comment-title">Entrevista encerrada</h3>
+        <p id="comment-intro" class="muted">A entrevista foi concluída. Se você quiser deixar algum comentário para o professor (reclamações, sugestões, algo que pareceu estranho), use o espaço abaixo. Pode deixar em branco.</p>
+        <textarea id="comment-textarea" class="textarea" maxlength="2000" placeholder="(opcional) Comentário para o professor"></textarea>
+        <div class="comment-footer">
+          <span class="char-count" id="comment-char-count">0 / 2000</span>
+          <div class="actions">
+            <button id="btn-skip-comment" class="btn" type="button">Sair sem comentário</button>
+            <button id="btn-submit-comment" class="btn btn-primary" type="button">Enviar e sair</button>
+          </div>
+        </div>
+        <div id="comment-msg" class="hint"></div>
+      </div>
+
+      <div id="final-screen" class="card hidden">
+        <div class="check">✓</div>
+        <h1 id="final-title">Entrevista registrada</h1>
+        <p class="lead" id="final-msg">Obrigado pela participação. Você pode fechar esta página.</p>
+      </div>
+
     </div>
 
   </main>
+
+  <dialog id="instructions-dialog">
+    <div class="dlg-body" id="instructions-body">Carregando…</div>
+    <div class="dlg-actions">
+      <button id="instructions-close" class="btn btn-primary" type="button">Fechar</button>
+    </div>
+  </dialog>
+
+  <dialog id="giveup-dialog">
+    <div class="dlg-body">
+      <h3>Desistir da entrevista?</h3>
+      <p>Você não poderá retomar depois. Você terá a chance de deixar um comentário ao professor antes de sair.</p>
+    </div>
+    <div class="dlg-actions">
+      <button id="giveup-cancel" class="btn" type="button">Cancelar</button>
+      <button id="giveup-confirm" class="btn btn-primary" type="button">Sim, desistir</button>
+    </div>
+  </dialog>
 
   <dialog id="meta-dialog">
     <div class="dlg-body">
@@ -432,6 +496,124 @@
       if (!startR.ok) return r;
       return await factory();
     }
+
+    // Atualiza visibilidade dos botões da topbar conforme a fase. "Instruções"
+    // aparece sempre que o main está visível; "Desistir" aparece apenas durante
+    // a entrevista ativa (intro/interviewing) — não faz sentido em
+    // awaiting_upload, finalizing ou finalized.
+    function syncTopbarActions() {
+      document.getElementById('btn-instructions').classList.remove('hidden');
+      const giveUpBtn = document.getElementById('btn-give-up');
+      const active = phase === 'intro' || phase === 'interviewing';
+      giveUpBtn.classList.toggle('hidden', !active);
+    }
+
+    // Carrega o snippet de instruções (static/student_instructions.html) na
+    // primeira abertura do modal e mantém em cache para reaberturas. Conteúdo
+    // editável pelo professor/admin sem mexer em JS.
+    let instructionsLoaded = false;
+    async function openInstructions() {
+      const dlg = document.getElementById('instructions-dialog');
+      const body = document.getElementById('instructions-body');
+      if (!instructionsLoaded) {
+        try {
+          const r = await fetch('/static/student_instructions.html');
+          if (r.ok) {
+            body.innerHTML = await r.text();
+            instructionsLoaded = true;
+          } else {
+            body.innerHTML = '<p>Não foi possível carregar as instruções agora.</p>';
+          }
+        } catch {
+          body.innerHTML = '<p>Não foi possível carregar as instruções agora.</p>';
+        }
+      }
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+    }
+
+    // Mostra o formulário de comentário (no card abaixo do chat) com título
+    // adequado ao motivo. Não submete nada ainda — o aluno preenche e clica.
+    function showCommentForm(reason) {
+      const card = document.getElementById('comment-card');
+      const title = document.getElementById('comment-title');
+      const intro = document.getElementById('comment-intro');
+      if (reason === 'give_up') {
+        title.textContent = 'Você desistiu da entrevista';
+        intro.textContent = 'Antes de sair, você pode deixar um comentário ao professor sobre a experiência. Pode deixar em branco.';
+      } else {
+        title.textContent = 'Entrevista encerrada';
+        intro.textContent = 'A entrevista foi concluída. Se você quiser deixar algum comentário para o professor (reclamações, sugestões, algo que pareceu estranho), use o espaço abaixo. Pode deixar em branco.';
+      }
+      // Esconde os inputs de mensagem — não cabe mais responder.
+      document.getElementById('input-text').classList.add('hidden');
+      document.getElementById('input-audio').classList.add('hidden');
+      card.classList.remove('hidden');
+      document.getElementById('comment-textarea').focus();
+      // Tira "Desistir" da topbar — não cabe mais.
+      document.getElementById('btn-give-up').classList.add('hidden');
+      card.dataset.completionReason = reason;
+    }
+
+    // Substitui todo o conteúdo do #main pela tela final. Chamada após o
+    // /finalize ter retornado ok.
+    function showFinalScreen() {
+      document.getElementById('upload-area')?.classList.add('hidden');
+      document.getElementById('chat-area')?.classList.add('hidden');
+      document.getElementById('comment-card').classList.add('hidden');
+      document.getElementById('final-screen').classList.remove('hidden');
+      document.getElementById('btn-give-up').classList.add('hidden');
+    }
+
+    async function submitFinalize(comment) {
+      const reason = document.getElementById('comment-card').dataset.completionReason || 'complete';
+      const msg = document.getElementById('comment-msg');
+      msg.textContent = '';
+      const btnSubmit = document.getElementById('btn-submit-comment');
+      const btnSkip = document.getElementById('btn-skip-comment');
+      btnSubmit.disabled = true;
+      btnSkip.disabled = true;
+      try {
+        const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/finalize`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment, completion_reason: reason }),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          msg.textContent = 'Falha: ' + (j.message || j.error || 'não foi possível encerrar');
+          btnSubmit.disabled = false;
+          btnSkip.disabled = false;
+          return;
+        }
+        showFinalScreen();
+      } catch {
+        msg.textContent = 'Falha de comunicação. Tente de novo.';
+        btnSubmit.disabled = false;
+        btnSkip.disabled = false;
+      }
+    }
+
+    document.getElementById('btn-instructions').onclick = openInstructions;
+    document.getElementById('instructions-close').onclick = () => {
+      document.getElementById('instructions-dialog').close();
+    };
+    document.getElementById('btn-give-up').onclick = () => {
+      const dlg = document.getElementById('giveup-dialog');
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else if (confirm('Tem certeza?')) showCommentForm('give_up');
+    };
+    document.getElementById('giveup-cancel').onclick = () => document.getElementById('giveup-dialog').close();
+    document.getElementById('giveup-confirm').onclick = () => {
+      document.getElementById('giveup-dialog').close();
+      showCommentForm('give_up');
+    };
+    document.getElementById('btn-submit-comment').onclick = () => {
+      const ta = document.getElementById('comment-textarea');
+      submitFinalize(ta.value.trim() || null);
+    };
+    document.getElementById('btn-skip-comment').onclick = () => submitFinalize(null);
+    document.getElementById('comment-textarea').addEventListener('input', (e) => {
+      document.getElementById('comment-char-count').textContent = `${e.target.value.length} / 2000`;
+    });
 
     function renderMessage(text) {
       let html = text;
@@ -601,8 +783,26 @@
       document.getElementById('main').classList.remove('hidden');
       document.getElementById('work-name').textContent = j.work.name;
       document.getElementById('tb-context').textContent = j.work.name + (j.submission?.student_label ? ` · ${j.submission.student_label}` : '');
+
+      // Entrevista já finalizada (aluno revisitou o link após terminar/desistir):
+      // mostra a tela final direto, sem chat, sem upload, sem nada. A conversa
+      // em si só é visível pelo professor.
+      if (j.session?.finalized) {
+        document.getElementById('upload-area').classList.add('hidden');
+        document.getElementById('chat-area').classList.add('hidden');
+        document.getElementById('final-screen').classList.remove('hidden');
+        const reason = j.submission?.completion_reason;
+        document.getElementById('final-title').textContent = reason === 'give_up'
+          ? 'Você desistiu da entrevista'
+          : 'Entrevista registrada';
+        document.getElementById('final-msg').textContent = 'Esta entrevista já foi encerrada e não pode mais ser modificada. Você pode fechar esta página.';
+        document.getElementById('btn-instructions').classList.remove('hidden');
+        return;
+      }
+
       phase = j.session.currentPhase;
       interactionMode = j.session.interactionMode || 'text';
+      syncTopbarActions();
 
       // Aplica modo na UI: texto ou áudio. Esconde a área não usada.
       if (interactionMode === 'audio') {
@@ -683,6 +883,10 @@
           appendTA(j.assistant, j.audio_url);
           if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
           document.getElementById('upload-area').classList.add('hidden');
+          // Upload bem-sucedido transitiona para "intro" — agora cabe mostrar
+          // o botão de Desistir na topbar.
+          phase = 'intro';
+          syncTopbarActions();
         }
       } catch {
         status.remove();
@@ -709,6 +913,11 @@
         appendStatus('Falha na comunicação com o servidor', true);
         return;
       }
+      if (r.status === 410) {
+        // Entrevista finalizada em outra aba ou pelo admin enquanto eu digitava.
+        showFinalScreen();
+        return;
+      }
       if (j.error) { appendStatus(j.message || j.error, true); return; }
       if (j.channel === 'modal') {
         if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
@@ -719,6 +928,14 @@
       }
       appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
+      if (j.phase && j.phase !== phase) {
+        phase = j.phase;
+        syncTopbarActions();
+        if (phase === 'finalizing') {
+          // Fim natural — abre o formulário de comentário automaticamente.
+          showCommentForm('complete');
+        }
+      }
     };
 
     document.getElementById('msg').addEventListener('keydown', (e) => {
@@ -860,6 +1077,12 @@
         setRecordingUI('idle');
         return;
       }
+      if (r.status === 410) {
+        if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
+        setRecordingUI('idle');
+        showFinalScreen();
+        return;
+      }
       if (j.error) {
         setRecordStatus(j.message || j.detail || j.error, true);
         if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
@@ -877,6 +1100,11 @@
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
       setRecordingUI('idle');
       setRecordStatus('Clique no botão para gravar nova resposta.');
+      if (j.phase && j.phase !== phase) {
+        phase = j.phase;
+        syncTopbarActions();
+        if (phase === 'finalizing') showCommentForm('complete');
+      }
     }
 
     document.getElementById('record-btn').addEventListener('click', async () => {

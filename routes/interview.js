@@ -8,7 +8,7 @@
 
 import express from "express";
 import multer from "multer";
-import { requireSubmissionToken, requireWithinBudget } from "../lib/middleware.js";
+import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
 import { transcribeAudio, AudioCache } from "../lib/audio.js";
@@ -64,6 +64,23 @@ const audioUpload = multer({
 router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) => {
     const token = req.submission.submission_token;
 
+    // Entrevista já finalizada: devolve um estado mínimo "finalized" para o
+    // frontend renderizar a tela "Entrevista encerrada", sem carregar/recompor
+    // sessão. A conversa em si nunca é re-exibida para o aluno após finalizar
+    // (só o professor a vê via /w/.../conversation).
+    if (req.submission.completion_reason) {
+        return res.json({
+            work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
+            submission: {
+                status: req.submission.status,
+                student_label: req.submission.student_label,
+                completion_reason: req.submission.completion_reason,
+                completed_at: req.submission.completed_at,
+            },
+            session: { currentPhase: "finalized", finalized: true },
+        });
+    }
+
     try {
         let sess = SESSIONS.get(token);
         let pendingAudio = null;
@@ -90,11 +107,19 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
                 sess.interactionMode = req.work.interaction_mode || "text";
                 sess.voice = req.work.voice || null;
                 const newVoiceGender = voiceGenderOf(sess.voice);
-                if (
-                    (newVoiceGender === "f" || newVoiceGender === "m") &&
-                    sess.interviewerPersona?.gender !== newVoiceGender
-                ) {
-                    sess.interviewerPersona = pickPersona({ voiceGender: newVoiceGender });
+                const identityOverride = req.work.interviewer_name && req.work.interviewer_gender
+                    ? { name: req.work.interviewer_name, gender: req.work.interviewer_gender }
+                    : null;
+                const needsRepick = identityOverride
+                    ? (sess.interviewerPersona?.name !== identityOverride.name
+                       || sess.interviewerPersona?.gender !== identityOverride.gender)
+                    : ((newVoiceGender === "f" || newVoiceGender === "m")
+                       && sess.interviewerPersona?.gender !== newVoiceGender);
+                if (needsRepick) {
+                    sess.interviewerPersona = pickPersona({
+                        voiceGender: newVoiceGender,
+                        overrides: identityOverride,
+                    });
                 }
             }
             log.info("SUBMISSION", `resume(mem) token=${token} phase=${sess.currentPhase} qn=${sess.questionCount} mode=${sess.interactionMode}`);
@@ -126,7 +151,7 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
 // ============================================================================
 // POST /s/:submissionToken/upload
 // ============================================================================
-router.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinBudget, studentUpload.single("file"), async (req, res) => {
+router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFinalized, requireWithinBudget, studentUpload.single("file"), async (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
     if (!sess) return res.status(400).json({ error: "call /start first" });
@@ -160,10 +185,16 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinB
     // fica imutável até o próximo upload.
     sess.interactionMode = req.work.interaction_mode || "text";
     sess.voice = req.work.voice || null;
-    // Cada upload reinicia a entrevista. Re-sorteia a persona alinhada com a
-    // voz atual: voz feminina → nome feminino, voz masculina → nome masculino;
-    // voz neutra ou modo texto → sorteio balanceado.
-    sess.interviewerPersona = pickPersona({ voiceGender: voiceGenderOf(sess.voice) });
+    // Cada upload reinicia a entrevista. Persona segue, em ordem de prioridade:
+    // (1) override do professor (works.interviewer_name/gender), (2) gênero da
+    // voz no modo áudio, (3) sorteio balanceado em modo texto.
+    const identityOverride = req.work.interviewer_name && req.work.interviewer_gender
+        ? { name: req.work.interviewer_name, gender: req.work.interviewer_gender }
+        : null;
+    sess.interviewerPersona = pickPersona({
+        voiceGender: voiceGenderOf(sess.voice),
+        overrides: identityOverride,
+    });
     log.info("SUBMISSION", `upload token=${token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"} persona=${sess.interviewerPersona.name}/${sess.interviewerPersona.city}`);
     try { await deleteConversationLog(req.submission.id); }
     catch (err) { log.error("LOG", `delete old conversation log failed: ${err.message}`); }
@@ -263,7 +294,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireWithinB
 // Serve o áudio do entrevistador a partir do cache em memória.
 // 404 se o turno foi evictado (cache LRU).
 // ============================================================================
-router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, res) => {
+router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, requireNotFinalized, (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
     if (!sess) return res.status(404).json({ error: "session not found" });
@@ -276,7 +307,7 @@ router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, re
 // ============================================================================
 // POST /s/:submissionToken/chat
 // ============================================================================
-router.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBudget, audioUpload.single("audio"), async (req, res) => {
+router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinalized, requireWithinBudget, audioUpload.single("audio"), async (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
     if (!sess) return res.status(400).json({ error: "call /start first" });
@@ -744,7 +775,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBud
             persist();
             log.info("TURN", `q#${sess.questionIndex} (sequential from plan)${acceptedTransitionPhrase ? " with sufficiency phrase" : " with default phrase"}`);
         } else {
-            assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. Use o botão 'Finalizar' quando estiver pronto.";
+            assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. A entrevista está concluída.";
             sess.currentPhase = "finalizing";
             log.info("TURN", `all questions covered or completed, finalizing`);
         }
@@ -766,10 +797,54 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireWithinBud
             nextTurnRef.question_audio_duration_seconds = audio.audio_duration_seconds ?? null;
             persist();
         }
-        res.json({ channel: "chat", assistant: assistantResponse, ...audio });
+        res.json({ channel: "chat", assistant: assistantResponse, phase: sess.currentPhase, ...audio });
     } catch (error) {
         log.error("CHAT", `failed: ${error.message}`);
         res.status(500).json({ error: "Erro ao processar mensagem" });
+    }
+});
+
+// ============================================================================
+// POST /s/:submissionToken/finalize
+// ----------------------------------------------------------------------------
+// Encerra a entrevista definitivamente, gravando o motivo e o comentário
+// opcional do aluno. Após esta chamada, /chat, /upload e /audio devolvem 410
+// (via requireNotFinalized). Aceita dois cenários:
+//   - completion_reason="complete": finalização natural após o plano se esgotar
+//     (frontend dispara isto quando o aluno submete o formulário de comentário
+//     na tela mostrada depois da mensagem de encerramento do entrevistador).
+//   - completion_reason="give_up": aluno clicou em "Desistir" durante a
+//     entrevista.
+// O endpoint não é idempotente em sentido estrito: chamar duas vezes
+// sobrescreve o comentário e o reason. Em prática o frontend só chama uma vez
+// porque depois disto a tela vai para "Entrevista registrada".
+// ============================================================================
+const MAX_COMMENT_LEN = 2000;
+router.post("/s/:submissionToken/finalize", requireSubmissionToken, express.json({ limit: "16kb" }), async (req, res) => {
+    const reason = String(req.body?.completion_reason ?? "");
+    if (reason !== "complete" && reason !== "give_up") {
+        return res.status(400).json({ error: "completion_reason deve ser 'complete' ou 'give_up'" });
+    }
+    if (req.submission.completion_reason) {
+        return res.status(409).json({ error: "entrevista já finalizada", completion_reason: req.submission.completion_reason });
+    }
+    const rawComment = req.body?.comment;
+    const comment = typeof rawComment === "string" ? rawComment.slice(0, MAX_COMMENT_LEN) : null;
+    try {
+        await db.finalizeSubmission(req.submission.id, comment, reason);
+        // Tenta atualizar a sessão em memória pra evitar uma janela em que ela
+        // possa parecer ainda "viva". Tolerante a sess inexistente — sem sessão
+        // em memória, os endpoints já estão bloqueados pelo middleware via DB.
+        const sess = SESSIONS.get(req.submission.submission_token);
+        if (sess) {
+            sess.conversationCompleted = true;
+            sess.currentPhase = "finalized";
+        }
+        log.info("SUBMISSION", `finalized token=${req.submission.submission_token} reason=${reason} has_comment=${!!comment}`);
+        res.json({ ok: true, completion_reason: reason });
+    } catch (err) {
+        log.error("SUBMISSION", `finalize failed token=${req.submission.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "falha ao finalizar entrevista", detail: err.message });
     }
 });
 

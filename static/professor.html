@@ -108,8 +108,33 @@
         <button id="voice-preview" class="btn" type="button" title="Ouvir uma frase de exemplo">▶ Ouvir prévia</button>
         <audio id="voice-audio" preload="none" style="display:none"></audio>
       </div>
+
+      <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
+        <p class="card-sub">Identidade do entrevistador (nome e gênero) — se deixar em branco, o sistema sorteia a cada upload do aluno.</p>
+        <div class="row" style="align-items: end; gap: var(--sp-3)">
+          <div style="flex: 1; min-width: 220px">
+            <label class="label" for="interviewer-name">Nome</label>
+            <input id="interviewer-name" class="input" placeholder="Ex.: Mariana"/>
+          </div>
+          <button id="random-name" class="btn" type="button" title="Sortear outro nome">🎲</button>
+          <div>
+            <label class="label">Gênero</label>
+            <div class="row" style="gap: var(--sp-3); margin: 0">
+              <label style="display:flex; align-items:center; gap: var(--sp-1)">
+                <input type="radio" name="interviewer-gender" value="f"/><span>Feminino</span>
+              </label>
+              <label style="display:flex; align-items:center; gap: var(--sp-1)">
+                <input type="radio" name="interviewer-gender" value="m"/><span>Masculino</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div id="identity-warning" class="hint" style="margin-top: var(--sp-2); color: #b8732a"></div>
+      </div>
+
       <div class="row" style="margin-top: var(--sp-3)">
-        <button id="save-interaction" class="btn btn-primary">Salvar modo</button>
+        <button id="save-interaction" class="btn btn-primary">Salvar modo e identidade</button>
+        <button id="clear-identity" class="btn" type="button" title="Volta ao sorteio aleatório a cada upload">Limpar identidade</button>
         <span id="interaction-msg" class="hint"></span>
       </div>
     </div>
@@ -275,6 +300,7 @@ async function load() {
     : 'Envie o enunciado antes de avaliar';
 
   applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
+  await applyIdentityStateToUI(j.work.interviewer_name, j.work.interviewer_gender);
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -481,7 +507,7 @@ async function loadVoices() {
   if (!r.ok) return;
   const j = await r.json();
   const sel = document.getElementById('voice-select');
-  sel.innerHTML = j.voices.map(v => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.label)}</option>`).join('');
+  sel.innerHTML = j.voices.map(v => `<option value="${escapeHtml(v.id)}" data-gender="${escapeHtml(v.gender || 'neutro')}">${escapeHtml(v.label)}</option>`).join('');
 }
 
 function applyInteractionStateToUI(mode, voice) {
@@ -494,12 +520,93 @@ function applyInteractionStateToUI(mode, voice) {
   }
 }
 
+// Pré-popula identidade do entrevistador. Se o professor já salvou name+gender,
+// usa o que está no banco. Senão, sorteia uma sugestão default coerente com o
+// gênero da voz (quando em modo áudio) ou aleatório (modo texto). A sugestão
+// fica nos campos como "rascunho" — só persiste se o professor clicar Salvar.
+async function applyIdentityStateToUI(name, gender) {
+  const nameEl = document.getElementById('interviewer-name');
+  if (name && (gender === 'f' || gender === 'm')) {
+    nameEl.value = name;
+    document.querySelector(`input[name="interviewer-gender"][value="${gender}"]`).checked = true;
+  } else {
+    // Sem identidade salva: sugere default sorteado para o gênero da voz atual,
+    // ou aleatório em modo texto.
+    const voiceId = document.getElementById('voice-select').value;
+    const voiceGender = guessVoiceGender(voiceId);
+    const suggestion = await fetchNameSuggestion(voiceGender);
+    nameEl.value = suggestion.name;
+    document.querySelector(`input[name="interviewer-gender"][value="${suggestion.gender}"]`).checked = true;
+  }
+  checkIdentityVoiceCoherence();
+}
+
+async function fetchNameSuggestion(gender) {
+  const qs = gender ? `?gender=${gender}` : '';
+  const r = await fetch(`/interviewer-name-suggestion${qs}`);
+  if (!r.ok) return { name: '', gender: gender || 'f' };
+  return await r.json();
+}
+
+// Heurística leve: nomes na lista de vozes em config/voices.js trazem o gênero,
+// mas o frontend não tem acesso direto. Devolve null por default — o aviso de
+// dissonância depende apenas dos campos preenchidos pelo professor.
+function guessVoiceGender(_voiceId) {
+  // O endpoint /voices retorna gender — poderíamos cachear isso. Para a
+  // sugestão default, basta passar null e deixar o backend sortear balanceado.
+  return null;
+}
+
+function checkIdentityVoiceCoherence() {
+  const warn = document.getElementById('identity-warning');
+  warn.textContent = '';
+  const mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
+  if (mode !== 'audio') return;
+  const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
+  const voiceId = document.getElementById('voice-select').value;
+  const voiceOpt = [...document.getElementById('voice-select').options].find(o => o.value === voiceId);
+  const voiceGender = voiceOpt?.dataset.gender || null;
+  if (gender && voiceGender && voiceGender !== 'neutro' && gender !== voiceGender) {
+    warn.textContent = `⚠ A voz escolhida soa ${voiceGender === 'f' ? 'feminina' : 'masculina'} mas o gênero está marcado como ${gender === 'f' ? 'feminino' : 'masculino'}. O aluno pode estranhar a combinação.`;
+  }
+}
+
 document.querySelectorAll('input[name="interaction-mode"]').forEach(el => {
   el.addEventListener('change', (e) => {
     const isAudio = e.target.value === 'audio';
     document.getElementById('voice-row').classList.toggle('hidden', !isAudio);
+    checkIdentityVoiceCoherence();
   });
 });
+document.getElementById('voice-select').addEventListener('change', checkIdentityVoiceCoherence);
+document.querySelectorAll('input[name="interviewer-gender"]').forEach(el => {
+  el.addEventListener('change', checkIdentityVoiceCoherence);
+});
+document.getElementById('random-name').onclick = async () => {
+  const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
+  const sug = await fetchNameSuggestion(gender);
+  document.getElementById('interviewer-name').value = sug.name;
+  if (!gender) {
+    document.querySelector(`input[name="interviewer-gender"][value="${sug.gender}"]`).checked = true;
+  }
+  checkIdentityVoiceCoherence();
+};
+document.getElementById('clear-identity').onclick = async () => {
+  if (!confirm('Limpar identidade do entrevistador? A partir do próximo upload do aluno, o sistema voltará a sortear nome e gênero aleatoriamente.')) return;
+  const msg = document.getElementById('interaction-msg');
+  msg.textContent = '';
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: null, gender: null }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = 'Erro: ' + (j.error || 'falha ao limpar identidade');
+    return;
+  }
+  msg.textContent = 'Identidade limpa. Os campos mostram uma sugestão sorteada (não salva).';
+  await applyIdentityStateToUI(null, null);
+};
 
 document.getElementById('voice-preview').onclick = async () => {
   const btn = document.getElementById('voice-preview');
@@ -537,14 +644,33 @@ document.getElementById('save-interaction').onclick = async () => {
   const mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
   const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
   if (mode === 'audio' && !voice) { msg.textContent = 'Escolha uma voz.'; return; }
-  const r = await fetch(`/w/${encodeURIComponent(workToken)}/interaction`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode, voice }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { msg.textContent = 'Erro: ' + (j.error || 'falha ao salvar'); return; }
-  msg.textContent = 'Modo salvo.';
+
+  const name = document.getElementById('interviewer-name').value.trim();
+  const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
+  // XOR ilegal: se o professor preencheu um, exige o outro (ou clicar em Limpar).
+  if ((name && !gender) || (!name && gender)) {
+    msg.textContent = 'Preencha nome e gênero (ou clique em Limpar identidade).';
+    return;
+  }
+
+  // Salva mode + identidade em paralelo. Ambos são pequenos e independentes.
+  const [rMode, rId] = await Promise.all([
+    fetch(`/w/${encodeURIComponent(workToken)}/interaction`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, voice }),
+    }),
+    fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(name ? { name, gender } : { name: null, gender: null }),
+    }),
+  ]);
+  if (!rMode.ok) { msg.textContent = 'Erro ao salvar modo.'; return; }
+  if (!rId.ok) {
+    const j = await rId.json().catch(() => ({}));
+    msg.textContent = 'Erro ao salvar identidade: ' + (j.error || 'falha');
+    return;
+  }
+  msg.textContent = name ? 'Modo e identidade salvos.' : 'Modo salvo. Identidade ficará aleatória.';
 };
 
 document.getElementById('save-interviewer').onclick = async () => {

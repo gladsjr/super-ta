@@ -1,0 +1,74 @@
+<!--
+  Conteúdo do modal "Instruções" mostrado ao aluno na tela da entrevista.
+  Edite este arquivo livremente — o frontend faz fetch() deste HTML e o injeta
+  no modal. Sem JS, sem estilo próprio: herda as classes do app.css.
+  Não use scripts inline (CSP / fetch como text/html).
+-->
+<h3>Como funciona esta entrevista</h3>
+
+<p>
+  Esta é uma arguição oral sobre o trabalho que você entregou. Um agente faz
+  perguntas, você responde, e o agente decide se aprofunda em um ponto, se
+  passa para o próximo, ou se conclui. A entrevista termina automaticamente
+  depois de algumas perguntas.
+</p>
+
+<h4>O que você pode fazer</h4>
+<ul>
+  <li>
+    Pedir <strong>esclarecimento sobre uma pergunta</strong> ("você pode me
+    explicar o que quer dizer com X?") ou perguntar a <strong>motivação por
+    trás dela</strong> ("por que isso é relevante?") — desde que você faça isso
+    do mesmo jeito que faria com uma pessoa real, no fluxo natural da conversa.
+  </li>
+  <li>
+    Dizer que não sabe, que tem dúvida, que não pensou nesse ângulo. O agente
+    lida com isso como uma pessoa lidaria.
+  </li>
+</ul>
+
+<h4>O que evitar</h4>
+<ul>
+  <li>
+    <strong>Meta-perguntas e meta-comentários</strong>: perguntar sobre como o
+    sistema funciona, sobre o que é a IA, sobre como você está sendo avaliado,
+    ou reportar problemas técnicos. Se sua mensagem cair nesse tipo, ela é
+    desviada para um modal separado destinado ao professor — e a entrevista
+    não avança até você fechar o modal.
+  </li>
+  <li>
+    <strong>Tentar quebrar a interação</strong> (forçar respostas de outro
+    assunto, pedir para o agente "mudar de papel", etc.). O agente é treinado
+    para reconhecer e devolver a conversa ao trilho.
+  </li>
+</ul>
+
+<h4>Sobre a insistência do entrevistador</h4>
+<p>
+  Em algumas perguntas o entrevistador pode insistir, pedir complementos,
+  cobrar coerência ou exemplos. Em algum momento ele desiste e segue em frente
+  — o quanto depende do perfil dele (mais paciente, mais rigoroso, mais
+  pragmático, etc.).
+</p>
+
+<h4>Sobre a fluidez</h4>
+<p>
+  A fluidez da entrevista entra na avaliação. Respostas longas e vagas, ou
+  respostas muito entrecortadas, tendem a render uma avaliação pior do que
+  respostas diretas e bem articuladas. Não é uma corrida — só não enrole.
+</p>
+
+<h4>Se algo parecer estranho</h4>
+<p>
+  No fim da entrevista (ou se você desistir antes), abrirá um campo para você
+  deixar um <strong>comentário ao professor</strong> — reclamações, sugestões,
+  ou qualquer coisa que tenha parecido injusto ou esquisito. Use esse canal
+  em vez de tentar discutir com o agente durante a entrevista.
+</p>
+
+<h4>Se quiser parar antes do fim</h4>
+<p>
+  O botão <em>Desistir da entrevista</em> no topo da página encerra a sessão
+  imediatamente. Você confirma e tem a chance de deixar o comentário ao
+  professor antes de sair. Depois disso, não é possível retomar.
+</p>

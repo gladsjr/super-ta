@@ -8,6 +8,7 @@ import yaml from "js-yaml";
 import OpenAI from "openai";
 import { requireWorkToken, requireWithinBudget, sanitizeLabel } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
+import { pickRandomName } from "../lib/personas.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { AudioCache, synthesizeSpeech } from "../lib/audio.js";
 import {
@@ -42,6 +43,8 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 has_interviewer: !!req.work.has_interviewer,
                 interaction_mode: req.work.interaction_mode,
                 voice: req.work.voice,
+                interviewer_name: req.work.interviewer_name,
+                interviewer_gender: req.work.interviewer_gender,
                 budget_usd: balance?.budget_usd ?? 0,
                 spent_usd: balance?.spent_usd ?? 0,
                 remaining_usd: balance?.remaining_usd ?? 0,
@@ -95,6 +98,37 @@ router.post("/w/:workToken/voices/preview", requireWorkToken, requireWithinBudge
     res.send(buffer);
 });
 
+// Sugestão de nome para o painel do professor — backend mantém as listas
+// canônicas (lib/personas.js), frontend só pede uma amostra. Sem requireWorkToken
+// porque é puramente uma operação read-only sobre dados literais; gateá-la não
+// agrega segurança e simplifica a UI.
+router.get("/interviewer-name-suggestion", (req, res) => {
+    const gender = req.query.gender === "f" || req.query.gender === "m" ? req.query.gender : null;
+    const name = pickRandomName(gender);
+    res.json({ name, gender: gender ?? null });
+});
+
+router.patch("/w/:workToken/interviewer-identity", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
+    const { name, gender } = req.body ?? {};
+    const clear = name == null && gender == null;
+    const set = typeof name === "string" && name.trim() && (gender === "f" || gender === "m");
+    if (!clear && !set) {
+        return res.status(400).json({ error: "name e gender devem ser ambos preenchidos (gender 'f' ou 'm') ou ambos nulos" });
+    }
+    try {
+        await db.setWorkInterviewerIdentity(req.work.id, clear ? null : name, clear ? null : gender);
+        log.info("WORK", `interviewer identity ${clear ? "cleared" : `set name="${name}" gender=${gender}`} work=${req.work.work_token}`);
+        res.json({
+            ok: true,
+            interviewer_name: clear ? null : name.trim(),
+            interviewer_gender: clear ? null : gender,
+        });
+    } catch (err) {
+        log.error("WORK", `set interviewer identity failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar identidade", detail: err.message });
+    }
+});
+
 router.post("/w/:workToken/interaction", requireWorkToken, express.json({ limit: "16kb" }), async (req, res) => {
     const mode = String(req.body?.mode ?? "");
     const voice = req.body?.voice ? String(req.body.voice) : null;
@@ -126,9 +160,10 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
         if (!found || found.work_id !== req.work.id) {
             return res.status(404).json({ error: "submission not found" });
         }
-        const [text, runtime] = await Promise.all([
+        const [text, runtime, finalization] = await Promise.all([
             db.getConversationJson(found.id),
             db.getSubmissionRuntimeState(found.id),
+            db.getSubmissionFinalization(found.id),
         ]);
         let conversation = null;
         if (text) {
@@ -157,6 +192,13 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
                 information_needs: q?.information_needs ?? [],
                 evaluation_mode: q?.evaluation_mode ?? [],
             }));
+        }
+        if (conversation && finalization?.completion_reason) {
+            conversation.finalization = {
+                completion_reason: finalization.completion_reason,
+                completed_at: finalization.completed_at,
+                student_comment: finalization.student_comment,
+            };
         }
         res.json({
             work: { work_token: req.work.work_token, name: req.work.name },
