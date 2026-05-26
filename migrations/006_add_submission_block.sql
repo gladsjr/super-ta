@@ -7,5 +7,9 @@
 --
 -- DEFAULT false cuida do backfill: tudo que já existe nasce desbloqueado.
 
+-- IF NOT EXISTS porque em produção a coluna foi criada manualmente
+-- antes de existir esta migration (fora do regime de migrations).
+-- Em dev a coluna foi criada por uma versão anterior desta própria
+-- migration, então o IF NOT EXISTS é seguro nos dois ambientes.
 ALTER TABLE submissions
-    ADD COLUMN is_blocked BOOLEAN NOT NULL DEFAULT false;
+    ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT false;
