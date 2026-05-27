@@ -21,6 +21,22 @@
   .budget-edit-row { display: none; gap: var(--sp-2); margin-top: var(--sp-2); }
   .budget-edit-row.open { display: flex; flex-wrap: wrap; }
   .budget-edit-row input { width: 120px; }
+
+  .works-toolbar { display: flex; gap: var(--sp-3); align-items: center; margin: var(--sp-3) 0 var(--sp-2); flex-wrap: wrap; }
+  .works-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
+  .works-toolbar .spacer { flex: 1; }
+  .work-card .work-actions { margin-top: var(--sp-3); display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+  .work-card.inactive { opacity: 0.7; border: 1px dashed var(--ink-300); }
+  .badge-inactive {
+    background: #fde2e2;
+    color: #8a1c1c;
+    border: 1px solid #f3b8b8;
+    border-radius: var(--r-sm);
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
 </style>
 </head>
 <body>
@@ -73,7 +89,17 @@
     </div>
 
     <h3 style="margin-top: var(--sp-6)">Seus trabalhos</h3>
+    <div class="works-toolbar">
+      <label class="filter-label" for="works-filter">Mostrar:</label>
+      <select id="works-filter" class="select">
+        <option value="all">Todos</option>
+        <option value="active" selected>Ativos</option>
+        <option value="inactive">Desativados</option>
+      </select>
+      <span class="spacer"></span>
+    </div>
     <div id="works"></div>
+    <div id="works-filtered-empty" class="table-empty hidden">Nenhum trabalho neste filtro.</div>
 
     <h3 style="margin-top: var(--sp-6)">Sua senha</h3>
     <div class="card">
@@ -193,22 +219,45 @@ document.getElementById('create-work').onclick = async () => {
   } catch { msg.textContent = 'Falha na comunicação'; }
 };
 
+let lastWorks = [];
+
 async function loadWorks() {
   const r = await fetch('/admin/works');
   if (r.status === 401) return showLogin();
   const j = await r.json();
+  lastWorks = j.works || [];
+  renderWorks();
+}
+
+function renderWorks() {
+  const filter = document.getElementById('works-filter').value;
   const el = document.getElementById('works');
-  if (!j.works || j.works.length === 0) {
+  const filteredEmpty = document.getElementById('works-filtered-empty');
+  if (lastWorks.length === 0) {
     el.innerHTML = '<div class="card"><div class="table-empty">Nenhum trabalho ainda. Crie o primeiro acima.</div></div>';
+    filteredEmpty.classList.add('hidden');
     return;
   }
-  el.innerHTML = j.works.map(w => {
+  const filtered = lastWorks.filter(w => {
+    if (filter === 'active') return w.is_active !== false;
+    if (filter === 'inactive') return w.is_active === false;
+    return true;
+  });
+  if (filtered.length === 0) {
+    el.innerHTML = '';
+    filteredEmpty.classList.remove('hidden');
+    return;
+  }
+  filteredEmpty.classList.add('hidden');
+  el.innerHTML = filtered.map(w => {
     const profUrl = '/w/' + encodeURIComponent(w.work_token);
     const pending = Number(w.pending || 0);
     const inprog = Number(w.in_progress || 0);
     const enunBadge = w.assignment_pdf
       ? '<span class="badge badge-accent">enunciado ✓</span>'
       : '<span class="badge">sem enunciado</span>';
+    const inactive = w.is_active === false;
+    const inactiveBadge = inactive ? '<span class="badge-inactive">desativado</span>' : '';
     const budget = Number(w.budget_usd || 0);
     const spent = Number(w.spent_usd || 0);
     const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 100;
@@ -218,10 +267,13 @@ async function loadWorks() {
     const exhaustedNote = (budget > 0 && spent >= budget)
       ? ' <span class="badge badge-pending" title="Sem saldo">orçamento esgotado</span>'
       : '';
+    const toggleBtn = inactive
+      ? `<button class="btn btn-sm" onclick="toggleActive('${w.work_token}', true)" title="Reativar — alunos voltam a ter acesso">Ativar</button>`
+      : `<button class="btn btn-sm" onclick="toggleActive('${w.work_token}', false)" title="Desativar — alunos perdem acesso, mas estado é preservado">Desativar</button>`;
     return `
-      <div class="card work-card" data-token="${escapeHtml(w.work_token)}">
+      <div class="card work-card ${inactive ? 'inactive' : ''}" data-token="${escapeHtml(w.work_token)}">
         <div>
-          <h3>${escapeHtml(w.name)}</h3>
+          <h3>${escapeHtml(w.name)} ${inactiveBadge}</h3>
           <div class="work-stats">
             <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
             <span class="badge badge-in_progress">${inprog} em andamento</span>
@@ -242,6 +294,10 @@ async function loadWorks() {
               <span class="hint" id="bedit-msg-${w.work_token}"></span>
             </div>
           </div>
+          <div class="work-actions">
+            ${toggleBtn}
+            <button class="btn btn-sm" onclick="deleteWork('${w.work_token}', ${JSON.stringify(w.name).replace(/'/g, "\\'")})" title="Apaga o trabalho e todas as submissões, conversas e custos associados. Irreversível.">Excluir…</button>
+          </div>
         </div>
         <div class="work-token-block">
           <div class="label">Token de trabalho</div>
@@ -254,6 +310,39 @@ async function loadWorks() {
       </div>`;
   }).join('');
 }
+
+async function toggleActive(workToken, makeActive) {
+  const r = await fetch(`/admin/works/${encodeURIComponent(workToken)}/active`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_active: makeActive }),
+  });
+  if (r.status === 401) return showLogin();
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    alert('Falha: ' + (j.error || 'ao alterar estado do trabalho'));
+    return;
+  }
+  loadWorks();
+}
+
+async function deleteWork(workToken, workName) {
+  const typed = prompt(`Excluir o trabalho "${workName}"?\n\nIsto apaga TUDO: submissões, conversas, custos. Não há como desfazer.\n\nDigite o nome do trabalho para confirmar:`);
+  if (typed === null) return;
+  if (typed.trim() !== workName) {
+    alert('Nome não confere. Exclusão cancelada.');
+    return;
+  }
+  const r = await fetch(`/admin/works/${encodeURIComponent(workToken)}`, { method: 'DELETE' });
+  if (r.status === 401) return showLogin();
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    alert('Falha: ' + (j.error || 'ao excluir'));
+    return;
+  }
+  loadWorks();
+}
+
+document.getElementById('works-filter').addEventListener('change', renderWorks);
 
 function toggleBudgetEdit(token) {
   const row = document.getElementById('bedit-' + token);

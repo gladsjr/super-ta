@@ -58,6 +58,23 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
     }
 });
 
+// Renomeia o trabalho. Usa sanitizeLabel (mesma validação dos rótulos de
+// submissão) — limite 80 chars, sem caracteres proibidos. Autenticação pelo
+// próprio work_token: quem tem o token pode renomear.
+router.patch("/w/:workToken/name", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
+    let name;
+    try { name = sanitizeLabel(req.body?.name); }
+    catch (err) { return res.status(400).json({ error: err.message }); }
+    try {
+        await db.renameWork(req.work.id, name);
+        log.info("WORK", `renamed work=${req.work.work_token} to="${name}"`);
+        res.json({ ok: true, name });
+    } catch (err) {
+        log.error("WORK", `rename failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao renomear" });
+    }
+});
+
 // ============================================================================
 // Modo de interação (texto vs áudio) e voz
 // ============================================================================

@@ -44,6 +44,40 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
     }
 });
 
+router.patch("/admin/works/:workToken/active", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+    const workToken = String(req.params.workToken || "").toLowerCase();
+    if (typeof req.body?.is_active !== "boolean") {
+        return res.status(400).json({ error: "is_active (boolean) required" });
+    }
+    try {
+        const work = await db.getWorkByToken(workToken);
+        if (!work) return res.status(404).json({ error: "work not found" });
+        const newValue = await db.setWorkActive(work.id, req.body.is_active);
+        log.info("ADMIN", `work ${newValue ? "activated" : "deactivated"} token=${workToken} by=${req.session.user.username}`);
+        res.json({ ok: true, work_token: workToken, is_active: newValue });
+    } catch (err) {
+        log.error("ADMIN", `set work active failed: ${err.message}`);
+        res.status(500).json({ error: "failed to update active flag" });
+    }
+});
+
+// Apaga o trabalho e tudo encadeado (submissions, work_cost_events via CASCADE).
+// Irreversível. UI exige confirmação dupla com o nome do trabalho.
+router.delete("/admin/works/:workToken", requireAdmin, async (req, res) => {
+    const workToken = String(req.params.workToken || "").toLowerCase();
+    try {
+        const work = await db.getWorkByToken(workToken);
+        if (!work) return res.status(404).json({ error: "work not found" });
+        const ok = await db.deleteWork(work.id);
+        if (!ok) return res.status(404).json({ error: "work not found" });
+        log.info("ADMIN", `work DELETED token=${workToken} name="${work.name}" by=${req.session.user.username}`);
+        res.json({ ok: true, deleted: workToken });
+    } catch (err) {
+        log.error("ADMIN", `delete work failed: ${err.message}`);
+        res.status(500).json({ error: "failed to delete work" });
+    }
+});
+
 router.patch("/admin/works/:workToken/budget", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
     const workToken = String(req.params.workToken || "").toLowerCase();
     const parsed = Number(req.body?.budget_usd);
