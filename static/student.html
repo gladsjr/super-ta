@@ -322,9 +322,29 @@
       gap: var(--sp-3);
     }
 
-    .topbar-actions { display: flex; gap: var(--sp-2); align-items: center; }
-    .topbar-actions .btn-give-up { color: #b8732a; }
-    .topbar-actions .btn-give-up:hover { color: #8a4f10; }
+    /* Barra de ações do aluno (Instruções / Desistir) — vive logo acima do
+       chat para ficar visível e clicável, principalmente no desktop onde
+       acabava sumindo dentro da topbar. No mobile vira coluna pra não
+       espremer os botões. */
+    .interview-actions {
+      display: flex;
+      gap: var(--sp-2);
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      margin: var(--sp-3) 0 var(--sp-2);
+    }
+    .interview-actions .btn-give-up {
+      color: #b8732a;
+      border-color: #e6c79f;
+    }
+    .interview-actions .btn-give-up:hover {
+      color: #8a4f10;
+      border-color: #c79a5e;
+    }
+    @media (max-width: 560px) {
+      .interview-actions { justify-content: stretch; }
+      .interview-actions .btn { flex: 1; }
+    }
 
     #instructions-dialog { max-width: 640px; line-height: 1.55; }
     #instructions-dialog h3 { margin-top: 0; }
@@ -352,10 +372,7 @@
     <div class="topbar-inner">
       <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
       <span class="topbar-context" id="tb-context">Entrevista do aluno</span>
-      <div class="topbar-right topbar-actions">
-        <button id="btn-instructions" class="btn btn-ghost btn-sm hidden" type="button">Instruções</button>
-        <button id="btn-give-up" class="btn btn-ghost btn-sm btn-give-up hidden" type="button">Desistir da entrevista</button>
-      </div>
+      <div class="topbar-right topbar-actions"></div>
     </div>
   </header>
 
@@ -380,6 +397,11 @@
           <button id="sendFile" class="btn btn-primary">Enviar</button>
         </div>
         <div id="fileRef" class="hint"></div>
+      </div>
+
+      <div id="interview-actions" class="interview-actions hidden">
+        <button id="btn-instructions" class="btn hidden" type="button">Instruções</button>
+        <button id="btn-give-up" class="btn btn-give-up hidden" type="button">Desistir da entrevista</button>
       </div>
 
       <div id="chat-area">
@@ -506,6 +528,8 @@
       const giveUpBtn = document.getElementById('btn-give-up');
       const active = phase === 'intro' || phase === 'interviewing';
       giveUpBtn.classList.toggle('hidden', !active);
+      // O wrapper começa hidden; mostra assim que pelo menos um botão aparece.
+      document.getElementById('interview-actions').classList.remove('hidden');
     }
 
     // Carrega o snippet de instruções (static/student_instructions.html) na
@@ -797,6 +821,7 @@
           : 'Entrevista registrada';
         document.getElementById('final-msg').textContent = 'Esta entrevista já foi encerrada e não pode mais ser modificada. Você pode fechar esta página.';
         document.getElementById('btn-instructions').classList.remove('hidden');
+        document.getElementById('interview-actions').classList.remove('hidden');
         return;
       }
 
