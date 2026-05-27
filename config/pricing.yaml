@@ -34,6 +34,10 @@ text:
     input_per_mtok: 2.50
     input_cached_per_mtok: 1.25
     output_per_mtok: 15.00
+  gpt-5.5:
+    input_per_mtok: 5.00
+    input_cached_per_mtok: 2.50   # conservador; oficial Standard = 0.50
+    output_per_mtok: 30.00
   gpt-5.4-mini:
     input_per_mtok: 0.75
     input_cached_per_mtok: 0.375

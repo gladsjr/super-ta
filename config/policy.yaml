@@ -4,7 +4,7 @@ challenge_task: true
 
 # Model configuration
 models:
-  principal_reasoning_model: "gpt-5.4"
+  principal_reasoning_model: "gpt-5.5"
   fast_model: "gpt-5.4-mini"
   # Audio (modo de interação áudio com o aluno; ver replit.md)
   stt_model: "gpt-4o-transcribe"
