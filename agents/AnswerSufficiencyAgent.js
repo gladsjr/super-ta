@@ -153,8 +153,8 @@ Formato de saída — retorne APENAS JSON válido, sem markdown. A ORDEM DOS CAM
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, turnLog, studentMessage, vectorStoreId, signal, meterCtx = null, interactionMode = "text" }) {
-        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode })}
+    async evaluate({ interviewerYamlText, currentTurn, turnLog, studentMessage, vectorStoreId, signal, meterCtx = null, interactionMode = "text", studentName = null }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName })}
 
 ${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);

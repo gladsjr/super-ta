@@ -829,10 +829,11 @@
       interactionMode = j.session.interactionMode || 'text';
       syncTopbarActions();
 
-      // Aplica modo na UI: texto ou áudio. Esconde a área não usada.
+      // Aplica modo na UI: texto ou áudio. Esconde a área de texto no modo
+      // áudio. A área de gravação NÃO é revelada aqui — ela só aparece quando
+      // de fato é a vez do aluno (via setStudentTurn), nunca na tela de upload.
       if (interactionMode === 'audio') {
         document.getElementById('input-text').classList.add('hidden');
-        document.getElementById('input-audio').classList.remove('hidden');
       }
 
       // Banner "Sessão recomposta": só em modo texto. Em áudio não há histórico
@@ -850,7 +851,10 @@
         // Áudio: sem histórico. Só o último áudio do entrevistador.
         if (pendingAudio && pendingAudio.audio_url) {
           // appendTA já renderiza player + transcrição oculta + autoplay.
-          appendTA('', pendingAudio.audio_url);
+          const wrap = appendTA('', pendingAudio.audio_url);
+          // Só libera a gravação quando o áudio do entrevistador terminar.
+          setStudentTurn(false, 'O entrevistador está falando…');
+          afterInterviewerAudio(wrap, () => setStudentTurn(true, 'Clique no botão para gravar sua resposta.'));
         } else if (pendingAudio && pendingAudio.error === 'tts_failed') {
           const div = document.createElement('div');
           div.className = 'sys-line err';
@@ -905,13 +909,14 @@
         status.remove();
         if (j.error) appendStatus(j.message || j.error, true);
         else if (j.assistant) {
-          appendTA(j.assistant, j.audio_url);
+          const wrap = appendTA(j.assistant, j.audio_url);
           if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
           document.getElementById('upload-area').classList.add('hidden');
-          // Upload bem-sucedido transitiona para "intro" — agora cabe mostrar
-          // o botão de Desistir na topbar.
+          // Upload bem-sucedido transitiona para "intro" (beat 1, pede o nome) —
+          // agora cabe mostrar o botão de Desistir na topbar.
           phase = 'intro';
           syncTopbarActions();
+          handleTurn(j, wrap);
         }
       } catch {
         status.remove();
@@ -951,7 +956,7 @@
         showMetaDialog(j.assistant_response ?? '', j.audio_url);
         return;
       }
-      appendTA(j.assistant, j.audio_url);
+      const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
@@ -959,8 +964,10 @@
         if (phase === 'finalizing') {
           // Fim natural — abre o formulário de comentário automaticamente.
           showCommentForm('complete');
+          return;
         }
       }
+      handleTurn(j, wrap);
     };
 
     document.getElementById('msg').addEventListener('keydown', (e) => {
@@ -1027,6 +1034,62 @@
         mediaRecorder = null;
       }
       recordedChunks = [];
+    }
+
+    // ---- Controle de "de quem é a vez" ----
+    // Após cada fala do entrevistador é sempre a vez do aluno (inclusive no
+    // intro, que agora é todo round-trip: nome → apresentação+pedido de "ok" →
+    // "ok" do aluno → primeira pergunta). Em modo áudio o botão de gravar só
+    // libera depois que o áudio do entrevistador termina de tocar — para o
+    // aluno não gravar por cima.
+
+    function setStudentTurn(enabled, statusText) {
+      if (interactionMode === 'audio') {
+        // A área de gravação só aparece a partir do primeiro turno (nunca na
+        // tela de upload). Revelar aqui garante isso sem deixar o botão de
+        // gravar visível antes da entrevista começar.
+        document.getElementById('input-audio').classList.remove('hidden');
+        if (enabled) {
+          setRecordingUI('idle');
+          if (statusText) setRecordStatus(statusText);
+        } else {
+          document.getElementById('record-btn').classList.add('hidden');
+          document.getElementById('stop-btn').classList.add('hidden');
+          document.getElementById('stop-send-btn').classList.add('hidden');
+          setRecordStatus(statusText || 'O entrevistador está falando…');
+        }
+      } else {
+        const ta = document.getElementById('msg');
+        const send = document.getElementById('send');
+        if (ta) ta.disabled = !enabled;
+        if (send) send.disabled = !enabled;
+      }
+    }
+
+    // Executa cb quando o áudio do entrevistador termina. Em modo texto (sem
+    // áudio) chama na hora. Se o autoplay foi bloqueado (áudio parado após uma
+    // janela curta), também libera — não há fala tocando para atrapalhar.
+    function afterInterviewerAudio(wrap, cb) {
+      const audioEl = wrap?.querySelector ? wrap.querySelector('audio') : null;
+      if (interactionMode !== 'audio' || !audioEl) { cb(); return; }
+      let done = false;
+      const fire = () => { if (!done) { done = true; cb(); } };
+      if (audioEl.ended) { fire(); return; }
+      audioEl.addEventListener('ended', fire, { once: true });
+      audioEl.addEventListener('error', fire, { once: true });
+      setTimeout(() => { if (audioEl.paused) fire(); }, 800);
+    }
+
+    // Pós-fala do entrevistador: libera a vez do aluno. Em modo texto, imediato;
+    // em áudio, só depois que o áudio do entrevistador termina de tocar. `wrap`
+    // é o elemento de mensagem recém-renderizado (contém o <audio> no modo áudio).
+    function handleTurn(j, wrap) {
+      if (interactionMode === 'audio') {
+        setStudentTurn(false, 'O entrevistador está falando…');
+        afterInterviewerAudio(wrap, () => setStudentTurn(true, 'Clique no botão para gravar sua resposta.'));
+      } else {
+        setStudentTurn(true);
+      }
     }
 
     function setRecordingUI(state) {
@@ -1121,15 +1184,14 @@
         showMetaDialog(j.assistant_response ?? '', j.audio_url);
         return;
       }
-      appendTA(j.assistant, j.audio_url);
+      const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
-      setRecordingUI('idle');
-      setRecordStatus('Clique no botão para gravar nova resposta.');
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
         syncTopbarActions();
-        if (phase === 'finalizing') showCommentForm('complete');
+        if (phase === 'finalizing') { showCommentForm('complete'); return; }
       }
+      handleTurn(j, wrap);
     }
 
     document.getElementById('record-btn').addEventListener('click', async () => {

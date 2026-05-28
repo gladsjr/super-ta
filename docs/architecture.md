@@ -84,8 +84,8 @@ flowchart TD
   click UploadHandler "vscode://file/c:/Users/glads/src/super-ta/server.js:864" "Abre o handler /upload"
   click ChatHandler "vscode://file/c:/Users/glads/src/super-ta/server.js:1014" "Abre o handler /chat"
   click PhaseGate "vscode://file/c:/Users/glads/src/super-ta/server.js:1044" "Abre o gate de currentPhase"
-  click IntroAgent1 "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:30" "Abre o systemPrompt do IntroductionAgent"
-  click IntroAgent2 "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:30" "Abre o systemPrompt do IntroductionAgent"
+  click IntroAgent1 "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:39" "Abre o systemPrompt (bodyFor) do IntroductionAgent"
+  click IntroAgent2 "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:39" "Abre o systemPrompt (bodyFor) do IntroductionAgent"
   click IntroDecision "vscode://file/c:/Users/glads/src/super-ta/server.js:1081" "Abre o ramo continue_intro vs transition"
   click Parallel "vscode://file/c:/Users/glads/src/super-ta/server.js:1163" "Abre o lançamento dos 4 agentes em paralelo"
   click Scope "vscode://file/c:/Users/glads/src/super-ta/agents/ScopeClarificationAgent.js:23" "Abre o systemPrompt do ScopeClarificationAgent"
@@ -115,7 +115,7 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | Preparação em background (MapBuilder + PlanBuilder + vector store, em paralelo) | [server.js — startInterviewPreparation](../server.js) | ver agentes correspondentes |
 | `MapBuilderAgent` (DocumentMap, chamado em paralelo na prep) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `systemPromptBody` |
 | `PlanBuilderAgent` (plano de N perguntas, chamado em paralelo na prep) | [agents/PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado |
-| `IntroductionAgent` (fast, fase social) | [agents/IntroductionAgent.js](../agents/IntroductionAgent.js) | [systemPrompt :30](../agents/IntroductionAgent.js#L30) + persona + agenda + histórico do intro |
+| `IntroductionAgent` (fast, fase social — roteiro de 3 beats: ask_name / present_self / begin) | [agents/IntroductionAgent.js](../agents/IntroductionAgent.js) | [systemPrompt :39 (bodyFor)](../agents/IntroductionAgent.js#L39) + persona + agenda + histórico do intro |
 | Sortição da persona | [lib/personas.js](../lib/personas.js) | — |
 | Handler do `/chat` | [server.js:1014](../server.js#L1014) | — |
 | Gate por `currentPhase` (intro vs interviewing) | [server.js:1044](../server.js#L1044) | — |

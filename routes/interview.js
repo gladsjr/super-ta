@@ -14,7 +14,7 @@ import { openai } from "../lib/openaiClient.js";
 import { transcribeAudio, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
-import { STT_MODEL, INTRO_TURN_CAP, MAX_RELEVANCE_SKIPS } from "../lib/config.js";
+import { STT_MODEL, MAX_RELEVANCE_SKIPS } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
 import {
@@ -239,16 +239,16 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         };
         startInterviewPreparation(sess);
 
-        // Cumprimento — disparado em paralelo com a prep pesada acima. É só esse
-        // que precisa terminar para responder ao aluno.
+        // Beat 1 do roteiro de abertura: apresenta-se (nome + papel) e pergunta
+        // só o nome do aluno. Disparado em paralelo com a prep pesada acima — é
+        // só ele que precisa terminar para responder ao aluno.
+        sess.introStep = "awaiting_name";
         const greeting = await introductionAgent.evaluate({
+            step: "ask_name",
             interviewerYamlText,
             persona: sess.interviewerPersona,
             introHistory: sess.introLog,
             studentMessage: null,
-            mainReady: false,
-            introTurnCount: 0,
-            introTurnCap: INTRO_TURN_CAP,
             meterCtx,
             interactionMode: sess.interactionMode,
         });
@@ -357,12 +357,16 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     const persist = () => persistConversationLog(sess);
 
     // ------------------------------------------------------------------
-    // Intro phase: short social opening from the persona-bearing agent
-    // while the heavy plan generation runs in background. Each turn the
-    // agent decides between continuing the chitchat and transitioning to
-    // the interview proper. Triage/sufficiency/relevance do not run here.
+    // Intro — roteiro de abertura, despachado por introStep. Cada beat é um
+    // round-trip normal (uma fala do entrevistador, uma do aluno):
+    //   awaiting_name  → aluno mandou o nome → beat present_self (cumprimenta,
+    //                    fala de si, pede um "ok") → introStep = awaiting_ok.
+    //   awaiting_ok    → aluno mandou o "ok" → beat begin + 1ª pergunta do
+    //                    plano → phase = interviewing.
+    // Triage/sufficiency/relevance não rodam aqui.
     // ------------------------------------------------------------------
     if (sess.currentPhase === "intro") {
+        // Push da mensagem do aluno (comum aos dois beats).
         sess.introLog.push({
             role: "user",
             content: message,
@@ -379,34 +383,27 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             log.error("CHAT", `remote write (intro user) failed: ${err.message}`);
         }
 
-        const introTurnCount = sess.introLog.filter(m => m.role === "assistant").length;
-        const mainReady = !!sess.interviewPlan;
+        // ---- Beat present_self: o aluno disse o nome. ----
+        if (sess.introStep !== "awaiting_ok") {
+            let intro;
+            try {
+                intro = await introductionAgent.evaluate({
+                    step: "present_self",
+                    interviewerYamlText: sess.interviewerYamlText ?? "",
+                    persona: sess.interviewerPersona,
+                    introHistory: sess.introLog.slice(0, -1),  // sem a mensagem recém-empurrada
+                    studentMessage: message,
+                    meterCtx: sessionMeterCtx(sess),
+                    interactionMode: sess.interactionMode,
+                });
+            } catch (err) {
+                log.error("AGENT:Introduction", `present_self failed, using fallback: ${err.message}`);
+                intro = { message: "Prazer em falar contigo. Quando você estiver pronto, me dá um ok que a gente começa.", student_name: null, reason: "agent_failed" };
+            }
 
-        let intro;
-        try {
-            intro = await introductionAgent.evaluate({
-                interviewerYamlText: sess.interviewerYamlText ?? "",
-                persona: sess.interviewerPersona,
-                introHistory: sess.introLog.slice(0, -1),  // history without the just-pushed student message
-                studentMessage: message,
-                mainReady,
-                introTurnCount,
-                introTurnCap: INTRO_TURN_CAP,
-                meterCtx: sessionMeterCtx(sess),
-                interactionMode: sess.interactionMode,
-            });
-        } catch (err) {
-            log.error("AGENT:Introduction", `failed, forcing transition: ${err.message}`);
-            intro = { decision: "transition", message: "Bom, vamos ao trabalho.", reason: "agent_failed" };
-        }
+            if (intro.student_name) sess.studentName = intro.student_name;
+            sess.introStep = "awaiting_ok";
 
-        // Force transition when the cap is reached, regardless of the agent's call.
-        if (intro.decision !== "transition" && introTurnCount >= INTRO_TURN_CAP) {
-            log.info("INTRO", `cap reached (${INTRO_TURN_CAP}), forcing transition`);
-            intro = { decision: "transition", message: intro.message || "Desculpe, tenho pouco tempo. Vamos ao trabalho.", reason: "cap_reached" };
-        }
-
-        if (intro.decision === "continue_intro") {
             const audio = await attachAudio(sess, intro.message);
             sess.introLog.push({
                 role: "assistant",
@@ -415,24 +412,21 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 audio_duration_seconds: audio.audio_duration_seconds ?? null,
             });
             sess.conv_chat.push({ role: "assistant", content: intro.message });
-            sess.conv_eval.push({ role: "assistant", content: intro.message, metadata: { phase: "intro", timestamp: Date.now() } });
+            sess.conv_eval.push({ role: "assistant", content: intro.message, metadata: { phase: "intro", student_name: sess.studentName ?? null, timestamp: Date.now() } });
             sess.history = sess.conv_chat;
             try {
                 await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: intro.message }] });
                 await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: intro.message }] });
             } catch (err) {
-                log.error("CHAT", `remote write (intro continue) failed: ${err.message}`);
+                log.error("CHAT", `remote write (intro present_self) failed: ${err.message}`);
             }
-            log.info("CHAT", `intro continue ${log.preview(intro.message, 120)}`);
+            log.info("CHAT", `intro present_self${sess.studentName ? ` name="${sess.studentName}"` : ""} ${log.preview(intro.message, 120)}`);
             await logLastConvItem(sess.conversationId_chat, "CONV:chat");
             persist();
             return res.json({ channel: "chat", assistant: intro.message, ...audio });
         }
 
-        // Transition: garantir que o plano está pronto. Se a prep ainda está
-        // rodando, esperamos. Se já falhou, tentamos uma vez de novo. Se mesmo
-        // assim falhar, devolvemos o erro REAL (não a mensagem genérica) — útil
-        // pra debug quando algo trava em produção.
+        // ---- Beat begin: o aluno deu o "ok". Garante o plano e transiciona. ----
         if (!sess.interviewPlan) {
             try { await sess.interviewPreparation; }
             catch (err) { log.error("INTRO", `interviewPreparation failed: ${err.message}`); }
@@ -446,25 +440,37 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
 
             if (!sess.interviewPlan) {
                 const detail = sess.interviewPreparationError?.message || "plano indisponível";
-                log.error("INTRO", `transition aborted: ${detail}`);
-                return res.status(500).json({
-                    error: "Falha ao preparar a entrevista. Tente novamente.",
-                    detail,
-                });
+                log.error("INTRO", `begin aborted: ${detail}`);
+                return res.status(500).json({ error: "Falha ao preparar a entrevista. Tente novamente.", detail });
             }
         }
 
-        const firstPlanQuestion = sess.interviewPlan.questions[0];
-        const combined = `${intro.message}\n\n${firstPlanQuestion.question}`;
+        let begin;
+        try {
+            begin = await introductionAgent.evaluate({
+                step: "begin",
+                interviewerYamlText: sess.interviewerYamlText ?? "",
+                persona: sess.interviewerPersona,
+                introHistory: sess.introLog.slice(0, -1),
+                studentMessage: message,
+                studentName: sess.studentName,
+                meterCtx: sessionMeterCtx(sess),
+                interactionMode: sess.interactionMode,
+            });
+        } catch (err) {
+            log.error("AGENT:Introduction", `begin failed, using fallback: ${err.message}`);
+            begin = { message: "Então vamos começar.", reason: "agent_failed" };
+        }
 
-        // TTS antes do push para podermos persistir a duração no turno e no
-        // intro log de uma vez só.
+        const firstPlanQuestion = sess.interviewPlan.questions[0];
+        const combined = `${begin.message}\n\n${firstPlanQuestion.question}`;
+
         const audio = await attachAudio(sess, combined);
         const transitionAudioSec = audio.audio_duration_seconds ?? null;
 
         sess.introLog.push({
             role: "assistant",
-            content: intro.message,
+            content: begin.message,
             at: new Date().toISOString(),
             audio_duration_seconds: transitionAudioSec,
         });
@@ -474,6 +480,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.turnLog.push(firstTurn);
         sess.questionIndex = 1;
         sess.currentPhase = "interviewing";
+        sess.introStep = "done";
 
         sess.conv_chat.push({ role: "assistant", content: combined });
         sess.conv_eval.push({
@@ -486,12 +493,12 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: combined }] });
             await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: combined }] });
         } catch (err) {
-            log.error("CHAT", `remote write (intro transition) failed: ${err.message}`);
+            log.error("CHAT", `remote write (intro begin) failed: ${err.message}`);
         }
-        log.info("CHAT", `intro transition + first plan question ${log.preview(combined, 160)}`);
+        log.info("CHAT", `intro begin + first plan question ${log.preview(combined, 160)}`);
         await logLastConvItem(sess.conversationId_chat, "CONV:chat");
         persist();
-        return res.json({ channel: "chat", assistant: combined, ...audio });
+        return res.json({ channel: "chat", assistant: combined, phase: "interviewing", ...audio });
     }
 
     const planHasMoreQuestions = sess.questionIndex < (sess.interviewPlan?.questions?.length ?? 0);
@@ -522,6 +529,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             vectorStoreId: sess.vectorStoreId,
             meterCtx: sessionMeterCtx(sess),
             interactionMode: sess.interactionMode,
+            studentName: sess.studentName ?? null,
         };
 
         const sufficiencyAbort = new AbortController();
@@ -534,6 +542,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             signal: sufficiencyAbort.signal,
             meterCtx: sessionMeterCtx(sess),
             interactionMode: sess.interactionMode,
+            studentName: sess.studentName ?? null,
         }).catch(err => {
             const aborted = err?.name === "APIUserAbortError"
                 || err?.constructor?.name === "APIUserAbortError"

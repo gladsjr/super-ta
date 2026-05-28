@@ -52,8 +52,8 @@ Formato de saída — retorne APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId, meterCtx = null, interactionMode = "text" }) {
-        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode })}
+    async evaluate({ interviewerYamlText, currentTurn, studentMessage, vectorStoreId, meterCtx = null, interactionMode = "text", studentName = null }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName })}
 
 ${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
