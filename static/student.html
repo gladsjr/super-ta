@@ -281,27 +281,20 @@
       height: 36px;
     }
 
-    .msg.ta .transcript-toggle {
-      font-size: var(--fs-xs);
-      color: var(--accent-700);
-      cursor: pointer;
-      user-select: none;
-      background: none;
-      border: none;
-      padding: 0;
-      align-self: flex-start;
-    }
+    /* (Estilos de .transcript-toggle e .transcript removidos — modo áudio não
+       expõe mais a transcrição da fala do entrevistador.) */
 
-    .msg.ta .transcript-toggle:hover {
-      text-decoration: underline;
+    /* Balão "pensando" do entrevistador, mostrado enquanto o servidor processa
+       a mensagem do aluno (modo áudio). Substituído pela bolha real quando o
+       áudio chega. Visual de TA bubble, com indicador animado. */
+    .msg.ta.thinking .bubble {
+      font-style: italic;
+      color: var(--ink-500);
     }
-
-    .msg.ta .transcript {
-      margin-top: var(--sp-2);
-      padding-top: var(--sp-2);
-      border-top: 1px dashed var(--ink-100);
-      font-size: var(--fs-sm);
-      color: var(--ink-700);
+    .msg.ta.thinking .stage-dots {
+      display: inline-block;
+      min-width: 1.6em;
+      text-align: left;
     }
 
     /* Consent dialog (Pacote A do plano de conformidade MEC/LGPD). */
@@ -681,13 +674,13 @@
       wrap.className = 'msg ta';
       let bubbleInner;
       if (interactionMode === 'audio' && audioUrl) {
-        // Modo áudio: player visível, transcrição oculta com toggle.
+        // Modo áudio: SÓ o player. A transcrição NÃO é inserida no DOM —
+        // expô-la (mesmo oculta) tornaria trivial para o aluno copiar a fala
+        // do entrevistador e colar numa LLM externa para responder.
         bubbleInner = `
       <div class="audio-row">
         <audio controls preload="auto" autoplay src="${audioUrl}"></audio>
       </div>
-      <button class="transcript-toggle" type="button">ver transcrição</button>
-      <div class="transcript hidden">${renderMessage(text)}</div>
     `;
       } else {
         bubbleInner = renderMessage(text);
@@ -695,14 +688,6 @@
       wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${bubbleInner}</div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
 
-      const toggle = wrap.querySelector('.transcript-toggle');
-      if (toggle) {
-        toggle.addEventListener('click', () => {
-          const t = wrap.querySelector('.transcript');
-          t.classList.toggle('hidden');
-          toggle.textContent = t.classList.contains('hidden') ? 'ver transcrição' : 'ocultar transcrição';
-        });
-      }
       // Tenta autoplay; se browser bloquear (sem gesto do usuário), o aluno
       // ainda pode clicar no controle nativo do <audio>.
       const a = wrap.querySelector('audio');
@@ -717,6 +702,45 @@
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
       return wrap;
     }
+    // Balão "pensando": placeholder do lado do entrevistador entre o envio do
+    // áudio do aluno e a chegada do áudio do entrevistador. Dois estágios:
+    //   ouvindo...    enquanto o "humano hipotético" estaria escutando a fala
+    //                 do aluno em ~2x + um respiro fixo de 5s. Heurística:
+    //                 (studentAudioSec / 2) + 5.
+    //   respondendo...do fim de ouvindo até a resposta chegar.
+    // Se studentAudioSec não vier (caminho inesperado), usa um default curto
+    // de 5s pra ouvindo. Os timers são limpos em .remove().
+    function appendThinkingBubble({ studentAudioSec = null } = {}) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg ta thinking';
+      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><span class="stage-label">ouvindo</span><span class="stage-dots"></span></div>`;
+      chat.appendChild(wrap);
+      chat.scrollTop = chat.scrollHeight;
+
+      const labelEl = wrap.querySelector('.stage-label');
+      const dotsEl = wrap.querySelector('.stage-dots');
+
+      let dotsCount = 0;
+      const dotsTimer = setInterval(() => {
+        dotsCount = (dotsCount + 1) % 4;
+        dotsEl.textContent = '.'.repeat(dotsCount);
+      }, 350);
+
+      const ouvindoMs = studentAudioSec != null && studentAudioSec > 0
+        ? Math.round((studentAudioSec / 2 + 5) * 1000)
+        : 5000;
+      const stageTimer = setTimeout(() => { labelEl.textContent = 'respondendo'; }, ouvindoMs);
+
+      return {
+        node: wrap,
+        remove() {
+          clearInterval(dotsTimer);
+          clearTimeout(stageTimer);
+          if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+        },
+      };
+    }
+
     // Balão de Dica: informativo do sistema, FORA do roleplay. Não é fala do
      // entrevistador. Reutilizável: por enquanto só usado pelo gate de áudio
      // (give_up), no futuro pode entrar em outros lugares (ex.: substituir a
@@ -1208,8 +1232,14 @@
       }
       teardownRecording();
 
-      setRecordStatus('Transcrevendo e processando...');
+      setRecordStatus('');
       const userPlaceholder = appendUser('🎙️ (mensagem de voz enviada)');
+      // Bolha do entrevistador "pensando" — preenche o vazio entre o envio do
+      // aluno e a chegada do áudio do entrevistador. Duração do estágio
+      // "ouvindo" é derivada do tempo de gravação do aluno (heurística:
+      // humano hipotético ouve em 2x). Removida em qualquer saída.
+      const studentAudioSec = recordStartedAt ? (Date.now() - recordStartedAt) / 1000 : null;
+      const thinking = appendThinkingBubble({ studentAudioSec });
 
       const form = new FormData();
       form.append('audio', blob, 'student.webm');
@@ -1218,30 +1248,35 @@
         r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, { method: 'POST', body: form }));
         j = await r.json();
       } catch {
+        thinking.remove();
         setRecordStatus('Falha de comunicação. Tente gravar de novo.', true);
         if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
         setRecordingUI('idle');
         return;
       }
       if (r.status === 410) {
+        thinking.remove();
         if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
         setRecordingUI('idle');
         showFinalScreen();
         return;
       }
       if (j.error) {
+        thinking.remove();
         setRecordStatus(j.message || j.detail || j.error, true);
         if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
         setRecordingUI('idle');
         return;
       }
       if (j.channel === 'modal') {
+        thinking.remove();
         if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
         setRecordingUI('idle');
         setRecordStatus('Clique no botão para gravar nova resposta.');
         showMetaDialog(j.assistant_response ?? '', j.audio_url);
         return;
       }
+      thinking.remove();
       const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
       if (j.audio_intelligibility?.hint) {
