@@ -14,9 +14,10 @@ import { openai } from "../lib/openaiClient.js";
 import { transcribeAudio, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
-import { STT_MODEL, MAX_RELEVANCE_SKIPS } from "../lib/config.js";
+import { STT_MODEL, MAX_RELEVANCE_SKIPS, AUDIO_INTELLIGIBILITY } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
+import { detectIntelligibilitySpans } from "../lib/audioIntelligibility.js";
 import {
     introductionAgent,
     answerSufficiencyAgent,
@@ -24,6 +25,7 @@ import {
     offTopicRedirectAgent,
     metaInterventionAgent,
     questionRelevanceAgent,
+    audioIntelligibilityAgent,
 } from "../lib/agents.js";
 import { pickTriageWinner } from "../lib/triage.js";
 import {
@@ -43,6 +45,168 @@ import {
     startInterviewPreparation,
 } from "../lib/sessionLifecycle.js";
 import log from "../lib/logger.js";
+
+// ============================================================================
+// Pré-gate de inteligibilidade no modo áudio.
+// ----------------------------------------------------------------------------
+// Trabalha em duas camadas, separadas por design (ver lib/audioIntelligibility.js):
+//   1. Algorítmica (pura): decide SE há trechos ininteligíveis a partir dos
+//      logprobs por token do STT. Sem LLM, determinística, configurável via
+//      AUDIO_INTELLIGIBILITY no policy.yaml.
+//   2. LLM (AudioIntelligibilityAgent): só FRASEIA a fala em personagem, dados
+//      os trechos. Modo "ask_repeat" nas primeiras tentativas, "give_up" na
+//      N-ésima do mesmo turno — daí o frontend mostra também uma Dica fora do
+//      roleplay orientando ações práticas (ajustar mic / desistir+comentar).
+//
+// Contador de tentativas:
+//   - Intro: sess.introAudioAttempts (single, intro inteiro).
+//   - Entrevista: currentTurn.audio_repeat_attempts (zera junto com o turno).
+//
+// A mensagem ininteligível do aluno NÃO é empurrada como turno do usuário —
+// fica apenas registrada como intervenção para auditoria do professor.
+// ============================================================================
+async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist }) {
+    const { spans, aggregate } = detectIntelligibilitySpans(logprobs, {
+        low_logprob_threshold: AUDIO_INTELLIGIBILITY.low_logprob_threshold,
+        min_consecutive_low_tokens: AUDIO_INTELLIGIBILITY.min_consecutive_low_tokens,
+        min_utterance_tokens: AUDIO_INTELLIGIBILITY.min_utterance_tokens,
+    });
+
+    // Loga aggregate SEMPRE — passou ou não — para calibração futura dos limiares.
+    log.info(
+        "AUDIO:Gate",
+        `tokens=${aggregate?.totalTokens ?? 0} low=${aggregate?.lowTokens ?? 0}` +
+        ` mean=${aggregate?.meanLogprob != null ? aggregate.meanLogprob.toFixed(2) : "—"}` +
+        ` min=${aggregate?.minLogprob != null ? aggregate.minLogprob.toFixed(2) : "—"}` +
+        ` spans=${spans.length}`
+    );
+
+    if (spans.length === 0) return { gated: false };
+
+    // Segmento lógico do contador.
+    const inIntro = sess.currentPhase === "intro";
+    let attempt;
+    if (inIntro) {
+        sess.introAudioAttempts = (sess.introAudioAttempts ?? 0) + 1;
+        attempt = sess.introAudioAttempts;
+    } else {
+        const currentTurn = sess.turnLog?.[sess.turnLog.length - 1];
+        if (currentTurn) {
+            currentTurn.audio_repeat_attempts = (currentTurn.audio_repeat_attempts ?? 0) + 1;
+            attempt = currentTurn.audio_repeat_attempts;
+        } else {
+            attempt = 1;
+        }
+    }
+    const max = AUDIO_INTELLIGIBILITY.max_retries_before_give_up;
+    const mode = attempt >= max ? "give_up" : "ask_repeat";
+
+    // Texto da pergunta do turno atual, para dar contexto ao agente de fraseado.
+    let currentQuestionText = null;
+    if (!inIntro) {
+        const currentTurn = sess.turnLog?.[sess.turnLog.length - 1];
+        currentQuestionText = currentTurn?.question ?? null;
+    }
+
+    let phrased;
+    try {
+        phrased = await audioIntelligibilityAgent.evaluate({
+            mode,
+            interviewerYamlText: sess.interviewerYamlText ?? "",
+            currentQuestionText,
+            transcript,
+            spans,
+            retryAttempt: attempt,
+            maxRetries: max,
+            meterCtx: sessionMeterCtx(sess),
+            studentName: sess.studentName ?? null,
+        });
+    } catch (err) {
+        log.error("AGENT:AudioIntelligibility", `failed, using fallback: ${err.message}`);
+        phrased = {
+            message: mode === "give_up"
+                ? "Tá difícil entender hoje. Acho melhor a gente continuar essa conversa em outro momento, com o áudio funcionando bem."
+                : "Desculpa, não peguei direito essa parte. Pode repetir?",
+            reason: "agent_failed",
+        };
+    }
+
+    // Empurra a fala do entrevistador no conv (visível ao aluno).
+    sess.conv_chat.push({ role: "assistant", content: phrased.message });
+    sess.conv_eval.push({
+        role: "assistant",
+        content: phrased.message,
+        metadata: { intervention: "audio_intelligibility", mode, attempt, timestamp: Date.now() },
+    });
+    sess.history = sess.conv_chat;
+    try {
+        await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: phrased.message }] });
+        await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: phrased.message }] });
+    } catch (err) {
+        log.error("CHAT", `remote write (audio intelligibility) failed: ${err.message}`);
+    }
+    await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+
+    // Registra a intervenção para auditoria do professor. Reusa os campos
+    // padrão (student_message, assistant_response, type, channel, at) para o
+    // renderer de conversation.html exibir o card pelo caminho comum; campos
+    // extras (mode/attempt/spans/aggregate) sobrevivem no JSONB para auditoria.
+    const interventionRecord = {
+        type: "audio_intelligibility",
+        channel: "chat",
+        mode,
+        attempt,
+        max_attempts: max,
+        student_message: transcript,
+        spans: spans.map(s => s.text),
+        aggregate,
+        assistant_response: phrased.message,
+        reason: phrased.reason || `algoritmo detectou ${spans.length} trecho(s) de baixa confiança; tentativa ${attempt}/${max}`,
+        at: new Date().toISOString(),
+    };
+    if (inIntro) {
+        // Sem currentTurn de plano no intro — registra no introLog com role
+        // "system" para o professor.html exibir como linha de auditoria.
+        sess.introLog.push({
+            role: "system",
+            content: `[áudio ininteligível — ${mode}, tentativa ${attempt}/${max}]`,
+            metadata: interventionRecord,
+            at: new Date().toISOString(),
+        });
+    } else {
+        const currentTurn = sess.turnLog?.[sess.turnLog.length - 1];
+        if (currentTurn) {
+            if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
+            currentTurn.interventions.push(interventionRecord);
+        }
+    }
+
+    const audio = await attachAudio(sess, phrased.message);
+    persist();
+
+    // Dica (fora do roleplay) só aparece no give_up. Texto fixo, editável aqui.
+    const hint = mode === "give_up" ? {
+        kind: "audio_give_up",
+        title: "Problemas com o áudio?",
+        body: "O entrevistador não está conseguindo te entender. Você pode tentar ajustar o microfone (ou mudar para um ambiente mais silencioso) e gravar de novo. Se achar que o problema é do sistema, use o botão \"Desistir da entrevista\" no topo, deixe um comentário descrevendo o que aconteceu, e peça outro link ao seu professor.",
+    } : null;
+
+    return {
+        gated: true,
+        response: {
+            channel: "chat",
+            assistant: phrased.message,
+            audio_intelligibility: {
+                mode,
+                attempt,
+                max_attempts: max,
+                spans: spans.map(s => s.text),
+                hint,
+            },
+            ...audio,
+        },
+    };
+}
 
 const router = express.Router();
 
@@ -334,6 +498,9 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Duração da mensagem de voz do aluno (segundos). Em modo texto fica null.
     // Probada do buffer original antes do STT — não depende do shape do response.
     let studentAudioDurationSec = null;
+    // Logprobs por token do STT, consumidos pelo pré-gate de inteligibilidade.
+    // Em modo texto fica null e o gate é no-op.
+    let studentAudioLogprobs = null;
     if (hasAudio) {
         try {
             studentAudioDurationSec = await getAudioDurationSeconds(
@@ -345,6 +512,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 () => transcribeAudio(openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm")
             );
             message = sttResult.text;
+            studentAudioLogprobs = sttResult.logprobs ?? null;
         } catch (err) {
             log.error("CHAT", `STT failed: ${err.message}`);
             return res.status(400).json({ error: "transcription_failed", detail: "Não consegui entender o áudio. Tente gravar de novo." });
@@ -355,6 +523,24 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     if (!message) return res.status(400).json({ error: "empty message" });
 
     const persist = () => persistConversationLog(sess);
+
+    // ------------------------------------------------------------------
+    // Pré-gate de inteligibilidade (modo áudio). Roda ANTES do bloco intro
+    // ou triagem — se o áudio veio com trechos ininteligíveis (decidido por
+    // lib/audioIntelligibility.js sobre os logprobs do STT), o entrevistador
+    // pede repetição ou faz a virada de roleplay (give_up) na N-ésima vez. A
+    // mensagem do aluno é descartada (registrada apenas como intervenção no
+    // log do professor); o turno NÃO avança.
+    // ------------------------------------------------------------------
+    if (hasAudio && AUDIO_INTELLIGIBILITY.enabled && studentAudioLogprobs) {
+        const gateResult = await runAudioIntelligibilityGate({
+            sess,
+            transcript: message,
+            logprobs: studentAudioLogprobs,
+            persist,
+        });
+        if (gateResult.gated) return res.json(gateResult.response);
+    }
 
     // ------------------------------------------------------------------
     // Intro — roteiro de abertura, despachado por introStep. Cada beat é um

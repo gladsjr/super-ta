@@ -17,3 +17,14 @@ models:
 # Triage (runs after each student answer, before next question)
 triage:
   intensity_threshold: 6   # winner fires only if max(intensity) >= threshold
+
+# Pré-gate de inteligibilidade no modo áudio. Decisão "pedir repetição" é puro
+# código sobre os logprobs do STT (lib/audioIntelligibility.js); o LLM
+# (AudioIntelligibilityAgent) entra só para fraseiar a fala em personagem.
+# Calibração: ajuste estes números depois de observar logs reais.
+audio_intelligibility:
+  enabled: true
+  low_logprob_threshold: -0.3      # token "inseguro": logprob abaixo disso (~prob < 74%)
+  min_consecutive_low_tokens: 2    # tamanho mínimo de um trecho ininteligível
+  min_utterance_tokens: 4          # piso: enunciados curtos (ok, sim, "Maria") não gateiam
+  max_retries_before_give_up: 3    # na N-ésima vez do mesmo turno, vira a fala + Dica de desistência

@@ -113,6 +113,33 @@
       font-style: normal;
     }
 
+    /* Dica: balão informativo do sistema (fora do roleplay). Não é fala do
+       entrevistador. Reutilizável. Hoje usado pelo pré-gate de áudio
+       (audio_give_up); no futuro, candidato a alternativa à modal de
+       meta-pergunta etc. */
+    .dica {
+      align-self: stretch;
+      max-width: 100%;
+      margin: var(--sp-1) 0;
+      padding: var(--sp-3) var(--sp-4);
+      border: 1px solid #d4b476;
+      background: #fff4dc;
+      border-left: 4px solid #b8732a;
+      border-radius: var(--r-md);
+      color: var(--ink-900);
+      line-height: 1.5;
+    }
+    .dica .dica-label {
+      font-size: var(--fs-xs);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #8a4f10;
+      margin-bottom: var(--sp-1);
+    }
+    .dica .dica-title { font-weight: 600; margin-bottom: var(--sp-1); }
+    .dica .dica-body { font-size: var(--fs-sm); white-space: pre-wrap; }
+
     .input-area {
       border-top: 1px solid var(--ink-100);
       padding: var(--sp-4) var(--sp-5);
@@ -690,6 +717,34 @@
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
       return wrap;
     }
+    // Balão de Dica: informativo do sistema, FORA do roleplay. Não é fala do
+     // entrevistador. Reutilizável: por enquanto só usado pelo gate de áudio
+     // (give_up), no futuro pode entrar em outros lugares (ex.: substituir a
+     // modal de meta-pergunta).
+    function appendDica({ title, body }) {
+      const div = document.createElement('div');
+      div.className = 'dica';
+      const label = document.createElement('div');
+      label.className = 'dica-label';
+      label.textContent = 'Dica';
+      div.appendChild(label);
+      if (title) {
+        const t = document.createElement('div');
+        t.className = 'dica-title';
+        t.textContent = title;
+        div.appendChild(t);
+      }
+      if (body) {
+        const b = document.createElement('div');
+        b.className = 'dica-body';
+        b.textContent = body;
+        div.appendChild(b);
+      }
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+      return div;
+    }
+
     function appendStatus(text, isError = false) {
       const div = document.createElement('div');
       div.className = 'sys-line' + (isError ? ' err' : '');
@@ -958,6 +1013,9 @@
       }
       const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
+      if (j.audio_intelligibility?.hint) {
+        appendDica({ title: j.audio_intelligibility.hint.title, body: j.audio_intelligibility.hint.body });
+      }
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
         syncTopbarActions();
@@ -1186,6 +1244,9 @@
       }
       const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
+      if (j.audio_intelligibility?.hint) {
+        appendDica({ title: j.audio_intelligibility.hint.title, body: j.audio_intelligibility.hint.body });
+      }
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
         syncTopbarActions();

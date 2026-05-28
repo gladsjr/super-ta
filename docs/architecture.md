@@ -116,6 +116,7 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | `MapBuilderAgent` (DocumentMap, chamado em paralelo na prep) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `systemPromptBody` |
 | `PlanBuilderAgent` (plano de N perguntas, chamado em paralelo na prep) | [agents/PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado |
 | `IntroductionAgent` (fast, fase social — roteiro de 3 beats: ask_name / present_self / begin) | [agents/IntroductionAgent.js](../agents/IntroductionAgent.js) | [systemPrompt :39 (bodyFor)](../agents/IntroductionAgent.js#L39) + persona + agenda + histórico do intro |
+| Pré-gate de inteligibilidade no modo áudio (algoritmo puro sobre logprobs do STT decide; `AudioIntelligibilityAgent` só fraseia) | [lib/audioIntelligibility.js](../lib/audioIntelligibility.js) + [agents/AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) | [systemPrompt :41 (systemPromptBody)](../agents/AudioIntelligibilityAgent.js#L41) + agenda + transcrição + trechos detectados + estado do ciclo |
 | Sortição da persona | [lib/personas.js](../lib/personas.js) | — |
 | Handler do `/chat` | [server.js:1014](../server.js#L1014) | — |
 | Gate por `currentPhase` (intro vs interviewing) | [server.js:1044](../server.js#L1044) | — |
@@ -217,6 +218,7 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [QuestionRelevanceAgent.js](../agents/QuestionRelevanceAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`
    - [AnswerSufficiencyAgent.js](../agents/AnswerSufficiencyAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice` (abortável via `signal`)
    - [IntroductionAgent.js](../agents/IntroductionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice` (fase social, persona em [lib/personas.js](../lib/personas.js))
+   - [AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice` (pré-gate de áudio em [lib/audioIntelligibility.js](../lib/audioIntelligibility.js); só fraseia o pedido de repetição ou a fala de give_up — decisão é algorítmica sobre logprobs)
    - [ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) — modelo: `fast_model`, audience: `professor_via_ui` (chat do assistente de configuração na página do professor)
    - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado ao processo, recebe PDF via `input_file`)
 3. **Strings inline em `server.js`**:

@@ -52,6 +52,7 @@
   .iv-type.scope_clarification { color: var(--accent-700); }
   .iv-type.off_topic_redirect { color: var(--warning-700); }
   .iv-type.follow_up { color: var(--success-700); }
+  .iv-type.audio_intelligibility { color: #b8732a; }
   .iv-row { margin: var(--sp-1) 0; }
   .iv-row .who { display: inline-block; min-width: 5.2em; color: var(--ink-500); font-weight: 600; }
   .iv .iv-text { white-space: pre-wrap; }
@@ -268,7 +269,17 @@ function renderInterventions(interventions) {
       off_topic_redirect: 'Redirecionamento (off-topic)',
       meta: 'Meta-pergunta (modal)',
       follow_up: 'Pedido de complemento',
+      audio_intelligibility: 'Áudio ininteligível — pedido de repetição',
     }[type] || type;
+    const audioGate = type === 'audio_intelligibility' && iv.mode
+      ? ` · ${escapeHtml(iv.mode)} ${iv.attempt ?? '?'}/${iv.max_attempts ?? '?'}`
+      : '';
+    const spansLine = type === 'audio_intelligibility' && Array.isArray(iv.spans) && iv.spans.length
+      ? `<div class="iv-scores">trechos suspeitos: ${iv.spans.map(s => `"${escapeHtml(s)}"`).join(', ')}</div>`
+      : '';
+    const aggLine = type === 'audio_intelligibility' && iv.aggregate
+      ? `<div class="iv-scores">confiança — média ${iv.aggregate.meanLogprob != null ? Number(iv.aggregate.meanLogprob).toFixed(2) : '—'} · min ${iv.aggregate.minLogprob != null ? Number(iv.aggregate.minLogprob).toFixed(2) : '—'} · ${iv.aggregate.lowTokens ?? '—'}/${iv.aggregate.totalTokens ?? '—'} tokens abaixo do limiar</div>`
+      : '';
     const channel = iv.channel ? ` · canal ${escapeHtml(iv.channel)}` : '';
     const intensity = iv.intensity != null ? ` · intensidade ${escapeHtml(iv.intensity)}` : '';
     const issueTag = iv.issue && iv.issue !== 'none' ? ` · issue ${escapeHtml(iv.issue)}` : '';
@@ -281,12 +292,14 @@ function renderInterventions(interventions) {
     return `
       <div class="iv">
         <div class="iv-head">
-          <span><span class="iv-type ${escapeHtml(type)}">Intervenção ${i + 1} — ${escapeHtml(typeLabel)}</span>${intensity}${issueTag}${channel}</span>
+          <span><span class="iv-type ${escapeHtml(type)}">Intervenção ${i + 1} — ${escapeHtml(typeLabel)}</span>${intensity}${issueTag}${channel}${audioGate}</span>
           <span>${fmtTime(iv.at)}</span>
         </div>
         <div class="iv-row"><span class="who">aluno:</span><span class="iv-text">${escapeHtml(iv.student_message ?? '')}</span></div>
         <div class="iv-row"><span class="who">agente:</span><span class="iv-text">${escapeHtml(iv.assistant_response ?? '')}</span></div>
         ${scoresLine}
+        ${spansLine}
+        ${aggLine}
         ${reasonLine}
       </div>`;
   }).join('');
