@@ -66,9 +66,20 @@ divisão summary/assessment não justifica chamada separada.
 
 Esta é a peça mais crítica do desenho. **Tudo orbita esse JSON.**
 
+O campo `rationale` é **obrigatório em toda ação**. É a justificativa que
+o professor vê no log (mesmo papel que o `rationale` que hoje cada pergunta
+do plano tem em [config/interview_prompt_template.txt](../config/interview_prompt_template.txt)).
+Modelos de reasoning fazem chain-of-thought interno e não preciso de campo
+separado para isso — o `rationale` é o produto auditável, não a esteira.
+
+Em `ask`, a justificativa vem acompanhada da associação a itens do YAML
+(`objectives`, `concerns`, etc.) — mesma estrutura de hoje, para que o
+professor reconheça o formato e a auditoria continue funcionando.
+
 ```jsonc
 {
-  "thinking": "raciocínio interno do super-orquestrador (audit only, não vai pro aluno)",
+  "rationale": "OBRIGATÓRIO. Justifica o porquê desta ação. Vai pro log do professor.",
+
   "action": {
     "kind": "ask" | "follow_up" | "meta_modal" | "hint" | "finalize" | "ask_repeat",
 
@@ -79,6 +90,16 @@ Esta é a peça mais crítica do desenho. **Tudo orbita esse JSON.**
     // espontânea — ex.: retomar um tópico anterior fora do plano).
     "plan_question_id": 5,
     "revisit_topic": null,           // se a ask retoma um tópico anterior
+
+    // Só em ask: associação aos itens do YAML do entrevistador. Mesma
+    // estrutura dos question_metadata atuais (lib/conversationUtils.js#turnFromPlanQuestion).
+    // Para perguntas espontâneas (não do plano), arrays vazios são aceitos
+    // — o `rationale` carrega o porquê.
+    "objectives": ["..."],
+    "concerns": ["..."],
+    "decision_criteria": ["..."],
+    "information_needs": ["..."],
+    "evaluation_mode": ["..."],
 
     // Só em follow_up: a qual turno se refere o follow-up.
     "about_turn_index": 3,
@@ -147,11 +168,19 @@ turno; em 30 turnos chega a ~15K tokens. Reasoning models lidam confortavelmente
 
 ## Tools
 
-- `file_search` sobre vector store com o PDF do aluno (mesma estrutura de
-  hoje em `lib/sessionLifecycle.js#createVectorStoreWithFile`).
-- `file_search` sobre o PDF do enunciado também — útil para o agente checar
-  qual era o pedido original ao confrontar uma resposta. Hoje só o aluno é
-  vetorizado.
+- `file_search` sobre vector store com **múltiplos documentos**:
+  - **PDF do aluno** (já hoje, [lib/sessionLifecycle.js#createVectorStoreWithFile](../lib/sessionLifecycle.js)).
+  - **PDF do enunciado** (novo). Útil para o agente verificar "o que foi
+    pedido vs o que foi entregue" diretamente, em vez de depender só do
+    YAML do entrevistador.
+  - **Slot extensível** (FUTURO, fora desta branch): material da disciplina
+    associado ao trabalho. Quando esse dia chegar vai precisar de migration
+    para algo tipo `works.knowledge_docs` (tabela de muitos). Por ora o
+    desenho vetoriza N documentos por sessão, mas só o enunciado e o aluno
+    são alimentados; a infraestrutura aceita o terceiro sem refatoração.
+
+A função que cria a vector store passa a aceitar `[fileId]` → `Array<fileId>`,
+mudança pequena no caller (createVectorStoreWithFile).
 
 ## Persistência (zero migrations)
 
@@ -291,18 +320,22 @@ seguinte. **Fora de escopo agora**, mas o desenho não fecha a porta.
 
 ## Decisões pendentes
 
-1. **Feature flag (legacy vs super) no `policy.yaml`?** Permite A/B controlado;
-   ou substituímos sem flag, confiando que o branch só vira main se passar nos
-   testes.
-2. **Onde mora o thinking do agente?** No `conversation_json` para o professor
-   ver (audit) ou só em log? Eu votaria em ambos: visível no professor.html
-   numa área colapsável e logado.
+1. ~~Feature flag legacy vs super~~ → **decidido: sem flag**. O branch
+   substitui completamente; A/B controlado, se desejado, vai por deploy
+   (uma instância na main, outra no branch). Evita duplicar código no
+   `routes/interview.js`.
+2. ~~Onde mora o thinking do agente~~ → **decidido: `rationale` obrigatório
+   por ação, sempre visível ao professor** (no log, mesmo papel que o
+   `rationale` das perguntas hoje). `thinking` dropado do schema — modelos
+   de reasoning fazem chain-of-thought interno e o que importa é a
+   justificativa final.
 3. **Limite de tamanho do histórico:** ignorar até 30 turnos e depois resumir?
    Ou crescer indefinidamente até estourar contexto? (Hoje cap natural é 10
    perguntas; com super-orquestrador podendo gerar follow-ups e revisitas,
    pode passar muito mais.)
-4. **PDF do enunciado também via vector store?** Hoje não é. Vale a pena para
-   o super-orquestrador poder verificar "o que foi pedido vs o que foi entregue".
+4. ~~PDF do enunciado também via vector store~~ → **decidido: sim**.
+   Acrescentado também o slot extensível para material da disciplina (FUTURO,
+   fora desta branch — vai exigir migration de schema).
 
 ---
 
