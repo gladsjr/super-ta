@@ -1,10 +1,17 @@
 // Rotas do aluno (auth via submission_token Bearer).
-// Cinco endpoints: /start, /upload, /audio/:turnId, /chat.
+// Cinco endpoints: /start, /upload, /audio/:turnId, /chat, /finalize +
+// /intro/advance.
 //
-// O handler /chat é o coração da orquestração: dispara triagem (3 agents
-// fast) + sufficiency (1 reasoning) em paralelo, escolhe entre aceitar e
-// avançar a próxima pergunta do plano ou interceptar com um follow-up /
-// scope / off-topic / meta.
+// O handler /chat tem dois fluxos:
+//   - Fase intro: roteiro determinístico de 3 falas (IntroductionAgent).
+//   - Fase interviewing: UMA chamada de raciocínio (SuperOrchestratorAgent)
+//     decide a próxima ação (ask / follow_up / meta_modal / hint / finalize /
+//     ask_repeat). Substituiu triagem×3 + sufficiency + relevance + composição
+//     do legado. Guardrails (MAX_TURNS, finalize precoce) ficam no código,
+//     não no agente.
+//
+// Pré-gate de áudio (algoritmo sobre logprobs do STT + AudioIntelligibilityAgent
+// só para fraseiar) roda antes do super-orquestrador no modo áudio.
 
 import express from "express";
 import multer from "multer";
@@ -14,20 +21,15 @@ import { openai } from "../lib/openaiClient.js";
 import { transcribeAudio, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
-import { STT_MODEL, MAX_RELEVANCE_SKIPS, AUDIO_INTELLIGIBILITY } from "../lib/config.js";
+import { STT_MODEL, AUDIO_INTELLIGIBILITY } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
 import { detectIntelligibilitySpans } from "../lib/audioIntelligibility.js";
 import {
     introductionAgent,
-    answerSufficiencyAgent,
-    scopeClarificationAgent,
-    offTopicRedirectAgent,
-    metaInterventionAgent,
-    questionRelevanceAgent,
     audioIntelligibilityAgent,
+    superOrchestratorAgent,
 } from "../lib/agents.js";
-import { pickTriageWinner } from "../lib/triage.js";
 import {
     turnFromPlanQuestion,
     persistConversationLog,
@@ -45,6 +47,15 @@ import {
     startInterviewPreparation,
 } from "../lib/sessionLifecycle.js";
 import log from "../lib/logger.js";
+
+// Cap duro do super-orquestrador. Depois disso, força finalize automático
+// independentemente do que o agente decidir — protege contra agente que não
+// finaliza nunca. Pode ir para policy.yaml depois.
+const SUPER_ORQ_MAX_TURNS = 30;
+// Bloqueio de finalize precoce. Antes de N turnos respondidos, o agente
+// não pode finalizar (exceto se finalize_reason="student_disengaged" — aluno
+// explicitamente desistindo).
+const SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE = 5;
 
 // ============================================================================
 // Pré-gate de inteligibilidade no modo áudio.
@@ -687,316 +698,245 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         return res.json({ channel: "chat", assistant: combined, phase: "interviewing", ...audio });
     }
 
-    const planHasMoreQuestions = sess.questionIndex < (sess.interviewPlan?.questions?.length ?? 0);
-    const currentTurn = sess.turnLog?.[sess.turnLog.length - 1];
-
-    // Carries the sufficiency-generated transition phrase from the triage block
-    // down to the normal flow (where the next plan question is assembled). Stays
-    // null when sufficiency wasn't run, errored out, or chose follow_up.
-    let acceptedTransitionPhrase = null;
-
     // ------------------------------------------------------------------
-    // Triage + sufficiency phase. All four agents are launched in parallel
-    // as soon as the message arrives. Triage (3 fast agents) decides whether
-    // the message should be intercepted as scope/off-topic/meta. Sufficiency
-    // (1 reasoning agent) decides whether the answer is complete and coherent
-    // enough to advance — but its result is only consumed when no triage
-    // guardrail wins. If a guardrail wins, sufficiency is best-effort
-    // cancelled via AbortSignal and its outcome is ignored.
-    //
-    // Both phases are gated by "plan still has a pending question and the
-    // current turn is awaiting an answer".
+    // SUPER-ORQUESTRADOR (experimento). UMA chamada de raciocínio decide a
+    // próxima ação: ask | follow_up | meta_modal | hint | finalize | ask_repeat.
+    // Substitui triagem×3 + sufficiency + relevance + composição do legado.
+    // Guardrails de turnos no código (não confia 100% no agente). Ver
+    // docs/super-orchestrator-plan.md.
     // ------------------------------------------------------------------
-    if (planHasMoreQuestions && currentTurn && currentTurn.answer == null) {
-        const triageContext = {
-            interviewerYamlText: sess.interviewerYamlText ?? "",
-            currentTurn,
-            studentMessage: message,
-            vectorStoreId: sess.vectorStoreId,
-            meterCtx: sessionMeterCtx(sess),
-            interactionMode: sess.interactionMode,
-            studentName: sess.studentName ?? null,
-        };
+    const currentTurn = sess.turnLog?.[sess.turnLog.length - 1] ?? null;
+    const turnsAnswered = sess.turnLog.filter(t => t && t.answered_at).length;
 
-        const sufficiencyAbort = new AbortController();
-        const sufficiencyPromise = answerSufficiencyAgent.evaluate({
-            interviewerYamlText: sess.interviewerYamlText ?? "",
-            currentTurn,
-            turnLog: sess.turnLog,
-            studentMessage: message,
-            vectorStoreId: sess.vectorStoreId,
-            signal: sufficiencyAbort.signal,
-            meterCtx: sessionMeterCtx(sess),
-            interactionMode: sess.interactionMode,
-            studentName: sess.studentName ?? null,
-        }).catch(err => {
-            const aborted = err?.name === "APIUserAbortError"
-                || err?.constructor?.name === "APIUserAbortError"
-                || /aborted/i.test(err?.message ?? "");
-            if (aborted) {
-                log.info("AGENT:AnswerSufficiency", "aborted (triage winner)");
-                return { aborted: true };
-            }
-            log.error("AGENT:AnswerSufficiency", `failed, defaulting to accept: ${err.message}`);
-            return { aborted: false, decision: "accept", issue: "none", reason: "agent_failed", follow_up_question: null };
-        });
-
-        const fallback = (type, channel) => (err) => {
-            log.error(`AGENT:${type}`, `failed, scoring as 0: ${err.message}`);
-            return { type, channel, intensity: 0, assistant_response: "", rationale: `agent failed: ${err.message}` };
-        };
-        const [scopeResult, offTopicResult, metaResult] = await Promise.all([
-            scopeClarificationAgent.evaluate(triageContext).catch(fallback("scope_clarification", "chat")),
-            offTopicRedirectAgent.evaluate(triageContext).catch(fallback("off_topic_redirect", "chat")),
-            metaInterventionAgent.evaluate(triageContext).catch(fallback("meta", "modal")),
-        ]);
-        const triageResults = [scopeResult, offTopicResult, metaResult];
-        const scores = {
-            scope_clarification: scopeResult.intensity,
-            off_topic_redirect: offTopicResult.intensity,
-            meta: metaResult.intensity,
-        };
-        log.info("TRIAGE", `scores scope=${scores.scope_clarification} off_topic=${scores.off_topic_redirect} meta=${scores.meta}`);
-
-        const winner = pickTriageWinner(triageResults);
-        if (winner) {
-            sufficiencyAbort.abort();
-            log.info("TRIAGE", `winner=${winner.type} intensity=${winner.intensity} channel=${winner.channel}`);
-            // TTS antes do push para anexar a duração ao intervention.
-            const audio = await attachAudio(sess, winner.assistant_response);
-            const intervention = {
-                type: winner.type,
-                student_message: message,
-                assistant_response: winner.assistant_response,
-                intensity: winner.intensity,
-                channel: winner.channel,
-                scores,
-                at: new Date().toISOString(),
-                student_audio_duration_seconds: studentAudioDurationSec,
-                assistant_audio_duration_seconds: audio.audio_duration_seconds ?? null,
-            };
-            if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
-            currentTurn.interventions.push(intervention);
-
-            if (winner.channel === "modal") {
-                // Meta intervention: keep the student message OUT of conv_chat (local
-                // and remote). Record into conv_eval for audit so the final evaluator
-                // still sees the exchange if needed.
-                sess.conv_eval.push({ role: "user", content: message, metadata: { triage: "meta", dropped_from_chat: true, timestamp: Date.now() } });
-                sess.conv_eval.push({ role: "assistant", content: winner.assistant_response, metadata: { triage: "meta", channel: "modal", timestamp: Date.now() } });
-                try {
-                    await openai.conversations.items.create(sess.conversationId_eval, {
-                        items: [
-                            { role: "user", content: message },
-                            { role: "assistant", content: winner.assistant_response },
-                        ],
-                    });
-                } catch (err) {
-                    log.error("CHAT", `remote eval write (meta) failed: ${err.message}`);
-                }
-                persist();
-                return res.json({
-                    channel: "modal",
-                    assistant_response: winner.assistant_response,
-                    restore_input: message,
-                    ...audio,
-                });
-            }
-
-            // Chat-channel intervention (scope_clarification / off_topic_redirect):
-            // student message and agent response DO flow through conv_chat.
-            sess.conv_chat.push({ role: "user", content: message });
-            sess.conv_chat.push({ role: "assistant", content: winner.assistant_response });
-            sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
-            sess.conv_eval.push({ role: "assistant", content: winner.assistant_response, metadata: { triage: winner.type, timestamp: Date.now() } });
-            sess.history = sess.conv_chat;
-            try {
-                await openai.conversations.items.create(sess.conversationId_chat, {
-                    items: [
-                        { role: "user", content: message },
-                        { role: "assistant", content: winner.assistant_response },
-                    ],
-                });
-                await openai.conversations.items.create(sess.conversationId_eval, {
-                    items: [
-                        { role: "user", content: message },
-                        { role: "assistant", content: winner.assistant_response },
-                    ],
-                });
-            } catch (err) {
-                log.error("CHAT", `remote write (triage=${winner.type}) failed: ${err.message}`);
-            }
-            log.info("CHAT", `user (triaged=${winner.type}) ${log.preview(message, 140)}`);
-            await logLastConvItem(sess.conversationId_chat, "CONV:chat");
-            persist();
-            return res.json({ channel: "chat", assistant: winner.assistant_response, ...audio });
+    // Guardrail 1: cap duro de turnos. Se já estourou, força finalize sem
+    // chamar o agente (economia + segurança).
+    if (turnsAnswered >= SUPER_ORQ_MAX_TURNS) {
+        log.info("SUPER_ORQ", `MAX_TURNS (${SUPER_ORQ_MAX_TURNS}) atingido — forçando finalize`);
+        const forcedMessage = "Obrigado, acho que já temos material suficiente para encerrar esta conversa.";
+        sess.conv_chat.push({ role: "user", content: message });
+        sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
+        sess.history = sess.conv_chat;
+        try {
+            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
+            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
+        } catch (err) { log.error("CHAT", `remote write (user, cap) failed: ${err.message}`); }
+        if (currentTurn && currentTurn.answer == null) {
+            currentTurn.answer = message;
+            currentTurn.answered_at = new Date().toISOString();
+            currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
         }
-
-        // No triage winner — sufficiency now blocks the move to the next turn.
-        const sufficiency = await sufficiencyPromise;
-        if (sufficiency.decision === "follow_up" && sufficiency.follow_up_question) {
-            log.info("AGENT:AnswerSufficiency", `follow_up issue=${sufficiency.issue}`);
-            // TTS antes do push para anexar a duração ao intervention.
-            const audio = await attachAudio(sess, sufficiency.follow_up_question);
-            const intervention = {
-                type: "follow_up",
-                issue: sufficiency.issue,
-                student_message: message,
-                assistant_response: sufficiency.follow_up_question,
-                channel: "chat",
-                reason: sufficiency.reason,
-                diminishing_returns_check: sufficiency.diminishing_returns_check ?? null,
-                at: new Date().toISOString(),
-                student_audio_duration_seconds: studentAudioDurationSec,
-                assistant_audio_duration_seconds: audio.audio_duration_seconds ?? null,
-            };
-            if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
-            currentTurn.interventions.push(intervention);
-
-            sess.conv_chat.push({ role: "user", content: message });
-            sess.conv_chat.push({ role: "assistant", content: intervention.assistant_response });
-            sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
-            sess.conv_eval.push({ role: "assistant", content: intervention.assistant_response, metadata: { intervention: "follow_up", issue: sufficiency.issue, timestamp: Date.now() } });
-            sess.history = sess.conv_chat;
-            try {
-                await openai.conversations.items.create(sess.conversationId_chat, {
-                    items: [
-                        { role: "user", content: message },
-                        { role: "assistant", content: intervention.assistant_response },
-                    ],
-                });
-                await openai.conversations.items.create(sess.conversationId_eval, {
-                    items: [
-                        { role: "user", content: message },
-                        { role: "assistant", content: intervention.assistant_response },
-                    ],
-                });
-            } catch (err) {
-                log.error("CHAT", `remote write (follow_up) failed: ${err.message}`);
-            }
-            log.info("CHAT", `user (follow_up=${sufficiency.issue}) ${log.preview(message, 140)}`);
-            await logLastConvItem(sess.conversationId_chat, "CONV:chat");
-            persist();
-            return res.json({ channel: "chat", assistant: intervention.assistant_response, ...audio });
-        }
-        // accept (or aborted/failed defaulting to accept). Capture the transition
-        // phrase generated by sufficiency so the normal flow can prepend it to
-        // the next plan question.
-        if (sufficiency.decision === "accept" && sufficiency.transition_phrase) {
-            acceptedTransitionPhrase = sufficiency.transition_phrase;
-        }
+        const audio = await attachAudio(sess, forcedMessage);
+        sess.conv_chat.push({ role: "assistant", content: forcedMessage });
+        sess.conv_eval.push({ role: "assistant", content: forcedMessage, metadata: { kind: "finalize", forced: "max_turns", timestamp: Date.now() } });
+        sess.history = sess.conv_chat;
+        try {
+            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: forcedMessage }] });
+            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: forcedMessage }] });
+        } catch (err) { log.error("CHAT", `remote write (assistant, cap) failed: ${err.message}`); }
+        sess.currentPhase = "finalizing";
+        persist();
+        return res.json({ channel: "chat", assistant: forcedMessage, phase: sess.currentPhase, ...audio });
     }
 
-    // ------------------------------------------------------------------
-    // Normal flow (no triage intervention). Student message becomes the
-    // answer to the current turn; next plan question (or the wrap-up
-    // sentinel if the plan is exhausted) is returned.
-    // ------------------------------------------------------------------
+    // Push da mensagem do aluno ANTES de chamar o agente — o agente lê o
+    // histórico via Conversations API (parâmetro `conversation` na
+    // responses.create), então a mensagem precisa estar lá no momento da
+    // chamada. Para meta_modal a gente pode reverter localmente, mas no
+    // remoto fica.
     sess.conv_chat.push({ role: "user", content: message });
     sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
     sess.history = sess.conv_chat;
-
-    if (currentTurn && currentTurn.answer == null) {
-        currentTurn.answer = message;
-        currentTurn.answered_at = new Date().toISOString();
-        currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
-        if (acceptedTransitionPhrase) {
-            currentTurn.transition_to_next = acceptedTransitionPhrase;
-        }
-        persist();
-    }
-
     try {
         await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
         await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
+    } catch (err) { log.error("CHAT", `remote write (user) failed: ${err.message}`); }
+    log.info("CHAT", `user ${log.preview(message, 140)}`);
 
-        log.info("CHAT", `user #${sess.questionIndex} ${log.preview(message, 140)}`);
-        await logLastConvItem(sess.conversationId_chat, "CONV:chat");
-
-        // Relevance pass: before serving the next planned question, ask whether
-        // it still makes sense given the conversation so far. Skip-loops past
-        // questions whose substance is already covered. Bounded to keep a
-        // misbehaving agent from emptying the rest of the plan.
-        let relevanceSkips = 0;
-        while (sess.questionIndex < sess.interviewPlan.questions.length && relevanceSkips < MAX_RELEVANCE_SKIPS) {
-            const candidate = sess.interviewPlan.questions[sess.questionIndex];
-            let decision;
-            try {
-                decision = await questionRelevanceAgent.evaluate({
-                    interviewerYamlText: sess.interviewerYamlText ?? "",
-                    turnLog: sess.turnLog,
-                    candidateQuestion: candidate,
-                    meterCtx: sessionMeterCtx(sess),
-                });
-            } catch (err) {
-                log.error("AGENT:QuestionRelevance", `failed, defaulting to ask: ${err.message}`);
-                decision = { decision: "ask", reason: "agent_failed" };
-            }
-            if (decision.decision === "skip") {
-                if (!Array.isArray(sess.skippedQuestions)) sess.skippedQuestions = [];
-                sess.skippedQuestions.push({
-                    plan_id: candidate?.id ?? null,
-                    question: candidate?.question ?? "",
-                    rationale: candidate?.rationale ?? null,
-                    reason: decision.reason,
-                    at: new Date().toISOString(),
-                });
-                log.info("RELEVANCE", `skip plan_id=${candidate?.id} reason=${log.preview(decision.reason, 120)}`);
-                sess.questionIndex++;
-                relevanceSkips++;
-                persist();
-                continue;
-            }
-            log.info("RELEVANCE", `ask plan_id=${candidate?.id}`);
-            break;
-        }
-        if (relevanceSkips >= MAX_RELEVANCE_SKIPS) {
-            log.error("RELEVANCE", `cap reached (${MAX_RELEVANCE_SKIPS}); forcing ask on questionIndex=${sess.questionIndex}`);
-        }
-
-        let assistantResponse;
-        let nextTurnRef = null;
-        if (sess.questionIndex < sess.interviewPlan.questions.length) {
-            const planQuestion = sess.interviewPlan.questions[sess.questionIndex];
-            const nextQuestion = planQuestion?.question;
-            if (!nextQuestion) {
-                throw new Error("Question not found in interview plan");
-            }
-            const phrase = acceptedTransitionPhrase || "Próxima pergunta.";
-            assistantResponse = `${phrase}\n\n${nextQuestion}`;
-            nextTurnRef = turnFromPlanQuestion(sess.turnLog.length, planQuestion);
-            sess.turnLog.push(nextTurnRef);
-            sess.questionIndex++;
-            persist();
-            log.info("TURN", `q#${sess.questionIndex} (sequential from plan)${acceptedTransitionPhrase ? " with sufficiency phrase" : " with default phrase"}`);
-        } else {
-            assistantResponse = "Obrigado pelas respostas. Acredito que já tenho informações suficientes para avaliar. A entrevista está concluída.";
-            sess.currentPhase = "finalizing";
-            log.info("TURN", `all questions covered or completed, finalizing`);
-        }
-
-        sess.conv_chat.push({ role: "assistant", content: assistantResponse });
-        sess.conv_eval.push({ role: "assistant", content: assistantResponse, metadata: { timestamp: Date.now() } });
-        sess.history = sess.conv_chat;
-
-        await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: assistantResponse }] });
-        await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: assistantResponse }] });
-
-        log.info("CHAT", `assistant ${log.preview(assistantResponse, 140)}`);
-        await logLastConvItem(sess.conversationId_chat, "CONV:chat");
-
-        const audio = await attachAudio(sess, assistantResponse);
-        // Persiste a duração do TTS no novo turno (quando há próximo turno do plano)
-        // — essa é a duração do áudio da pergunta + frase de transição.
-        if (nextTurnRef) {
-            nextTurnRef.question_audio_duration_seconds = audio.audio_duration_seconds ?? null;
-            persist();
-        }
-        res.json({ channel: "chat", assistant: assistantResponse, phase: sess.currentPhase, ...audio });
-    } catch (error) {
-        log.error("CHAT", `failed: ${error.message}`);
-        res.status(500).json({ error: "Erro ao processar mensagem" });
+    // Chama o super-orquestrador. Falha cai pra fallback ask_repeat.
+    let parsed;
+    try {
+        parsed = await superOrchestratorAgent.evaluate({
+            interviewerYamlText: sess.interviewerYamlText ?? "",
+            workAnalysis: sess.workAnalysis ?? null,
+            interviewPlan: sess.interviewPlan ?? null,
+            memory: sess.superOrchestratorMemory ?? null,
+            turnLog: sess.turnLog,
+            studentMessage: message,
+            conversationId: sess.conversationId_chat,
+            vectorStoreId: sess.vectorStoreId,
+            studentName: sess.studentName ?? null,
+            interactionMode: sess.interactionMode,
+            meterCtx: sessionMeterCtx(sess),
+        });
+    } catch (err) {
+        log.error("SUPER_ORQ", `agent failed, fallback to ask_repeat: ${err.message}`);
+        parsed = {
+            rationale: `Falha do super-orquestrador: ${err.message}. Pedindo repetição como fallback.`,
+            action: { kind: "ask_repeat", message: "Desculpa, tive um problema aqui. Pode repetir a sua última resposta?" },
+            memory: sess.superOrchestratorMemory ?? null,
+        };
     }
+
+    // Persiste memory que o agente devolveu (mesmo no fallback, copia a antiga).
+    if (parsed.memory && typeof parsed.memory === "object") {
+        sess.superOrchestratorMemory = parsed.memory;
+    }
+
+    // Guardrail 2: bloqueio de finalize precoce.
+    if (parsed.action.kind === "finalize"
+        && turnsAnswered < SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE
+        && parsed.action.finalize_reason !== "student_disengaged") {
+        log.error("SUPER_ORQ", `finalize precoce bloqueado (turnsAnswered=${turnsAnswered}, reason=${parsed.action.finalize_reason}); convertendo para ask_repeat`);
+        parsed.action = {
+            kind: "ask_repeat",
+            message: "Vamos seguir um pouco mais — pode me dizer mais sobre a sua última resposta?",
+        };
+    }
+
+    const kind = parsed.action.kind;
+    const assistantMessage = parsed.action.message;
+    const rationale = parsed.rationale;
+
+    // Gera TTS uma vez. Toda kind precisa de áudio (modal inclusive).
+    const audio = await attachAudio(sess, assistantMessage);
+    const assistantAudioSec = audio.audio_duration_seconds ?? null;
+
+    // ====== Despacha por kind ======
+
+    if (kind === "meta_modal") {
+        // Meta: NÃO entra em conv_chat (igual ao legado). Já empurramos a
+        // mensagem do aluno em conv_chat acima — precisamos REVERTER esse push
+        // local (a mensagem ficou no remoto, mas isso já era o comportamento
+        // legado: meta vai pro eval pra audit).
+        sess.conv_chat.pop(); // tira a user message recém-empurrada
+        sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { kind, rationale, channel: "modal", timestamp: Date.now() } });
+        try {
+            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: assistantMessage }] });
+        } catch (err) { log.error("CHAT", `remote eval write (meta_modal) failed: ${err.message}`); }
+        if (currentTurn) {
+            if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
+            currentTurn.interventions.push({
+                type: "meta",
+                channel: "modal",
+                student_message: message,
+                assistant_response: assistantMessage,
+                student_audio_duration_seconds: studentAudioDurationSec,
+                assistant_audio_duration_seconds: assistantAudioSec,
+                rationale,
+                at: new Date().toISOString(),
+            });
+        }
+        persist();
+        return res.json({
+            channel: "modal",
+            assistant_response: assistantMessage,
+            restore_input: message,
+            ...audio,
+        });
+    }
+
+    // Helper: empurra a fala do assistente nos canais visíveis ao aluno.
+    const pushAssistantVisible = async (extraEvalMeta = {}) => {
+        sess.conv_chat.push({ role: "assistant", content: assistantMessage });
+        sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { kind, rationale, ...extraEvalMeta, timestamp: Date.now() } });
+        sess.history = sess.conv_chat;
+        try {
+            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: assistantMessage }] });
+            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: assistantMessage }] });
+        } catch (err) { log.error("CHAT", `remote write (assistant, kind=${kind}) failed: ${err.message}`); }
+        await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+    };
+
+    if (kind === "follow_up" || kind === "ask_repeat" || kind === "hint") {
+        // Intervenções: NÃO criam novo turno. Empurram fala visível +
+        // registram a interação no currentTurn.interventions para auditoria.
+        await pushAssistantVisible({ intervention: kind });
+        if (currentTurn) {
+            if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
+            currentTurn.interventions.push({
+                type: kind,
+                channel: "chat",
+                student_message: message,
+                assistant_response: assistantMessage,
+                student_audio_duration_seconds: studentAudioDurationSec,
+                assistant_audio_duration_seconds: assistantAudioSec,
+                rationale,
+                follow_up_reason: parsed.action.follow_up_reason ?? null,
+                at: new Date().toISOString(),
+            });
+        }
+        persist();
+        const payload = { channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio };
+        if (kind === "hint" && parsed.action.hint) payload.audio_intelligibility = { hint: parsed.action.hint };
+        return res.json(payload);
+    }
+
+    if (kind === "ask") {
+        // ASK: o turno corrente é ACEITO (vira answer), e um NOVO turno é
+        // criado para a próxima pergunta. Pode ser do plano (plan_question_id
+        // referencia) ou espontânea (plan_question_id=null).
+        if (currentTurn && currentTurn.answer == null) {
+            currentTurn.answer = message;
+            currentTurn.answered_at = new Date().toISOString();
+            currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+        }
+        const planQId = parsed.action.plan_question_id ?? null;
+        const planQuestion = planQId != null
+            ? (sess.interviewPlan?.questions ?? []).find(q => q.id === planQId)
+            : null;
+        const nextTurnRef = planQuestion
+            ? turnFromPlanQuestion(sess.turnLog.length, planQuestion)
+            : {
+                index: sess.turnLog.length,
+                question: assistantMessage,
+                rationale,
+                answer: null,
+                asked_at: new Date().toISOString(),
+                answered_at: null,
+                question_metadata: {
+                    id: null,
+                    spontaneous: true,
+                    revisit_topic: parsed.action.revisit_topic ?? null,
+                    objectives: parsed.action.objectives ?? [],
+                    concerns: parsed.action.concerns ?? [],
+                    decision_criteria: parsed.action.decision_criteria ?? [],
+                    information_needs: parsed.action.information_needs ?? [],
+                    evaluation_mode: parsed.action.evaluation_mode ?? [],
+                },
+            };
+        // A fala em personagem vinda do agente substitui o texto cru da
+        // pergunta do plano (mesma intenção, voz da persona). Mantém o
+        // question_metadata original como auditoria.
+        nextTurnRef.question = assistantMessage;
+        nextTurnRef.question_audio_duration_seconds = assistantAudioSec;
+        sess.turnLog.push(nextTurnRef);
+        sess.questionIndex = sess.turnLog.length; // mantém monotônico p/ pending_questions do professor
+        log.info("SUPER_ORQ", `ask plan_id=${planQId ?? "spontaneous"} idx=${sess.questionIndex}`);
+        await pushAssistantVisible({ plan_question_id: planQId, spontaneous: planQId == null });
+        persist();
+        return res.json({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
+    }
+
+    if (kind === "finalize") {
+        // Finalize: captura a última resposta no currentTurn (se aberto), seta
+        // phase=finalizing, envia a fala de despedida.
+        if (currentTurn && currentTurn.answer == null) {
+            currentTurn.answer = message;
+            currentTurn.answered_at = new Date().toISOString();
+            currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+        }
+        sess.currentPhase = "finalizing";
+        log.info("SUPER_ORQ", `finalize reason=${parsed.action.finalize_reason}`);
+        await pushAssistantVisible({ finalize_reason: parsed.action.finalize_reason });
+        persist();
+        return res.json({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
+    }
+
+    // Defensivo — kind desconhecido (não deveria, validateAction já checou).
+    log.error("SUPER_ORQ", `kind inesperado: ${kind} — fallback genérico`);
+    await pushAssistantVisible({ unknown_kind: kind });
+    persist();
+    return res.json({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
 });
 
 // ============================================================================
