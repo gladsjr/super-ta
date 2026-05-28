@@ -296,7 +296,7 @@ function renderWorks() {
           </div>
           <div class="work-actions">
             ${toggleBtn}
-            <button class="btn btn-sm" onclick="deleteWork('${w.work_token}', ${JSON.stringify(w.name).replace(/'/g, "\\'")})" title="Apaga o trabalho e todas as submissões, conversas e custos associados. Irreversível.">Excluir…</button>
+            <button class="btn btn-sm" onclick="deleteWork('${w.work_token}')" title="Apaga o trabalho e todas as submissões, conversas e custos associados. Irreversível.">Excluir…</button>
           </div>
         </div>
         <div class="work-token-block">
@@ -325,7 +325,9 @@ async function toggleActive(workToken, makeActive) {
   loadWorks();
 }
 
-async function deleteWork(workToken, workName) {
+async function deleteWork(workToken) {
+  const work = lastWorks.find(w => w.work_token === workToken);
+  const workName = work ? work.name : '';
   const typed = prompt(`Excluir o trabalho "${workName}"?\n\nIsto apaga TUDO: submissões, conversas, custos. Não há como desfazer.\n\nDigite o nome do trabalho para confirmar:`);
   if (typed === null) return;
   if (typed.trim() !== workName) {
