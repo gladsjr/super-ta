@@ -163,8 +163,39 @@ repetidos. Tudo que é estável vai no começo:
 ```
 
 A janela cacheável fica entre o system prompt e o final da análise+plano. Em
-turnos sucessivos, essa parte é desconto. O histórico cresce ~500 tokens por
-turno; em 30 turnos chega a ~15K tokens. Reasoning models lidam confortavelmente.
+turnos sucessivos, essa parte é desconto.
+
+## Server-side compaction (gestão automática de contexto longo)
+
+A partir de 11/fev/2026 a OpenAI expõe **compactação automática server-side**
+no Responses API. Isso resolve completamente o problema "entrevista longa
+estoura contexto":
+
+```js
+client.responses.create({
+  model: ...,
+  input: ...,
+  context_management: [{ type: "compaction", compact_threshold: 100000 }],
+})
+```
+
+Quando os tokens renderizados passam de `compact_threshold`, o servidor
+**sumariza o que dá e poda o resto** preservando estado-chave. O resultado
+chega como um "compaction output item" no stream; em chamadas seguintes ele
+encadeia naturalmente via `previous_response_id` (ou input-array chaining).
+
+**Como vamos usar:**
+- Mantemos a Conversations API que já está no código (`conversationId_chat`,
+  `conversationId_eval`) para estado e auditoria.
+- Acrescentamos `context_management` no `responses.create()` do super-orquestrador.
+- Limiar inicial: 100k tokens. Generoso o suficiente para a entrevista
+  típica nunca disparar, mas baixo o suficiente para proteger contra
+  degradação dos modelos de raciocínio em contexto >100k.
+
+**Implicação:** a decisão (3) — "como lidar com histórico em entrevistas
+longas" — se resolve sozinha. Não precisamos de sumarização caseira nem
+de cap de turnos motivado por contexto. O `MAX_TURNS = 30` continua, mas
+agora é por motivos UX (não enrolar o aluno), não técnicos.
 
 ## Tools
 
@@ -314,7 +345,7 @@ seguinte. **Fora de escopo agora**, mas o desenho não fecha a porta.
 | Agente finaliza cedo demais | médio | bloqueia `finalize` antes de N turnos respondidos |
 | Latência cauda longa (>25s) | médio | timeout + fallback, instrumentação para iterar |
 | Custo subiu demais | baixo | budget check existente já cobre; vale monitorar |
-| Contexto cresce demais em entrevistas longas | médio | resumir histórico antigo após 25 turnos (out of scope inicial) |
+| Contexto cresce demais em entrevistas longas | baixo | `context_management` server-side da OpenAI cuida automaticamente (lançado 11/fev/2026) |
 | Inconsistência de comportamento entre turnos | médio | memory bloco ajuda; iterar prompt; observability |
 | Branch abandonado deixa lixo | mitigado | zero migrations, tudo em JSONB, descartar branch resolve |
 
@@ -329,10 +360,11 @@ seguinte. **Fora de escopo agora**, mas o desenho não fecha a porta.
    `rationale` das perguntas hoje). `thinking` dropado do schema — modelos
    de reasoning fazem chain-of-thought interno e o que importa é a
    justificativa final.
-3. **Limite de tamanho do histórico:** ignorar até 30 turnos e depois resumir?
-   Ou crescer indefinidamente até estourar contexto? (Hoje cap natural é 10
-   perguntas; com super-orquestrador podendo gerar follow-ups e revisitas,
-   pode passar muito mais.)
+3. ~~Limite de tamanho do histórico~~ → **resolvido pela API da OpenAI**.
+   Vamos usar `context_management: [{type: "compaction", compact_threshold: 100000}]`
+   no `responses.create()`. Servidor sumariza e poda automaticamente quando
+   o limiar é atingido, preservando estado-chave. Sem sumarização caseira;
+   sem cap de contexto. O `MAX_TURNS = 30` fica por motivo UX, não técnico.
 4. ~~PDF do enunciado também via vector store~~ → **decidido: sim**.
    Acrescentado também o slot extensível para material da disciplina (FUTURO,
    fora desta branch — vai exigir migration de schema).
