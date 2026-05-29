@@ -704,9 +704,47 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Substitui triagem×3 + sufficiency + relevance + composição do legado.
     // Guardrails de turnos no código (não confia 100% no agente). Ver
     // docs/super-orchestrator-plan.md.
+    //
+    // SSE (Server-Sent Events) no caminho ÁUDIO: o frontend troca o label do
+    // balão de "ouvindo" para "respondendo" no momento real em que o modelo
+    // começa a emitir tokens de texto (após o chain-of-thought interno). Em
+    // texto, mantém JSON único — não há balão para sinalizar.
     // ------------------------------------------------------------------
     const currentTurn = sess.turnLog?.[sess.turnLog.length - 1] ?? null;
     const turnsAnswered = sess.turnLog.filter(t => t && t.answered_at).length;
+
+    const useSSE = isAudioMode;
+    if (useSSE) {
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            // Hint para nginx-like proxies não bufferizarem nosso stream.
+            "X-Accel-Buffering": "no",
+        });
+        // Sinal inicial — frontend pode usar pra confirmar que abriu o stream.
+        res.write(`event: thinking\ndata: {}\n\n`);
+    }
+    // Despacha o payload final. Em SSE, vira event: result + end. Em JSON,
+    // res.json clássico. Toda saída bem-sucedida desta rota passa aqui.
+    const sendFinal = (payload) => {
+        if (useSSE) {
+            res.write(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
+            res.end();
+        } else {
+            res.json(payload);
+        }
+    };
+    // Em SSE não dá pra usar res.status() depois do writeHead, então erros
+    // viram event:error com o status no payload.
+    const sendError = (status, payload) => {
+        if (useSSE) {
+            res.write(`event: error\ndata: ${JSON.stringify({ ...payload, status })}\n\n`);
+            res.end();
+        } else {
+            res.status(status).json(payload);
+        }
+    };
 
     // Guardrail 1: cap duro de turnos. Se já estourou, força finalize sem
     // chamar o agente (economia + segurança).
@@ -735,7 +773,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         } catch (err) { log.error("CHAT", `remote write (assistant, cap) failed: ${err.message}`); }
         sess.currentPhase = "finalizing";
         persist();
-        return res.json({ channel: "chat", assistant: forcedMessage, phase: sess.currentPhase, ...audio });
+        return sendFinal({ channel: "chat", assistant: forcedMessage, phase: sess.currentPhase, ...audio });
     }
 
     // Push da mensagem do aluno ANTES de chamar o agente — o agente lê o
@@ -752,7 +790,10 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     } catch (err) { log.error("CHAT", `remote write (user) failed: ${err.message}`); }
     log.info("CHAT", `user ${log.preview(message, 140)}`);
 
-    // Chama o super-orquestrador. Falha cai pra fallback ask_repeat.
+    // Chama o super-orquestrador. Falha cai pra fallback ask_repeat. Em SSE,
+    // passamos onFirstDelta para sinalizar "respondendo" ao frontend no momento
+    // real em que o modelo começa a emitir tokens de texto (após o
+    // chain-of-thought interno).
     let parsed;
     try {
         parsed = await superOrchestratorAgent.evaluate({
@@ -767,6 +808,9 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             studentName: sess.studentName ?? null,
             interactionMode: sess.interactionMode,
             meterCtx: sessionMeterCtx(sess),
+            onFirstDelta: useSSE ? () => {
+                res.write(`event: responding\ndata: {}\n\n`);
+            } : null,
         });
     } catch (err) {
         log.error("SUPER_ORQ", `agent failed, fallback to ask_repeat: ${err.message}`);
@@ -827,7 +871,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             });
         }
         persist();
-        return res.json({
+        return sendFinal({
             channel: "modal",
             assistant_response: assistantMessage,
             restore_input: message,
@@ -868,7 +912,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         persist();
         const payload = { channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio };
         if (kind === "hint" && parsed.action.hint) payload.audio_intelligibility = { hint: parsed.action.hint };
-        return res.json(payload);
+        return sendFinal(payload);
     }
 
     if (kind === "ask") {
@@ -914,7 +958,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         log.info("SUPER_ORQ", `ask plan_id=${planQId ?? "spontaneous"} idx=${sess.questionIndex}`);
         await pushAssistantVisible({ plan_question_id: planQId, spontaneous: planQId == null });
         persist();
-        return res.json({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
+        return sendFinal({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
     }
 
     if (kind === "finalize") {
@@ -929,14 +973,14 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         log.info("SUPER_ORQ", `finalize reason=${parsed.action.finalize_reason}`);
         await pushAssistantVisible({ finalize_reason: parsed.action.finalize_reason });
         persist();
-        return res.json({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
+        return sendFinal({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
     }
 
     // Defensivo — kind desconhecido (não deveria, validateAction já checou).
     log.error("SUPER_ORQ", `kind inesperado: ${kind} — fallback genérico`);
     await pushAssistantVisible({ unknown_kind: kind });
     persist();
-    return res.json({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
+    return sendFinal({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
 });
 
 // ============================================================================

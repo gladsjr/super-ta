@@ -93,6 +93,11 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
      * @param {string|null} p.studentName
      * @param {string} p.interactionMode - "text" | "audio"
      * @param {object|null} p.meterCtx
+     * @param {function():void} [p.onFirstDelta] - callback opcional disparado
+     *        UMA VEZ no primeiro token de texto emitido pelo modelo (após o
+     *        chain-of-thought interno e antes do output completo). Usado pelo
+     *        despachante SSE para sinalizar "respondendo" ao frontend no
+     *        momento real em que a fala começa a ser produzida.
      */
     async evaluate({
         interviewerYamlText,
@@ -106,6 +111,7 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
         studentName = null,
         interactionMode = "text",
         meterCtx = null,
+        onFirstDelta = null,
     }) {
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName })}
 
@@ -172,14 +178,52 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
             payload.tools = [{ type: "file_search", vector_store_ids: [vectorStoreId] }];
         }
 
-        log.prompt("AGENT:SuperOrchestrator", `system+user (${systemPrompt.length + userContent.length} chars)`);
-        const response = await log.span("AGENT:SuperOrchestrator", "responses.create", () =>
-            meteredResponses(
-                { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
-                () => this.client.responses.create(payload)
-            )
-        );
-        const text = response.output_text || "";
+        // Streaming sempre habilitado quando o caller passou onFirstDelta —
+        // só assim conseguimos sinalizar "respondendo" no momento real do
+        // primeiro token de texto. Caller que não precisa disso (cenários
+        // sem SSE) pode chamar sem callback e o agente segue blocking.
+        const wantStream = typeof onFirstDelta === "function";
+
+        log.prompt("AGENT:SuperOrchestrator", `system+user (${systemPrompt.length + userContent.length} chars)${wantStream ? " [stream]" : ""}`);
+
+        let text;
+        if (wantStream) {
+            payload.stream = true;
+            const stream = await log.span("AGENT:SuperOrchestrator", "responses.create[stream]", () =>
+                meteredResponses(
+                    { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
+                    () => this.client.responses.create(payload)
+                )
+            );
+            const collected = [];
+            let firstDeltaFired = false;
+            let finalResponse = null;
+            for await (const event of stream) {
+                if (event?.type === "response.output_text.delta") {
+                    if (!firstDeltaFired) {
+                        firstDeltaFired = true;
+                        try { onFirstDelta(); }
+                        catch (cbErr) { log.error("AGENT:SuperOrchestrator", `onFirstDelta callback threw: ${cbErr.message}`); }
+                    }
+                    if (typeof event.delta === "string") collected.push(event.delta);
+                } else if (event?.type === "response.completed") {
+                    finalResponse = event.response ?? null;
+                }
+            }
+            // Preferimos output_text da Response completa (canônico). Cai pra
+            // concatenação dos deltas se por algum motivo a Response não veio.
+            text = finalResponse?.output_text
+                ?? collected.join("")
+                ?? "";
+        } else {
+            const response = await log.span("AGENT:SuperOrchestrator", "responses.create", () =>
+                meteredResponses(
+                    { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
+                    () => this.client.responses.create(payload)
+                )
+            );
+            text = response.output_text || "";
+        }
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) {
             log.error("AGENT:SuperOrchestrator", `no JSON in response: ${log.preview(text, 200)}`);
