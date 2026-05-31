@@ -46,6 +46,7 @@ import {
     initOrResumeSession,
     startInterviewPreparation,
 } from "../lib/sessionLifecycle.js";
+import { attachNarratorAudio } from "../lib/narrator.js";
 import log from "../lib/logger.js";
 
 // Cap duro do super-orquestrador. Depois disso, força finalize automático
@@ -462,6 +463,45 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         log.error("UPLOAD", `failed: ${error.message}`);
         res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
     }
+});
+
+// ============================================================================
+// POST /s/:submissionToken/narrator-intro
+// ----------------------------------------------------------------------------
+// Gera (ou devolve em cache) o áudio do "orientador" — voz aleatória diferente
+// da voz do entrevistador, lendo um script fixo (config/narrator_intro.txt)
+// que explica como a entrevista funciona. Disparado pelo frontend EM PARALELO
+// com o /upload, para cobrir a espera enquanto o entrevistador prepara a
+// primeira fala. Em modo texto, devolve 204 — não há áudio a gerar.
+// Idempotente por sessão (segundo POST devolve o mesmo URL sem custo extra).
+// ============================================================================
+router.post("/s/:submissionToken/narrator-intro", requireSubmissionToken, requireNotFinalized, requireWithinBudget, async (req, res) => {
+    const token = req.submission.submission_token;
+    const sess = SESSIONS.get(token);
+    if (!sess) return res.status(400).json({ error: "call /start first" });
+    if (sess.interactionMode !== "audio") return res.status(204).end();
+    try {
+        const result = await attachNarratorAudio(sess, sessionMeterCtx(sess));
+        if (!result) return res.status(204).end();
+        if (result.audio_error) return res.status(502).json({ error: result.audio_error });
+        return res.json(result);
+    } catch (err) {
+        log.error("NARRATOR", `endpoint failed: ${err.message}`);
+        return res.status(500).json({ error: "narrator_failed", detail: err.message });
+    }
+});
+
+// ============================================================================
+// GET /s/:submissionToken/narrator-audio
+// Serve o buffer do áudio do orientador. Vive em sess.narratorAudio.buffer
+// (separado do audioCache LRU dos turnos para não ser evictado).
+// ============================================================================
+router.get("/s/:submissionToken/narrator-audio", requireSubmissionToken, requireNotFinalized, (req, res) => {
+    const token = req.submission.submission_token;
+    const sess = SESSIONS.get(token);
+    if (!sess || !sess.narratorAudio?.buffer) return res.status(404).json({ error: "no narrator audio" });
+    res.type("audio/mpeg");
+    res.send(sess.narratorAudio.buffer);
 });
 
 // ============================================================================

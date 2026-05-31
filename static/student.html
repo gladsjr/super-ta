@@ -140,6 +140,41 @@
     .dica .dica-title { font-weight: 600; margin-bottom: var(--sp-1); }
     .dica .dica-body { font-size: var(--fs-sm); white-space: pre-wrap; }
 
+    /* Orientador (narrator): áudio fora-de-roleplay tocado ANTES do
+       entrevistador, com voz aleatória diferente da dele. Formato distinto
+       (centralizado, cor de informação, sem cantos de balão de chat) pra
+       deixar visual e auditivamente óbvio que NÃO é o entrevistador. */
+    .msg.narrator {
+      align-self: center;
+      max-width: 92%;
+    }
+    .msg.narrator .who {
+      color: #1a5a85;
+      text-align: center;
+    }
+    .msg.narrator .bubble {
+      background: #eaf2f9;
+      border-color: #b8d4e8;
+      border-left: 4px solid #1a5a85;
+      border-radius: var(--r-md);
+      color: var(--ink-900);
+    }
+    .msg.narrator .audio-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+    }
+    .msg.narrator .audio-row audio {
+      flex: 1;
+      height: 36px;
+    }
+    .msg.narrator .narrator-note {
+      font-size: var(--fs-xs);
+      color: var(--ink-500);
+      margin-top: var(--sp-2);
+      line-height: 1.4;
+    }
+
     .input-area {
       border-top: 1px solid var(--ink-100);
       padding: var(--sp-4) var(--sp-5);
@@ -669,6 +704,48 @@
       });
       return marked.parse(html);
     }
+    // Fila FIFO de áudios para tocar serialmente. Garante que o orientador
+    // toca ANTES da primeira fala do entrevistador mesmo que ambos cheguem
+    // próximos. Para turnos normais (queue vazia) o efeito é nulo — toca
+    // direto. Erros e .ended avançam pra próxima.
+    const audioQueue = [];
+    let queuePlaying = false;
+    function playOrQueueAudio(el) {
+      if (!el) return;
+      if (queuePlaying) { audioQueue.push(el); return; }
+      queuePlaying = true;
+      el.play().catch(() => {});
+      const advance = () => {
+        el.removeEventListener('ended', advance);
+        el.removeEventListener('error', advance);
+        queuePlaying = false;
+        if (audioQueue.length > 0) playOrQueueAudio(audioQueue.shift());
+      };
+      el.addEventListener('ended', advance);
+      el.addEventListener('error', advance);
+    }
+
+    // Balão do "orientador" — voz aleatória diferente do entrevistador,
+    // tocando um script fixo de instruções. Aparece UMA vez, no /upload, e
+    // deixa visualmente claro que NÃO é o entrevistador.
+    function appendNarrator(audioUrl) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg narrator';
+      wrap.innerHTML = `
+        <span class="who">Orientação (não é o entrevistador)</span>
+        <div class="bubble">
+          <div class="audio-row">
+            <audio controls preload="auto" src="${audioUrl}"></audio>
+          </div>
+          <div class="narrator-note">Tudo isso também está no botão <strong>Instruções</strong>, no topo da tela.</div>
+        </div>
+      `;
+      chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+      const a = wrap.querySelector('audio');
+      if (a) playOrQueueAudio(a);
+      return wrap;
+    }
+
     function appendTA(text, audioUrl) {
       const wrap = document.createElement('div');
       wrap.className = 'msg ta';
@@ -677,9 +754,11 @@
         // Modo áudio: SÓ o player. A transcrição NÃO é inserida no DOM —
         // expô-la (mesmo oculta) tornaria trivial para o aluno copiar a fala
         // do entrevistador e colar numa LLM externa para responder.
+        // `autoplay` removido do <audio>: a fila (playOrQueueAudio) controla
+        // quando tocar pra não competir com o orientador.
         bubbleInner = `
       <div class="audio-row">
-        <audio controls preload="auto" autoplay src="${audioUrl}"></audio>
+        <audio controls preload="auto" src="${audioUrl}"></audio>
       </div>
     `;
       } else {
@@ -688,10 +767,11 @@
       wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${bubbleInner}</div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
 
-      // Tenta autoplay; se browser bloquear (sem gesto do usuário), o aluno
-      // ainda pode clicar no controle nativo do <audio>.
+      // Encaminha para a fila — se nada estiver tocando, dispara já; senão,
+      // espera o atual terminar. Browsers podem bloquear se faltou gesto do
+      // usuário; nesse caso o aluno clica no controle nativo do <audio>.
       const a = wrap.querySelector('audio');
-      if (a) a.play().catch(() => { });
+      if (a) playOrQueueAudio(a);
       return wrap;
     }
     function appendUser(text) {
@@ -1041,6 +1121,24 @@
       const form = new FormData();
       form.append('file', f);
       status.textContent = 'Analisando trabalho...';
+
+      // Modo áudio: dispara o áudio do orientador em paralelo com o /upload.
+      // O orientador (script fixo + TTS rápido) chega tipicamente antes do
+      // entrevistador (que precisa de LLM + TTS) e cobre a espera. A fila
+      // global de áudio garante que o entrevistador só toca depois.
+      let narratorPromise = null;
+      if (interactionMode === 'audio') {
+        narratorPromise = sessionAwareFetch(() =>
+          fetch(`/s/${encodeURIComponent(submissionToken)}/narrator-intro`, { method: 'POST' })
+        ).then(async r => {
+          if (r.status === 204 || !r.ok) return null;
+          return r.json();
+        }).then(j => {
+          if (j?.audio_url) appendNarrator(j.audio_url);
+          return j;
+        }).catch(() => null);
+      }
+
       try {
         const r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form }));
         const j = await r.json();
@@ -1048,6 +1146,10 @@
         status.remove();
         if (j.error) appendStatus(j.message || j.error, true);
         else if (j.assistant) {
+          // Garante que o balão do orientador apareceu no DOM antes do
+          // entrevistador (preserva ordem visual mesmo se /upload responder
+          // antes do narrator).
+          if (narratorPromise) { try { await narratorPromise; } catch {} }
           const wrap = appendTA(j.assistant, j.audio_url);
           if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
           document.getElementById('upload-area').classList.add('hidden');

@@ -167,6 +167,7 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
 1. **Templates `.txt`** ([config/](../config/)):
    - [interview_prompt_template.txt](../config/interview_prompt_template.txt) — renderizado por `PrepBuilderAgent.buildPlan` para gerar o plano de entrevista.
    - [interviewer_agenda_template.txt](../config/interviewer_agenda_template.txt) — bloco de agenda compartilhado por todos os agentes que operam no contexto da entrevista.
+   - [narrator_intro.txt](../config/narrator_intro.txt) — script fixo lido por [lib/narrator.js](../lib/narrator.js) e enviado à TTS (não à LLM de raciocínio); produz o áudio do "orientador" que toca antes do entrevistador no modo áudio.
    - [student_instructions.html](../static/student_instructions.html) — instruções mostradas ao aluno no modal "Instruções" (não vai à LLM, mas é conteúdo editável).
 2. **`systemPromptBody` + preâmbulo padronizado em classes de agente** ([agents/](../agents/)):
     Todo agente compõe seu system prompt como `renderAgentPreamble({audience, interactionMode, studentName})` + body específico. O preâmbulo enquadra a cena (SuperTA, identidade dupla, audience, modo, nome do aluno quando disponível). Ver [lib/agentPreamble.js](../lib/agentPreamble.js).
