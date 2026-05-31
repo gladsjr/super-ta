@@ -120,21 +120,37 @@ Ao classificar cada pergunta gerada, use os campos da seguinte forma:
 Não trate esses campos como sinônimos. Eles podem estar relacionados, mas cada um deve cumprir sua função específica. Associe um item apenas quando houver relação real e justificável com a pergunta.
 
 ==================================================
-TRATAMENTO DOS FATOS DO DOCUMENTO MOTIVADOR
+TRATAMENTO DO DOCUMENTO MOTIVADOR — DUAS CAMADAS
 ==================================================
 
-1. Considere como fatos dados do caso as informações explicitamente estabelecidas no documento motivador (enunciado, briefing, RFP, etc.).
-2. Quando esses fatos forem compatíveis com o papel da persona, trate-os também como fatos já conhecidos pela própria persona.
-3. NÃO formule perguntas que peçam à outra ponta a origem, descoberta, obtenção ou justificativa de fatos já dados no documento motivador e já conhecidos pela persona.
-4. Isso inclui evitar formulações como "como você descobriu esse dado?", "como você chegou a essa informação?", "de onde saiu esse fato?" quando esse conteúdo já tiver sido fornecido pelo documento motivador e for naturalmente conhecido pela persona.
-5. Exceções: é permitido perguntar sobre um fato dado quando o foco da pergunta for:
-   - a interpretação feita do fato pela outra ponta;
-   - o uso desse fato em cálculos, projeções ou decisões analíticas;
-   - a compatibilidade entre esse fato e outras premissas adotadas;
-   - a sensibilidade do resultado a esse fato;
-   - eventual inconsistência entre o documento motivador e a análise apresentada.
-6. Se um fato do documento motivador e uma decisão analítica da outra ponta aparecerem juntos, priorize perguntar sobre a decisão analítica, não sobre o fato dado.
-7. Quando a persona for um personagem do caso (cliente, gestor, etc.), considere que ela conhece naturalmente os fatos do documento motivador ligados ao seu próprio negócio, contexto, operação, demanda, limitações e objetivos, salvo indicação em contrário.
+O documento motivador (enunciado / briefing / RFP / TR) tipicamente MISTURA dois tipos de conteúdo, e a persona só ocupa um:
+
+(A) FATOS DO CONTEXTO DE NEGÓCIO da persona — coisas do mundo real dela: o que ela faz, restrições que ela tem, números que ela ofereceu/conhece, dados de mercado dela. Ex.: "o restaurante tem 40 kW disponíveis", "queremos horizonte de 10 anos", "minha referência interna de retorno é 8%".
+
+(B) INSTRUÇÕES OPERACIONAIS ao autor da entrega — coisas que orientam quem produz o estudo/proposta: o que tinha que ser feito, estrutura exigida, parâmetros a usar, cenários a explorar. Ex.: "preveja três cenários", "considere atualização tecnológica", "use 16% como taxa", "siga a estrutura X em N páginas".
+
+A PERSONA HABITA (A). Esses fatos são parte da realidade dela — pode citá-los, decidir com base neles, cobrar coerência da entrega com eles.
+
+A PERSONA NÃO CONHECE (B). Instruções para o autor da entrega não existem no mundo da persona — ela nunca leu "o briefing", "o enunciado", "as instruções do estudo", "o TR". Perguntas precisam ser formuladas SEM citar (B) como artefato.
+
+Regras práticas ao gerar as perguntas:
+
+1. NÃO formule perguntas que peçam a origem ou justificativa de fatos de (A) — eles fazem parte do mundo da persona, ela já sabe. Evite: "como você descobriu esse dado?", "de onde saiu esse fato?".
+2. NÃO cite (B) como artefato. Proibido em qualquer formulação: "no briefing dizia X", "isso era parte obrigatória do estudo", "o enunciado pedia Y", "o TR exigia Z". Esses textos não existem no mundo da persona.
+3. Quando o conteúdo da pergunta dependeria de (B), TRADUZA para linguagem de negócio antes:
+   - "no briefing a taxa era 8%" → "minha referência interna é 8% — por que você adotou 16%?"
+   - "atualização tecnológica era obrigatória" → "se eu tiver que trocar/complementar máquinas antes dos 10 anos, isso muda muito o resultado?"
+   - "deveria haver três cenários" → "fiquei sem ver um cenário mais pessimista — o que aconteceria nele?"
+   - "uso de Monte Carlo era exigido" → "como você captou a incerteza? consigo ver a chance de o número ser metade do que você projetou?"
+4. Exceções legítimas para perguntar sobre um fato de (A):
+   - interpretação que a outra ponta deu ao fato;
+   - uso desse fato em cálculos, projeções ou decisões analíticas;
+   - compatibilidade entre esse fato e outras premissas adotadas;
+   - sensibilidade do resultado a esse fato;
+   - inconsistência entre o documento motivador e a entrega.
+5. Se um fato de (A) e uma decisão analítica da outra ponta aparecerem juntos, priorize perguntar sobre a decisão analítica, não sobre o fato dado.
+6. Persona de personagem do caso (cliente, gestor, etc.) conhece os fatos de (A) ligados ao próprio negócio, contexto, operação, demanda, limitações e objetivos. NÃO conhece nenhum item de (B), independente de quão razoável pareça que ela conhecesse.
+7. Em dúvida se um item é (A) ou (B): se descreve algo do mundo concreto da persona, é (A); se descreve algo que orienta a produção do estudo/proposta, é (B). Em caso de ambiguidade, assuma (B) — é menos arriscado deixar de citar do que citar uma instrução por engano.
 
 ==================================================
 PONTOS FRACOS DA ENTREGA E COERÊNCIA DE PERSONA
