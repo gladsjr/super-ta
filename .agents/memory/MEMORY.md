@@ -1,0 +1,1 @@
+- [Servidor stale após troca de branch/pull](stale-server-after-git-switch.md) — erro não bate com o disco (rota 404, ENOENT de config)? Processo Node antigo em memória; restart do workflow resolve.
