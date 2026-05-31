@@ -45,6 +45,8 @@ import {
     maybeRebuildPendingQuestionAudio,
     initOrResumeSession,
     startInterviewPreparation,
+    maybeKickOffPregeneration,
+    pregenSnapshot,
 } from "../lib/sessionLifecycle.js";
 import { attachNarratorAudio } from "../lib/narrator.js";
 import log from "../lib/logger.js";
@@ -302,6 +304,10 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
             // SESSIONS-hit em modo áudio também precisa do último áudio para tocar
             // (reload da aba). Reaproveita o buffer cacheado quando possível.
             pendingAudio = await maybeRebuildPendingQuestionAudio(sess);
+            // Em awaiting_upload, garante pré-geração ativa (saudação + orientador).
+            // Idempotente — se já feito ou em vôo com o snapshot atual, no-op.
+            try { await maybeKickOffPregeneration(sess, req); }
+            catch (err) { log.error("PREGEN", `kickoff(memhit) failed: ${err.message}`); }
         }
 
         res.json({
@@ -361,16 +367,27 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
     // fica imutável até o próximo upload.
     sess.interactionMode = req.work.interaction_mode || "text";
     sess.voice = req.work.voice || null;
-    // Cada upload reinicia a entrevista. Persona segue, em ordem de prioridade:
-    // (1) override do professor (works.interviewer_name/gender), (2) gênero da
-    // voz no modo áudio, (3) sorteio balanceado em modo texto.
+    // Persona segue, em ordem de prioridade: (1) override do professor, (2)
+    // gênero da voz em modo áudio, (3) sorteio balanceado em modo texto.
+    // A pré-geração no /start já escolheu uma persona; só re-picka se a config
+    // divergiu entre /start e /upload (raro). Re-pick invalida o cache da
+    // saudação pré-gerada — caminho lento (gera fresh).
     const identityOverride = req.work.interviewer_name && req.work.interviewer_gender
         ? { name: req.work.interviewer_name, gender: req.work.interviewer_gender }
         : null;
-    sess.interviewerPersona = pickPersona({
-        voiceGender: voiceGenderOf(sess.voice),
-        overrides: identityOverride,
-    });
+    const newVoiceGender = voiceGenderOf(sess.voice);
+    const personaNeedsRepick = identityOverride
+        ? (sess.interviewerPersona?.name !== identityOverride.name
+           || sess.interviewerPersona?.gender !== identityOverride.gender)
+        : ((newVoiceGender === "f" || newVoiceGender === "m")
+           && sess.interviewerPersona?.gender !== newVoiceGender);
+    if (personaNeedsRepick || !sess.interviewerPersona) {
+        sess.interviewerPersona = pickPersona({
+            voiceGender: newVoiceGender,
+            overrides: identityOverride,
+        });
+        sess.preGeneratedGreeting = null;
+    }
     log.info("SUBMISSION", `upload token=${token} mode=${sess.interactionMode} voice=${sess.voice ?? "-"} persona=${sess.interviewerPersona.name}/${sess.interviewerPersona.city}`);
     try { await deleteConversationLog(req.submission.id); }
     catch (err) { log.error("LOG", `delete old conversation log failed: ${err.message}`); }
@@ -395,16 +412,10 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         sess.questionIndex = 1;
         const meterCtx = sessionMeterCtx(sess);
 
-        // ESTRATÉGIA DE LATÊNCIA: o cumprimento de abertura usa apenas o YAML do
-        // entrevistador e a persona — nada do upload do aluno, nada do vector
-        // store. Disparamos a saudação (fast model, ~1-2s) em paralelo com TODA
-        // a preparação pesada (uploads de PDF, vector store, document map, plano
-        // de entrevista). O caminho crítico até o aluno ver a saudação fica em
-        // O(saudação), em vez de O(uploads + vector store + saudação).
-        //
-        // Inputs da prep ficam guardados na sessão para permitir retry caso a
-        // primeira execução em background falhe (ex.: timeout transitório de
-        // rede). Sem isso, uma falha durante a fase intro deixaria o aluno preso.
+        // Prep pesada (PDF do aluno + vector store + work_analysis + plano)
+        // segue rodando em background a partir daqui — não bloqueia a resposta
+        // do /upload. Inputs ficam guardados na sessão para permitir retry caso
+        // a primeira execução em background falhe.
         sess.preparationInputs = {
             submissionId: req.submission.id,
             studentBuffer,
@@ -415,22 +426,45 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         };
         startInterviewPreparation(sess);
 
-        // Beat 1 do roteiro de abertura: apresenta-se (nome + papel) e pergunta
-        // só o nome do aluno. Disparado em paralelo com a prep pesada acima — é
-        // só ele que precisa terminar para responder ao aluno.
+        // Saudação e áudio do orientador foram pré-gerados no /start (ver
+        // maybeKickOffPregeneration em sessionLifecycle.js). Aguarda as
+        // promessas se ainda em vôo; usa o resultado se o snapshot bater com
+        // o estado atual, senão cai pro caminho lento (gera fresh, equivalente
+        // ao comportamento antigo).
         sess.introStep = "awaiting_name";
-        const greeting = await introductionAgent.evaluate({
-            step: "ask_name",
-            interviewerYamlText,
-            persona: sess.interviewerPersona,
-            introHistory: sess.introLog,
-            studentMessage: null,
-            meterCtx,
-            interactionMode: sess.interactionMode,
-        });
 
-        // TTS antes do push para podermos persistir a duração junto com o item.
-        const audio = await attachAudio(sess, greeting.message);
+        if (sess.greetingPreGenPromise) {
+            try { await sess.greetingPreGenPromise; }
+            catch (err) { log.error("PREGEN", `await greeting failed: ${err.message}`); }
+        }
+        const curSnap = pregenSnapshot(sess);
+        let greeting;
+        let audio;
+        const pre = sess.preGeneratedGreeting;
+        const preMatches = pre
+            && pre.snapshot
+            && pre.snapshot.personaName === curSnap.personaName
+            && pre.snapshot.personaGender === curSnap.personaGender
+            && pre.snapshot.voice === curSnap.voice
+            && pre.snapshot.mode === curSnap.mode;
+        if (preMatches) {
+            greeting = { message: pre.text, reason: pre.reason };
+            audio = pre.audio ?? {};
+            log.info("UPLOAD", `using pre-generated greeting (snapshot match)`);
+        } else {
+            log.info("UPLOAD", `pre-gen miss (mode/voice/persona divergiram ou pre-gen falhou) — fallback fresh`);
+            greeting = await introductionAgent.evaluate({
+                step: "ask_name",
+                interviewerYamlText,
+                persona: sess.interviewerPersona,
+                introHistory: sess.introLog,
+                studentMessage: null,
+                meterCtx,
+                interactionMode: sess.interactionMode,
+            });
+            audio = await attachAudio(sess, greeting.message);
+        }
+
         const greetingEntry = {
             role: "assistant",
             content: greeting.message,
@@ -458,36 +492,37 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
 
         await persistConversationLog(sess);
 
-        res.json({ ok: true, assistant: greeting.message, ...audio });
+        // Áudio do orientador (pré-gerado no /start em modo áudio). Aguarda a
+        // promessa em vôo se necessário; cai pra geração lenta como fallback.
+        let narratorPayload = null;
+        if (sess.interactionMode === "audio") {
+            if (sess.narratorPreGenPromise) {
+                try { await sess.narratorPreGenPromise; }
+                catch (err) { log.error("PREGEN", `await narrator failed: ${err.message}`); }
+            }
+            if (sess.narratorAudio?.buffer) {
+                narratorPayload = {
+                    audio_url: sess.narratorAudio.url,
+                    audio_duration_seconds: sess.narratorAudio.durationSec,
+                    voice_id: sess.narratorAudio.voiceId,
+                };
+            } else {
+                // Último recurso — gera agora síncrono. Não deveria acontecer
+                // a menos que a pré-geração tenha falhado e ninguém retry.
+                const r = await attachNarratorAudio(sess, meterCtx);
+                if (r && !r.audio_error) narratorPayload = r;
+            }
+        }
+
+        res.json({
+            ok: true,
+            assistant: greeting.message,
+            ...audio,
+            narrator: narratorPayload,
+        });
     } catch (error) {
         log.error("UPLOAD", `failed: ${error.message}`);
         res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
-    }
-});
-
-// ============================================================================
-// POST /s/:submissionToken/narrator-intro
-// ----------------------------------------------------------------------------
-// Gera (ou devolve em cache) o áudio do "orientador" — voz aleatória diferente
-// da voz do entrevistador, lendo um script fixo (config/narrator_intro.txt)
-// que explica como a entrevista funciona. Disparado pelo frontend EM PARALELO
-// com o /upload, para cobrir a espera enquanto o entrevistador prepara a
-// primeira fala. Em modo texto, devolve 204 — não há áudio a gerar.
-// Idempotente por sessão (segundo POST devolve o mesmo URL sem custo extra).
-// ============================================================================
-router.post("/s/:submissionToken/narrator-intro", requireSubmissionToken, requireNotFinalized, requireWithinBudget, async (req, res) => {
-    const token = req.submission.submission_token;
-    const sess = SESSIONS.get(token);
-    if (!sess) return res.status(400).json({ error: "call /start first" });
-    if (sess.interactionMode !== "audio") return res.status(204).end();
-    try {
-        const result = await attachNarratorAudio(sess, sessionMeterCtx(sess));
-        if (!result) return res.status(204).end();
-        if (result.audio_error) return res.status(502).json({ error: result.audio_error });
-        return res.json(result);
-    } catch (err) {
-        log.error("NARRATOR", `endpoint failed: ${err.message}`);
-        return res.status(500).json({ error: "narrator_failed", detail: err.message });
     }
 });
 
