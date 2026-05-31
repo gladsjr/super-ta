@@ -111,7 +111,6 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | Bloco | Código | Prompt enviado à LLM |
 |---|---|---|
 | `INTERVIEWER_ADAPT_INSTRUCTIONS` (botão "Adaptar ao enunciado") | [routes/work.js](../routes/work.js) | string literal usada como `instructions` na chamada da Responses API |
-| Base TA (carregada por `loadSystemPrompt`) | [lib/config.js — loadSystemPrompt](../lib/config.js) | [config/system_prompt.txt](../config/system_prompt.txt) |
 | `ConfigAssistantAgent` (chat do assistente de configuração, em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | preâmbulo + `systemPromptBody` |
 | `EnunciadoCoherenceAgent` (avalia adequação do enunciado, em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | preâmbulo + `systemPromptBody` |
 | Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [lib/sessionLifecycle.js — initOrResumeSession / validateResources / rebuildSession](../lib/sessionLifecycle.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `work_analysis` (e `interview_plan`) salvos no `runtime_state_json` |
@@ -166,7 +165,6 @@ Características:
 Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
 
 1. **Templates `.txt`** ([config/](../config/)):
-   - [system_prompt.txt](../config/system_prompt.txt) — base TA.
    - [interview_prompt_template.txt](../config/interview_prompt_template.txt) — renderizado por `PrepBuilderAgent.buildPlan` para gerar o plano de entrevista.
    - [interviewer_agenda_template.txt](../config/interviewer_agenda_template.txt) — bloco de agenda compartilhado por todos os agentes que operam no contexto da entrevista.
    - [student_instructions.html](../static/student_instructions.html) — instruções mostradas ao aluno no modal "Instruções" (não vai à LLM, mas é conteúdo editável).

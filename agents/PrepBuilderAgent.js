@@ -42,32 +42,32 @@ export class PrepBuilderAgent {
         this.client = openaiClient;
         this.model = model;
 
-        this.analyzeSystemBody = `Sua função: analisar o trabalho entregue pelo aluno (PDF anexado) em relação ao enunciado (PDF anexado) e à agenda do entrevistador (texto fornecido), produzindo um JSON estruturado que vai alimentar o gerador do plano de entrevista (próxima etapa) e o super-orquestrador que conduz a conversa.
+        this.analyzeSystemBody = `Sua função: analisar a entrega sob avaliação (PDF anexado) em relação ao documento motivador (PDF anexado — enunciado, briefing, RFP, etc.) e à agenda do entrevistador (texto fornecido), produzindo um JSON estruturado que vai alimentar o gerador do plano de perguntas (próxima etapa) e o super-orquestrador que conduz a conversa.
 
-Você está rodando uma vez por entrevista, antes da primeira pergunta. Sua saída é contexto compactado, NÃO conversa com o aluno.
+Você está rodando uma vez por conversa, antes da primeira pergunta. Sua saída é contexto compactado, NÃO conversa endereçada à outra ponta da cena.
 
 Produza JSON com EXATAMENTE estes campos:
 
 {
-  "summary": "Resumo executivo do trabalho. 2-3 parágrafos. O que foi proposto, em que cenário, com que abordagem.",
+  "summary": "Resumo executivo da entrega. 2-3 parágrafos. O que foi proposto, em que cenário, com que abordagem.",
   "assessment": {
-    "strengths":         ["2-5 pontos onde o trabalho está bem (raciocínio claro, decisões justificadas, evidência adequada)"],
+    "strengths":         ["2-5 pontos onde a entrega está bem (raciocínio claro, decisões justificadas, evidência adequada)"],
     "weaknesses":        ["2-5 pontos de fragilidade (lacunas, premissas não justificadas, simplificações, riscos não tratados)"],
-    "critical_points":   ["1-3 pontos onde uma resposta fraca na entrevista comprometeria a credibilidade do trabalho"],
-    "authorship_doubts": ["0-3 trechos onde a qualidade da escrita ou a coerência sugere que o autor pode ter dificuldade de defender espontaneamente. NÃO acuse — só sinalize onde investigar"]
+    "critical_points":   ["1-3 pontos onde uma resposta fraca na conversa comprometeria a credibilidade da entrega"],
+    "authorship_doubts": ["0-3 trechos onde a fluência ou a coerência interna sugere que quem entregou pode ter dificuldade de defender espontaneamente. NÃO acuse — só sinalize onde valeria sondar"]
   },
   "evidence_index": [
-    { "topic": "tópico curto", "anchors": ["seção X", "fig Y", "tabela Z"], "why_check": "por que vale o entrevistador verificar isso na hora" }
+    { "topic": "tópico curto", "anchors": ["seção X", "fig Y", "tabela Z"], "why_check": "por que vale conferir esse ponto durante a conversa" }
   ]
 }
 
 Regras:
 - Use EXCLUSIVAMENTE o conteúdo dos PDFs. Não invente.
 - Cite seções/figuras/tabelas quando puder (vai virar anchors).
-- A agenda do entrevistador serve para calibrar O QUE você considera fragilidade — entrevistador pragmático foca em decisão; investigativo foca em raciocínio; etc.
+- A agenda do entrevistador serve para calibrar O QUE você considera fragilidade — persona pragmática foca em decisão; investigativa foca em raciocínio; etc.
 - Retorne APENAS o JSON, sem markdown.`;
 
-        this.buildPlanExtraInstructions = `\n\nVOCÊ ESTÁ RECEBENDO TAMBÉM UMA ANÁLISE PRÉVIA DO TRABALHO (JSON abaixo).\n\nUse essa análise como input principal. As perguntas devem:\n- Cobrir prioritariamente os \`critical_points\` e \`weaknesses\` da análise.\n- Usar os \`evidence_index\` para se referir a partes específicas do trabalho (citar seção/figura/tabela na pergunta quando fizer sentido).\n- Investigar de forma educada os \`authorship_doubts\` (sem acusação) — perguntas que verificam se o aluno consegue defender espontaneamente trechos suspeitos.\n- Equilibrar: nem todas as perguntas precisam ser sobre fragilidades. Algumas podem aprofundar pontos fortes, especialmente para entrevistadores didáticos.\n\nANÁLISE PRÉVIA:\n`;
+        this.buildPlanExtraInstructions = `\n\nVOCÊ ESTÁ RECEBENDO TAMBÉM UMA ANÁLISE PRÉVIA DA ENTREGA (JSON abaixo).\n\nUse essa análise como input principal. As perguntas devem:\n- Cobrir prioritariamente os \`critical_points\` e \`weaknesses\` da análise.\n- Usar os \`evidence_index\` para se referir a partes específicas da entrega (citar seção/figura/tabela na pergunta quando fizer sentido).\n- Sondar os \`authorship_doubts\` APENAS através de perguntas que a PERSONA da agenda faria naturalmente sobre esses trechos. NÃO formule como verificação acadêmica — nada de "reconstrua", "mostre passo a passo", "explique como cada cálculo foi feito" se a persona não for um avaliador acadêmico. Use o registro da persona (intuição, consequência prática, sensibilidade, comparação, justificativa de decisão).\n- Equilibrar: nem todas as perguntas precisam ser sobre fragilidades. Algumas podem aprofundar pontos fortes, especialmente para personas didáticas.\n\nANÁLISE PRÉVIA:\n`;
     }
 
     /**
@@ -91,7 +91,7 @@ ${this.analyzeSystemBody}`;
         const userText = `**AGENDA DO ENTREVISTADOR**
 ${agendaBlock}
 
-Analise o trabalho entregue (anexo) à luz do enunciado (também anexo) e da agenda acima. Retorne SOMENTE o JSON especificado.`;
+Analise a entrega (PDF anexo) à luz do documento motivador (PDF também anexo) e da agenda acima. Retorne SOMENTE o JSON especificado.`;
 
         const payload = {
             model: this.model,
@@ -180,7 +180,7 @@ ${renderedWithAnalysis}`;
             input: [{
                 role: "user",
                 content: [
-                    { type: "input_text", text: "Enunciado e trabalho do aluno em anexo. A análise prévia está no system prompt. Gere o JSON solicitado." },
+                    { type: "input_text", text: "Documento motivador e entrega em anexo (PDFs). A análise prévia está no system prompt. Gere o JSON solicitado." },
                     { type: "input_file", file_id: enunciadoFileId },
                     { type: "input_file", file_id: studentFileId },
                 ],

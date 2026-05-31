@@ -21,7 +21,7 @@ The system adheres to core rules: critical components fail fast without architec
 - `routes/admin.js`: Admin endpoints (works, users).
 - `agents/`: All agent classes. Per the super-orchestrator reform: `PrepBuilderAgent` (one-shot on `/upload`, analyze + build plan), `IntroductionAgent` (3 beats), `AudioIntelligibilityAgent` (pre-gate phrasing only), `SuperOrchestratorAgent` (per-turn orchestration in `interviewing`), `ConfigAssistantAgent` + `EnunciadoCoherenceAgent` (professor-facing).
 - `lib/`: Shared infrastructure (db, sessionLifecycle, sessionState, conversationUtils, audio, billing, middleware, agentPreamble, interviewPrompt, audioIntelligibility, superOrchestrator/actionSchema).
-- `config/`: `system_prompt.txt`, `policy.yaml`, `pricing.yaml`, `voices.js`, `interview_prompt_template.txt`, `interviewer_agenda_template.txt`, `interviewers/*.yaml` (templates).
+- `config/`: `policy.yaml`, `pricing.yaml`, `voices.js`, `interview_prompt_template.txt`, `interviewer_agenda_template.txt`, `interviewers/*.yaml` (templates).
 - `static/`: Frontend HTML (`student.html`, `professor.html`, `admin.html`, `conversation.html`, `student_instructions.html`).
 - `migrations/`: SQL migrations, file-per-change (see CLAUDE.md).
 

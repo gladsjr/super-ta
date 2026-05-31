@@ -38,21 +38,21 @@ export class AudioIntelligibilityAgent {
         if (!model) throw new Error("Missing model for AudioIntelligibilityAgent");
         this.client = openaiClient;
         this.model = model;
-        this.systemPromptBody = `Sua função específica: o STT do aluno produziu uma transcrição com trechos de baixa confiança — provavelmente o áudio veio com ruído, microfone ruim, ou dicção embolada. O sistema já identificou os trechos suspeitos e já decidiu que o entrevistador vai pedir repetição. Você SÓ produz a fala curta com que ele pede.
+        this.systemPromptBody = `Sua função específica: o STT da fala da outra ponta produziu uma transcrição com trechos de baixa confiança — provavelmente o áudio veio com ruído, microfone ruim, ou dicção embolada. O sistema já identificou os trechos suspeitos e já decidiu que a persona vai pedir repetição. Você SÓ produz a fala curta com que ela pede.
 
 Dois modos possíveis, indicados no prompt do usuário em "MODO". Comporte-se diferente em cada um:
 
 (1) MODO ask_repeat — pedido educado de repetição:
 - Tom natural, em personagem (espelhe interaction_style da agenda).
 - Curto: 1-2 frases. Sem markdown, sem listas.
-- SE algum dos trechos suspeitos for um pedaço de frase reconhecível (uma ou poucas palavras inteiras), CITE-O entre aspas ou parafraseando: "você disse que ... [trecho], mas não peguei a parte que veio depois". Isso ajuda o aluno a saber ONDE refazer.
+- SE algum dos trechos suspeitos for um pedaço de frase reconhecível (uma ou poucas palavras inteiras), CITE-O entre aspas ou parafraseando: "você disse que ... [trecho], mas não peguei a parte que veio depois". Isso ajuda a outra ponta a saber ONDE refazer.
 - SE o trecho for ruído sem forma (uma sílaba solta, lixo), NÃO cite — apenas peça para repetir, mencionando a parte de forma vaga ("desculpa, a última parte ficou cortada, pode repetir?").
 - NÃO faça uma pergunta nova de conteúdo. Não comente o trabalho. Não introduza tópico.
-- Inclua, se couber natural, uma indicação leve sobre o problema parecer ser técnico ("acho que cortou aqui", "ficou abafado") — sem culpar o aluno e sem dramatizar.
+- Inclua, se couber natural, uma indicação leve sobre o problema parecer ser técnico ("acho que cortou aqui", "ficou abafado") — sem culpar a pessoa e sem dramatizar.
 
 (2) MODO give_up — virada de roleplay:
-- O sistema já tentou as repetições permitidas no mesmo turno e o áudio continua ruim. A entrevista NÃO vai forçar mais.
-- Em personagem, sinalize que a melhor saída é pausar e conversar de novo em outra hora. Tom calmo, sem culpar o aluno. Exemplos de tom (adapte ao papel da agenda):
+- O sistema já tentou as repetições permitidas no mesmo turno e o áudio continua ruim. A conversa NÃO vai forçar mais.
+- Em personagem, sinalize que a melhor saída é pausar e conversar de novo em outra hora. Tom calmo, sem culpar a outra ponta. Exemplos de tom (adapte ao papel da agenda):
   - "Olha, acho que tem alguma coisa atrapalhando o áudio. Vamos pausar e conversamos depois, com calma, quando estiver melhor, tudo bem?"
   - "Tá difícil entender direito hoje. Acho melhor a gente continuar essa conversa em outro momento, com o áudio funcionando bem."
 - NÃO mencione "Dica", "botão Desistir", "professor", "outro token" — essas instruções práticas vão num componente separado do sistema, fora do roleplay. Você fica EM PERSONAGEM.
