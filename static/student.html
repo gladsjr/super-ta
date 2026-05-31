@@ -702,6 +702,59 @@
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
       return wrap;
     }
+    // Parser de SSE para o handler de áudio do /chat na fase interviewing.
+    // Servidor emite:
+    //   event: thinking   data: {}    (abertura — confirma stream)
+    //   event: responding data: {}    (primeiro token de texto do super-orq)
+    //   event: result     data: {payload final}  (fim — payload no shape JSON
+    //                                              de hoje, mesmo handling)
+    //   event: error      data: {message, status}  (falha durante o stream)
+    // `thinking` é a bolha do entrevistador retornada por appendThinkingBubble;
+    // recebemos para poder flipar a label em 'responding' direto do servidor.
+    async function consumeSSE(response, thinking) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let result = null;
+      let streamError = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Eventos SSE separados por linha em branco (\n\n). Mantém o resto
+        // (potencialmente parcial) no buffer pra próxima iteração.
+        let sepIdx;
+        while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
+          const raw = buffer.slice(0, sepIdx);
+          buffer = buffer.slice(sepIdx + 2);
+          let eventName = 'message';
+          let dataStr = '';
+          for (const line of raw.split('\n')) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+          }
+          if (eventName === 'responding') {
+            if (thinking) thinking.setStage('respondendo');
+          } else if (eventName === 'result') {
+            try { result = JSON.parse(dataStr); }
+            catch { streamError = new Error('SSE result com JSON inválido'); }
+          } else if (eventName === 'error') {
+            try {
+              const e = JSON.parse(dataStr);
+              streamError = new Error(e.message || e.error || 'erro do servidor');
+            } catch {
+              streamError = new Error(dataStr || 'erro do servidor');
+            }
+          }
+          // 'thinking' (e qualquer outro) é ignorado — chega antes do
+          // responding e não muda nada localmente.
+        }
+      }
+      if (streamError) throw streamError;
+      if (!result) throw new Error('stream encerrou sem result');
+      return result;
+    }
+
     // Balão "pensando": placeholder do lado do entrevistador entre o envio do
     // áudio do aluno e a chegada do áudio do entrevistador. Dois estágios:
     //   ouvindo...    enquanto o "humano hipotético" estaria escutando a fala
@@ -733,6 +786,13 @@
 
       return {
         node: wrap,
+        // Override externo do estágio (ex.: sinal SSE 'event: responding'
+        // chega ANTES do timer e queremos sincronizar com o servidor real).
+        // Cancela o timer pra não disputar com o label.
+        setStage(label) {
+          clearTimeout(stageTimer);
+          labelEl.textContent = label;
+        },
         remove() {
           clearInterval(dotsTimer);
           clearTimeout(stageTimer);
@@ -1246,7 +1306,17 @@
       let r, j;
       try {
         r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, { method: 'POST', body: form }));
-        j = await r.json();
+        // Server pode responder em dois formatos:
+        //   - SSE (Content-Type: text/event-stream): fase interviewing —
+        //     consumimos a stream pra flipar a label de 'ouvindo' pra
+        //     'respondendo' no momento real em que o super-orq começa a falar.
+        //   - JSON: cap, intro, erros — caminho legado de hoje.
+        const ct = r.headers.get('content-type') || '';
+        if (r.ok && ct.includes('text/event-stream')) {
+          j = await consumeSSE(r, thinking);
+        } else {
+          j = await r.json();
+        }
       } catch {
         thinking.remove();
         setRecordStatus('Falha de comunicação. Tente gravar de novo.', true);
