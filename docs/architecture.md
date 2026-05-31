@@ -1,108 +1,85 @@
 # Arquitetura — ciclo do `/chat` e mapa de prompts
 
-Diagrama do que acontece entre uma resposta do aluno e a próxima pergunta do plano:
-triagem em paralelo (3 agentes), agente de relevância (loop de skip) e progressão.
+Após a reforma do super-orquestrador (merge `dae5780`), o ciclo de uma resposta
+do aluno ao próximo passo do entrevistador deixou de ter triagem×3 +
+sufficiency + relevance em paralelo. Hoje, **uma única chamada de raciocínio
+por turno** (SuperOrchestratorAgent) decide tudo: continuar, fazer follow-up,
+abrir modal de meta-pergunta, mostrar dica, finalizar. O código vira
+despachante; agente decide.
 
 > **Como abrir os arquivos no clique**
 >
 > Pré-requisito: extensão **Markdown Preview Mermaid Support** (`bierner.markdown-mermaid`) instalada. Abra esta página com `Ctrl+Shift+V`.
 >
-> No diagrama, **cada nó de agente clica direto na linha do `systemPrompt`** (não no topo do arquivo). Os nós de fluxo clicam na linha do handler/função correspondente. O nó "Templates compartilhados" clica nos templates `.txt` que entram na composição dos prompts dos agentes de triagem e do de relevância. Se o seu preview bloquear o esquema `vscode://` (alguns o fazem por segurança), use a **tabela de navegação** abaixo do diagrama — links markdown puros que sempre funcionam.
+> Os nós de agente clicam direto na linha do `systemPrompt` (não no topo do arquivo). Se o seu preview bloquear o esquema `vscode://` (alguns o fazem por segurança), use a **tabela de navegação** abaixo do diagrama.
 
 ```mermaid
 flowchart TD
-  %% UPLOAD: PDF do aluno entra; saudação e prep pesada disparam em paralelo.
+  %% UPLOAD: PDF do aluno + enunciado → análise serializada → plano informado.
   Upload([Aluno envia PDF]) --> UploadHandler["/upload"]
-  UploadHandler --> IntroAgent1["IntroductionAgent"]
-  IntroAgent1 --> OutGreeting>"Cumprimento ao aluno"]
+  UploadHandler --> IntroAgent1["IntroductionAgent (beat 1)"]
+  IntroAgent1 --> OutGreeting>"Saudação ao aluno + pergunta o nome"]
   UploadHandler -.-> Prep(("Prep em background"))
-  Prep --> MapBuilder["MapBuilderAgent"]
-  Prep --> PlanBuilder["PlanBuilderAgent"]
-  Prep --> VectorStore["createVectorStoreWithFile"]
+  Prep --> VectorStore["createVectorStoreWithFiles (aluno + enunciado)"]
+  Prep --> Analyze["PrepBuilderAgent.analyzeWork"]
+  Analyze --> BuildPlan["PrepBuilderAgent.buildPlan (consome análise)"]
 
   %% CHAT: dispara o ciclo principal a cada mensagem do aluno.
   Start([Aluno envia mensagem]) --> ChatHandler["/chat"]
-  ChatHandler --> PhaseGate{"currentPhase?"}
+  ChatHandler --> AudioGate{"Modo áudio?"}
+  AudioGate -- "sim" --> Inteligibility["Pré-gate de inteligibilidade<br/>(algoritmo + AudioIntelligibilityAgent)"]
+  AudioGate -- "não" --> PhaseGate{"currentPhase?"}
+  Inteligibility -->|"ininteligível"| OutRepeat>"Fala de repetição (ou give_up + Dica)"]
+  Inteligibility -->|"ok"| PhaseGate
 
-  %% INTRO PHASE
-  PhaseGate -- "intro" --> IntroAgent2["IntroductionAgent"]
-  IntroAgent2 --> IntroDecision{"continue_intro<br/>ou transition?"}
-  IntroDecision -- "continue_intro" --> OutContinue>"Resposta breve<br/>(continua intro)"]
-  IntroDecision -- "transition" --> OutFirstQ>"Transição + 1ª pergunta<br/>do plano"]
+  %% INTRO PHASE — roteiro determinístico de 3 falas.
+  PhaseGate -- "intro / awaiting_name" --> IntroPresent["IntroductionAgent (beat 2)"]
+  IntroPresent --> OutPresent>"Cumprimenta usando o nome,<br/>fala de si, pede um 'ok'"]
+  PhaseGate -- "intro / awaiting_ok" --> IntroBegin["IntroductionAgent (beat 3)"]
+  IntroBegin --> OutFirstQ>"'Vamos começar' + 1ª pergunta do plano"]
 
-  %% INTERVIEWING PHASE
-  PhaseGate -- "interviewing" --> CheckPlan{"Plano tem<br/>mais perguntas?"}
-  CheckPlan -- "não" --> OutWrap>"Mensagem de fechamento"]
-  CheckPlan -- "sim" --> Parallel(("4 agentes<br/>em paralelo"))
+  %% INTERVIEWING PHASE — super-orquestrador decide tudo.
+  PhaseGate -- "interviewing" --> CapCheck{"30 turnos?"}
+  CapCheck -- "sim" --> OutCapFinalize>"Força finalize"]
+  CapCheck -- "não" --> SuperOrq["SuperOrchestratorAgent<br/>(1 reasoning call,<br/>contexto cheio,<br/>file_search)"]
+  SuperOrq --> ActionSchema{"action.kind?"}
+  ActionSchema -- "ask" --> OutAsk>"Próxima pergunta<br/>(do plano ou espontânea)"]
+  ActionSchema -- "follow_up" --> OutFollowUp>"Pedido de complemento"]
+  ActionSchema -- "meta_modal" --> OutMeta>"Resposta no modal<br/>(meta-pergunta)"]
+  ActionSchema -- "hint" --> OutHint>"Fala + Dica fora do roleplay"]
+  ActionSchema -- "finalize" --> FinalizeGate{"5+ turnos<br/>respondidos?"}
+  FinalizeGate -- "sim" --> OutFinalize>"Fechamento"]
+  FinalizeGate -- "não (e não foi student_disengaged)" --> OutRefuseFinalize>"Bloqueia → vira ask_repeat"]
+  ActionSchema -- "ask_repeat" --> OutAskRepeat>"Pede repetição"]
 
-  Parallel --> Scope["ScopeClarificationAgent"]
-  Parallel --> OffTopic["OffTopicRedirectAgent"]
-  Parallel --> Meta["MetaInterventionAgent"]
-  Parallel --> Sufficiency["AnswerSufficiencyAgent"]
-
-  Scope --> Pick{"Triage<br/>winner?"}
-  OffTopic --> Pick
-  Meta --> Pick
-
-  Pick -- "channel=chat" --> OutTriageChat>"Resposta de intervenção<br/>(scope ou off_topic)"]
-  Pick -- "channel=modal" --> OutTriageModal>"Modal pro aluno<br/>(meta)"]
-  Pick -- "nenhum" --> SufDecision{"Sufficiency:<br/>accept ou follow_up?"}
-  Sufficiency -.-> SufDecision
-
-  SufDecision -- "follow_up" --> OutFollowUp>"Pergunta de complemento"]
-  SufDecision -- "accept" --> Relevance["QuestionRelevanceAgent"]
-
-  Relevance --> RelDecision{"ask ou skip?"}
-  RelDecision -- "skip" --> Relevance
-  RelDecision -- "ask" --> OutNext>"Transição + próxima pergunta"]
-  RelDecision -- "plano esgotou" --> OutWrap
-
-  %% Templates compartilhados — entram via composição no prompt de vários agentes.
-  subgraph templates ["Agenda no prompt (compartilhada)"]
-    AgendaTpl[/"interviewer_agenda_template.txt"/]
-  end
-  IntroAgent1 -.-> AgendaTpl
-  IntroAgent2 -.-> AgendaTpl
-  Scope -.-> AgendaTpl
-  OffTopic -.-> AgendaTpl
-  Meta -.-> AgendaTpl
-  Sufficiency -.-> AgendaTpl
-  Relevance -.-> AgendaTpl
+  %% Persistência de memória entre turnos do super-orquestrador.
+  SuperOrq -.-> Memory[("runtime_state.super_orchestrator.memory<br/>questions_covered / skipped / open_threads")]
+  Memory -.-> SuperOrq
 
   classDef agent fill:#eaf0f7,stroke:#1e3a5f,color:#0f1b2d;
   classDef gate  fill:#fff4dc,stroke:#8a6100,color:#0f1b2d;
   classDef out   fill:#e7f4eb,stroke:#1f6c3b,color:#0f1b2d;
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
-  classDef tpl   fill:#f3f5f8,stroke:#5a6b80,color:#0f1b2d,stroke-dasharray: 4 2;
+  classDef state fill:#f3f5f8,stroke:#5a6b80,color:#0f1b2d,stroke-dasharray: 4 2;
 
-  class UploadHandler,ChatHandler,IntroAgent1,IntroAgent2,Scope,OffTopic,Meta,Sufficiency,Relevance,Parallel,MapBuilder,PlanBuilder,VectorStore,Prep agent
-  class PhaseGate,IntroDecision,CheckPlan,Pick,SufDecision,RelDecision gate
-  class OutGreeting,OutContinue,OutFirstQ,OutWrap,OutTriageChat,OutTriageModal,OutFollowUp,OutNext out
+  class UploadHandler,ChatHandler,IntroAgent1,IntroPresent,IntroBegin,SuperOrq,Inteligibility,Analyze,BuildPlan,VectorStore,Prep agent
+  class AudioGate,PhaseGate,ActionSchema,CapCheck,FinalizeGate gate
+  class OutGreeting,OutPresent,OutFirstQ,OutAsk,OutFollowUp,OutMeta,OutHint,OutFinalize,OutAskRepeat,OutRepeat,OutCapFinalize,OutRefuseFinalize out
   class Upload,Start entry
-  class AgendaTpl tpl
+  class Memory state
 
-  click UploadHandler "vscode://file/c:/Users/glads/src/super-ta/server.js:864" "Abre o handler /upload"
-  click ChatHandler "vscode://file/c:/Users/glads/src/super-ta/server.js:1014" "Abre o handler /chat"
-  click PhaseGate "vscode://file/c:/Users/glads/src/super-ta/server.js:1044" "Abre o gate de currentPhase"
+  click UploadHandler "vscode://file/c:/Users/glads/src/super-ta/routes/interview.js:137" "Abre o handler /upload"
+  click ChatHandler "vscode://file/c:/Users/glads/src/super-ta/routes/interview.js:474" "Abre o handler /chat"
+  click PhaseGate "vscode://file/c:/Users/glads/src/super-ta/routes/interview.js:554" "Abre o gate de currentPhase"
   click IntroAgent1 "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:39" "Abre o systemPrompt (bodyFor) do IntroductionAgent"
-  click IntroAgent2 "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:39" "Abre o systemPrompt (bodyFor) do IntroductionAgent"
-  click IntroDecision "vscode://file/c:/Users/glads/src/super-ta/server.js:1081" "Abre o ramo continue_intro vs transition"
-  click Parallel "vscode://file/c:/Users/glads/src/super-ta/server.js:1163" "Abre o lançamento dos 4 agentes em paralelo"
-  click Scope "vscode://file/c:/Users/glads/src/super-ta/agents/ScopeClarificationAgent.js:23" "Abre o systemPrompt do ScopeClarificationAgent"
-  click OffTopic "vscode://file/c:/Users/glads/src/super-ta/agents/OffTopicRedirectAgent.js:20" "Abre o systemPrompt do OffTopicRedirectAgent"
-  click Meta "vscode://file/c:/Users/glads/src/super-ta/agents/MetaInterventionAgent.js:24" "Abre o systemPrompt do MetaInterventionAgent"
-  click Sufficiency "vscode://file/c:/Users/glads/src/super-ta/agents/AnswerSufficiencyAgent.js:33" "Abre o systemPrompt do AnswerSufficiencyAgent"
-  click Pick "vscode://file/c:/Users/glads/src/super-ta/server.js:273" "Abre pickTriageWinner"
-  click SufDecision "vscode://file/c:/Users/glads/src/super-ta/server.js:1278" "Abre a decisão accept/follow_up"
-  click Relevance "vscode://file/c:/Users/glads/src/super-ta/agents/QuestionRelevanceAgent.js:23" "Abre o systemPrompt do QuestionRelevanceAgent"
-  click RelDecision "vscode://file/c:/Users/glads/src/super-ta/server.js:1357" "Abre o skip-loop de relevância"
-  click OutFirstQ "vscode://file/c:/Users/glads/src/super-ta/server.js:1120" "Abre a montagem da transição + 1ª pergunta"
-  click OutNext "vscode://file/c:/Users/glads/src/super-ta/server.js:1399" "Abre a montagem da transição + próxima pergunta"
-  click OutWrap "vscode://file/c:/Users/glads/src/super-ta/server.js:1406" "Abre a string da mensagem de fechamento"
-  click AgendaTpl "vscode://file/c:/Users/glads/src/super-ta/config/interviewer_agenda_template.txt" "Abre o template da agenda do entrevistador"
-  click MapBuilder "vscode://file/c:/Users/glads/src/super-ta/agents/MapBuilderAgent.js" "Abre MapBuilderAgent (DocumentMap)"
-  click PlanBuilder "vscode://file/c:/Users/glads/src/super-ta/agents/PlanBuilderAgent.js" "Abre PlanBuilderAgent (plano de entrevista)"
-  click VectorStore "vscode://file/c:/Users/glads/src/super-ta/server.js" "Abre createVectorStoreWithFile"
+  click IntroPresent "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:39" "Abre o systemPrompt (bodyFor) do IntroductionAgent"
+  click IntroBegin "vscode://file/c:/Users/glads/src/super-ta/agents/IntroductionAgent.js:39" "Abre o systemPrompt (bodyFor) do IntroductionAgent"
+  click Inteligibility "vscode://file/c:/Users/glads/src/super-ta/routes/interview.js:74" "Abre runAudioIntelligibilityGate"
+  click SuperOrq "vscode://file/c:/Users/glads/src/super-ta/agents/SuperOrchestratorAgent.js:36" "Abre o systemPromptBody do SuperOrchestratorAgent"
+  click ActionSchema "vscode://file/c:/Users/glads/src/super-ta/lib/superOrchestrator/actionSchema.js" "Abre o schema da ação"
+  click Analyze "vscode://file/c:/Users/glads/src/super-ta/agents/PrepBuilderAgent.js:42" "Abre analyzeSystemBody"
+  click BuildPlan "vscode://file/c:/Users/glads/src/super-ta/agents/PrepBuilderAgent.js" "Abre buildPlan"
+  click VectorStore "vscode://file/c:/Users/glads/src/super-ta/lib/sessionLifecycle.js:59" "Abre createVectorStoreWithFiles"
 ```
 
 ## Tabela de navegação — código e prompt lado a lado
@@ -111,53 +88,41 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 
 | Bloco | Código | Prompt enviado à LLM |
 |---|---|---|
-| Handler do `/upload` | [server.js:864](../server.js#L864) | — |
-| Preparação em background (MapBuilder + PlanBuilder + vector store, em paralelo) | [server.js — startInterviewPreparation](../server.js) | ver agentes correspondentes |
-| `MapBuilderAgent` (DocumentMap, chamado em paralelo na prep) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `systemPromptBody` |
-| `PlanBuilderAgent` (plano de N perguntas, chamado em paralelo na prep) | [agents/PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado |
-| `IntroductionAgent` (fast, fase social — roteiro de 3 beats: ask_name / present_self / begin) | [agents/IntroductionAgent.js](../agents/IntroductionAgent.js) | [systemPrompt :39 (bodyFor)](../agents/IntroductionAgent.js#L39) + persona + agenda + histórico do intro |
-| Pré-gate de inteligibilidade no modo áudio (algoritmo puro sobre logprobs do STT decide; `AudioIntelligibilityAgent` só fraseia) | [lib/audioIntelligibility.js](../lib/audioIntelligibility.js) + [agents/AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) | [systemPrompt :41 (systemPromptBody)](../agents/AudioIntelligibilityAgent.js#L41) + agenda + transcrição + trechos detectados + estado do ciclo |
+| Handler do `/upload` | [routes/interview.js — /upload](../routes/interview.js) | — |
+| Preparação em background (`startInterviewPreparation`) | [lib/sessionLifecycle.js — startInterviewPreparation](../lib/sessionLifecycle.js) | ver agentes correspondentes |
+| `PrepBuilderAgent.analyzeWork` (1ª chamada da prep, analisa trabalho + enunciado) | [agents/PrepBuilderAgent.js — analyzeWork](../agents/PrepBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `analyzeSystemBody` + agenda |
+| `PrepBuilderAgent.buildPlan` (2ª chamada, recebe análise) | [agents/PrepBuilderAgent.js — buildPlan](../agents/PrepBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado + análise prévia |
+| `createVectorStoreWithFiles` (aluno + enunciado, expandido na reforma) | [lib/sessionLifecycle.js:59](../lib/sessionLifecycle.js#L59) | — |
+| Handler do `/chat` | [routes/interview.js — /chat](../routes/interview.js) | — |
+| Pré-gate de inteligibilidade (algoritmo puro decide; `AudioIntelligibilityAgent` só fraseia) | [lib/audioIntelligibility.js](../lib/audioIntelligibility.js) + [agents/AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) | preâmbulo + `systemPromptBody` + agenda + transcrição + trechos detectados |
+| `IntroductionAgent` (3 beats: ask_name / present_self / begin) | [agents/IntroductionAgent.js](../agents/IntroductionAgent.js) | [bodyFor :39](../agents/IntroductionAgent.js#L39) + persona + agenda + histórico do intro |
+| `SuperOrchestratorAgent` (UMA chamada por turno na fase interviewing) | [agents/SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js) | preâmbulo (`student_via_interviewer_voice`) + `systemPromptBody` + agenda + análise + plano + memory + histórico (via Conversations API) + última mensagem |
+| Schema da ação do super-orquestrador | [lib/superOrchestrator/actionSchema.js](../lib/superOrchestrator/actionSchema.js) | descrição embutida no prompt do agente |
+| Despachante por `action.kind` em `/chat` | [routes/interview.js — bloco SUPER-ORQUESTRADOR](../routes/interview.js) | — |
+| Guardrails de cap (30 turnos) e finalize precoce (<5 turnos) | [routes/interview.js — SUPER_ORQ_MAX_TURNS / SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE](../routes/interview.js) | — |
 | Sortição da persona | [lib/personas.js](../lib/personas.js) | — |
-| Handler do `/chat` | [server.js:1014](../server.js#L1014) | — |
-| Gate por `currentPhase` (intro vs interviewing) | [server.js:1044](../server.js#L1044) | — |
-| Ramo `continue_intro` (decisão do agente) | [server.js:1081](../server.js#L1081) | — |
-| Ramo `transition` (await prep + turno 0) | [server.js:1101](../server.js#L1101) | — |
-| Montagem transição + 1ª pergunta do plano | [server.js:1124](../server.js#L1124) | — |
-| Lançamento dos 4 agentes em paralelo | [server.js:1163](../server.js#L1163) | — |
-| `ScopeClarificationAgent` (fast) | [agents/ScopeClarificationAgent.js](../agents/ScopeClarificationAgent.js) | [systemPrompt :23](../agents/ScopeClarificationAgent.js#L23) + agenda + último turno |
-| `OffTopicRedirectAgent` (fast) | [agents/OffTopicRedirectAgent.js](../agents/OffTopicRedirectAgent.js) | [systemPrompt :20](../agents/OffTopicRedirectAgent.js#L20) + agenda + último turno |
-| `MetaInterventionAgent` (fast) | [agents/MetaInterventionAgent.js](../agents/MetaInterventionAgent.js) | [systemPrompt :24](../agents/MetaInterventionAgent.js#L24) + agenda + último turno |
-| `AnswerSufficiencyAgent` (reasoning, abortável; gera transition_phrase quando accept) | [agents/AnswerSufficiencyAgent.js](../agents/AnswerSufficiencyAgent.js) | [systemPrompt :33](../agents/AnswerSufficiencyAgent.js#L33) + agenda + pergunta do turno + conversa completa + última mensagem (RAG via vector store) |
-| Decisão do vencedor (`pickTriageWinner`) | [server.js:273](../server.js#L273) | — |
-| Await do sufficiency e ramo follow_up | [server.js:1278](../server.js#L1278) | — |
-| Captura da `transition_phrase` (caminho accept) | [server.js:1322](../server.js#L1322) | — |
-| `QuestionRelevanceAgent` (fast) | [agents/QuestionRelevanceAgent.js](../agents/QuestionRelevanceAgent.js) | [systemPrompt :23](../agents/QuestionRelevanceAgent.js#L23) + agenda + conversa completa + candidata |
-| Skip-loop de relevância | [server.js:1357](../server.js#L1357) | — |
-| Montagem `transition + próxima pergunta` (ramo accept) | [server.js:1399](../server.js#L1399) | — |
-| `turnFromPlanQuestion` | [server.js:187](../server.js#L187) | — |
-| Serializer do log | [server.js:207](../server.js#L207) | — |
-| Persistência do log | [lib/conversationLog.js](../lib/conversationLog.js) | — |
-| Endpoint que serve o log pro professor | [server.js:592](../server.js#L592) | — |
-| Mensagem de fechamento (sentinel) | [server.js:1406](../server.js#L1406) | string literal — não vai à LLM |
+| `turnFromPlanQuestion` | [lib/conversationUtils.js](../lib/conversationUtils.js) | — |
+| Persistência do log | [lib/conversationUtils.js — persistConversationLog](../lib/conversationUtils.js) | — |
+| Endpoint que serve o log pro professor | [routes/work.js — /conversation](../routes/work.js) | — |
+| SSE em `/chat` áudio interviewing (sinal `responding` em tempo real) | [routes/interview.js — useSSE / sendFinal](../routes/interview.js) + [agents/SuperOrchestratorAgent.js — onFirstDelta](../agents/SuperOrchestratorAgent.js) | — |
 
 ## Caminhos não cobertos pelo diagrama
 
 | Bloco | Código | Prompt enviado à LLM |
 |---|---|---|
-| `MapBuilderAgent` (chamado em `/upload`, parte da prep paralela) | [agents/MapBuilderAgent.js](../agents/MapBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `systemPromptBody` |
-| `PlanBuilderAgent` (chamado em `/upload`, parte da prep paralela — gera o plano de entrevista) | [agents/PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado via [lib/interviewPrompt.js](../lib/interviewPrompt.js) |
-| `INTERVIEWER_ADAPT_INSTRUCTIONS` (botão "Adaptar ao enunciado") | [server.js:660](../server.js#L660) | string literal usada como `instructions` na chamada da Responses API |
-| Base TA (carregada por `loadSystemPrompt`) | [server.js:88](../server.js#L88) | [config/system_prompt.txt](../config/system_prompt.txt) |
-| `ConfigAssistantAgent` (chat do assistente de configuração, chamado em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | [systemPrompt :31](../agents/ConfigAssistantAgent.js#L31) |
-| `EnunciadoCoherenceAgent` (avalia adequação do enunciado, chamado em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | [systemPrompt :40](../agents/EnunciadoCoherenceAgent.js#L40) |
-| Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [server.js — initOrResumeSession / validateResources / rebuildSession](../server.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `document_map` salvo no `runtime_state_json` |
+| `INTERVIEWER_ADAPT_INSTRUCTIONS` (botão "Adaptar ao enunciado") | [routes/work.js](../routes/work.js) | string literal usada como `instructions` na chamada da Responses API |
+| Base TA (carregada por `loadSystemPrompt`) | [lib/config.js — loadSystemPrompt](../lib/config.js) | [config/system_prompt.txt](../config/system_prompt.txt) |
+| `ConfigAssistantAgent` (chat do assistente de configuração, em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | preâmbulo + `systemPromptBody` |
+| `EnunciadoCoherenceAgent` (avalia adequação do enunciado, em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | preâmbulo + `systemPromptBody` |
+| Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [lib/sessionLifecycle.js — initOrResumeSession / validateResources / rebuildSession](../lib/sessionLifecycle.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `work_analysis` (e `interview_plan`) salvos no `runtime_state_json` |
 
 ## Configuração do trabalho (página do professor)
 
-Fluxo independente do ciclo `/chat` do aluno. O professor abre `/w/:workToken`,
-edita os campos manualmente E/OU consulta um assistente conversacional que
-sugere personas, explica metodologia e despacha avaliação de coerência do
-enunciado. O assistente NUNCA salva — só propõe; o professor aplica via UI.
+Fluxo independente do ciclo `/chat` do aluno — não foi tocado pela reforma do
+super-orquestrador. O professor abre `/w/:workToken`, edita os campos
+manualmente E/OU consulta um assistente conversacional que sugere personas,
+explica metodologia e despacha avaliação de coerência do enunciado. O
+assistente NUNCA salva — só propõe; o professor aplica via UI.
 
 ```mermaid
 flowchart LR
@@ -185,18 +150,15 @@ flowchart LR
   class ActExplain,ActPersona,ActYaml,ActCheck,OutCached,OutFresh out
   class ProfUI entry
 
-  click ProfUI "vscode://file/c:/Users/glads/src/super-ta/static/professor.html" "Abre a página do professor"
-  click ChatHandler "vscode://file/c:/Users/glads/src/super-ta/server.js" "Abre /config-chat handler"
-  click CoherenceHandler "vscode://file/c:/Users/glads/src/super-ta/server.js" "Abre /enunciado/coherence handler"
-  click ConfigAgent "vscode://file/c:/Users/glads/src/super-ta/agents/ConfigAssistantAgent.js:31" "Abre o systemPrompt do ConfigAssistantAgent"
-  click CoherenceAgent "vscode://file/c:/Users/glads/src/super-ta/agents/EnunciadoCoherenceAgent.js:40" "Abre o systemPrompt do EnunciadoCoherenceAgent"
+  click ConfigAgent "vscode://file/c:/Users/glads/src/super-ta/agents/ConfigAssistantAgent.js" "Abre ConfigAssistantAgent"
+  click CoherenceAgent "vscode://file/c:/Users/glads/src/super-ta/agents/EnunciadoCoherenceAgent.js" "Abre EnunciadoCoherenceAgent"
 ```
 
 Características:
 
 - **Sem persistência de chat**: histórico vive só na aba do navegador; cada turno o cliente reenvia o histórico inteiro (sem Conversations API, ver CLAUDE.md).
 - **Cache de coerência**: `works.enunciado_coherence_json` guarda o último relatório do `EnunciadoCoherenceAgent`. É invalidado automaticamente quando o PDF do enunciado é substituído (`POST /enunciado` chama `db.clearCoherenceCache`).
-- **Estado injetado no system prompt**: o `ConfigAssistantAgent` recebe um `state_block` com nome do trabalho, presença do PDF, último diagnóstico de coerência e identidade do template salvo. Construído por `buildConfigStateBlock` em [server.js](../server.js).
+- **Estado injetado no system prompt**: o `ConfigAssistantAgent` recebe um `state_block` com nome do trabalho, presença do PDF, último diagnóstico de coerência e identidade do template salvo.
 - **Validação rígida das ações**: ações com filename de persona inválido, YAML vazio ou `based_on` desconhecido são rejeitadas no agente antes de chegarem à UI.
 
 ## Índice completo de prompts
@@ -205,24 +167,21 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
 
 1. **Templates `.txt`** ([config/](../config/)):
    - [system_prompt.txt](../config/system_prompt.txt) — base TA.
-   - [interview_prompt_template.txt](../config/interview_prompt_template.txt) — renderizado pelo `PlanBuilderAgent` para gerar o plano de entrevista.
-   - [interviewer_agenda_template.txt](../config/interviewer_agenda_template.txt) — bloco de agenda compartilhado por triagem e relevância.
+   - [interview_prompt_template.txt](../config/interview_prompt_template.txt) — renderizado por `PrepBuilderAgent.buildPlan` para gerar o plano de entrevista.
+   - [interviewer_agenda_template.txt](../config/interviewer_agenda_template.txt) — bloco de agenda compartilhado por todos os agentes que operam no contexto da entrevista.
+   - [student_instructions.html](../static/student_instructions.html) — instruções mostradas ao aluno no modal "Instruções" (não vai à LLM, mas é conteúdo editável).
 2. **`systemPromptBody` + preâmbulo padronizado em classes de agente** ([agents/](../agents/)):
-    Todo agente compõe seu system prompt como `renderAgentPreamble({audience, interactionMode})` + `this.systemPromptBody`. O preâmbulo enquadra a cena (SuperTA, identidade dupla, audience, modo). Ver [lib/agentPreamble.js](../lib/agentPreamble.js).
+    Todo agente compõe seu system prompt como `renderAgentPreamble({audience, interactionMode, studentName})` + body específico. O preâmbulo enquadra a cena (SuperTA, identidade dupla, audience, modo, nome do aluno quando disponível). Ver [lib/agentPreamble.js](../lib/agentPreamble.js).
 
-   - [MapBuilderAgent.js](../agents/MapBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`
-   - [PlanBuilderAgent.js](../agents/PlanBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`, body é o template `interview_prompt_template.txt` renderizado por chamada
-   - [ScopeClarificationAgent.js](../agents/ScopeClarificationAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
-   - [OffTopicRedirectAgent.js](../agents/OffTopicRedirectAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
-   - [MetaInterventionAgent.js](../agents/MetaInterventionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`
-   - [QuestionRelevanceAgent.js](../agents/QuestionRelevanceAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`
-   - [AnswerSufficiencyAgent.js](../agents/AnswerSufficiencyAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice` (abortável via `signal`)
-   - [IntroductionAgent.js](../agents/IntroductionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice` (fase social, persona em [lib/personas.js](../lib/personas.js))
-   - [AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice` (pré-gate de áudio em [lib/audioIntelligibility.js](../lib/audioIntelligibility.js); só fraseia o pedido de repetição ou a fala de give_up — decisão é algorítmica sobre logprobs)
-   - [ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) — modelo: `fast_model`, audience: `professor_via_ui` (chat do assistente de configuração na página do professor)
-   - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado ao processo, recebe PDF via `input_file`)
-3. **Strings inline em `server.js`**:
-   - [INTERVIEWER_ADAPT_INSTRUCTIONS — linha 660](../server.js#L660) — instruções para "Adaptar ao enunciado".
+   **Conjunto ativo após a reforma do super-orquestrador:**
+   - [PrepBuilderAgent.js](../agents/PrepBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`. Duas chamadas serializadas em `/upload`: `analyzeWork` (análise do trabalho) → `buildPlan` (plano de 10 perguntas informado pela análise).
+   - [IntroductionAgent.js](../agents/IntroductionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`. Roteiro determinístico de 3 beats: `ask_name` / `present_self` / `begin`.
+   - [AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`. Pré-gate de áudio: o algoritmo em [lib/audioIntelligibility.js](../lib/audioIntelligibility.js) decide se vai gateiar (sobre logprobs do STT); o agente apenas fraseia o pedido de repetição ou a fala de give_up.
+   - [SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice`. **UMA chamada por turno** na fase `interviewing`. Devolve uma `action` no schema definido em [lib/superOrchestrator/actionSchema.js](../lib/superOrchestrator/actionSchema.js). Mantém estado entre turnos via `memory` em `runtime_state.super_orchestrator.memory`. Em modo áudio, roda com `stream: true` para sinalizar `responding` ao frontend via SSE no primeiro token de texto.
+   - [ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) — modelo: `fast_model`, audience: `professor_via_ui` (chat do assistente de configuração na página do professor).
+   - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado, recebe PDF via `input_file`).
+3. **Strings inline em `routes/`**:
+   - [INTERVIEWER_ADAPT_INSTRUCTIONS](../routes/work.js) — instruções para "Adaptar ao enunciado".
 
 ## Convenção do esquema `vscode://`
 
@@ -232,4 +191,4 @@ Formato no Windows:
 vscode://file/<drive>:/<caminho-com-barras-pra-frente>:<linha>
 ```
 
-Exemplo: `vscode://file/c:/Users/glads/src/super-ta/server.js:973`. Sem `:linha` no final, abre na linha 1.
+Exemplo: `vscode://file/c:/Users/glads/src/super-ta/routes/interview.js:474`. Sem `:linha` no final, abre na linha 1.

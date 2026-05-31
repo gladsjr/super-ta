@@ -1,7 +1,11 @@
 # TA-Assignment (SuperTA) – Production Architecture
 
 ## Overview
-SuperTA is an assignment evaluation system that conducts a structured, stateful interview with students about their submitted work. Its primary purpose is to assess authorship, understanding, and conceptual coherence, moving beyond mere textual correctness. The system integrates a code-controlled state machine for orchestration, specialized AI agents for cognitive tasks like document analysis and per-turn signals (triage, sufficiency), and manages dual-state conversations (student-facing and internal evaluation). It also employs a two-layer document understanding approach using a global DocumentMap and local RAG.
+SuperTA is an assignment evaluation system that conducts a structured, stateful interview with students about their submitted work. Its primary purpose is to assess authorship, understanding, and conceptual coherence, moving beyond mere textual correctness.
+
+Per-turn orchestration is **delegated to a single reasoning-model call** (`SuperOrchestratorAgent`) that receives full context (interviewer agenda, pre-generated work analysis, interview plan, the agent's own carried `memory`, conversation history, and the latest student message) and decides the next action by returning a JSON conforming to a fixed action schema. The code is a dispatcher around that decision, with hard guardrails (max turns cap, early-finalize blocking).
+
+This replaced the earlier architecture of triage×3 + sufficiency + relevance running in parallel on every turn. See `docs/architecture.md` and `docs/super-orchestrator-plan.md` for the rationale and the action schema.
 
 ## User Preferences
 Not specified.
@@ -9,38 +13,55 @@ Not specified.
 ## System Architecture
 
 ### Architectural Principles
-The system adheres to core rules: code orchestrates while AI agents analyze and propose; conversation history is separate from operational state; critical components fail fast without architectural fallbacks; runtime configuration has a single source of truth (`config/policy.yaml`); global understanding is achieved via a DocumentMap; local verification uses RAG (Vector Store); and internal evaluation is never exposed to the student.
+The system adheres to core rules: critical components fail fast without architectural fallbacks; runtime configuration has a single source of truth (`config/policy.yaml`); per-turn cognitive load is concentrated in one reasoning call (`SuperOrchestratorAgent`) with hard code-side guardrails around it; pre-interview prep (work analysis + plan) is generated upfront once; local verification of the student's claims uses RAG (Vector Store) accessible to the super-orchestrator via `file_search`; internal evaluation is never exposed to the student.
 
 ### Project Structure
-- `server.js`: Orchestration logic and agents.
-- `auth.js`: Authentication.
-- `static/index.html`: Frontend chat interface.
-- `config/`: Contains `system_prompt.txt`, `policy.yaml`, `pricing.yaml`, `voices.js`, and the `interview_prompt_template.txt` / `interviewer_agenda_template.txt` templates.
-- `data/submissions/`: Stores uploaded student files.
+- `routes/interview.js`: Student-facing endpoints (`/start`, `/upload`, `/chat`, `/audio`, `/finalize`, `/intro/advance`). The `/chat` handler dispatches by phase: `intro` → `IntroductionAgent` (3 beats); `interviewing` → `SuperOrchestratorAgent` (one reasoning call per turn).
+- `routes/work.js`: Professor-facing endpoints (`/info`, `/conversation`, `/interviewer`, `/config-chat`, `/enunciado/coherence`, submission management).
+- `routes/admin.js`: Admin endpoints (works, users).
+- `agents/`: All agent classes. Per the super-orchestrator reform: `PrepBuilderAgent` (one-shot on `/upload`, analyze + build plan), `IntroductionAgent` (3 beats), `AudioIntelligibilityAgent` (pre-gate phrasing only), `SuperOrchestratorAgent` (per-turn orchestration in `interviewing`), `ConfigAssistantAgent` + `EnunciadoCoherenceAgent` (professor-facing).
+- `lib/`: Shared infrastructure (db, sessionLifecycle, sessionState, conversationUtils, audio, billing, middleware, agentPreamble, interviewPrompt, audioIntelligibility, superOrchestrator/actionSchema).
+- `config/`: `system_prompt.txt`, `policy.yaml`, `pricing.yaml`, `voices.js`, `interview_prompt_template.txt`, `interviewer_agenda_template.txt`, `interviewers/*.yaml` (templates).
+- `static/`: Frontend HTML (`student.html`, `professor.html`, `admin.html`, `conversation.html`, `student_instructions.html`).
+- `migrations/`: SQL migrations, file-per-change (see CLAUDE.md).
 
 ### Core Runtime Concepts
 
 #### Dual Conversations
-Each session maintains two independent conversational states:
-- **Student Conversation (`conv_chat`)**: Visible to the student.
-- **Evaluator Conversation (`conv_eval`)**: Contains internal analyses, signals, and document understanding, mirroring the visible chat for auditability.
+Each session maintains two independent conversational states served by the OpenAI Conversations API:
+- **Student Conversation (`conv_chat`)**: Visible to the student. The super-orchestrator reads this via the `conversation` parameter to get the full history server-side.
+- **Evaluator Conversation (`conv_eval`)**: Audit trail of the same exchange with extra metadata (action kinds, rationale, intervention type). Visible to the professor through the conversation log view.
 
 #### Document Handling Strategy
-Student documents are processed via:
-- **Global View – DocumentMap**: Generated once by `MapBuilderAgent` from the full document (via `input_file` to Responses API). Provides a structured summary (thesis, structure, methodology, key claims, weak points) as compressed global context for downstream agents.
-- **Local View – Vector Store (RAG)**: Full document indexed via OpenAI Vector Store, exposed as a `file_search` tool for per-turn agents (`AnswerSufficiencyAgent`, `ScopeClarificationAgent`, `OffTopicRedirectAgent`, `QuestionRelevanceAgent`) for evidence gathering grounded in the document.
+Student documents and the assignment statement are processed via:
+- **Global View – `work_analysis`**: Generated once on `/upload` by `PrepBuilderAgent.analyzeWork` from both PDFs (via `input_file` to Responses API). Provides a structured executive summary, assessment (strengths/weaknesses/critical_points/authorship_doubts) and `evidence_index` (anchors to sections/figures worth checking). Persists in `runtime_state.super_orchestrator.work_analysis`.
+- **Plan**: Built next by `PrepBuilderAgent.buildPlan`, informed by `work_analysis`. Same shape as the legacy interview plan (10 questions with associated YAML items). Persists in `runtime_state.interview_plan`.
+- **Local View – Vector Store (RAG)**: BOTH PDFs (student + assignment) are indexed and exposed as `file_search` to the `SuperOrchestratorAgent` for per-turn evidence gathering. Generalized from the legacy single-file vector store.
 
 #### Turn Dynamics
-The system follows an invariant loop: Student responds → triage agents (scope/off-topic/meta) and the sufficiency agent run in parallel → if any triage wins, the answer is intercepted and sufficiency is aborted; otherwise sufficiency decides between `accept` (advance to next plan question) and `follow_up` (clarifying intervention) → SuperTA asks the next question. Evaluation only runs after student input.
+On every student turn in the `interviewing` phase:
+1. STT (audio mode only) transcribes the message.
+2. Pre-gate of intelligibility (algorithm over STT logprobs; `AudioIntelligibilityAgent` only phrases the repeat/give-up message) may intercept.
+3. Student message is pushed to `conv_chat` and `conv_eval`.
+4. `SuperOrchestratorAgent` is called with: interviewer agenda (rendered YAML), `work_analysis`, `interview_plan`, the agent's own `memory` carried from the previous turn, the conversation history (via the OpenAI `conversation` parameter), and the latest student message. Tools: `file_search` over the vector store. The agent returns a JSON with `rationale`, `action.kind` (one of `ask` / `follow_up` / `meta_modal` / `hint` / `finalize` / `ask_repeat`) and an updated `memory`.
+5. The dispatcher in `routes/interview.js` translates `action.kind` into behavior (push to conv, persist, attach TTS audio, push intervention to current turn, transition phase, etc.).
+6. Hard guardrails: `SUPER_ORQ_MAX_TURNS=30` forces finalize; `SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE=5` blocks early finalize (except when `finalize_reason="student_disengaged"`); schema-invalid output and agent failure both fall back to `ask_repeat`.
+7. In audio mode, the response is streamed as SSE (`thinking` → `responding` on first model output text → `result`) so the frontend can flip the "ouvindo" label to "respondendo" at the real moment the agent starts producing text.
 
 #### Session Persistence
-Each turn writes a single atomic `UPDATE` to `submissions` covering both `conversation_json` (the professor-facing log) and the runtime state needed to resume the interview after a server restart: `current_phase`, `question_index`, `frozen_interaction_mode`, `frozen_voice`, and `runtime_state_json` (a JSONB blob holding the OpenAI resource IDs, interview plan and document map). On `POST /s/:t/start` for a submission whose PDF is already in the DB, the server rehydrates the session, validates the four OpenAI resources (vector store, file, two conversations) in parallel, and reconstructs them from the student PDF if any have been deleted; the student sees a "Sessão recomposta" banner only in this rebuild path (text mode). `POST /s/:t/upload` rejects with 409 once an interview is in flight — to restart, the professor generates a new submission. `runtime_state_json IS NULL` is the canonical "no in-flight attempt" marker.
+Each turn writes a single atomic `UPDATE` to `submissions` covering both `conversation_json` (the professor-facing log) and the runtime state needed to resume the interview after a server restart: `current_phase`, `question_index`, `frozen_interaction_mode`, `frozen_voice`, and `runtime_state_json` (a JSONB blob holding the OpenAI resource IDs, interview plan, `work_analysis`, the super-orchestrator's `memory`, intro step, captured `studentName`, etc.). On `POST /s/:t/start` for a submission whose PDF is already in the DB, the server rehydrates the session, validates the four OpenAI resources (vector store, files, two conversations) in parallel, and reconstructs them from the stored PDFs if any have been deleted; the student sees a "Sessão recomposta" banner only in this rebuild path (text mode). `POST /s/:t/upload` rejects with 409 once an interview is in flight — to restart, the professor generates a new submission. `runtime_state_json IS NULL` is the canonical "no in-flight attempt" marker.
 
 ### Cognitive Agents
-All agents are classes under `agents/` and utilize the Responses API, designed to fail fast. The active set: `MapBuilderAgent` and `PlanBuilderAgent` (one-shot on `/upload`), the triage trio (`ScopeClarificationAgent`, `OffTopicRedirectAgent`, `MetaInterventionAgent`) and `AnswerSufficiencyAgent` running in parallel on each student turn, plus `IntroductionAgent`, `QuestionRelevanceAgent`, `ConfigAssistantAgent` and `EnunciadoCoherenceAgent` for the professor-facing flows.
+All agents are classes under `agents/` and use the Responses API, designed to fail fast. The active set:
+- **`PrepBuilderAgent`** — one-shot on `/upload`, in two serialized calls (`analyzeWork` then `buildPlan`).
+- **`IntroductionAgent`** — three deterministic beats for the social opening (`ask_name`, `present_self`, `begin`).
+- **`AudioIntelligibilityAgent`** — fraseates the audio pre-gate's repeat-or-give-up message (decision is algorithmic, in `lib/audioIntelligibility.js`).
+- **`SuperOrchestratorAgent`** — one reasoning call per turn in `interviewing`. Replaces the entire legacy per-turn agent fleet.
+- **`ConfigAssistantAgent`** — professor-facing config chat (`/config-chat`).
+- **`EnunciadoCoherenceAgent`** — professor-facing assignment-statement evaluator (`/enunciado/coherence`).
 
 ### Orchestration Model
-The state machine resides in `server.js`. The orchestrator controls phase transitions, plan progression, per-turn agent invocation, and the public dialogue. AI agents provide signals and candidates but never control flow.
+The state machine resides in `routes/interview.js`. Code controls phase transitions and code-side guardrails (cap, early-finalize block, schema validation, fallback). Inside the `interviewing` phase, the **super-orchestrator decides everything else** — including when to ask, which question (planned or spontaneous), when to follow up, when to redirect a meta-question to the modal, when to show a hint, and when to finalize. The action JSON it returns is the contract; the dispatcher only does the I/O around it.
 
 ### Development Principles
 - **When to Use Agents**: For reasoning over documents, structured outputs with validation, and complex cognitive tasks. Never for orchestration or simple text generation.
@@ -51,12 +72,13 @@ The state machine resides in `server.js`. The orchestrator controls phase transi
 
 ### OpenAI Integration
 The system integrates with OpenAI using the following APIs:
-- **Files API**: For uploading student documents.
-- **Vector Stores API**: For indexing documents for RAG and `file_search`.
-- **Conversations API**: To persist `conv_chat` and `conv_eval` server-side.
-- **Responses API**: For all generation tasks, including DocumentMap creation, per-turn agent signals, and next-question generation.
-- **Audio Transcriptions API** (STT): Converts student voice messages to text when the work is configured for audio mode.
-- **Audio Speech API** (TTS): Generates the interviewer's voice response when the work is configured for audio mode.
+- **Files API**: For uploading both the student and the assignment PDFs.
+- **Vector Stores API**: Single vector store per session indexing BOTH the student and the assignment PDFs, exposed as `file_search` to `SuperOrchestratorAgent` and `PrepBuilderAgent`.
+- **Conversations API**: To persist `conv_chat` and `conv_eval` server-side. The super-orchestrator reads `conv_chat` via the `conversation` request parameter to get full history without re-sending it. Server-side compaction (`context_management: [{type: "compaction", compact_threshold: 100000}]`) is passed in the request body so long interviews are compacted automatically.
+- **Responses API**: For all generation tasks. The super-orchestrator request also uses `stream: true` when called from audio-mode `/chat`, so the server can emit a `responding` SSE event at the first `response.output_text.delta` (used by the student frontend to flip the "ouvindo" label to "respondendo" at the real moment).
+- **Audio Transcriptions API** (STT): Converts student voice messages to text when the work is configured for audio mode. The pre-gate of intelligibility requests `include: ["logprobs"]` so it can detect ininteligible stretches algorithmically.
+- **Audio Speech API** (TTS): Generates the interviewer's voice response when the work is configured for audio mode. Returns a single audio blob (not streamed in this codebase).
+
 The system uses `openai@^6.17.0` and does **not** use the Assistants API.
 
 ### Interaction Modes (text vs audio)
@@ -65,7 +87,7 @@ Each work is configured by the professor as either `text` (default) or `audio`. 
 **Critical principle: analysis is always done on text.** Audio is the "last-mile" interface with the student only:
 - Inbound (student): voice → STT → text → identical pipeline as text mode.
 - Outbound (interviewer): LLM-generated text → TTS → audio served to the student.
-- All agents, document map, vector store and conversation log operate on text exclusively.
+- All agents, work analysis, vector store and conversation log operate on text exclusively.
 
 Audio is not persisted in the database. TTS output is cached per-session in memory (LRU of size 10) and served via `GET /s/:submissionToken/audio/:turnId`. On re-entry to an interview in audio mode, the student no longer sees the transcribed history — only the last interviewer audio is presented (reused from the in-memory cache when possible; regenerated via TTS once when the buffer is gone after a restart or LRU evict). This is intentional: visible transcripts make it trivial for the student to paste the question into an external LLM. Text mode is unaffected.
 
