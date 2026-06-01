@@ -10,6 +10,10 @@
 // schema é gerido pelo fluxo de Publish do Replit.
 
 import "dotenv/config";
+// Sentinel lida por lib/migrations.js. Setada antes do import porque o guard
+// das funções checa no momento da chamada — não muda nada ler antes, mas
+// deixa a intenção explícita.
+process.env.MIGRATIONS_CLI = "1";
 import { runMigrations, listMigrationStatus } from "../lib/migrations.js";
 import { pool } from "../auth.js";
 
