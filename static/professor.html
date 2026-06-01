@@ -3,8 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>SuperTA — Professor</title>
+<title>ORATIA — Professor</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
 <style>
   .meta-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-sm); }
   .sub-form { display: grid; grid-template-columns: 1fr 100px auto; gap: var(--sp-3); align-items: end; }
@@ -44,7 +46,7 @@
 
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="/"><span class="brand-mark">ST</span> SuperTA</a>
+    <a class="brand" href="/"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""> ORATIA</a>
     <span class="topbar-context" id="tb-context">Painel do professor</span>
   </div>
 </header>
@@ -259,7 +261,7 @@
   <div class="dlg-body">
     <h3>Orientações para o enunciado do trabalho</h3>
     <div style="line-height: 1.55">
-      <p>Envie aqui o PDF do enunciado que os alunos receberam. Esse documento é a referência principal usada pelo SuperTA para entender o que foi pedido, quais são os critérios de avaliação e quais conceitos o aluno precisa demonstrar dominar durante a entrevista.</p>
+      <p>Envie aqui o PDF do enunciado que os alunos receberam. Esse documento é a referência principal usada pelo ORATIA para entender o que foi pedido, quais são os critérios de avaliação e quais conceitos o aluno precisa demonstrar dominar durante a entrevista.</p>
       <p>Quanto mais claro e específico for o enunciado, melhor será a entrevista. Tente garantir que o documento descreva os objetivos do trabalho, o produto esperado (relatório, código, apresentação etc.), os critérios de avaliação e quaisquer restrições importantes. Se o enunciado original for vago, considere complementá-lo com uma rubrica ou um pequeno guia antes de enviar.</p>
       <p>Depois de carregar o PDF, você poderá clicar em <strong>Avaliar Enunciado</strong> para receber um diagnóstico automático sobre pontos que podem confundir o aluno ou dificultar uma entrevista produtiva. Use esse retorno para revisar o enunciado antes de gerar os tokens dos alunos.</p>
     </div>
@@ -925,7 +927,7 @@ function openDrawer() {
   document.getElementById('assistant-drawer').setAttribute('aria-hidden', 'false');
   document.getElementById('assistant-backdrop').classList.remove('hidden');
   if (chatHistory.length === 0) {
-    appendChatBubble('assistant', 'Olá! Posso explicar a metodologia do SuperTA, avaliar se seu enunciado se encaixa bem no processo de entrevista, ou recomendar uma persona de entrevistador. O que você quer fazer?');
+    appendChatBubble('assistant', 'Olá! Posso explicar a metodologia do ORATIA, avaliar se seu enunciado se encaixa bem no processo de entrevista, ou recomendar uma persona de entrevistador. O que você quer fazer?');
   }
   document.getElementById('chat-input').focus();
 }

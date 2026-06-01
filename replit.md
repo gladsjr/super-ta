@@ -1,7 +1,7 @@
-# TA-Assignment (SuperTA) – Production Architecture
+# ORATIA – Production Architecture
 
 ## Overview
-SuperTA is an assignment evaluation system that conducts a structured, stateful interview with students about their submitted work. Its primary purpose is to assess authorship, understanding, and conceptual coherence, moving beyond mere textual correctness.
+ORATIA is an assignment evaluation system that conducts a structured, stateful interview with students about their submitted work. Its primary purpose is to assess authorship, understanding, and conceptual coherence, moving beyond mere textual correctness.
 
 Per-turn orchestration is **delegated to a single reasoning-model call** (`SuperOrchestratorAgent`) that receives full context (interviewer agenda, pre-generated work analysis, interview plan, the agent's own carried `memory`, conversation history, and the latest student message) and decides the next action by returning a JSON conforming to a fixed action schema. The code is a dispatcher around that decision, with hard guardrails (max turns cap, early-finalize blocking).
 

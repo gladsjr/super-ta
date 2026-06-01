@@ -1,10 +1,11 @@
-/* SuperTA — shared visual system.
+/* ORATIA — shared visual system.
  * Tokens, base styles and component primitives. Each HTML page links this
  * file first and then adds only page-specific overrides.
+ * Palette derived from the brand mark: navy (main), gold + teal (accents).
  */
 
 :root {
-  /* Color — neutral academic palette: slate ink + institutional navy. */
+  /* Color — slate ink + ORATIA navy. */
   --ink-900: #0f1b2d;
   --ink-700: #2c3e55;
   --ink-600: #3f5570;
@@ -19,12 +20,28 @@
   --bg-muted:  #f7f9fb;
   --bg-raised: #ffffff;
 
-  --accent-900: #112a4d;
-  --accent-700: #1e3a5f;
-  --accent-600: #2a4d7d;
-  --accent-500: #3a6090;
+  /* Navy from the ORATIA wordmark. --accent-700 é o tom canônico da marca. */
+  --accent-900: #0e2447;
+  --accent-700: #1d2e57;
+  --accent-600: #2a4078;
+  --accent-500: #3a5a93;
   --accent-400: #5a7fab;
   --accent-50:  #eaf0f7;
+
+  /* Gold (livro + dots na logo). Acento quente — usar com parcimônia em
+     CTAs secundários, divisórias, ornamentos. NÃO usar como texto sobre
+     fundo branco (contraste insuficiente para corpo). */
+  --gold-700: #8c6f2a;
+  --gold-500: #b8964f;
+  --gold-300: #d4b779;
+  --gold-50:  #faf3e2;
+
+  /* Teal (galhos do circuito na logo). Acento frio — destaque de "AI" /
+     features avançadas, badges, links secundários. */
+  --teal-700: #2a7382;
+  --teal-500: #3a8a9e;
+  --teal-300: #7cbecc;
+  --teal-50:  #e6f3f6;
 
   --success-700: #1f6c3b;
   --success-50:  #e7f4eb;
@@ -151,21 +168,16 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
   font-weight: 600;
   font-size: var(--fs-md);
   color: var(--ink-900);
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
 }
 .brand:hover { color: var(--accent-700); text-decoration: none; }
+/* Ícone da marca: o PNG do logo (column + book + circuit em bubble). Mantém
+   altura fixa de 32px, largura auto via aspect-ratio do ícone (~3:4). */
 .brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: var(--accent-700);
-  color: #fff;
-  font-weight: 700;
-  font-size: 0.8rem;
-  letter-spacing: 0.04em;
-  border-radius: var(--r-sm);
+  display: inline-block;
+  height: 32px;
+  width: auto;
+  vertical-align: middle;
 }
 .topbar-context {
   color: var(--ink-500);

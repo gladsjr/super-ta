@@ -6,7 +6,7 @@ import { renderAgentPreamble } from "../lib/agentPreamble.js";
  * EnunciadoCoherenceAgent
  *
  * Avalia se o ENUNCIADO de um trabalho (PDF) está bem encaixado no processo
- * de entrevista do SuperTA. NÃO avalia qualidade pedagógica, didática ou
+ * de entrevista do ORATIA. NÃO avalia qualidade pedagógica, didática ou
  * técnica do trabalho — apenas se o enunciado fornece base suficiente para
  * uma arguição produtiva sobre autoria e compreensão.
  *
@@ -42,10 +42,10 @@ export class EnunciadoCoherenceAgent {
         // System prompt final = preâmbulo padronizado (lib/agentPreamble.js)
         // + este body. Audience professor_via_ui — o relatório é lido pelo
         // professor na página de configuração do trabalho.
-        this.systemPromptBody = `Sua função específica: avaliar se o ENUNCIADO de um trabalho (PDF anexado) está bem encaixado no processo de entrevista do SuperTA. Você NÃO avalia qualidade pedagógica, dificuldade, didática ou correção do trabalho — apenas se o enunciado fornece base suficiente para que o aluno se prepare e o entrevistador automatizado conduza uma arguição produtiva.
+        this.systemPromptBody = `Sua função específica: avaliar se o ENUNCIADO de um trabalho (PDF anexado) está bem encaixado no processo de entrevista do ORATIA. Você NÃO avalia qualidade pedagógica, dificuldade, didática ou correção do trabalho — apenas se o enunciado fornece base suficiente para que o aluno se prepare e o entrevistador automatizado conduza uma arguição produtiva.
 
 PREMISSA CENTRAL DO SUPERTA — leia com atenção:
-O entrevistador do SuperTA não é um banca acadêmica genérica. Ele assume uma POSIÇÃO DE NEGÓCIO (cliente, investidor, gestor de contratação, sponsor executivo, jornalista, etc.) e arguiu o aluno a partir desse papel. O que se espera do aluno é (i) sustentar o que está no trabalho com argumentos próprios e (ii) preparar-se para o perfil de negócio do entrevistador. Por isso, o que precisa estar claro no enunciado é, antes de tudo, o CONTEXTO DE NEGÓCIO em que o trabalho será defendido. Critérios de avaliação detalhados e perfil completo do entrevistador são bem-vindos, mas OPCIONAIS — o aluno pode (e deve) inferi-los do contexto.
+O entrevistador do ORATIA não é um banca acadêmica genérica. Ele assume uma POSIÇÃO DE NEGÓCIO (cliente, investidor, gestor de contratação, sponsor executivo, jornalista, etc.) e arguiu o aluno a partir desse papel. O que se espera do aluno é (i) sustentar o que está no trabalho com argumentos próprios e (ii) preparar-se para o perfil de negócio do entrevistador. Por isso, o que precisa estar claro no enunciado é, antes de tudo, o CONTEXTO DE NEGÓCIO em que o trabalho será defendido. Critérios de avaliação detalhados e perfil completo do entrevistador são bem-vindos, mas OPCIONAIS — o aluno pode (e deve) inferi-los do contexto.
 
 CRITÉRIOS — listados todos em findings, mas com pesos diferentes:
 
