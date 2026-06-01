@@ -30,6 +30,11 @@ Mecânica:
 - Onde rodam (só em dev): no Replit o comando do workflow é `npm run db:migrate && node server.js`; localmente o `predev` roda `db:up && db:migrate`. O `server.js` NÃO roda migrations.
 - Produção: o boot não toca no schema. O fluxo de **Publish** do Replit faz o diff dev→prod e aplica em prod. As migrations seguem sendo a fonte versionada do schema (histórico em git) e o jeito de evoluir o dev.
 
+Por que migrations NÃO rodam no boot (decisão, não acidente — não reverta sem ler):
+- Antes, `server.js` rodava `runMigrations()` no boot. O **Publish** do Replit, porém, aplica o diff de schema dev→prod **sem** registrar nada na `schema_migrations` do prod. Resultado: o boot do prod tentava reaplicar uma migration que o Publish já tinha materializado e quebrava (ex.: `column already exists`), travando o boot a cada reinício até alguém corrigir o ledger na mão.
+- Correção estrutural: o boot nunca roda DDL. Dev evolui via `npm run db:migrate`; prod é materializado pelo Publish. A `schema_migrations` é o ledger do **dev**; em prod ela existe mas ninguém a lê no boot.
+- Consequência operacional: uma migration precisa estar aplicada/testada no dev **antes** do Publish, senão o diff não a leva pro prod.
+
 Workflow para qualquer mudança de schema (aditiva ou destrutiva):
 1. Olhar último número em `migrations/`. Criar `migrations/NNN+1_descricao.sql`.
 2. Escrever SQL direto, SEM `IF NOT EXISTS` ou guards de idempotência — cada migration roda exatamente uma vez por banco.
