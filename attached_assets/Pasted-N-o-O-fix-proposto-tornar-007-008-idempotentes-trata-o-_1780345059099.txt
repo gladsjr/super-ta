@@ -1,0 +1,35 @@
+Não. O fix proposto (tornar 007/008 idempotentes) trata o sintoma e perpetua a causa errada.
+
+Causa real: a produção do Replit foi bootstrapada a partir de um schema.sql legado que já tinha as colunas que 007/008 tentariam adicionar. Esse é um artefato histórico de um único ambiente, não uma propriedade do sistema. Ambiente novo nasce de 001_init.sql, que é explicitamente idempotente PORQUE pode rodar contra esse legado (IF NOT EXISTS em tudo, intencional). Daí pra frente — 002+ — são deltas puros e funcionam contra qualquer banco vindo de 001 limpo.
+
+A fronteira "001 = snapshot idempotente, 002+ = deltas puros" existe por design (documentado no CLAUDE.md). Quebrá-la em 005/006/007/008 (uma cada vez que aparece um conflito) é o que vai gerar problema recorrente — não o contrário.
+
+Quatro objeções concretas ao ADD COLUMN IF NOT EXISTS:
+
+Esconde drift de schema. ADD COLUMN IF NOT EXISTS interviewer_name TEXT "aplica" com sucesso mesmo se a coluna já existir com tipo, nullability ou default DIFERENTES. A migration registra OK no schema_migrations, mas dois ambientes ficam com schemas diferentes. Isso é o oposto do que migrations servem pra garantir.
+
+Constraints não têm IF NOT EXISTS em Postgres. O agente está propondo blocos DO $$ BEGIN IF NOT EXISTS ... END $$ em volta de cada ADD CONSTRAINT. Cada migration vira 4-5x mais código, ilegível, com mais superfície de bug.
+
+Perde-se o sinal "algo está fora do contrato". Migration que falha = aviso explícito de divergência entre o livro-caixa e a realidade do banco. Idempotente em tudo = aceitação silenciosa do desconhecido. O incidente atual foi detectado JUSTAMENTE porque 007 falhou. Se ela tivesse sido idempotente desde o início, teríamos schema drift entre dev e prod sem ninguém saber.
+
+Cada exceção fragiliza a regra. "Só esse caso" foi o argumento para 005 e 006. Agora é para 007 e 008. A regra existe por uma razão; cada concessão a aproxima de irrelevante.
+
+O que já fizemos resolve permanentemente este incidente. Os dois INSERT em schema_migrations (007 e 008) sincronizaram o livro-caixa com a realidade. Próximo boot pula 007/008 (porque registradas) e segue adiante. Não há recorrência possível DESTE problema neste banco.
+
+O que aconteceria em um ambiente novo?
+
+Banco virgem → roda 001 → cria tudo, inclusive interviewer_name etc.
+
+Espera — 001 NÃO cria interviewer_name. Então banco virgem rodaria 001 (cria as tabelas originais), 002-006 (deltas), 007 (cria interviewer_name, sucesso), 008 (cria is_active, sucesso). Funciona perfeitamente, sem precisar de idempotência em 002+.
+
+O ÚNICO ambiente que tem o problema é prod do Replit, justamente por causa do bootstrap legado. Já está corrigido. Não há razão pra mudar o código.
+
+Se você acha que vale endurecer o sistema contra este tipo de recorrência, há caminhos mais corretos do que tornar todas as migrations idempotentes:
+
+Adicionar à pre-flight do runner uma verificação que, antes de aplicar uma migration nova, compara o estado do schema com o esperado e avisa se já houver drift.
+Adicionar um modo de auditoria que rode a Etapa 1 (information_schema + pg_constraint) e reporte divergências antes do deploy.
+Mas isso é refactor do sistema de migrations, não patch nas migrations existentes.
+
+Resumindo: o pedido ADD COLUMN IF NOT EXISTS em 007/008 é negado. O incidente foi resolvido via sincronização do schema_migrations, que é o procedimento explicitamente previsto no CLAUDE.md para "bug em migration que falhou" (exceção: "editar OK se não foi aplicada em lugar nenhum" — mas neste caso elas aplicaram em dev local, então editar é vedado).
+
+Sobre o EADDRINUSE no app local: isso é só processo zumbi na porta 5000. Pode reiniciar — não tem relação com migration.
