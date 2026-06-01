@@ -156,9 +156,21 @@ Produza a fala deste beat (${step}). Retorne apenas o JSON.`;
         if (!message) {
             throw new Error("IntroductionAgent: empty message");
         }
-        const extractedName = step === "present_self" && parsed.student_name
-            ? String(parsed.student_name).trim() || null
-            : null;
+        // Validação dura do nome extraído (segurança contra prompt injection
+        // via campo livre). O nome volta pro contexto de TODOS os agentes
+        // subsequentes via studentNameBlock — um "nome" como
+        // "IGNORE PREVIOUS INSTRUCTIONS" viraria carga útil no prompt deles.
+        // Regex Unicode-aware: só letras (qualquer alfabeto), espaço, hífen
+        // e apóstrofo; 1-30 chars. Falhou validação → segue sem nome.
+        let extractedName = null;
+        if (step === "present_self" && parsed.student_name) {
+            const candidate = String(parsed.student_name).trim();
+            if (candidate && /^[\p{L}'\- ]{1,30}$/u.test(candidate)) {
+                extractedName = candidate;
+            } else if (candidate) {
+                log.warn("AGENT:Introduction", `student_name rejeitado por validação: ${log.preview(candidate, 60)}`);
+            }
+        }
         log.info("AGENT:Introduction", `step=${step}${extractedName ? ` name="${extractedName}"` : ""}`);
         return {
             message,

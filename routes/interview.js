@@ -59,6 +59,11 @@ const SUPER_ORQ_MAX_TURNS = 30;
 // não pode finalizar (exceto se finalize_reason="student_disengaged" — aluno
 // explicitamente desistindo).
 const SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE = 5;
+// Tamanho máximo da mensagem do aluno por turno (texto ou transcrição de
+// áudio). Defesa contra prompt-injection que tenta confundir o reasoning
+// model com payloads longos. 4000 chars cobre ~600-800 palavras —
+// muito além do que cabe num turno legítimo de entrevista oral.
+const MAX_STUDENT_MESSAGE_CHARS = 4000;
 
 // ============================================================================
 // Pré-gate de inteligibilidade no modo áudio.
@@ -607,6 +612,18 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         message = (req.body?.message || "").toString();
     }
     if (!message) return res.status(400).json({ error: "empty message" });
+    // Cap de tamanho (defesa contra injection por mensagem longa). Áudio raramente
+    // estoura — STT de minutos de fala fica bem abaixo de 4000 chars. Texto pode
+    // estourar com colagem. Erro explícito pro frontend tratar.
+    if (message.length > MAX_STUDENT_MESSAGE_CHARS) {
+        log.warn("CHAT", `mensagem excede cap (${message.length} > ${MAX_STUDENT_MESSAGE_CHARS}) submission=${token}`);
+        return res.status(413).json({
+            error: "message_too_long",
+            detail: `A mensagem excedeu o limite de ${MAX_STUDENT_MESSAGE_CHARS} caracteres. Encurte e tente de novo.`,
+            limit: MAX_STUDENT_MESSAGE_CHARS,
+            length: message.length,
+        });
+    }
 
     const persist = () => persistConversationLog(sess);
 
