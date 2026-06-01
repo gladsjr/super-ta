@@ -1,5 +1,9 @@
 // Bootstrap do servidor: middlewares globais, montagem dos routers, e o
-// app.listen() que aplica migrations + seeds antes de aceitar tráfego.
+// app.listen() que roda os seeds antes de aceitar tráfego.
+//
+// Migrations NÃO rodam aqui (ver "Schema do banco" no CLAUDE.md): em dev elas
+// são aplicadas pelo `npm run db:migrate` (no workflow do Replit e no predev
+// local); em produção o schema é gerido pelo fluxo de Publish do Replit.
 //
 // Toda lógica de rota vive em routes/*.js. Toda lógica de domínio vive em
 // lib/*.js. Este arquivo é só o ponto de entrada.
@@ -17,7 +21,6 @@ import {
     logoutHandler,
     meHandler,
 } from "./auth.js";
-import { runMigrations } from "./lib/migrations.js";
 // O lib/config.js valida policy.yaml + pricing.yaml ao ser carregado.
 // Importar PORT antes de tudo garante fail-fast no boot.
 import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
@@ -53,10 +56,6 @@ app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {
         log.warn("BOOT", "OPENAI_API_KEY ausente no .env");
     }
-    // Aplica migrations pendentes antes de qualquer coisa. Fail-fast: se
-    // qualquer migration falha, o servidor não sobe. Ver "Schema do banco —
-    // diretriz permanente" em CLAUDE.md.
-    await runMigrations();
     try {
         await seedInitialUsers();
     } catch (err) {

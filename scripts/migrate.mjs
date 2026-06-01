@@ -4,9 +4,10 @@
 //   npm run db:migrate          → aplica pendentes
 //   npm run db:migrate -- status → lista status sem aplicar nada
 //
-// Útil para CI, deploys com etapa de migração separada do boot, ou
-// inspeção manual. O servidor também roda migrations no boot, então
-// este script é opcional no fluxo normal de dev.
+// Este é o ÚNICO ponto que aplica migrations — o servidor (server.js) NÃO
+// migra no boot. Em dev roda automaticamente (workflow do Replit
+// `npm run db:migrate && node server.js` e `predev` local); em produção o
+// schema é gerido pelo fluxo de Publish do Replit.
 
 import "dotenv/config";
 import { runMigrations, listMigrationStatus } from "../lib/migrations.js";

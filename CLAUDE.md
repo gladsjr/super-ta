@@ -24,22 +24,23 @@ Migrations file-per-change. Toda mudança de schema vai num arquivo novo em `mig
 
 Mecânica:
 - Arquivos: `migrations/NNN_descricao.sql`, NNN com zero-padding em 3 dígitos (`001`, `002`, ..., `999`). Aplicados em ordem alfabética = ordem numérica.
-- Runner: `lib/migrations.js#runMigrations()`, chamado no boot do servidor antes dos seeds. Cada arquivo roda em sua própria transação. Falha em qualquer migration = rollback dela + boot abortado.
+- Runner: `lib/migrations.js#runMigrations()`, invocado pelo CLI `scripts/migrate.mjs` — NÃO mais no boot do servidor. Cada arquivo roda em sua própria transação. Falha em qualquer migration = rollback dela + o CLI sai com código 1.
 - Tabela de controle: `schema_migrations(version, filename, applied_at)`. Criada automaticamente. Cada migration aplicada com sucesso é registrada com sua versão.
 - CLI: `npm run db:migrate` aplica pendentes; `npm run db:migrate -- status` lista status sem aplicar.
-- O servidor também aplica no boot — em dev e Replit, geralmente não se usa o CLI.
+- Onde rodam (só em dev): no Replit o comando do workflow é `npm run db:migrate && node server.js`; localmente o `predev` roda `db:up && db:migrate`. O `server.js` NÃO roda migrations.
+- Produção: o boot não toca no schema. O fluxo de **Publish** do Replit faz o diff dev→prod e aplica em prod. As migrations seguem sendo a fonte versionada do schema (histórico em git) e o jeito de evoluir o dev.
 
 Workflow para qualquer mudança de schema (aditiva ou destrutiva):
 1. Olhar último número em `migrations/`. Criar `migrations/NNN+1_descricao.sql`.
 2. Escrever SQL direto, SEM `IF NOT EXISTS` ou guards de idempotência — cada migration roda exatamente uma vez por banco.
-3. Reiniciar server local → runner aplica → testar.
-4. Commit + push. Em qualquer ambiente (Replit, prod), o boot reaplicará as pendentes.
+3. Aplicar no dev: `npm run db:migrate` (ou reiniciar o workflow do Replit, que migra antes de subir) → testar.
+4. Commit + push. Para levar a prod: **Publish** no Replit (diff dev→prod). O boot do prod NÃO reaplica migrations.
 
 Regras duras (Claude deve respeitar e avisar o usuário se ele propor o contrário):
 - **Nunca editar uma migration depois de qualquer deploy.** Mesmo um typo em comentário. A tabela `schema_migrations` confia em "filename já aplicado"; editar quebra reproducibilidade entre ambientes.
 - **Para corrigir bug em migration JÁ aplicada**: criar uma migration corretiva (NNN+1). Nunca editar a anterior.
 - **Para corrigir bug em migration que falhou (rollback, não registrada)**: editar é OK — não foi aplicada em lugar nenhum ainda.
-- **Migration falha em prod = bug bloqueante.** Tabela `schema_migrations` não recebe a versão, o boot vai tentar e falhar a cada reinício até alguém investigar e subir uma correção. Tratar como incidente.
+- **Migrations só rodam em dev.** Em prod, quem aplica schema é o Publish do Replit (o boot não roda DDL). Logo, uma migration precisa estar aplicada e testada no dev ANTES do Publish, pra que o diff a leve pro prod. Migration que falha no dev = bug bloqueante: corrigir antes de publicar.
 - **Seeds são separados de migrations.** `seedInitialUsers()` e `seedInterviewerTemplates()` continuam em `auth.js` e rodam DEPOIS das migrations. Migrations cuidam de schema; seeds cuidam de dados de bootstrap. Não misturar.
 - **`001_init.sql` é o snapshot bootstrap** — escrito com `IF NOT EXISTS` em tudo, justamente porque pode rodar contra um banco legado que veio do antigo `schema.sql`. Migrations a partir da 002 são deltas puros.
 

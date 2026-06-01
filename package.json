@@ -7,7 +7,7 @@
     "db:down": "docker compose down",
     "db:migrate": "node scripts/migrate.mjs",
     "db:migrate-fs": "node scripts/migrate-fs-to-db.mjs",
-    "predev": "npm run db:up",
+    "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"
   },
   "dependencies": {
