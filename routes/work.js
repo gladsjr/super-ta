@@ -124,9 +124,13 @@ router.post("/w/:workToken/voices/preview", requireWorkToken, requireWithinBudge
 // porque é puramente uma operação read-only sobre dados literais; gateá-la não
 // agrega segurança e simplifica a UI.
 router.get("/interviewer-name-suggestion", (req, res) => {
-    const gender = req.query.gender === "f" || req.query.gender === "m" ? req.query.gender : null;
+    const requested = req.query.gender === "f" || req.query.gender === "m" ? req.query.gender : null;
+    // Sem gênero pedido, sorteia balanceado. NUNCA devolve null: o frontend
+    // marca o radio input[value="${gender}"], e só existem 'f' e 'm' — um null
+    // viraria querySelector(...).checked sobre null e derrubaria o load().
+    const gender = requested ?? (Math.random() < 0.5 ? "f" : "m");
     const name = pickRandomName(gender);
-    res.json({ name, gender: gender ?? null });
+    res.json({ name, gender });
 });
 
 router.patch("/w/:workToken/interviewer-identity", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {

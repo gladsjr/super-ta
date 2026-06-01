@@ -311,7 +311,14 @@ async function load() {
     : 'Envie o enunciado antes de avaliar';
 
   applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
-  await applyIdentityStateToUI(j.work.interviewer_name, j.work.interviewer_gender);
+  // A sugestão de identidade é cosmética. Ela NUNCA pode derrubar o load() e
+  // impedir a renderização da lista de alunos (que vem logo abaixo) — foi
+  // exatamente esse o bug em que um gender inesperado fazia null.checked lançar.
+  try {
+    await applyIdentityStateToUI(j.work.interviewer_name, j.work.interviewer_gender);
+  } catch (e) {
+    console.error('applyIdentityStateToUI falhou (ignorado, não bloqueia a lista):', e);
+  }
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
