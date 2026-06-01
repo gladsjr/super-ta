@@ -36,6 +36,10 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
     try {
         const submissions = await db.listSubmissionsForWork(req.work.id);
         const balance = await getWorkBalance(req.work.id);
+        // Lista dinâmica que precisa refletir criações/bloqueios na hora. Sem
+        // isto, em produção (atrás do Google Frontend) o navegador pode servir
+        // uma cópia em cache e o professor não vê o token recém-gerado.
+        res.set("Cache-Control", "no-store");
         res.json({
             work: {
                 name: req.work.name,
