@@ -49,6 +49,7 @@ import {
     pregenSnapshot,
 } from "../lib/sessionLifecycle.js";
 import { attachNarratorAudio } from "../lib/narrator.js";
+import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import log from "../lib/logger.js";
 
 // Cap duro do super-orquestrador. Depois disso, força finalize automático
@@ -64,6 +65,39 @@ const SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE = 5;
 // model com payloads longos. 4000 chars cobre ~600-800 palavras —
 // muito além do que cabe num turno legítimo de entrevista oral.
 const MAX_STUDENT_MESSAGE_CHARS = 4000;
+
+// Arquiva o buffer de áudio do aluno (best-effort) — sobe pro Object Storage
+// e grava metadados no Postgres. NUNCA lança. Se o storage estiver indisponível
+// ou falhar, loga e segue — a entrevista não pode quebrar por isso.
+// audio_idx é sequencial por submission, batendo com a ordem dos uploads de
+// áudio do aluno; isso permite o painel do professor casar áudio com fala na
+// conv_chat pela ordem.
+async function archiveStudentAudio({ submissionId, submissionToken, buffer, mimetype, durationS }) {
+    if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
+    try {
+        const audioIdx = await db.nextAudioIdxForSubmission(submissionId);
+        const ext = extFromMimetype(mimetype);
+        const key = audioKeyFor(submissionToken, audioIdx, ext);
+        const result = await putAudio({ key, buffer, mimetype });
+        if (!result.stored) {
+            log.info("AUDIO_STORE", `put no-op submission=${submissionToken} idx=${audioIdx} reason=${result.reason}`);
+            return null;
+        }
+        await db.recordStudentAudioArtifact({
+            submissionId,
+            audioIdx,
+            objectKey: result.key,
+            mimetype,
+            byteSize: result.byte_size ?? buffer.length,
+            durationS,
+            sha256: result.sha256,
+        });
+        return { audioIdx, objectKey: result.key };
+    } catch (err) {
+        log.error("AUDIO_STORE", `archiveStudentAudio failed submission=${submissionToken}: ${err.message}`);
+        return null;
+    }
+}
 
 // ============================================================================
 // Pré-gate de inteligibilidade no modo áudio.
@@ -593,6 +627,8 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Logprobs por token do STT, consumidos pelo pré-gate de inteligibilidade.
     // Em modo texto fica null e o gate é no-op.
     let studentAudioLogprobs = null;
+    let studentAudioBuffer = null;
+    let studentAudioMimetype = null;
     if (hasAudio) {
         try {
             studentAudioDurationSec = await getAudioDurationSeconds(
@@ -605,6 +641,11 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             );
             message = sttResult.text;
             studentAudioLogprobs = sttResult.logprobs ?? null;
+            // Preserva o buffer pra arquivamento best-effort APÓS o STT ter
+            // sucesso. Só guarda se a fala for usada (passou pelo pré-gate
+            // de inteligibilidade — checado mais abaixo).
+            studentAudioBuffer = req.file.buffer;
+            studentAudioMimetype = req.file.mimetype || null;
         } catch (err) {
             log.error("CHAT", `STT failed: ${err.message}`);
             return res.status(400).json({ error: "transcription_failed", detail: "Não consegui entender o áudio. Tente gravar de novo." });
@@ -613,6 +654,18 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         message = (req.body?.message || "").toString();
     }
     if (!message) return res.status(400).json({ error: "empty message" });
+    // Arquivamento da gravação do aluno (best-effort, audio mode apenas).
+    // Acontece ANTES do pré-gate — áudios ininteligíveis também são
+    // arquivados como evidência pra eventual auditoria. Falha silenciosa.
+    if (studentAudioBuffer) {
+        archiveStudentAudio({
+            submissionId: req.submission.id,
+            submissionToken: token,
+            buffer: studentAudioBuffer,
+            mimetype: studentAudioMimetype,
+            durationS: studentAudioDurationSec,
+        }).catch(err => log.error("AUDIO_STORE", `archive promise rejeitada: ${err.message}`));
+    }
     // Cap de tamanho (defesa contra injection por mensagem longa). Áudio raramente
     // estoura — STT de minutos de fala fica bem abaixo de 4000 chars. Texto pode
     // estourar com colagem. Erro explícito pro frontend tratar.

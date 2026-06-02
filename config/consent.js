@@ -5,7 +5,7 @@
 // Versionamento: incrementar CONSENT_VERSION sempre que o texto mudar
 // (mesmo virgula). Submissions com versão antiga re-disparam o modal.
 
-export const CONSENT_VERSION = "1.0.0";
+export const CONSENT_VERSION = "2.0.0";
 
 // HTML do termo. Não usar `<script>` ou atributos `on*` aqui — é renderizado
 // direto com innerHTML no navegador, então mantenha apenas marcação semântica.
@@ -30,14 +30,16 @@ export const CONSENT_TEXT_HTML = `
 
 <h4>Retenção</h4>
 <p>Ao final da entrevista, os recursos enviados à OpenAI (PDF, índice de busca e histórico de mensagens) são <strong>removidos automaticamente</strong>. O transcript em texto permanece no banco do ORATIA para o professor avaliar.</p>
+<p>Quando a entrevista é em modo áudio, as gravações da sua voz são <strong>retidas por até 6 meses após o término da entrevista</strong> e em seguida apagadas automaticamente. Durante esse período, apenas o(a) professor(a) e administradores autorizados podem ouvi-las, exclusivamente para auditoria da própria entrevista.</p>
 
 <h4>Seus direitos (LGPD)</h4>
-<p>Você pode solicitar acesso, correção ou exclusão dos seus dados entrando em contato com o(a) responsável pelo trabalho.</p>
+<p>Você pode solicitar acesso, correção ou exclusão dos seus dados — incluindo a exclusão antecipada das gravações de voz — entrando em contato com o(a) responsável pelo trabalho.</p>
 `.trim();
 
 // Parágrafo extra mostrado SÓ quando a entrevista está em modo áudio.
 // Concatenado dentro do modal, antes do checkbox.
 export const CONSENT_AUDIO_ADDITION_HTML = `
 <h4>Aviso adicional — modo áudio</h4>
-<p>Esta entrevista é em modo áudio. Sua voz será transcrita automaticamente por um serviço de speech-to-text da OpenAI. <strong>O áudio bruto não é armazenado pelo ORATIA</strong>; apenas o texto transcrito é mantido.</p>
+<p>Esta entrevista é em modo áudio. Sua voz será transcrita automaticamente por um serviço de speech-to-text da OpenAI. Após a transcrição, a OpenAI não retém o áudio enviado.</p>
+<p>Para fins de auditoria da entrevista (verificação da fidelidade do transcript e checagem de autoria), o ORATIA <strong>retém as gravações da sua voz por até 6 meses</strong> em armazenamento controlado, com acesso restrito ao(à) professor(a) responsável e administradores autorizados. Após esse prazo, as gravações são apagadas automaticamente. Você pode pedir exclusão antecipada ao(à) responsável pelo trabalho.</p>
 `.trim();

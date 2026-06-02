@@ -7,10 +7,12 @@
     "db:down": "docker compose down",
     "db:migrate": "node scripts/migrate.mjs",
     "db:migrate-fs": "node scripts/migrate-fs-to-db.mjs",
+    "audio:gc": "node scripts/audio-gc.mjs",
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"
   },
   "dependencies": {
+    "@replit/object-storage": "^1.0.0",
     "bcrypt": "^6.0.0",
     "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.4.5",

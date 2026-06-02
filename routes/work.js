@@ -18,6 +18,7 @@ import {
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
 import { configAssistantAgent, enunciadoCoherenceAgent } from "../lib/agents.js";
+import { streamAudio } from "../lib/audioStore.js";
 import { PRINCIPAL_REASONING_MODEL, TTS_MODEL } from "../lib/config.js";
 import log from "../lib/logger.js";
 
@@ -225,6 +226,24 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
                 student_comment: finalization.student_comment,
             };
         }
+        // Lista das gravações de áudio do aluno (modo áudio). Cada item tem
+        // audio_idx — a ordem bate com a ordem dos uploads de áudio, e por
+        // construção do /chat handler bate com a ordem das falas do aluno em
+        // conv_chat. A UI casa um pelo outro contando user-messages.
+        try {
+            const artifacts = await db.listStudentAudioArtifactsForSubmission(found.id);
+            if (conversation && artifacts.length > 0) {
+                conversation.student_audio = artifacts.map(a => ({
+                    audio_idx: a.audio_idx,
+                    mimetype: a.mimetype,
+                    duration_s: a.duration_s ? Number(a.duration_s) : null,
+                    byte_size: a.byte_size,
+                    audio_url: `/w/${encodeURIComponent(req.work.work_token)}/submissions/${encodeURIComponent(subToken)}/audio/${a.audio_idx}`,
+                }));
+            }
+        } catch (err) {
+            log.error("WORK", `audio list failed submission=${subToken}: ${err.message}`);
+        }
         res.json({
             work: { work_token: req.work.work_token, name: req.work.name },
             submission: { submission_token: subToken, student_label: found.student_label, status: found.status },
@@ -233,6 +252,37 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
     } catch (err) {
         log.error("WORK", `conversation lookup failed submission=${subToken}: ${err.message}`);
         res.status(500).json({ error: "failed to read conversation" });
+    }
+});
+
+// Streama o áudio gravado do aluno. Acesso restrito ao professor do work
+// (requireWorkToken garante isso). Object Storage indisponível ou objeto
+// inexistente → 404.
+router.get("/w/:workToken/submissions/:subToken/audio/:audioIdx", requireWorkToken, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    const audioIdx = Number.parseInt(req.params.audioIdx, 10);
+    if (!Number.isFinite(audioIdx) || audioIdx < 0) {
+        return res.status(400).json({ error: "audio_idx inválido" });
+    }
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        const artifact = await db.getStudentAudioArtifact({ submissionId: found.id, audioIdx });
+        if (!artifact) return res.status(404).json({ error: "audio not found" });
+        const stream = await streamAudio(artifact.object_key);
+        if (!stream) return res.status(503).json({ error: "audio store unavailable" });
+        if (artifact.mimetype) res.type(artifact.mimetype);
+        stream.on("error", err => {
+            log.error("WORK", `stream error key=${artifact.object_key}: ${err.message}`);
+            if (!res.headersSent) res.status(404).json({ error: "audio not found in store" });
+            else res.end();
+        });
+        stream.pipe(res);
+    } catch (err) {
+        log.error("WORK", `audio fetch failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "failed to fetch audio" });
     }
 });
 

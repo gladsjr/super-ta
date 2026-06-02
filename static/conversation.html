@@ -114,6 +114,22 @@
   .intro-transitioned { color: var(--ink-500); font-size: var(--fs-xs); margin-top: var(--sp-2); font-style: italic; }
   .persona-line { color: var(--ink-500); font-size: var(--fs-sm); margin-top: var(--sp-1); }
 
+  details.student-audio {
+    margin-top: var(--sp-4);
+    background: var(--bg-muted);
+    border: 1px solid var(--ink-100);
+    border-radius: var(--r-md);
+    padding: var(--sp-3);
+    font-size: var(--fs-sm);
+  }
+  details.student-audio summary { color: var(--ink-700); cursor: pointer; font-weight: 500; }
+  details.student-audio[open] summary { margin-bottom: var(--sp-2); }
+  .audio-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-top: 1px dashed var(--ink-200); }
+  .audio-row:first-of-type { border-top: none; }
+  .audio-row .audio-meta { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-width: 220px; color: var(--ink-500); font-size: var(--fs-xs); }
+  .audio-row .audio-meta strong { color: var(--ink-700); font-size: var(--fs-sm); }
+  .audio-row audio { flex: 1; max-width: 380px; height: 32px; }
+
   details.skipped {
     margin-top: var(--sp-4);
     background: var(--bg-muted);
@@ -199,6 +215,11 @@
     <summary id="intro-summary">Apresentação inicial</summary>
     <div id="intro-body"></div>
     <div id="intro-transitioned" class="intro-transitioned"></div>
+  </details>
+
+  <details class="student-audio hidden" id="student-audio">
+    <summary id="student-audio-summary">Gravações do aluno</summary>
+    <div id="student-audio-body"></div>
   </details>
 
   <details class="doc-map hidden" id="doc-map">
@@ -452,6 +473,25 @@ async function load() {
   if (conv.document_map) {
     document.getElementById('doc-map').classList.remove('hidden');
     document.getElementById('doc-map-body').textContent = JSON.stringify(conv.document_map, null, 2);
+  }
+
+  const studentAudios = Array.isArray(conv.student_audio) ? conv.student_audio : [];
+  if (studentAudios.length > 0) {
+    const fmtDur = s => s == null ? '—' : (s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s/60)}m${String(Math.round(s%60)).padStart(2,'0')}s`);
+    const fmtSize = b => b == null ? '—' : (b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+    document.getElementById('student-audio-summary').textContent =
+      `Gravações do aluno (${studentAudios.length})`;
+    document.getElementById('student-audio-body').innerHTML = studentAudios.map(a => `
+      <div class="audio-row">
+        <div class="audio-meta">
+          <strong>#${a.audio_idx}</strong>
+          <span>${fmtDur(a.duration_s)}</span>
+          <span>${fmtSize(a.byte_size)}</span>
+          <span>${escapeHtml(a.mimetype ?? '—')}</span>
+        </div>
+        <audio controls preload="none" src="${escapeHtml(a.audio_url)}"></audio>
+      </div>`).join('');
+    document.getElementById('student-audio').classList.remove('hidden');
   }
 
   const skipped = Array.isArray(conv.skipped_questions) ? conv.skipped_questions : [];
