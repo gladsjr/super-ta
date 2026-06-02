@@ -46,6 +46,16 @@ export class PrepBuilderAgent {
 
 Você está rodando uma vez por conversa, antes da primeira pergunta. Sua saída é contexto compactado, NÃO conversa endereçada à outra ponta da cena.
 
+PASSO OBRIGATÓRIO ANTES DE PRODUZIR O JSON — busca de contradições internas:
+Faça uma varredura DEDICADA da entrega procurando contradições internas. Isso é fonte de PRIMEIRA ORDEM para perguntas de entrevista. Tipos a procurar:
+  - Valores/números divergentes em pontos diferentes (ex.: taxa de retorno é 8% na seção 2 e 12% na planilha; receita Y1 é R$ 1M no texto e R$ 1.2M no gráfico).
+  - Premissa adotada em um ponto vs cálculo/conclusão que requer premissa diferente (ex.: assume cenário base na metodologia mas a recomendação só faz sentido no cenário otimista).
+  - Escopo declarado vs escopo efetivamente coberto (ex.: enuncia que vai analisar 3 cenários, só apresenta 1).
+  - Suposições explícitas vs cálculos que assumem o oposto (ex.: declara "ignorar inflação" mas usa taxa nominal nos números).
+  - Recomendação final vs o que os dados mostram (ex.: tabela mostra Opção B com melhor VPL, recomenda Opção A sem justificar).
+  - Definições inconsistentes do mesmo termo entre seções.
+Para cada contradição encontrada, anote: ONDE (seções/figuras/tabelas que se contradizem) e A DIVERGÊNCIA (o que está em conflito). Se não encontrar nenhuma contradição clara, devolva array vazio — NÃO force.
+
 Produza JSON com EXATAMENTE estes campos:
 
 {
@@ -54,7 +64,10 @@ Produza JSON com EXATAMENTE estes campos:
     "strengths":         ["2-5 pontos onde a entrega está bem (raciocínio claro, decisões justificadas, evidência adequada)"],
     "weaknesses":        ["2-5 pontos de fragilidade (lacunas, premissas não justificadas, simplificações, riscos não tratados)"],
     "critical_points":   ["1-3 pontos onde uma resposta fraca na conversa comprometeria a credibilidade da entrega"],
-    "authorship_doubts": ["0-3 trechos onde a fluência ou a coerência interna sugere que quem entregou pode ter dificuldade de defender espontaneamente. NÃO acuse — só sinalize onde valeria sondar"]
+    "authorship_doubts": ["0-3 trechos onde a fluência ou a coerência interna sugere que quem entregou pode ter dificuldade de defender espontaneamente. NÃO acuse — só sinalize onde valeria sondar"],
+    "internal_contradictions": [
+      { "where": ["seção/figura/tabela 1", "seção/figura/tabela 2"], "description": "o que está em conflito, em uma frase" }
+    ]
   },
   "evidence_index": [
     { "topic": "tópico curto", "anchors": ["seção X", "fig Y", "tabela Z"], "why_check": "por que vale conferir esse ponto durante a conversa" }
@@ -63,11 +76,12 @@ Produza JSON com EXATAMENTE estes campos:
 
 Regras:
 - Use EXCLUSIVAMENTE o conteúdo dos PDFs. Não invente.
-- Cite seções/figuras/tabelas quando puder (vai virar anchors).
+- Cite seções/figuras/tabelas quando puder (vai virar anchors / where).
 - A agenda do entrevistador serve para calibrar O QUE você considera fragilidade — persona pragmática foca em decisão; investigativa foca em raciocínio; etc.
+- Contradições internas são fato observável da entrega, não interpretação — vale para qualquer persona.
 - Retorne APENAS o JSON, sem markdown.`;
 
-        this.buildPlanExtraInstructions = `\n\nVOCÊ ESTÁ RECEBENDO TAMBÉM UMA ANÁLISE PRÉVIA DA ENTREGA (JSON abaixo).\n\nUse essa análise como input principal. As perguntas devem:\n- Cobrir prioritariamente os \`critical_points\` e \`weaknesses\` da análise.\n- Usar os \`evidence_index\` para se referir a partes específicas da entrega (citar seção/figura/tabela na pergunta quando fizer sentido).\n- Sondar os \`authorship_doubts\` APENAS através de perguntas que a PERSONA da agenda faria naturalmente sobre esses trechos. NÃO formule como verificação acadêmica — nada de "reconstrua", "mostre passo a passo", "explique como cada cálculo foi feito" se a persona não for um avaliador acadêmico. Use o registro da persona (intuição, consequência prática, sensibilidade, comparação, justificativa de decisão).\n- Equilibrar: nem todas as perguntas precisam ser sobre fragilidades. Algumas podem aprofundar pontos fortes, especialmente para personas didáticas.\n\nANÁLISE PRÉVIA:\n`;
+        this.buildPlanExtraInstructions = `\n\nVOCÊ ESTÁ RECEBENDO TAMBÉM UMA ANÁLISE PRÉVIA DA ENTREGA (JSON abaixo).\n\nUse essa análise como input principal. As perguntas devem:\n- Cobrir prioritariamente os \`internal_contradictions\` da análise — contradição interna NA entrega é fonte de PRIMEIRA ORDEM. Cada contradição vira pergunta direta (ou base de pergunta), formulada na voz da persona: cite os dois pontos divergentes (sem citar "no enunciado X" — ver seção das duas camadas) e peça reconciliação. Ex.: "Aqui você usa 8%, ali 12% — qual delas é a sua referência efetiva pra essa decisão?".\n- Cobrir prioritariamente os \`critical_points\` e \`weaknesses\` da análise.\n- Usar os \`evidence_index\` para se referir a partes específicas da entrega (citar seção/figura/tabela na pergunta quando fizer sentido).\n- Sondar os \`authorship_doubts\` APENAS através de perguntas que a PERSONA da agenda faria naturalmente sobre esses trechos. NÃO formule como verificação acadêmica — nada de "reconstrua", "mostre passo a passo", "explique como cada cálculo foi feito" se a persona não for um avaliador acadêmico. Use o registro da persona (intuição, consequência prática, sensibilidade, comparação, justificativa de decisão).\n- Equilibrar: nem todas as perguntas precisam ser sobre fragilidades. Algumas podem aprofundar pontos fortes, especialmente para personas didáticas.\n\nANÁLISE PRÉVIA:\n`;
     }
 
     /**
@@ -135,11 +149,18 @@ Analise a entrega (PDF anexo) à luz do documento motivador (PDF também anexo) 
         if (!a || !Array.isArray(a.strengths) || !Array.isArray(a.weaknesses) || !Array.isArray(a.critical_points) || !Array.isArray(a.authorship_doubts)) {
             throw new Error("PrepBuilder.analyzeWork: assessment incompleto (strengths/weaknesses/critical_points/authorship_doubts)");
         }
+        // internal_contradictions é novo (introduzido depois) — tolera ausência
+        // pra não quebrar análises de versões antigas regravadas; normaliza
+        // para array vazio. Novas análises sempre vêm com o campo.
+        if (a.internal_contradictions !== undefined && !Array.isArray(a.internal_contradictions)) {
+            throw new Error("PrepBuilder.analyzeWork: internal_contradictions deve ser array");
+        }
+        if (!Array.isArray(a.internal_contradictions)) a.internal_contradictions = [];
         if (!Array.isArray(parsed.evidence_index)) {
             throw new Error("PrepBuilder.analyzeWork: evidence_index não é array");
         }
 
-        log.info("AGENT:PrepBuilder", `analyzeWork ok summary=${log.preview(parsed.summary, 80)} strengths=${a.strengths.length} weaknesses=${a.weaknesses.length} critical=${a.critical_points.length} doubts=${a.authorship_doubts.length} evidence=${parsed.evidence_index.length}`);
+        log.info("AGENT:PrepBuilder", `analyzeWork ok summary=${log.preview(parsed.summary, 80)} strengths=${a.strengths.length} weaknesses=${a.weaknesses.length} critical=${a.critical_points.length} doubts=${a.authorship_doubts.length} contradictions=${a.internal_contradictions.length} evidence=${parsed.evidence_index.length}`);
         if (log.enabled("debug")) {
             log.debug("AGENT:PrepBuilder", `analyzeWork full JSON:\n${JSON.stringify(parsed, null, 2)}`);
         }
