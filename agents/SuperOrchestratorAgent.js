@@ -115,6 +115,7 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
      * @param {string} p.conversationId - id da Conversations API (chat) para o servidor injetar histórico
      * @param {string|null} p.vectorStoreId
      * @param {string|null} p.studentName
+     * @param {string|null} p.studentGenderHint - "f"|"m"|"n"|null preferência declarada
      * @param {string} p.interactionMode - "text" | "audio"
      * @param {object|null} p.meterCtx
      * @param {function():void} [p.onFirstDelta] - callback opcional disparado
@@ -133,11 +134,12 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
         conversationId,
         vectorStoreId,
         studentName = null,
+        studentGenderHint = null,
         interactionMode = "text",
         meterCtx = null,
         onFirstDelta = null,
     }) {
-        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName })}
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
 
 ${this.systemPromptBody}`;
 

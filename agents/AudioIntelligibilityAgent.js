@@ -66,13 +66,13 @@ Formato de saída — APENAS JSON válido, sem markdown:
 }`;
     }
 
-    async evaluate({ mode, interviewerYamlText, currentQuestionText, transcript, spans, retryAttempt, maxRetries, meterCtx = null, studentName = null }) {
+    async evaluate({ mode, interviewerYamlText, currentQuestionText, transcript, spans, retryAttempt, maxRetries, meterCtx = null, studentName = null, studentGenderHint = null }) {
         if (mode !== "ask_repeat" && mode !== "give_up") {
             throw new Error(`AudioIntelligibilityAgent: mode inválido "${mode}"`);
         }
         // Sempre áudio neste agente (rodando atrás do STT). O preâmbulo precisa
         // saber disso para evitar markdown na fala (vai ser sintetizada por TTS).
-        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode: "audio", studentName })}
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode: "audio", studentName, studentGenderHint })}
 
 ${this.systemPromptBody}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);

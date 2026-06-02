@@ -71,7 +71,13 @@ Formato de saída — APENAS JSON válido, sem markdown:
 ESTE BEAT — APRESENTAR-SE MELHOR (a outra ponta acabou de dizer o nome).
 IMPORTANTE: você JÁ se apresentou na fala anterior (veja o HISTÓRICO DO INTRO). NÃO repita seu nome, NÃO repita seu papel, NÃO recomece com "oi, sou...". Construa em cima do que já foi dito, sem redundância.
 - Primeiro, EXTRAIA o primeiro nome da pessoa a partir da última fala dela e devolva em "student_name". Se não houver nome reconhecível (ex.: "oi", "bom dia"), devolva null.
-- Comece com um cumprimento breve usando o nome quando houver ("Prazer, X." / "Legal, X."). Se student_name for null, cumprimente sem nome.
+- Detecte se a pessoa declarou EXPLICITAMENTE uma preferência de gênero para ser tratada ("me trate no feminino", "use ele/dele", "sou ela", "prefiro pronomes neutros", etc.). Devolva em "student_gender_preference":
+  * "f" = feminino (ela/dela, concordâncias femininas)
+  * "m" = masculino (ele/dele, concordâncias masculinas)
+  * "n" = neutro/não-binário (evitar marcação de gênero quando possível)
+  * null = pessoa NÃO declarou nada explícito sobre isso (caso padrão; NÃO infira do nome — fica null)
+- Se a pessoa declarou preferência, ACOLHA brevemente na sua fala ("anotado", "claro, pode deixar"), sem fazer disso o ponto central da fala.
+- Comece com um cumprimento breve usando o nome quando houver ("Prazer, X." / "Legal, X."). Se student_name for null, cumprimente sem nome. Se houver preferência de gênero declarada, use a concordância correspondente JÁ neste cumprimento ("Muito prazer, X. Tô animada por essa conversa.").
 - Fale UM POUCO MAIS sobre o que te traz a esta conversa: incorpore de forma natural seus OBJETIVOS (\`objectives\`) e PREOCUPAÇÕES (\`concerns\`) principais — o que você quer entender e o que costuma te preocupar. Sem listar mecanicamente, sem repetir o que já disse na abertura.
 - TERMINE pedindo um sinal da pessoa para começar. Deixe explícito que, quando estiver pronta, basta dar um "ok". Ex.: "Quando você estiver pronto, me dá um ok que a gente começa.", "Pode ser? Se sim, é só me dar um ok."
 - NÃO faça a primeira pergunta substantiva. NÃO faça outras perguntas além do pedido de "ok".
@@ -81,6 +87,7 @@ Formato de saída — APENAS JSON válido, sem markdown:
 {
   "message": "<cumprimento + o que te traz à conversa + pedido de 'ok'>",
   "student_name": "<primeiro nome da pessoa ou null>",
+  "student_gender_preference": "<'f' | 'm' | 'n' | null — só se DECLARADO explicitamente>",
   "reason": "<motivo curto>"
 }`;
         }
@@ -103,8 +110,8 @@ Formato de saída — APENAS JSON válido, sem markdown:
         throw new Error(`IntroductionAgent: step inválido "${step}"`);
     }
 
-    async evaluate({ step, interviewerYamlText, persona, introHistory, studentMessage, studentName = null, meterCtx = null, interactionMode = "text" }) {
-        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName })}
+    async evaluate({ step, interviewerYamlText, persona, introHistory, studentMessage, studentName = null, studentGenderHint = null, meterCtx = null, interactionMode = "text" }) {
+        const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
 
 ${this.bodyFor(step)}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
@@ -171,10 +178,21 @@ Produza a fala deste beat (${step}). Retorne apenas o JSON.`;
                 log.warn("AGENT:Introduction", `student_name rejeitado por validação: ${log.preview(candidate, 60)}`);
             }
         }
-        log.info("AGENT:Introduction", `step=${step}${extractedName ? ` name="${extractedName}"` : ""}`);
+        // Preferência de gênero — só aceita "f" | "m" | "n" exato. Qualquer
+        // coisa fora disso vira null (= sem preferência declarada). Same
+        // safety surface do nome: o valor entra no studentGenderBlock de
+        // todos os agentes subsequentes.
+        let extractedGender = null;
+        if (step === "present_self" && parsed.student_gender_preference) {
+            const g = String(parsed.student_gender_preference).trim().toLowerCase();
+            if (g === "f" || g === "m" || g === "n") extractedGender = g;
+            else log.warn("AGENT:Introduction", `student_gender_preference inválido: ${log.preview(g, 40)}`);
+        }
+        log.info("AGENT:Introduction", `step=${step}${extractedName ? ` name="${extractedName}"` : ""}${extractedGender ? ` gender=${extractedGender}` : ""}`);
         return {
             message,
             student_name: extractedName,
+            student_gender_preference: extractedGender,
             reason: String(parsed.reason ?? ""),
         };
     }

@@ -139,6 +139,7 @@ async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist
             maxRetries: max,
             meterCtx: sessionMeterCtx(sess),
             studentName: sess.studentName ?? null,
+            studentGenderHint: sess.studentGenderHint ?? null,
         });
     } catch (err) {
         log.error("AGENT:AudioIntelligibility", `failed, using fallback: ${err.message}`);
@@ -691,6 +692,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             }
 
             if (intro.student_name) sess.studentName = intro.student_name;
+            if (intro.student_gender_preference) sess.studentGenderHint = intro.student_gender_preference;
             sess.introStep = "awaiting_ok";
 
             const audio = await attachAudio(sess, intro.message);
@@ -743,6 +745,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 introHistory: sess.introLog.slice(0, -1),
                 studentMessage: message,
                 studentName: sess.studentName,
+                studentGenderHint: sess.studentGenderHint ?? null,
                 meterCtx: sessionMeterCtx(sess),
                 interactionMode: sess.interactionMode,
             });
@@ -898,6 +901,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             conversationId: sess.conversationId_chat,
             vectorStoreId: sess.vectorStoreId,
             studentName: sess.studentName ?? null,
+            studentGenderHint: sess.studentGenderHint ?? null,
             interactionMode: sess.interactionMode,
             meterCtx: sessionMeterCtx(sess),
             onFirstDelta: useSSE ? () => {
