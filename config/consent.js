@@ -5,7 +5,7 @@
 // Versionamento: incrementar CONSENT_VERSION sempre que o texto mudar
 // (mesmo virgula). Submissions com versão antiga re-disparam o modal.
 
-export const CONSENT_VERSION = "2.0.0";
+export const CONSENT_VERSION = "3.0.0";
 
 // HTML do termo. Não usar `<script>` ou atributos `on*` aqui — é renderizado
 // direto com innerHTML no navegador, então mantenha apenas marcação semântica.
@@ -31,6 +31,15 @@ export const CONSENT_TEXT_HTML = `
 <h4>Retenção</h4>
 <p>Ao final da entrevista, os recursos enviados à OpenAI (PDF, índice de busca e histórico de mensagens) são <strong>removidos automaticamente</strong>. O transcript em texto permanece no banco do ORATIA para o professor avaliar.</p>
 <p>Quando a entrevista é em modo áudio, as gravações da sua voz são <strong>retidas por até 6 meses após o término da entrevista</strong> e em seguida apagadas automaticamente. Durante esse período, apenas o(a) professor(a) e administradores autorizados podem ouvi-las, exclusivamente para auditoria da própria entrevista.</p>
+
+<h4>Revisão pós-entrevista (7 dias)</h4>
+<p>Por <strong>7 dias após o término da entrevista</strong> (encerramento natural ou desistência), você terá acesso ao conteúdo completo da entrevista para revisar:</p>
+<ul>
+  <li>O texto de toda a conversa (perguntas e respostas).</li>
+  <li>Em modo áudio, suas próprias gravações de voz.</li>
+  <li>Um campo para deixar um <strong>comentário ao professor</strong> sobre qualquer problema, reclamação ou desconforto.</li>
+</ul>
+<p>Depois desse prazo, esse acesso de revisão se encerra (suas gravações continuam retidas pelo período de 6 meses descrito acima, mas só o professor pode acessá-las). <strong>O comentário ao professor é enviado uma única vez</strong> e não pode ser editado depois — vale escrever com calma antes de confirmar.</p>
 
 <h4>Seus direitos (LGPD)</h4>
 <p>Você pode solicitar acesso, correção ou exclusão dos seus dados — incluindo a exclusão antecipada das gravações de voz — entrando em contato com o(a) responsável pelo trabalho.</p>

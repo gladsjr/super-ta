@@ -66,6 +66,20 @@ const SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE = 5;
 // muito além do que cabe num turno legítimo de entrevista oral.
 const MAX_STUDENT_MESSAGE_CHARS = 4000;
 
+// Janela de revisão pós-entrevista (LGPD self-access). Aluno tem N dias
+// após completed_at para ver texto + áudios e mandar comentário ao professor.
+const REVIEW_WINDOW_DAYS = 7;
+
+function reviewWindowState(submission) {
+    if (!submission?.completion_reason || !submission?.completed_at) {
+        return { eligible: false, expired: false, deadline: null };
+    }
+    const completed = new Date(submission.completed_at);
+    const deadline = new Date(completed.getTime() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    return { eligible: now < deadline, expired: now >= deadline, deadline: deadline.toISOString() };
+}
+
 // Arquiva o buffer de áudio do aluno (best-effort) — sobe pro Object Storage
 // e grava metadados no Postgres. NUNCA lança. Se o storage estiver indisponível
 // ou falhar, loga e segue — a entrevista não pode quebrar por isso.
@@ -282,11 +296,14 @@ const audioUpload = multer({
 router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res) => {
     const token = req.submission.submission_token;
 
-    // Entrevista já finalizada: devolve um estado mínimo "finalized" para o
-    // frontend renderizar a tela "Entrevista encerrada", sem carregar/recompor
-    // sessão. A conversa em si nunca é re-exibida para o aluno após finalizar
-    // (só o professor a vê via /w/.../conversation).
+    // Entrevista já finalizada: o frontend roteia entre 3 estados:
+    //   (a) review aberto (dentro da janela de 7d, sem comentário enviado)
+    //   (b) review com comentário enviado (read-only, dentro da janela)
+    //   (c) janela expirada → tela final encerrada
+    // Aqui só sinalizamos os dados; o frontend chama GET /s/:t/review pra
+    // carregar o conteúdo completo quando estiver em (a) ou (b).
     if (req.submission.completion_reason) {
+        const win = reviewWindowState(req.submission);
         return res.json({
             work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
             submission: {
@@ -294,8 +311,17 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
                 student_label: req.submission.student_label,
                 completion_reason: req.submission.completion_reason,
                 completed_at: req.submission.completed_at,
+                comment_submitted: !!req.submission.student_comment,
             },
-            session: { currentPhase: "finalized", finalized: true },
+            session: {
+                currentPhase: "finalized",
+                finalized: true,
+                review: {
+                    eligible: win.eligible,
+                    expired: win.expired,
+                    deadline: win.deadline,
+                },
+            },
         });
     }
 
@@ -1173,6 +1199,111 @@ router.post("/s/:submissionToken/finalize", requireSubmissionToken, express.json
     } catch (err) {
         log.error("SUBMISSION", `finalize failed token=${req.submission.submission_token}: ${err.message}`);
         res.status(500).json({ error: "falha ao finalizar entrevista", detail: err.message });
+    }
+});
+
+// ============================================================================
+// GET /s/:submissionToken/review
+// ----------------------------------------------------------------------------
+// Pós-finalização: aluno tem REVIEW_WINDOW_DAYS dias para ver a conversa
+// completa + ouvir as próprias gravações + deixar comentário ao professor.
+// Acesso por submission_token Bearer (mesmo do resto). Após janela: 410.
+// ============================================================================
+router.get("/s/:submissionToken/review", requireSubmissionToken, async (req, res) => {
+    const subId = req.submission.id;
+    const win = reviewWindowState(req.submission);
+    if (!req.submission.completion_reason) {
+        return res.status(409).json({ error: "not_finalized", detail: "Entrevista ainda não foi encerrada." });
+    }
+    if (win.expired) {
+        return res.status(410).json({ error: "review_window_expired", deadline: win.deadline });
+    }
+    try {
+        const [convJson, audios] = await Promise.all([
+            db.getConversationJson(subId),
+            db.listStudentAudioArtifactsForSubmission(subId),
+        ]);
+        let conversation = null;
+        if (convJson) {
+            try { conversation = JSON.parse(convJson); }
+            catch (err) {
+                log.error("REVIEW", `conversation parse failed sub=${subId}: ${err.message}`);
+                return res.status(500).json({ error: "failed_to_read_conversation" });
+            }
+        }
+        const audioList = audios.map(a => ({
+            audio_idx: a.audio_idx,
+            mimetype: a.mimetype,
+            duration_s: a.duration_s ? Number(a.duration_s) : null,
+            byte_size: a.byte_size,
+            audio_url: `/s/${encodeURIComponent(req.submission.submission_token)}/student-audio/${a.audio_idx}`,
+        }));
+        res.json({
+            submission: {
+                student_label: req.submission.student_label,
+                completion_reason: req.submission.completion_reason,
+                completed_at: req.submission.completed_at,
+            },
+            review_window: { deadline: win.deadline, days: REVIEW_WINDOW_DAYS },
+            comment: {
+                value: req.submission.student_comment ?? null,
+                locked: !!req.submission.student_comment,
+            },
+            conversation,
+            student_audio: audioList,
+        });
+    } catch (err) {
+        log.error("REVIEW", `failed token=${req.submission.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "failed_to_load_review" });
+    }
+});
+
+// Stream do áudio do aluno (LGPD self-access — a própria pessoa ouve a
+// própria voz). Mesmo acesso que /review: dentro da janela e após finalize.
+router.get("/s/:submissionToken/student-audio/:audioIdx", requireSubmissionToken, async (req, res) => {
+    const audioIdx = Number.parseInt(req.params.audioIdx, 10);
+    if (!Number.isFinite(audioIdx) || audioIdx < 0) return res.status(400).json({ error: "audio_idx inválido" });
+    if (!req.submission.completion_reason) return res.status(409).json({ error: "not_finalized" });
+    const win = reviewWindowState(req.submission);
+    if (win.expired) return res.status(410).json({ error: "review_window_expired" });
+    try {
+        const artifact = await db.getStudentAudioArtifact({ submissionId: req.submission.id, audioIdx });
+        if (!artifact) return res.status(404).json({ error: "audio not found" });
+        const stream = await streamAudio(artifact.object_key);
+        if (!stream) return res.status(503).json({ error: "audio_store_unavailable" });
+        if (artifact.mimetype) res.type(artifact.mimetype);
+        stream.on("error", err => {
+            log.error("REVIEW", `audio stream error key=${artifact.object_key}: ${err.message}`);
+            if (!res.headersSent) res.status(404).json({ error: "audio_not_in_store" });
+            else res.end();
+        });
+        stream.pipe(res);
+    } catch (err) {
+        log.error("REVIEW", `audio fetch failed token=${req.submission.submission_token} idx=${audioIdx}: ${err.message}`);
+        res.status(500).json({ error: "failed_to_fetch_audio" });
+    }
+});
+
+// Submit do comentário ao professor. Single-shot: uma vez que student_comment
+// estiver setado (não-null), não atualiza mais. Dentro da janela de revisão.
+router.post("/s/:submissionToken/comment", requireSubmissionToken, express.json({ limit: "16kb" }), async (req, res) => {
+    if (!req.submission.completion_reason) return res.status(409).json({ error: "not_finalized" });
+    const win = reviewWindowState(req.submission);
+    if (win.expired) return res.status(410).json({ error: "review_window_expired" });
+    if (req.submission.student_comment) {
+        return res.status(409).json({ error: "comment_already_submitted", detail: "Comentário já foi enviado e não pode ser editado." });
+    }
+    const raw = req.body?.comment;
+    if (typeof raw !== "string") return res.status(400).json({ error: "comment é obrigatório (string)" });
+    const trimmed = raw.trim().slice(0, MAX_COMMENT_LEN);
+    if (!trimmed) return res.status(400).json({ error: "comment vazio" });
+    try {
+        await db.setSubmissionStudentComment(req.submission.id, trimmed);
+        log.info("REVIEW", `comment submitted token=${req.submission.submission_token} chars=${trimmed.length}`);
+        res.json({ ok: true, comment: trimmed });
+    } catch (err) {
+        log.error("REVIEW", `comment submit failed token=${req.submission.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "failed_to_save_comment" });
     }
 });
 

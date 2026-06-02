@@ -425,12 +425,46 @@
     #instructions-dialog ul { margin: var(--sp-1) 0; padding-left: 1.4rem; }
     #instructions-dialog li { margin-bottom: var(--sp-1); }
 
-    #comment-card { margin-top: var(--sp-4); }
-    #comment-card h3 { margin-top: 0; }
+    #review-card { margin-top: var(--sp-4); }
+    #review-card h3 { margin-top: 0; }
     #comment-textarea { width: 100%; min-height: 8rem; resize: vertical; }
+
+    .review-section {
+      margin-top: var(--sp-3);
+      border: 1px solid var(--ink-100);
+      border-radius: var(--r-md);
+      padding: var(--sp-3);
+      background: var(--bg-muted);
+    }
+    .review-section summary { cursor: pointer; font-weight: 500; color: var(--ink-700); }
+    .review-section[open] summary { margin-bottom: var(--sp-2); }
+    .review-body { font-size: var(--fs-sm); }
+    .review-body .conv-line { padding: var(--sp-1) 0; }
+    .review-body .conv-line .who { font-weight: 600; color: var(--ink-500); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.02em; margin-right: var(--sp-2); display: inline-block; min-width: 5em; }
+    .review-body .conv-line .text { white-space: pre-wrap; }
+    .review-body .conv-section-label { font-weight: 700; color: var(--ink-700); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; margin-top: var(--sp-3); margin-bottom: var(--sp-1); }
+    .review-body .conv-section-label:first-child { margin-top: 0; }
+    .review-body .audio-item { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-top: 1px dashed var(--ink-200); flex-wrap: wrap; }
+    .review-body .audio-item:first-child { border-top: none; }
+    .review-body .audio-item .audio-meta { display: flex; gap: var(--sp-3); flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-xs); min-width: 180px; }
+    .review-body .audio-item .audio-meta strong { color: var(--ink-700); font-size: var(--fs-sm); }
+    .review-body .audio-item audio { flex: 1; max-width: 320px; height: 32px; }
+
+    .review-comment-block { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--ink-200); }
+    .review-comment-block h4 { margin: 0 0 var(--sp-2); }
+
     .comment-footer { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); }
     .comment-footer .char-count { color: var(--ink-400); font-size: var(--fs-xs); }
     .comment-footer .actions { display: flex; gap: var(--sp-2); }
+
+    .comment-submitted {
+      margin-top: var(--sp-3);
+      padding: var(--sp-3);
+      background: var(--success-50);
+      border-left: 4px solid var(--success-700);
+      border-radius: var(--r-sm);
+      color: var(--ink-900);
+    }
 
     #final-screen { padding: var(--sp-6) var(--sp-4); text-align: center; }
     #final-screen .check { font-size: 3rem; color: var(--success-700); margin-bottom: var(--sp-3); }
@@ -498,18 +532,36 @@
         </div>
       </div>
 
-      <div id="comment-card" class="card hidden">
-        <h3 id="comment-title">Entrevista encerrada</h3>
-        <p id="comment-intro" class="muted">A entrevista foi concluída. Se você quiser deixar algum comentário para o professor (reclamações, sugestões, algo que pareceu estranho), use o espaço abaixo. Pode deixar em branco.</p>
-        <textarea id="comment-textarea" class="textarea" maxlength="2000" placeholder="(opcional) Comentário para o professor"></textarea>
-        <div class="comment-footer">
-          <span class="char-count" id="comment-char-count">0 / 2000</span>
-          <div class="actions">
-            <button id="btn-skip-comment" class="btn" type="button">Sair sem comentário</button>
-            <button id="btn-submit-comment" class="btn btn-primary" type="button">Enviar e sair</button>
+      <div id="review-card" class="card hidden">
+        <h3 id="review-title">Entrevista encerrada — revise antes de comentar</h3>
+        <p id="review-intro" class="muted">Você tem <strong id="review-deadline-label">7 dias</strong> para revisar a entrevista e deixar um comentário ao professor. O comentário é enviado uma única vez — escreva com calma.</p>
+
+        <details class="review-section" id="review-conv" open>
+          <summary>Conversa completa</summary>
+          <div id="review-conv-body" class="review-body"></div>
+        </details>
+
+        <details class="review-section hidden" id="review-audio">
+          <summary id="review-audio-summary">Suas gravações</summary>
+          <div id="review-audio-body" class="review-body"></div>
+        </details>
+
+        <div class="review-comment-block">
+          <h4 id="review-comment-title">Comentário ao professor</h4>
+          <p id="review-comment-help" class="muted">Reclamações, sugestões, algo que pareceu estranho ou injusto. Será visto pelo(a) professor(a) responsável.</p>
+          <textarea id="comment-textarea" class="textarea" maxlength="2000" placeholder="Escreva seu comentário aqui (opcional)"></textarea>
+          <div class="comment-footer">
+            <span class="char-count" id="comment-char-count">0 / 2000</span>
+            <div class="actions">
+              <button id="btn-submit-comment" class="btn btn-primary" type="button">Confirmar e enviar</button>
+            </div>
           </div>
+          <div id="comment-msg" class="hint"></div>
         </div>
-        <div id="comment-msg" class="hint"></div>
+
+        <div id="comment-submitted-msg" class="comment-submitted hidden">
+          <strong>Comentário enviado.</strong> Não é mais editável.
+        </div>
       </div>
 
       <div id="final-screen" class="card hidden">
@@ -628,64 +680,186 @@
       if (typeof dlg.showModal === 'function') dlg.showModal();
     }
 
-    // Mostra o formulário de comentário (no card abaixo do chat) com título
-    // adequado ao motivo. Não submete nada ainda — o aluno preenche e clica.
-    function showCommentForm(reason) {
-      const card = document.getElementById('comment-card');
-      const title = document.getElementById('comment-title');
-      const intro = document.getElementById('comment-intro');
-      if (reason === 'give_up') {
-        title.textContent = 'Você desistiu da entrevista';
-        intro.textContent = 'Antes de sair, você pode deixar um comentário ao professor sobre a experiência. Pode deixar em branco.';
-      } else {
-        title.textContent = 'Entrevista encerrada';
-        intro.textContent = 'A entrevista foi concluída. Se você quiser deixar algum comentário para o professor (reclamações, sugestões, algo que pareceu estranho), use o espaço abaixo. Pode deixar em branco.';
-      }
-      // Esconde os inputs de mensagem — não cabe mais responder.
-      document.getElementById('input-text').classList.add('hidden');
-      document.getElementById('input-audio').classList.add('hidden');
-      card.classList.remove('hidden');
-      document.getElementById('comment-textarea').focus();
-      // Tira "Desistir" da topbar — não cabe mais.
-      document.getElementById('btn-give-up').classList.add('hidden');
-      card.dataset.completionReason = reason;
+    // Esconde inputs de chat, esconde botão Desistir. Estado intermediário
+    // entre fim de turno e tela de revisão.
+    function hideChatActions() {
+      document.getElementById('input-text')?.classList.add('hidden');
+      document.getElementById('input-audio')?.classList.add('hidden');
+      document.getElementById('btn-give-up')?.classList.add('hidden');
     }
 
-    // Substitui todo o conteúdo do #main pela tela final. Chamada após o
-    // /finalize ter retornado ok.
-    function showFinalScreen() {
+    function showFinalScreen(titleText, msgText) {
       document.getElementById('upload-area')?.classList.add('hidden');
       document.getElementById('chat-area')?.classList.add('hidden');
-      document.getElementById('comment-card').classList.add('hidden');
-      document.getElementById('final-screen').classList.remove('hidden');
-      document.getElementById('btn-give-up').classList.add('hidden');
+      document.getElementById('review-card')?.classList.add('hidden');
+      const card = document.getElementById('final-screen');
+      if (titleText) document.getElementById('final-title').textContent = titleText;
+      if (msgText) document.getElementById('final-msg').textContent = msgText;
+      card.classList.remove('hidden');
+      hideChatActions();
     }
 
-    async function submitFinalize(comment) {
-      const reason = document.getElementById('comment-card').dataset.completionReason || 'complete';
-      const msg = document.getElementById('comment-msg');
-      msg.textContent = '';
-      const btnSubmit = document.getElementById('btn-submit-comment');
-      const btnSkip = document.getElementById('btn-skip-comment');
-      btnSubmit.disabled = true;
-      btnSkip.disabled = true;
+    // Chama /finalize SEM comentário (a coleta do comentário acontece depois,
+    // dentro da tela de revisão). Depois entra em modo revisão.
+    async function finalizeAndEnterReview(reason) {
+      hideChatActions();
       try {
         const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/finalize`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comment, completion_reason: reason }),
+          body: JSON.stringify({ completion_reason: reason }),
+        });
+        if (!r.ok && r.status !== 409) {
+          // 409 = já finalizada (ok pra reabrir review); outros = erro real
+          const j = await r.json().catch(() => ({}));
+          appendStatus('Falha ao encerrar: ' + (j.message || j.error || r.status), true);
+          return;
+        }
+      } catch {
+        appendStatus('Falha de comunicação ao encerrar.', true);
+      }
+      await enterReviewMode();
+    }
+
+    // Carrega /review e renderiza a tela de revisão. Chamada após
+    // finalizeAndEnterReview ou no caminho de re-entry (entrevista já
+    // finalizada em outra aba ou sessão anterior).
+    async function enterReviewMode() {
+      document.getElementById('chat-area')?.classList.add('hidden');
+      document.getElementById('upload-area')?.classList.add('hidden');
+      document.getElementById('btn-give-up')?.classList.add('hidden');
+      const card = document.getElementById('review-card');
+      card.classList.remove('hidden');
+      let j;
+      try {
+        const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/review`);
+        if (r.status === 410) {
+          showFinalScreen('Entrevista registrada', 'A janela de revisão (7 dias) já se encerrou. Se precisar comentar algo, fale com o(a) professor(a).');
+          return;
+        }
+        if (!r.ok) throw new Error(await r.text().catch(() => 'erro'));
+        j = await r.json();
+      } catch (err) {
+        document.getElementById('review-conv-body').textContent = 'Falha ao carregar a entrevista. Tente recarregar a página.';
+        return;
+      }
+      renderReview(j);
+    }
+
+    function renderReview(data) {
+      // Deadline humano
+      try {
+        const dl = new Date(data.review_window?.deadline);
+        const days = data.review_window?.days ?? 7;
+        document.getElementById('review-deadline-label').textContent =
+          `${days} dias (até ${dl.toLocaleDateString('pt-BR')} ${dl.toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})})`;
+      } catch {}
+
+      // Conversa: intro + turnos + finalização
+      const body = document.getElementById('review-conv-body');
+      const parts = [];
+      const conv = data.conversation || {};
+      const introMsgs = Array.isArray(conv.intro?.messages) ? conv.intro.messages : [];
+      if (introMsgs.length > 0) {
+        parts.push('<div class="conv-section-label">Apresentação inicial</div>');
+        for (const m of introMsgs) {
+          const who = m.role === 'assistant' ? 'entrevistador' : 'você';
+          parts.push(`<div class="conv-line"><span class="who">${escapeHtml(who)}:</span><span class="text">${escapeHtml(m.content ?? '')}</span></div>`);
+        }
+      }
+      const turns = Array.isArray(conv.turns) ? conv.turns : [];
+      if (turns.length > 0) {
+        parts.push('<div class="conv-section-label">Perguntas e respostas</div>');
+        for (const t of turns) {
+          parts.push(`<div class="conv-line"><span class="who">entrevistador:</span><span class="text">${escapeHtml(t.question ?? '')}</span></div>`);
+          const ivs = Array.isArray(t.interventions) ? t.interventions : [];
+          for (const iv of ivs) {
+            if (typeof iv.student_message === 'string' && iv.student_message) parts.push(`<div class="conv-line"><span class="who">você:</span><span class="text">${escapeHtml(iv.student_message)}</span></div>`);
+            if (typeof iv.assistant_response === 'string' && iv.assistant_response) parts.push(`<div class="conv-line"><span class="who">entrevistador:</span><span class="text">${escapeHtml(iv.assistant_response)}</span></div>`);
+          }
+          if (typeof t.answer === 'string' && t.answer) parts.push(`<div class="conv-line"><span class="who">você:</span><span class="text">${escapeHtml(t.answer)}</span></div>`);
+        }
+      }
+      if (conv.finalization) {
+        parts.push('<div class="conv-section-label">Encerramento</div>');
+        const reason = conv.finalization.completion_reason === 'give_up' ? 'Você desistiu da entrevista.' : 'Entrevista concluída.';
+        parts.push(`<div class="conv-line"><span class="text">${escapeHtml(reason)}</span></div>`);
+      }
+      body.innerHTML = parts.length > 0 ? parts.join('') : '<em>Sem registros de conversa.</em>';
+
+      // Áudios do aluno (modo áudio)
+      const audios = Array.isArray(data.student_audio) ? data.student_audio : [];
+      if (audios.length > 0) {
+        const fmtDur = s => s == null ? '—' : (s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s/60)}m${String(Math.round(s%60)).padStart(2,'0')}s`);
+        const fmtSize = b => b == null ? '—' : (b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+        document.getElementById('review-audio-summary').textContent = `Suas gravações (${audios.length})`;
+        document.getElementById('review-audio-body').innerHTML = audios.map(a => `
+          <div class="audio-item">
+            <div class="audio-meta">
+              <strong>#${a.audio_idx}</strong>
+              <span>${fmtDur(a.duration_s)}</span>
+              <span>${fmtSize(a.byte_size)}</span>
+            </div>
+            <audio controls preload="none" src="${escapeHtml(a.audio_url)}"></audio>
+          </div>`).join('');
+        document.getElementById('review-audio').classList.remove('hidden');
+      }
+
+      // Estado do comentário
+      const commentLocked = !!data.comment?.locked;
+      const commentValue = data.comment?.value ?? '';
+      const ta = document.getElementById('comment-textarea');
+      const submittedMsg = document.getElementById('comment-submitted-msg');
+      const submitBtn = document.getElementById('btn-submit-comment');
+      ta.value = commentValue;
+      document.getElementById('comment-char-count').textContent = `${commentValue.length} / 2000`;
+      if (commentLocked) {
+        ta.disabled = true;
+        submitBtn.disabled = true;
+        submitBtn.classList.add('hidden');
+        submittedMsg.classList.remove('hidden');
+      } else {
+        ta.disabled = false;
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('hidden');
+        submittedMsg.classList.add('hidden');
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    async function submitComment() {
+      const ta = document.getElementById('comment-textarea');
+      const msg = document.getElementById('comment-msg');
+      const btn = document.getElementById('btn-submit-comment');
+      const text = (ta.value || '').trim();
+      msg.textContent = '';
+      if (!text) {
+        msg.textContent = 'Escreva alguma coisa antes de enviar (ou simplesmente feche a página se não quiser comentar).';
+        return;
+      }
+      if (!confirm('Enviar o comentário? Não vai dar pra editar depois.')) return;
+      btn.disabled = true;
+      ta.disabled = true;
+      try {
+        const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/comment`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment: text }),
         });
         if (!r.ok) {
           const j = await r.json().catch(() => ({}));
-          msg.textContent = 'Falha: ' + (j.message || j.error || 'não foi possível encerrar');
-          btnSubmit.disabled = false;
-          btnSkip.disabled = false;
+          msg.textContent = 'Falha ao enviar: ' + (j.detail || j.error || r.status);
+          btn.disabled = false;
+          ta.disabled = false;
           return;
         }
-        showFinalScreen();
+        document.getElementById('comment-submitted-msg').classList.remove('hidden');
+        btn.classList.add('hidden');
       } catch {
         msg.textContent = 'Falha de comunicação. Tente de novo.';
-        btnSubmit.disabled = false;
-        btnSkip.disabled = false;
+        btn.disabled = false;
+        ta.disabled = false;
       }
     }
 
@@ -696,18 +870,14 @@
     document.getElementById('btn-give-up').onclick = () => {
       const dlg = document.getElementById('giveup-dialog');
       if (typeof dlg.showModal === 'function') dlg.showModal();
-      else if (confirm('Tem certeza?')) showCommentForm('give_up');
+      else if (confirm('Tem certeza?')) finalizeAndEnterReview('give_up');
     };
     document.getElementById('giveup-cancel').onclick = () => document.getElementById('giveup-dialog').close();
     document.getElementById('giveup-confirm').onclick = () => {
       document.getElementById('giveup-dialog').close();
-      showCommentForm('give_up');
+      finalizeAndEnterReview('give_up');
     };
-    document.getElementById('btn-submit-comment').onclick = () => {
-      const ta = document.getElementById('comment-textarea');
-      submitFinalize(ta.value.trim() || null);
-    };
-    document.getElementById('btn-skip-comment').onclick = () => submitFinalize(null);
+    document.getElementById('btn-submit-comment').onclick = submitComment;
     document.getElementById('comment-textarea').addEventListener('input', (e) => {
       document.getElementById('comment-char-count').textContent = `${e.target.value.length} / 2000`;
     });
@@ -1061,19 +1231,23 @@
       document.getElementById('tb-context').textContent = j.work.name + (j.submission?.student_label ? ` · ${j.submission.student_label}` : '');
 
       // Entrevista já finalizada (aluno revisitou o link após terminar/desistir):
-      // mostra a tela final direto, sem chat, sem upload, sem nada. A conversa
-      // em si só é visível pelo professor.
+      // 3 sub-estados decididos pela janela de revisão.
       if (j.session?.finalized) {
         document.getElementById('upload-area').classList.add('hidden');
         document.getElementById('chat-area').classList.add('hidden');
-        document.getElementById('final-screen').classList.remove('hidden');
-        const reason = j.submission?.completion_reason;
-        document.getElementById('final-title').textContent = reason === 'give_up'
-          ? 'Você desistiu da entrevista'
-          : 'Entrevista registrada';
-        document.getElementById('final-msg').textContent = 'Esta entrevista já foi encerrada e não pode mais ser modificada. Você pode fechar esta página.';
         document.getElementById('btn-instructions').classList.remove('hidden');
         document.getElementById('interview-actions').classList.remove('hidden');
+        if (j.session.review?.eligible) {
+          // Dentro da janela — entra na tela de revisão (com ou sem comentário enviado).
+          enterReviewMode();
+        } else {
+          // Janela expirada — tela final encerrada.
+          const reason = j.submission?.completion_reason;
+          showFinalScreen(
+            reason === 'give_up' ? 'Você desistiu da entrevista' : 'Entrevista registrada',
+            'Esta entrevista já foi encerrada e a janela de revisão (7 dias) se encerrou. Se precisar comentar algo, fale com o(a) professor(a).'
+          );
+        }
         return;
       }
 
@@ -1212,7 +1386,7 @@
       }
       if (r.status === 410) {
         // Entrevista finalizada em outra aba ou pelo admin enquanto eu digitava.
-        showFinalScreen();
+        enterReviewMode();
         return;
       }
       if (j.error) { appendStatus(j.message || j.error, true); return; }
@@ -1232,8 +1406,8 @@
         phase = j.phase;
         syncTopbarActions();
         if (phase === 'finalizing') {
-          // Fim natural — abre o formulário de comentário automaticamente.
-          showCommentForm('complete');
+          // Fim natural — entra direto no modo revisão (server já finalizou).
+          enterReviewMode();
           return;
         }
       }
@@ -1456,7 +1630,7 @@
         thinking.remove();
         if (userPlaceholder?.parentNode) userPlaceholder.parentNode.removeChild(userPlaceholder);
         setRecordingUI('idle');
-        showFinalScreen();
+        enterReviewMode();
         return;
       }
       if (j.error) {
@@ -1483,7 +1657,7 @@
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
         syncTopbarActions();
-        if (phase === 'finalizing') { showCommentForm('complete'); return; }
+        if (phase === 'finalizing') { enterReviewMode(); return; }
       }
       handleTurn(j, wrap);
     }
