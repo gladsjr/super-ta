@@ -151,6 +151,19 @@
     </div>
 
     <div class="card">
+      <h3 class="card-title">Número de perguntas da entrevista</h3>
+      <p class="card-sub">Quantas perguntas planejadas o entrevistador fará (entre 3 e 20). Ele ainda pode aprofundar com follow-ups além desse número. Vale para novas submissões — entrevistas já em andamento mantêm o número com que começaram.</p>
+      <div class="row" style="align-items: end; gap: var(--sp-3)">
+        <div style="max-width: 140px">
+          <label class="label" for="question-count">Perguntas</label>
+          <input id="question-count" class="input" type="number" min="3" max="20" step="1" value="6"/>
+        </div>
+        <button id="save-question-count" class="btn btn-primary">Salvar</button>
+        <span id="question-count-msg" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="card">
       <h3 class="card-title">Tokens de envio para alunos</h3>
       <p class="card-sub">Gere tokens para cada aluno e compartilhe com eles. Cada token abre uma entrevista independente.</p>
       <div class="sub-form">
@@ -311,6 +324,7 @@ async function load() {
     : 'Envie o enunciado antes de avaliar';
 
   applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
+  document.getElementById('question-count').value = j.work.question_count ?? 6;
   // A sugestão de identidade é cosmética. Ela NUNCA pode derrubar o load() e
   // impedir a renderização da lista de alunos (que vem logo abaixo) — foi
   // exatamente esse o bug em que um gender inesperado fazia null.checked lançar.
@@ -719,6 +733,26 @@ document.getElementById('save-interaction').onclick = async () => {
     return;
   }
   msg.textContent = name ? 'Modo e identidade salvos.' : 'Modo salvo. Identidade ficará aleatória.';
+};
+
+document.getElementById('save-question-count').onclick = async () => {
+  const msg = document.getElementById('question-count-msg');
+  msg.textContent = '';
+  const count = parseInt(document.getElementById('question-count').value, 10);
+  if (!Number.isInteger(count) || count < 3 || count > 20) {
+    msg.textContent = 'Informe um inteiro entre 3 e 20.';
+    return;
+  }
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/question-count`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question_count: count }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = 'Erro ao salvar: ' + (j.error || 'falha');
+    return;
+  }
+  msg.textContent = 'Número de perguntas salvo.';
 };
 
 document.getElementById('save-interviewer').onclick = async () => {

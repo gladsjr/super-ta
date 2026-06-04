@@ -19,7 +19,13 @@ import {
 import { openai } from "../lib/openaiClient.js";
 import { configAssistantAgent, enunciadoCoherenceAgent } from "../lib/agents.js";
 import { streamAudio } from "../lib/audioStore.js";
-import { PRINCIPAL_REASONING_MODEL, TTS_MODEL } from "../lib/config.js";
+import {
+    PRINCIPAL_REASONING_MODEL,
+    TTS_MODEL,
+    isValidQuestionCount,
+    MIN_QUESTION_COUNT,
+    MAX_QUESTION_COUNT,
+} from "../lib/config.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -48,6 +54,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 has_interviewer: !!req.work.has_interviewer,
                 interaction_mode: req.work.interaction_mode,
                 voice: req.work.voice,
+                question_count: req.work.question_count,
                 interviewer_name: req.work.interviewer_name,
                 interviewer_gender: req.work.interviewer_gender,
                 budget_usd: balance?.budget_usd ?? 0,
@@ -173,6 +180,23 @@ router.post("/w/:workToken/interaction", requireWorkToken, express.json({ limit:
     } catch (err) {
         log.error("WORK", `set interaction failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar modo de interação", detail: err.message });
+    }
+});
+
+// Número de perguntas planejadas da entrevista. Vale para novas submissões — o
+// valor é materializado no plano (PrepBuilder.buildPlan) no /upload do aluno.
+router.post("/w/:workToken/question-count", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
+    const count = Number(req.body?.question_count);
+    if (!isValidQuestionCount(count)) {
+        return res.status(400).json({ error: `número de perguntas deve ser um inteiro entre ${MIN_QUESTION_COUNT} e ${MAX_QUESTION_COUNT}` });
+    }
+    try {
+        await db.setQuestionCount(req.work.id, count);
+        log.info("WORK", `question_count=${count} work=${req.work.work_token}`);
+        res.json({ ok: true, question_count: count });
+    } catch (err) {
+        log.error("WORK", `set question_count failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar número de perguntas", detail: err.message });
     }
 });
 

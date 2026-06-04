@@ -99,7 +99,7 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | `SuperOrchestratorAgent` (UMA chamada por turno na fase interviewing) | [agents/SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js) | preâmbulo (`student_via_interviewer_voice`) + `systemPromptBody` + agenda + análise + plano + memory + histórico (via Conversations API) + última mensagem |
 | Schema da ação do super-orquestrador | [lib/superOrchestrator/actionSchema.js](../lib/superOrchestrator/actionSchema.js) | descrição embutida no prompt do agente |
 | Despachante por `action.kind` em `/chat` | [routes/interview.js — bloco SUPER-ORQUESTRADOR](../routes/interview.js) | — |
-| Guardrails de cap (30 turnos) e finalize precoce (<5 turnos) | [routes/interview.js — SUPER_ORQ_MAX_TURNS / SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE](../routes/interview.js) | — |
+| Guardrails de cap e finalize precoce (derivados de `works.question_count`: cap = nº×3, piso = ⌈nº/2⌉) | [routes/interview.js — maxTurnsFor / minTurnsBeforeFinalizeFor](../routes/interview.js) | — |
 | Sortição da persona | [lib/personas.js](../lib/personas.js) | — |
 | `turnFromPlanQuestion` | [lib/conversationUtils.js](../lib/conversationUtils.js) | — |
 | Persistência do log | [lib/conversationUtils.js — persistConversationLog](../lib/conversationUtils.js) | — |

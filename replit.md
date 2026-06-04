@@ -45,7 +45,7 @@ On every student turn in the `interviewing` phase:
 3. Student message is pushed to `conv_chat` and `conv_eval`.
 4. `SuperOrchestratorAgent` is called with: interviewer agenda (rendered YAML), `work_analysis`, `interview_plan`, the agent's own `memory` carried from the previous turn, the conversation history (via the OpenAI `conversation` parameter), and the latest student message. Tools: `file_search` over the vector store. The agent returns a JSON with `rationale`, `action.kind` (one of `ask` / `follow_up` / `meta_modal` / `hint` / `finalize` / `ask_repeat`) and an updated `memory`.
 5. The dispatcher in `routes/interview.js` translates `action.kind` into behavior (push to conv, persist, attach TTS audio, push intervention to current turn, transition phase, etc.).
-6. Hard guardrails: `SUPER_ORQ_MAX_TURNS=30` forces finalize; `SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE=5` blocks early finalize (except when `finalize_reason="student_disengaged"`); schema-invalid output and agent failure both fall back to `ask_repeat`.
+6. Hard guardrails (turn caps): both derive per-session from the planned question count (`works.question_count`, professor-configurable, range 3–20, default 6, materialized in `interview_plan`). The cap that forces finalize is `questions × 3`; the floor that blocks early finalize is `⌈questions / 2⌉` (except when `finalize_reason="student_disengaged"`). At the legacy default of 10 these reproduce the old fixed 30/5. Schema-invalid output and agent failure both fall back to `ask_repeat`.
 7. In audio mode, the response is streamed as SSE (`thinking` → `responding` on first model output text → `result`) so the frontend can flip the "ouvindo" label to "respondendo" at the real moment the agent starts producing text.
 
 #### Session Persistence

@@ -21,7 +21,7 @@ import { openai } from "../lib/openaiClient.js";
 import { transcribeAudio, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
-import { STT_MODEL, AUDIO_INTELLIGIBILITY } from "../lib/config.js";
+import { STT_MODEL, AUDIO_INTELLIGIBILITY, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
 import { detectIntelligibilitySpans } from "../lib/audioIntelligibility.js";
@@ -52,14 +52,25 @@ import { attachNarratorAudio } from "../lib/narrator.js";
 import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import log from "../lib/logger.js";
 
-// Cap duro do super-orquestrador. Depois disso, força finalize automático
-// independentemente do que o agente decidir — protege contra agente que não
-// finaliza nunca. Pode ir para policy.yaml depois.
-const SUPER_ORQ_MAX_TURNS = 30;
-// Bloqueio de finalize precoce. Antes de N turnos respondidos, o agente
-// não pode finalizar (exceto se finalize_reason="student_disengaged" — aluno
-// explicitamente desistindo).
-const SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE = 5;
+// Guardrails de turno do super-orquestrador. Antes fixos (30/5); agora derivam
+// do número de perguntas planejadas (works.question_count, materializado no
+// plano da sessão). Cap duro força finalize automático independentemente do que
+// o agente decidir (protege contra agente que não finaliza nunca); piso bloqueia
+// finalize precoce (exceto finalize_reason="student_disengaged"). As fórmulas
+// reproduzem 30/5 no antigo default de 10 perguntas.
+//   cap  = nº de perguntas × 3   (folga para follow-ups e perguntas espontâneas)
+//   piso = ceil(nº de perguntas / 2)
+// O nº vem do plano persistido (sobrevive a restart). Fallback defensivo só se o
+// plano ainda não existir — impossível na fase interviewing, onde isto roda.
+function plannedQuestionCount(sess) {
+    return sess.interviewPlan?.questions?.length ?? DEFAULT_QUESTION_COUNT;
+}
+function maxTurnsFor(sess) {
+    return plannedQuestionCount(sess) * 3;
+}
+function minTurnsBeforeFinalizeFor(sess) {
+    return Math.ceil(plannedQuestionCount(sess) / 2);
+}
 // Tamanho máximo da mensagem do aluno por turno (texto ou transcrição de
 // áudio). Defesa contra prompt-injection que tenta confundir o reasoning
 // model com payloads longos. 4000 chars cobre ~600-800 palavras —
@@ -487,6 +498,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
             studentBuffer,
             studentFilename,
             enunciadoBlob,
+            questionCount: req.work.question_count,
             meterCtx,
             token,
         };
@@ -922,8 +934,9 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
 
     // Guardrail 1: cap duro de turnos. Se já estourou, força finalize sem
     // chamar o agente (economia + segurança).
-    if (turnsAnswered >= SUPER_ORQ_MAX_TURNS) {
-        log.info("SUPER_ORQ", `MAX_TURNS (${SUPER_ORQ_MAX_TURNS}) atingido — forçando finalize`);
+    const maxTurns = maxTurnsFor(sess);
+    if (turnsAnswered >= maxTurns) {
+        log.info("SUPER_ORQ", `MAX_TURNS (${maxTurns}) atingido — forçando finalize`);
         const forcedMessage = "Obrigado, acho que já temos material suficiente para encerrar esta conversa.";
         sess.conv_chat.push({ role: "user", content: message });
         sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
@@ -1002,10 +1015,11 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     }
 
     // Guardrail 2: bloqueio de finalize precoce.
+    const minTurnsBeforeFinalize = minTurnsBeforeFinalizeFor(sess);
     if (parsed.action.kind === "finalize"
-        && turnsAnswered < SUPER_ORQ_MIN_TURNS_BEFORE_FINALIZE
+        && turnsAnswered < minTurnsBeforeFinalize
         && parsed.action.finalize_reason !== "student_disengaged") {
-        log.error("SUPER_ORQ", `finalize precoce bloqueado (turnsAnswered=${turnsAnswered}, reason=${parsed.action.finalize_reason}); convertendo para ask_repeat`);
+        log.error("SUPER_ORQ", `finalize precoce bloqueado (turnsAnswered=${turnsAnswered} < ${minTurnsBeforeFinalize}, reason=${parsed.action.finalize_reason}); convertendo para ask_repeat`);
         parsed.action = {
             kind: "ask_repeat",
             message: "Vamos seguir um pouco mais — pode me dizer mais sobre a sua última resposta?",
