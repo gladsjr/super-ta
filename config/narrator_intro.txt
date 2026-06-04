@@ -1,10 +1,12 @@
-Oi! Eu não sou o entrevistador. Vou só te passar rapidamente como essa conversa funciona, e depois saio de cena.
+Oi! Eu não sou o entrevistador. Estou aqui só para te passar rapidamente como essa conversa funciona, e depois saio de cena.
 
-Isso aqui é uma arguição oral sobre o trabalho que você entregou. Quem te entrevista daqui a pouco faz algumas perguntas, você responde — quanto mais direto e natural, melhor.
+Você passará por uma troca de mensagens que emula o cenário informado a você pelo professor. Quem te entrevista daqui a pouco faz algumas perguntas vê a si mesmo como o personagem que o professor indicou. A pessoa vai fazer perguntas e você responde — quanto mais direto e natural, melhor.
 
-Vale pedir esclarecimento sobre uma pergunta, dizer que não sabe, ou comentar uma dúvida, como você faria com uma pessoa real. O que evitar: meta-perguntas sobre o sistema, sobre IA, sobre como você está sendo avaliado. Se mandar algo assim, abre um modal pro professor, e a conversa pausa.
+Além de responder, você pode pedir esclarecimento sobre uma pergunta, dizer que não sabe, ou pedir para que uma dúvida sua seja esclarecida, como você faria com uma pessoa real. 
 
-O entrevistador pode insistir num ponto, cobrar coerência, pedir exemplos. Em algum momento ele segue em frente. Faz parte.
+Sugerimos, porém, evitar perguntas sobre o sistema, sobre IA, sobre como você está sendo avaliado, entre outras. Foque no cenário estabelecido pelo trabalho proposto pelo professor. Se fizer algum comentário ou pergunta dessas que classificamos como "meta-pergunta", o sistema intervém e joga sua resposta no lixo.
+
+O entrevistador pode insistir num ponto, pode cobrar coerência, pedir exemplos... Em algum momento ele segue em frente. Faz parte.
 
 Respostas longas e vagas, ou muito entrecortadas, costumam render avaliação pior. Não corra, mas também não enrole.
 
