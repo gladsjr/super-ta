@@ -71,6 +71,22 @@ function maxTurnsFor(sess) {
 function minTurnsBeforeFinalizeFor(sess) {
     return Math.ceil(plannedQuestionCount(sess) / 2);
 }
+
+// Persiste a finalização no banco no MOMENTO em que o servidor decide encerrar
+// (finalize do orquestrador ou cap duro de turnos). O servidor é a fonte de
+// verdade: sem gravar completion_reason aqui, o frontend assumia "server já
+// finalizou" e ia direto pra revisão, mas /review devolvia 409 (não carregava a
+// conversa) e, no refresh, /start retomava a entrevista — em áudio, reexibindo o
+// último áudio do entrevistador, sem acesso ao campo de comentário. Idempotente
+// na prática: requireNotFinalized garante que /chat só roda com a submissão
+// ainda aberta. Falha de escrita é logada, não derruba a despedida.
+async function persistFinalization(req, completionReason) {
+    try {
+        await db.finalizeSubmission(req.submission.id, null, completionReason);
+    } catch (err) {
+        log.error("SUBMISSION", `finalize persist failed token=${req.submission.submission_token} reason=${completionReason}: ${err.message}`);
+    }
+}
 // Tamanho máximo da mensagem do aluno por turno (texto ou transcrição de
 // áudio). Defesa contra prompt-injection que tenta confundir o reasoning
 // model com payloads longos. 4000 chars cobre ~600-800 palavras —
@@ -959,6 +975,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: forcedMessage }] });
         } catch (err) { log.error("CHAT", `remote write (assistant, cap) failed: ${err.message}`); }
         sess.currentPhase = "finalizing";
+        await persistFinalization(req, "complete");
         persist();
         return sendFinal({ channel: "chat", assistant: forcedMessage, phase: sess.currentPhase, ...audio });
     }
@@ -1161,6 +1178,10 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.currentPhase = "finalizing";
         log.info("SUPER_ORQ", `finalize reason=${parsed.action.finalize_reason}`);
         await pushAssistantVisible({ finalize_reason: parsed.action.finalize_reason });
+        // student_disengaged = aluno pediu pra parar pela conversa → "give_up"
+        // (mesma semântica do botão Desistir). Demais razões = "complete".
+        const completionReason = parsed.action.finalize_reason === "student_disengaged" ? "give_up" : "complete";
+        await persistFinalization(req, completionReason);
         persist();
         return sendFinal({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
     }
