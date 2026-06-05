@@ -1,3 +1,4 @@
 - [Servidor stale após troca de branch/pull](stale-server-after-git-switch.md) — erro não bate com o disco (rota 404, ENOENT de config)? Processo Node antigo em memória; restart do workflow resolve.
 - [Dev funciona / prod não = red herring](dev-vs-prod-red-herring.md) — antes de culpar cache/deploy/migrations, verifique banco→API→md5→SW→console; a causa pode ser data-dependent (runtime throw).
 - [Replit publish vs boot migrations](replit-publish-vs-boot-migrations.md) — prod crasha no boot ("column already exists") porque o publish-diff adiciona colunas sem atualizar schema_migrations; fix = sincronizar o ledger, não tornar migrations idempotentes.
+- [Object Storage bucket binding](object-storage-bucket-binding.md) — @replit/object-storage não lê DEFAULT_OBJECT_STORAGE_BUCKET_ID sozinha; passe new Client({ bucketId }). no-op best-effort mascarava a falta de bucket.

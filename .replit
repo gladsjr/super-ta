@@ -1,6 +1,7 @@
 modules = ["nodejs-20", "web", "python-3.11", "postgresql-16"]
 [agent]
 expertMode = true
+integrations = ["javascript_object_storage:2.0.0"]
 
 [nix]
 channel = "stable-25_05"

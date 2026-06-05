@@ -1,0 +1,23 @@
+Sobre a funcionalidade de áudio (arquivamento das gravações do aluno)
+
+Implementei o arquivamento das gravações de áudio de entrada do aluno e quero garantir que funcione aqui no Replit (dev e produção).
+
+Como funciona:
+
+Só o áudio do aluno é guardado. A voz do entrevistador é TTS e não é persistida.
+Os bytes vão pro Object Storage; os metadados (índice, mimetype, tamanho, hash) vão pra tabela Postgres student_audio_artifacts — que já existe (migration 009). Nenhuma migration nova é necessária pra isso.
+Todo o acoplamento de storage está num único adapter: lib/audioStore.js, com dois backends escolhidos automaticamente no boot:
+replit → Replit Object Storage (@replit/object-storage), quando a env REPL_ID está presente (ou seja, aqui no Replit — dev e prod);
+local → filesystem, fora do Replit (máquina do dev).
+Dá pra forçar com a env AUDIO_STORE_BACKEND (replit ou local).
+Chave do objeto: audio/{submission_token}/{audio_idx}.{ext}.
+O arquivamento é best-effort: se o storage falhar ou estiver indisponível, a entrevista não quebra — só não grava o áudio (degradação silenciosa, por design).
+O que preciso que esteja certo no Replit:
+
+O Object Storage (App Storage) precisa estar provisionado/habilitado para este App. Sem um bucket ativo, o new Client() do @replit/object-storage não inicializa e o arquivamento vira no-op (a entrevista roda, mas nada é gravado). Por favor confirme que há um bucket de Object Storage ativo.
+No boot, o servidor loga o backend ativo — procure por: [BOOT] audio_store backend=replit available=true Se vier available=false, o Object Storage não está acessível e precisa ser habilitado.
+Dev e prod no Replit compartilham o mesmo bucket por padrão, e tudo bem: os bancos são separados e as chaves usam token aleatório único, então um ambiente nunca toca nos objetos do outro.
+Não precisa mudar código nem schema, nem criar fallback — a seleção de backend já é automática. É só garantir o Object Storage habilitado e conferir o log de boot.
+
+Se preferir, posso encurtar para uma versão de 3-4 linhas (só "habilite Object Storage e confira o log de boot"), ou traduzir para inglês. Quer alguma das duas?
+
