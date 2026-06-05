@@ -5,3 +5,4 @@ node_modules/
 data/submissions/*
 !data/submissions/.gitkeep
 data/works/
+.audio-store/

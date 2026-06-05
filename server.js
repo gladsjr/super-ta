@@ -28,6 +28,7 @@ import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
+import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -65,6 +66,15 @@ app.listen(PORT, "0.0.0.0", async () => {
         await seedInterviewerTemplates();
     } catch (err) {
         log.error("BOOT", `seedInterviewerTemplates failed: ${err.message}`);
+    }
+    // Inicializa o store de áudio cedo pra que o backend ativo (e eventual
+    // indisponibilidade) apareça no boot, não como no-op silencioso no meio
+    // de uma entrevista. Não fatal — gravação é best-effort.
+    try {
+        const audio = await initAudioStore();
+        log.info("BOOT", `audio_store backend=${audio.backend} available=${audio.available}${audio.available ? "" : ` reason=${audio.reason}`}`);
+    } catch (err) {
+        log.error("BOOT", `initAudioStore failed: ${err.message}`);
     }
     log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });
