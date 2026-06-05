@@ -1,4 +1,4 @@
-Oi! Eu não sou o entrevistador. Estou aqui só para te passar rapidamente como essa conversa funciona, e depois saio de cena.
+Oi! Estou aqui só para te passar rapidamente como essa conversa funciona, e depois saio de cena. O entrevistador não sou eu.
 
 Você passará por uma troca de mensagens que emula o cenário informado a você pelo professor. Quem te entrevista daqui a pouco faz algumas perguntas vê a si mesmo como o personagem que o professor indicou. A pessoa vai fazer perguntas e você responde — quanto mais direto e natural, melhor.
 
@@ -6,13 +6,13 @@ Além de responder, você pode pedir esclarecimento sobre uma pergunta, dizer qu
 
 Sugerimos, porém, evitar perguntas sobre o sistema, sobre IA, sobre como você está sendo avaliado, entre outras. Foque no cenário estabelecido pelo trabalho proposto pelo professor. Se fizer algum comentário ou pergunta dessas que classificamos como "meta-pergunta", o sistema intervém e joga sua resposta no lixo.
 
-O entrevistador pode insistir num ponto, pode cobrar coerência, pedir exemplos... Em algum momento ele segue em frente. Faz parte.
+O entrevistador pode insistir num ponto, pode cobrar coerência, pedir exemplos... Em algum momento ele segue em frente. 
 
-Respostas longas e vagas, ou muito entrecortadas, costumam render avaliação pior. Não corra, mas também não enrole.
+Respostas longas e vagas, ou muito entrecortadas, são piores. Não corra, mas também não enrole.
 
 Se uma pergunta parecer impossível, injusta ou esquisita, não discute com o entrevistador, não tenta argumentar com ele. Só fala claramente: "pula essa". Ele vai pular sem te questionar.
 
-Quando a entrevista acabar — naturalmente ou porque você desistiu — você vai ter sete dias de acesso pra revisar o que aconteceu. Vai ver o texto da conversa, ouvir as suas próprias gravações, e ter um campo pra deixar um comentário pro professor sobre qualquer coisa que não funcionou. É lá que você reclama, com calma, com tudo na mão. Não tenta brigar com o entrevistador na hora.
+Quando a entrevista acabar — naturalmente ou porque você desistiu — você vai ter sete dias de acesso pra revisar tudo. Vai ver o texto da conversa, ouvir as suas próprias gravações, e ter um campo pra deixar um comentário pro professor sobre qualquer coisa que não funcionou. É lá que você reclama, com calma, com tudo na mão. Não tenta brigar com o entrevistador na hora.
 
 Se quiser parar antes do fim, tem um botão de "Desistir da entrevista" no topo. Mesma janela de revisão depois.
 
