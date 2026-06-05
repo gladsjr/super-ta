@@ -4,7 +4,8 @@
       "PowerShell(Get-Command pg_ctl, psql, postgres -ErrorAction SilentlyContinue)",
       "PowerShell(Get-Command docker, docker-compose -ErrorAction SilentlyContinue)",
       "PowerShell(Start-Process \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\")",
-      "PowerShell(docker compose stop db 2>&1 | Out-Null; Get-Process -Name \"Docker Desktop\",\"com.docker.backend\",\"com.docker.build\",\"Docker.Backend\",\"vpnkit\",\"vpnkit-bridge\",\"dockerd\",\"docker\" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; $ready = $false; try { docker info 2>&1 | Out-Null; $ready = \\($LASTEXITCODE -eq 0\\) } catch {}; Write-Output \"engine_ready_after_kill=$ready\")"
+      "PowerShell(docker compose stop db 2>&1 | Out-Null; Get-Process -Name \"Docker Desktop\",\"com.docker.backend\",\"com.docker.build\",\"Docker.Backend\",\"vpnkit\",\"vpnkit-bridge\",\"dockerd\",\"docker\" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; $ready = $false; try { docker info 2>&1 | Out-Null; $ready = \\($LASTEXITCODE -eq 0\\) } catch {}; Write-Output \"engine_ready_after_kill=$ready\")",
+      "Bash(node --check server.js)"
     ]
   }
 }
