@@ -279,12 +279,27 @@ async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist
     const audio = await attachAudio(sess, phrased.message);
     persist();
 
-    // Dica (fora do roleplay) só aparece no give_up. Texto fixo, editável aqui.
-    const hint = mode === "give_up" ? {
-        kind: "audio_give_up",
-        title: "Problemas com o áudio?",
-        body: "O entrevistador não está conseguindo te entender. Você pode tentar ajustar o microfone (ou mudar para um ambiente mais silencioso) e gravar de novo. Se achar que o problema é do sistema, use o botão \"Desistir da entrevista\" no topo, deixe um comentário descrevendo o que aconteceu, e peça outro link ao seu professor.",
-    } : null;
+    // Dica (fora do roleplay) aparece SEMPRE que o áudio é barrado — repetição
+    // ou desistência — e inclui a transcrição da fala do aluno com os trechos
+    // que não ficaram claros destacados, para ele saber exatamente o que o
+    // entrevistador não entendeu. É a própria fala do aluno (não a pergunta do
+    // entrevistador), então não há preocupação de anti-cola.
+    const unclear = spans.map(s => s.text);
+    const hint = mode === "give_up"
+        ? {
+            kind: "audio_give_up",
+            title: "Problemas com o áudio?",
+            body: "O entrevistador não está conseguindo te entender. Veja abaixo como o seu áudio foi transcrito — os trechos destacados não ficaram claros. Você pode ajustar o microfone (ou mudar para um ambiente mais silencioso) e gravar de novo. Se achar que o problema é do sistema, use o botão \"Desistir da entrevista\" no topo, deixe um comentário descrevendo o que aconteceu, e peça outro link ao seu professor.",
+            transcript,
+            unclear,
+        }
+        : {
+            kind: "audio_repeat",
+            title: "O entrevistador não entendeu parte do que você disse",
+            body: "Veja abaixo como o seu áudio foi transcrito — os trechos destacados não ficaram claros. Tente gravar de novo, com calma, reforçando essas partes.",
+            transcript,
+            unclear,
+        };
 
     return {
         gated: true,

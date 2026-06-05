@@ -141,6 +141,23 @@
     }
     .dica .dica-title { font-weight: 600; margin-bottom: var(--sp-1); }
     .dica .dica-body { font-size: var(--fs-sm); white-space: pre-wrap; }
+    .dica .dica-transcript {
+      font-size: var(--fs-sm);
+      margin-top: var(--sp-2);
+      padding: var(--sp-2) var(--sp-3);
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid #e0c896;
+      border-radius: var(--r-sm);
+      font-style: italic;
+      color: var(--ink-700);
+    }
+    .dica .dica-transcript mark {
+      background: #f3c0a0;
+      color: #7a2e00;
+      font-style: normal;
+      padding: 0 2px;
+      border-radius: 2px;
+    }
 
     /* Orientador (narrator): áudio fora-de-roleplay tocado ANTES do
        entrevistador, com voz aleatória diferente da dele. Formato distinto
@@ -1088,7 +1105,36 @@
      // entrevistador. Reutilizável: por enquanto só usado pelo gate de áudio
      // (give_up), no futuro pode entrar em outros lugares (ex.: substituir a
      // modal de meta-pergunta).
-    function appendDica({ title, body }) {
+    // Monta a transcrição do aluno com os trechos não entendidos em <mark>.
+    // Trabalha sobre a string já escapada (anti-XSS) e mescla intervalos para
+    // não aninhar/quebrar tags. Se nenhum trecho casar, mostra a transcrição
+    // limpa — degrada bem.
+    function highlightUnclear(transcript, unclear) {
+      const esc = escapeHtml(transcript);
+      const frags = [...new Set((unclear || []).map(s => (s || '').trim()).filter(Boolean))].map(escapeHtml);
+      const ranges = [];
+      for (const f of frags) {
+        const i = esc.indexOf(f);
+        if (i !== -1) ranges.push([i, i + f.length]);
+      }
+      if (ranges.length === 0) return '“' + esc + '”';
+      ranges.sort((a, b) => a[0] - b[0]);
+      const merged = [ranges[0]];
+      for (let k = 1; k < ranges.length; k++) {
+        const last = merged[merged.length - 1];
+        if (ranges[k][0] <= last[1]) last[1] = Math.max(last[1], ranges[k][1]);
+        else merged.push(ranges[k]);
+      }
+      let out = '', cursor = 0;
+      for (const [s, e] of merged) {
+        out += esc.slice(cursor, s) + '<mark>' + esc.slice(s, e) + '</mark>';
+        cursor = e;
+      }
+      out += esc.slice(cursor);
+      return '“' + out + '”';
+    }
+
+    function appendDica({ title, body, transcript, unclear }) {
       const div = document.createElement('div');
       div.className = 'dica';
       const label = document.createElement('div');
@@ -1106,6 +1152,12 @@
         b.className = 'dica-body';
         b.textContent = body;
         div.appendChild(b);
+      }
+      if (transcript) {
+        const tr = document.createElement('div');
+        tr.className = 'dica-transcript';
+        tr.innerHTML = highlightUnclear(transcript, unclear);
+        div.appendChild(tr);
       }
       chat.appendChild(div);
       chat.scrollTop = chat.scrollHeight;
@@ -1400,7 +1452,8 @@
       const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
       if (j.audio_intelligibility?.hint) {
-        appendDica({ title: j.audio_intelligibility.hint.title, body: j.audio_intelligibility.hint.body });
+        const _h = j.audio_intelligibility.hint;
+        appendDica({ title: _h.title, body: _h.body, transcript: _h.transcript, unclear: _h.unclear });
       }
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
@@ -1652,7 +1705,8 @@
       const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
       if (j.audio_intelligibility?.hint) {
-        appendDica({ title: j.audio_intelligibility.hint.title, body: j.audio_intelligibility.hint.body });
+        const _h = j.audio_intelligibility.hint;
+        appendDica({ title: _h.title, body: _h.body, transcript: _h.transcript, unclear: _h.unclear });
       }
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
