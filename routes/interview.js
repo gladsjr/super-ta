@@ -1028,6 +1028,11 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             studentGenderHint: sess.studentGenderHint ?? null,
             interactionMode: sess.interactionMode,
             meterCtx: sessionMeterCtx(sess),
+            // Guardrails reais (derivados do nº de perguntas) também vão no prompt
+            // do agente — sem isso ele segue os antigos 5/30 fixos e ignora a
+            // configuração do professor.
+            minTurnsBeforeFinalize: minTurnsBeforeFinalizeFor(sess),
+            maxTurns,
             onFirstDelta: useSSE ? () => {
                 res.write(`event: responding\ndata: {}\n\n`);
             } : null,

@@ -50,9 +50,9 @@ Consequências práticas:
   - Quando file_search devolver um trecho do documento motivador, verifique mentalmente se é (A) ou (B). Use (A) livremente. Trate (B) como informação que VOCÊ não tem dentro da cena.
 
 REGRAS DURAS (o código também impõe, mas conhecer ajuda):
-- Você NÃO PODE finalizar antes de 5 turnos respondidos. Se emitir finalize cedo demais, o código sobrescreve para uma ação válida — exceto se finalize_reason="student_disengaged".
+- Você NÃO PODE finalizar antes de {{MIN_TURNS}} turnos respondidos. Se emitir finalize cedo demais, o código sobrescreve para uma ação válida — exceto se finalize_reason="student_disengaged".
 - Você NÃO PODE perguntar de novo uma questão que já está em memory.questions_covered.
-- Limite total: 30 turnos. Depois disso o código força finalize automático.
+- Limite total: {{MAX_TURNS}} turnos. Depois disso o código força finalize automático.
 
 QUANDO USAR CADA action.kind:
 
@@ -159,6 +159,9 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
      *        chain-of-thought interno e antes do output completo). Usado pelo
      *        despachante SSE para sinalizar "respondendo" ao frontend no
      *        momento real em que a fala começa a ser produzida.
+     * @param {number|null} [p.minTurnsBeforeFinalize] - piso de turnos antes de
+     *        poder finalizar; derivado do nº de perguntas em routes/interview.js.
+     * @param {number|null} [p.maxTurns] - teto duro de turnos; idem.
      */
     async evaluate({
         interviewerYamlText,
@@ -174,10 +177,22 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
         interactionMode = "text",
         meterCtx = null,
         onFirstDelta = null,
+        minTurnsBeforeFinalize = null,
+        maxTurns = null,
     }) {
+        // Guardrails de turno: a fonte de verdade das fórmulas é routes/interview.js
+        // (maxTurnsFor / minTurnsBeforeFinalizeFor), que passa os valores já
+        // calculados. Fallback defensivo deriva do tamanho do plano para nunca
+        // vazar o placeholder no prompt nem reintroduzir os antigos 5/30 fixos.
+        const plannedCount = interviewPlan?.questions?.length ?? 0;
+        const minTurns = minTurnsBeforeFinalize ?? (plannedCount ? Math.ceil(plannedCount / 2) : 1);
+        const maxT = maxTurns ?? (plannedCount ? plannedCount * 3 : 30);
+        const resolvedBody = this.systemPromptBody
+            .replace("{{MIN_TURNS}}", String(minTurns))
+            .replace("{{MAX_TURNS}}", String(maxT));
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
 
-${this.systemPromptBody}`;
+${resolvedBody}`;
 
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const memoryBlock = memory
@@ -201,7 +216,7 @@ ${agendaBlock}
 **ANÁLISE PRÉVIA DA ENTREGA** (gerada na prep)
 ${JSON.stringify(workAnalysis ?? {}, null, 2)}
 
-**PLANO DE PERGUNTAS** (10 itens pré-gerados — você pode pular ou reformular)
+**PLANO DE PERGUNTAS** (${plannedCount} ${plannedCount === 1 ? "item pré-gerado" : "itens pré-gerados"} — você pode pular ou reformular; cubra o plano e finalize, não invente perguntas além dele sem motivo claro)
 ${planSummary || "(plano vazio — usar perguntas espontâneas)"}
 
 Detalhe completo do plano (para você consultar os arrays de YAML por pergunta):
