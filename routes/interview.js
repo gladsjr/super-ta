@@ -72,6 +72,36 @@ function minTurnsBeforeFinalizeFor(sess) {
     return Math.ceil(plannedQuestionCount(sess) / 2);
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A Conversations API da OpenAI serializa operações por conversa: dois turnos
+// em sequência rápida podem colidir e devolver 400 "Another process is currently
+// operating on this conversation. Please retry in a few seconds." Antes, esse
+// erro caía direto no fallback ask_repeat, que pedia ao aluno para REDIGITAR a
+// resposta por causa de uma corrida transitória de backend. Aqui detectamos esse
+// erro específico e retentamos com backoff antes de degradar — a própria API diz
+// "retry in a few seconds". Só este erro é retentado; qualquer outro propaga.
+function isConversationLockError(err) {
+    const m = err && err.message ? String(err.message) : "";
+    return m.includes("Another process is currently operating on this conversation");
+}
+
+async function evaluateWithConversationLockRetry(fn, { retries = 3, baseDelayMs = 1200 } = {}) {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            lastErr = err;
+            if (!isConversationLockError(err) || attempt === retries) throw err;
+            const delay = baseDelayMs * (attempt + 1);
+            log.warn("SUPER_ORQ", `conversation lock (tentativa ${attempt + 1}/${retries}); retry em ${delay}ms`);
+            await sleep(delay);
+        }
+    }
+    throw lastErr;
+}
+
 // Persiste a finalização no banco no MOMENTO em que o servidor decide encerrar
 // (finalize do orquestrador ou cap duro de turnos). O servidor é a fonte de
 // verdade: sem gravar completion_reason aqui, o frontend assumia "server já
@@ -990,8 +1020,15 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: forcedMessage }] });
         } catch (err) { log.error("CHAT", `remote write (assistant, cap) failed: ${err.message}`); }
         sess.currentPhase = "finalizing";
+        sess.conversationCompleted = true;
         await persistFinalization(req, "complete");
-        persist();
+        await persist();
+        // Estado terminal limpo: invariante runtime_state_json IS NULL ⇔ sem
+        // tentativa em andamento. Sem isto a submissão ficava com
+        // runtime_state_json não-nulo e current_phase="finalizing" para sempre
+        // (in_flight fantasma no painel/analytics).
+        try { await db.clearSubmissionRuntimeState(req.submission.id); }
+        catch (err) { log.error("SUBMISSION", `clear runtime after max-turns finalize failed: ${err.message}`); }
         return sendFinal({ channel: "chat", assistant: forcedMessage, phase: sess.currentPhase, ...audio });
     }
 
@@ -1015,7 +1052,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // chain-of-thought interno).
     let parsed;
     try {
-        parsed = await superOrchestratorAgent.evaluate({
+        parsed = await evaluateWithConversationLockRetry(() => superOrchestratorAgent.evaluate({
             interviewerYamlText: sess.interviewerYamlText ?? "",
             workAnalysis: sess.workAnalysis ?? null,
             interviewPlan: sess.interviewPlan ?? null,
@@ -1036,7 +1073,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             onFirstDelta: useSSE ? () => {
                 res.write(`event: responding\ndata: {}\n\n`);
             } : null,
-        });
+        }));
     } catch (err) {
         log.error("SUPER_ORQ", `agent failed, fallback to ask_repeat: ${err.message}`);
         parsed = {
@@ -1196,13 +1233,20 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
         }
         sess.currentPhase = "finalizing";
+        sess.conversationCompleted = true;
         log.info("SUPER_ORQ", `finalize reason=${parsed.action.finalize_reason}`);
         await pushAssistantVisible({ finalize_reason: parsed.action.finalize_reason });
         // student_disengaged = aluno pediu pra parar pela conversa → "give_up"
         // (mesma semântica do botão Desistir). Demais razões = "complete".
         const completionReason = parsed.action.finalize_reason === "student_disengaged" ? "give_up" : "complete";
         await persistFinalization(req, completionReason);
-        persist();
+        await persist();
+        // Estado terminal limpo: invariante runtime_state_json IS NULL ⇔ sem
+        // tentativa em andamento. Sem isto a submissão ficava com
+        // runtime_state_json não-nulo e current_phase="finalizing" para sempre
+        // (in_flight fantasma no painel/analytics).
+        try { await db.clearSubmissionRuntimeState(req.submission.id); }
+        catch (err) { log.error("SUBMISSION", `clear runtime after finalize failed: ${err.message}`); }
         return sendFinal({ channel: "chat", assistant: assistantMessage, phase: sess.currentPhase, ...audio });
     }
 
@@ -1216,17 +1260,23 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
 // ============================================================================
 // POST /s/:submissionToken/finalize
 // ----------------------------------------------------------------------------
-// Encerra a entrevista definitivamente, gravando o motivo e o comentário
-// opcional do aluno. Após esta chamada, /chat, /upload e /audio devolvem 410
-// (via requireNotFinalized). Aceita dois cenários:
-//   - completion_reason="complete": finalização natural após o plano se esgotar
-//     (frontend dispara isto quando o aluno submete o formulário de comentário
-//     na tela mostrada depois da mensagem de encerramento do entrevistador).
-//   - completion_reason="give_up": aluno clicou em "Desistir" durante a
-//     entrevista.
-// O endpoint não é idempotente em sentido estrito: chamar duas vezes
-// sobrescreve o comentário e o reason. Em prática o frontend só chama uma vez
-// porque depois disto a tela vai para "Entrevista registrada".
+// Encerra a entrevista pelo botão "Desistir" (give_up). Após esta chamada,
+// /chat, /upload e /audio devolvem 410 (via requireNotFinalized).
+//
+// IMPORTANTE — quem finaliza o quê:
+//   - Fim NATURAL (plano esgotado / cap de turnos): é o handler de /chat que
+//     finaliza no servidor (ramo `finalize` do super-orquestrador), gravando
+//     completion_reason="complete" naquele momento. O frontend, ao ver
+//     phase="finalizing", entra direto no modo revisão; eventual comentário do
+//     aluno vai por POST /s/:t/comment, NÃO por aqui. Ou seja: chamar este
+//     endpoint com "complete" após um fim natural devolve 409 (completion_reason
+//     já setado) — esse caminho não é exercido pelo frontend hoje.
+//   - DESISTÊNCIA: o botão "Desistir" durante a entrevista chama este endpoint
+//     com completion_reason="give_up".
+// "complete" segue aceito por compatibilidade (ex.: finalização sem passar pelo
+// /chat), mas o fluxo padrão de fim natural não passa por aqui.
+// Não é idempotente em sentido estrito, mas a checagem de completion_reason já
+// setado devolve 409 numa segunda chamada.
 // ============================================================================
 const MAX_COMMENT_LEN = 2000;
 router.post("/s/:submissionToken/finalize", requireSubmissionToken, express.json({ limit: "16kb" }), async (req, res) => {

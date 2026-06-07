@@ -1425,6 +1425,11 @@
       if (!m) return;
       const userNode = appendUser(m);
       input.value = '';
+      // Balão "pensando" do entrevistador enquanto o servidor processa o turno.
+      // No modo texto não há SSE (useSSE = isAudioMode no backend), então a label
+      // usa só o timer interno: "ouvindo" e, após 5s, "respondendo". Removido em
+      // TODOS os ramos de saída (catch, 410, erro, modal, sucesso).
+      const thinking = appendThinkingBubble();
       let r, j;
       try {
         r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
@@ -1433,22 +1438,26 @@
         }));
         j = await r.json();
       } catch {
+        thinking.remove();
         appendStatus('Falha na comunicação com o servidor', true);
         return;
       }
       if (r.status === 410) {
         // Entrevista finalizada em outra aba ou pelo admin enquanto eu digitava.
+        thinking.remove();
         enterReviewMode();
         return;
       }
-      if (j.error) { appendStatus(j.message || j.error, true); return; }
+      if (j.error) { thinking.remove(); appendStatus(j.message || j.error, true); return; }
       if (j.channel === 'modal') {
+        thinking.remove();
         if (userNode && userNode.parentNode) userNode.parentNode.removeChild(userNode);
         input.value = j.restore_input ?? m;
         input.focus();
         showMetaDialog(j.assistant_response ?? '', j.audio_url);
         return;
       }
+      thinking.remove();
       const wrap = appendTA(j.assistant, j.audio_url);
       if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
       if (j.audio_intelligibility?.hint) {
