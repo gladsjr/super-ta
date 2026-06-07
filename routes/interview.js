@@ -1021,6 +1021,14 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         } catch (err) { log.error("CHAT", `remote write (assistant, cap) failed: ${err.message}`); }
         sess.currentPhase = "finalizing";
         sess.conversationCompleted = true;
+        // Despedida durável (B): persiste no conversation_json para sobreviver a
+        // queda de conexão e aparecer na revisão do aluno e no log do professor.
+        sess.finalization = {
+            message: forcedMessage,
+            completion_reason: "complete",
+            finalize_reason: "max_turns",
+            at: new Date().toISOString(),
+        };
         await persistFinalization(req, "complete");
         await persist();
         // Estado terminal limpo: invariante runtime_state_json IS NULL ⇔ sem
@@ -1239,6 +1247,14 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         // student_disengaged = aluno pediu pra parar pela conversa → "give_up"
         // (mesma semântica do botão Desistir). Demais razões = "complete".
         const completionReason = parsed.action.finalize_reason === "student_disengaged" ? "give_up" : "complete";
+        // Despedida durável (B): persiste no conversation_json para sobreviver a
+        // queda de conexão e aparecer na revisão do aluno e no log do professor.
+        sess.finalization = {
+            message: assistantMessage,
+            completion_reason: completionReason,
+            finalize_reason: parsed.action.finalize_reason ?? null,
+            at: new Date().toISOString(),
+        };
         await persistFinalization(req, completionReason);
         await persist();
         // Estado terminal limpo: invariante runtime_state_json IS NULL ⇔ sem

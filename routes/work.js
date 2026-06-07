@@ -244,10 +244,18 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
             }));
         }
         if (conversation && finalization?.completion_reason) {
+            // completion_reason/completed_at/student_comment vêm da linha da
+            // submission (fonte autoritativa). message/finalize_reason vêm do
+            // conversation_json (despedida durável, B) — preserva antes do overwrite.
+            const closingMessage = typeof conversation.finalization?.message === "string"
+                ? conversation.finalization.message : null;
+            const finalizeReason = conversation.finalization?.finalize_reason ?? null;
             conversation.finalization = {
                 completion_reason: finalization.completion_reason,
                 completed_at: finalization.completed_at,
                 student_comment: finalization.student_comment,
+                message: closingMessage,
+                finalize_reason: finalizeReason,
             };
         }
         // Lista das gravações de áudio do aluno (modo áudio). Cada item tem

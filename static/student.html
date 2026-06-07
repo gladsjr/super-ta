@@ -796,9 +796,18 @@
           if (typeof t.answer === 'string' && t.answer) parts.push(`<div class="conv-line"><span class="who">você:</span><span class="text">${escapeHtml(t.answer)}</span></div>`);
         }
       }
-      if (conv.finalization) {
+      // Encerramento: a fala de despedida do entrevistador (durável no
+      // conversation_json desde B) + a nota do motivo. completion_reason vem de
+      // data.submission (sempre presente apos finalizar, inclusive no give_up via
+      // botao, que nao gera fala de despedida).
+      const finalization = conv.finalization || null;
+      const completionReason = data.submission?.completion_reason || finalization?.completion_reason || null;
+      if (completionReason) {
         parts.push('<div class="conv-section-label">Encerramento</div>');
-        const reason = conv.finalization.completion_reason === 'give_up' ? 'Você desistiu da entrevista.' : 'Entrevista concluída.';
+        if (finalization && typeof finalization.message === 'string' && finalization.message) {
+          parts.push(`<div class="conv-line"><span class="who">entrevistador:</span><span class="text">${escapeHtml(finalization.message)}</span></div>`);
+        }
+        const reason = completionReason === 'give_up' ? 'Você encerrou a entrevista.' : 'Entrevista concluída.';
         parts.push(`<div class="conv-line"><span class="text">${escapeHtml(reason)}</span></div>`);
       }
       body.innerHTML = parts.length > 0 ? parts.join('') : '<em>Sem registros de conversa.</em>';
