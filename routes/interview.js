@@ -961,6 +961,15 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     const turnsAnswered = sess.turnLog.filter(t => t && t.answered_at).length;
 
     const useSSE = isAudioMode;
+    // Heartbeat keep-alive do SSE (C1). O gap entre 'thinking' (t=0) e o 1º token
+    // do super-orquestrador — e depois entre 'responding' e o TTS — pode passar de
+    // 30-50s SEM trafegar byte. O idle timeout do proxy do Autoscale corta a conexão
+    // nesse silêncio: o servidor conclui o turno, mas o cliente não recebe nada. Um
+    // comentário SSE ': ping' a cada 10s mantém bytes fluindo. Linhas de comentário
+    // (começam com ':') são ignoradas pelo EventSource e pelo consumeSSE do front
+    // (não casam com 'event:'/'data:'), então não afetam o protocolo.
+    let heartbeat = null;
+    const clearHeartbeat = () => { if (heartbeat) { clearInterval(heartbeat); heartbeat = null; } };
     if (useSSE) {
         res.writeHead(200, {
             "Content-Type": "text/event-stream; charset=utf-8",
@@ -971,11 +980,17 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         });
         // Sinal inicial — frontend pode usar pra confirmar que abriu o stream.
         res.write(`event: thinking\ndata: {}\n\n`);
+        heartbeat = setInterval(() => {
+            try { res.write(`: ping\n\n`); } catch { clearHeartbeat(); }
+        }, 10000);
+        // Cliente desconectou no meio → não deixa o interval vazando.
+        res.on("close", clearHeartbeat);
     }
     // Despacha o payload final. Em SSE, vira event: result + end. Em JSON,
     // res.json clássico. Toda saída bem-sucedida desta rota passa aqui.
     const sendFinal = (payload) => {
         if (useSSE) {
+            clearHeartbeat();
             res.write(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
             res.end();
         } else {
@@ -986,6 +1001,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // viram event:error com o status no payload.
     const sendError = (status, payload) => {
         if (useSSE) {
+            clearHeartbeat();
             res.write(`event: error\ndata: ${JSON.stringify({ ...payload, status })}\n\n`);
             res.end();
         } else {
