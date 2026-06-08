@@ -22,9 +22,13 @@ triage:
 # código sobre os logprobs do STT (lib/audioIntelligibility.js); o LLM
 # (AudioIntelligibilityAgent) entra só para fraseiar a fala em personagem.
 # Calibração: ajuste estes números depois de observar logs reais.
+# Recalibrado em jun/2026 após observar over-triggering em entrevistas reais de
+# áudio (gate disparando por 2 tokens incertos no meio de respostas fluentes de
+# 100-300 tokens). Antes: T=-0.3 (~74%) / K=2. Os logs [AUDIO:Gate] registram o
+# aggregate (mean/min/lowTokens) de TODO áudio — use-os para refinar.
 audio_intelligibility:
   enabled: true
-  low_logprob_threshold: -0.3      # token "inseguro": logprob abaixo disso (~prob < 74%)
-  min_consecutive_low_tokens: 2    # tamanho mínimo de um trecho ininteligível
+  low_logprob_threshold: -1.2      # token "inseguro": logprob abaixo disso (~prob < 30%). Antes -0.3 (~74%) flagava incerteza normal de fala fluente.
+  min_consecutive_low_tokens: 3    # tamanho mínimo de um trecho ininteligível (antes 2): exige um trecho de fato embolado, não um par isolado de tokens incertos.
   min_utterance_tokens: 4          # piso: enunciados curtos (ok, sim, "Maria") não gateiam
   max_retries_before_give_up: 3    # na N-ésima vez do mesmo turno, vira a fala + Dica de desistência

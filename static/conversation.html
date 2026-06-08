@@ -519,11 +519,16 @@ async function load() {
     document.getElementById('finalization-head').innerHTML =
       `<span class="reason">${escapeHtml(reasonLabel)}</span> · encerrada em ${fmtTime(fin.completed_at)}`;
     const body = document.getElementById('finalization-body');
-    if (fin.student_comment) {
-      body.innerHTML = `<div class="comment">${escapeHtml(fin.student_comment)}</div>`;
-    } else {
-      body.innerHTML = `<div class="no-comment">Aluno não deixou comentário.</div>`;
+    let finHtml = '';
+    if (typeof fin.message === 'string' && fin.message) {
+      finHtml += `<div class="comment"><strong>Despedida do entrevistador:</strong><br>${escapeHtml(fin.message)}</div>`;
     }
+    if (fin.student_comment) {
+      finHtml += `<div class="comment"><strong>Comentário do aluno:</strong><br>${escapeHtml(fin.student_comment)}</div>`;
+    } else {
+      finHtml += `<div class="no-comment">Aluno não deixou comentário.</div>`;
+    }
+    body.innerHTML = finHtml;
   }
 
   const turnsEl = document.getElementById('turns');
