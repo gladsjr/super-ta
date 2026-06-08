@@ -179,3 +179,34 @@ export async function seed({
         trabalhoPdf: trabalhoPdf(),
     };
 }
+
+// Modo REMOTO (ambiente de teste/prod): o trabalho JÁ existe e está configurado
+// (enunciado + entrevistador + modo áudio). Não cria trabalho nem faz login —
+// só cunha UMA submissão a partir do token do trabalho. O endpoint
+// POST /w/:workToken/submissions não exige sessão (requireWorkToken só valida o
+// token), então isso roda sem credenciais. Sem jar → sem consulta do lado do
+// professor (o relatório fica só com o lado do aluno).
+export async function seedRemote({
+    base = "http://127.0.0.1:5000",
+    workToken,
+    label = "Teste E2E Audio remoto",
+    log = console.log,
+} = {}) {
+    if (!workToken) throw new Error("seedRemote: --work <token> obrigatório");
+    const jar = makeJar(); // vazio: POST /w/:token/submissions é público
+    const res = await jfetch(base, jar, `/w/${workToken}/submissions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+    });
+    const { submissions } = await expectJson(res, "create submission (remoto)");
+    const subToken = submissions[0].submission_token;
+    log(`  [seed-remoto] submissão criada token=${subToken} (work=${workToken}, sem login)`);
+    return {
+        jar: null, // sem login → pula o relatório do lado do professor
+        workToken,
+        subToken,
+        studentUrl: `${base}/s/${subToken}`,
+        trabalhoPdf: trabalhoPdf(),
+    };
+}

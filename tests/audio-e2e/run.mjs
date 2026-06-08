@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, execSync } from "node:child_process";
 import { chromium } from "playwright-core";
-import { seed } from "./seed.mjs";
+import { seed, seedRemote } from "./seed.mjs";
 import { PERSONAS, nextAnswer, speak } from "./student.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,7 +30,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 function parseArgs(argv) {
     // 127.0.0.1 (não "localhost"): o fetch do Node resolve localhost para IPv6
     // (::1) primeiro, mas o servidor escuta em IPv4 (0.0.0.0) — localhost falha.
-    const a = { persona: "bem_preparado", voice: "coral", questions: 3, headed: false, keepServer: false, base: "http://127.0.0.1:5000" };
+    const a = { persona: "bem_preparado", voice: "coral", questions: 3, headed: false, keepServer: false, base: "http://127.0.0.1:5000", work: null };
     for (let i = 0; i < argv.length; i++) {
         const v = argv[i];
         if (v === "--persona") a.persona = argv[++i];
@@ -39,6 +39,9 @@ function parseArgs(argv) {
         else if (v === "--headed") a.headed = true;
         else if (v === "--keep-server") a.keepServer = true;
         else if (v === "--base") a.base = argv[++i];
+        // Modo remoto (ambiente de teste/prod): trabalho já existente; cunha só
+        // uma submissão via token, sem login. --voice/--questions são ignorados.
+        else if (v === "--work") a.work = argv[++i];
     }
     return a;
 }
@@ -149,11 +152,21 @@ async function main() {
     let browser = null;
 
     try {
-        server = await ensureServer(ARGS.base);
-
-        log(`[seed] criando trabalho em modo audio (voz=${ARGS.voice}, perguntas=${ARGS.questions})...`);
-        const s = await seed({ base: ARGS.base, voice: ARGS.voice, questionCount: ARGS.questions });
-        report.seed = { workToken: s.workToken, subToken: s.subToken, studentUrl: s.studentUrl };
+        let s;
+        if (ARGS.work) {
+            // Modo remoto: alvo já no ar (dev/prod). NÃO sobe servidor local.
+            if (!(await pingServer(ARGS.base))) {
+                throw new Error(`alvo remoto não respondeu em ${ARGS.base}/me — confira a URL`);
+            }
+            log(`[infra] alvo remoto: ${ARGS.base} (sem servidor local)`);
+            log(`[seed-remoto] usando trabalho existente ${ARGS.work} (sem login). --voice/--questions ignorados (vêm da config do trabalho).`);
+            s = await seedRemote({ base: ARGS.base, workToken: ARGS.work });
+        } else {
+            server = await ensureServer(ARGS.base);
+            log(`[seed] criando trabalho em modo audio (voz=${ARGS.voice}, perguntas=${ARGS.questions})...`);
+            s = await seed({ base: ARGS.base, voice: ARGS.voice, questionCount: ARGS.questions });
+        }
+        report.seed = { workToken: s.workToken, subToken: s.subToken, studentUrl: s.studentUrl, remote: !!ARGS.work };
         log(`[seed] aluno: ${s.studentUrl}`);
 
         // ---- Browser ----
@@ -310,16 +323,23 @@ async function main() {
         report.finishedPhase = phase;
 
         // ---- Transcript canonico pelo lado do professor ----
-        try {
-            const convRes = await fetch(`${ARGS.base}/w/${s.workToken}/submissions/${s.subToken}/conversation`, {
-                headers: s.jar.header(),
-            });
-            if (convRes.ok) {
-                const conv = await convRes.json();
-                fs.writeFileSync(path.join(outDir, "professor-conversation.json"), JSON.stringify(conv, null, 2));
+        // Só no modo local (com login/jar). No modo remoto não há sessão de
+        // professor, então o relatório fica com o lado do aluno (transcript +
+        // SSE por turno + áudios) — suficiente para validar a cadeia/C1.
+        if (s.jar) {
+            try {
+                const convRes = await fetch(`${ARGS.base}/w/${s.workToken}/submissions/${s.subToken}/conversation`, {
+                    headers: s.jar.header(),
+                });
+                if (convRes.ok) {
+                    const conv = await convRes.json();
+                    fs.writeFileSync(path.join(outDir, "professor-conversation.json"), JSON.stringify(conv, null, 2));
+                }
+            } catch (err) {
+                report.errors.push(`professor conversation fetch: ${err.message}`);
             }
-        } catch (err) {
-            report.errors.push(`professor conversation fetch: ${err.message}`);
+        } else {
+            log("[seed-remoto] pulando relatório do lado do professor (sem login)");
         }
 
         report.ok = report.pageErrors.length === 0 && (phase === "finalizing" || phase === "finalized");
