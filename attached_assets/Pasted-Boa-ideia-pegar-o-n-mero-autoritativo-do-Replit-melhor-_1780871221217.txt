@@ -1,0 +1,18 @@
+Boa ideia — pegar o número autoritativo do Replit é melhor que ficar sondando o prod. O que a resposta decide para o **C**: se o timeout for por **ociosidade** (tempo sem trafegar bytes), então **SSE + keep-alive** resolve; se for um **teto duro de duração total** da requisição, aí não tem jeito senão **poll/background**. A pergunta abaixo separa exatamente isso.
+
+## Pergunta para o Replit (pode colar como está)
+
+> Tenho um app **Node/Express** publicado como **Autoscale Deployment** no Replit. Em alguns endpoints o servidor segura **uma única requisição HTTP aberta por 30–60s** enquanto faz uma chamada lenta a uma API externa (LLM) antes de responder. Em turnos longos, às vezes o cliente não recebe resposta nenhuma.
+>
+> 1. Num **Autoscale Deployment**, qual é o **tempo máximo que uma requisição HTTP de entrada pode ficar aberta** antes de a plataforma encerrá-la? Existe um **request timeout total** e/ou um **idle timeout** (tempo sem trafegar bytes)? Quais os valores **padrão**?
+> 2. O limite é baseado em (a) tempo até o **primeiro byte**, (b) tempo **ocioso entre bytes**, ou (c) **duração total** da requisição? Ou seja: se eu **enviar bytes periodicamente** (ex.: **SSE com comentários de keep-alive** a cada poucos segundos), isso **reseta/evita** o timeout?
+> 3. Esse timeout é **configurável** no Autoscale?
+> 4. Os limites são **diferentes** entre o ambiente de **desenvolvimento** (webview/preview) e o **Autoscale Deployment** publicado?
+> 5. Para requisições que podem passar de 60s, vocês recomendam **outra abordagem** (ex.: **Reserved VM** em vez de Autoscale, ou um padrão **assíncrono** com polling/background)?
+
+(Funciona em PT no Assistant do Replit; se for abrir ticket de suporte ou perguntar em fórum, posso te passar a versão em inglês.)
+
+## Ou eu entro e pergunto
+Se preferir o outro caminho: **abre o Replit no Chrome e faz login você** (não vou digitar sua senha) — me avisa quando estiver logado e em qual tela (o **Assistant/Agent** do projeto, ou a busca de docs), que eu faço a pergunta acima direto lá e leio a resposta. 
+
+Qual dos dois você quer? Se for a primeira, é só colar e me trazer a resposta que eu sigo o desenho do C com base nela.
