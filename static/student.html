@@ -1742,6 +1742,9 @@
       }
       // Estima o SNR do PCM ANTES do teardown (que limpa os frames).
       const snrEstimate = computeSnrEstimate();
+      // Instrumentação para calibrar os limiares com mic real: lê o valor exato
+      // no console (F12). frames = nº de blocos analisados (sanidade).
+      console.log(`[acoustic] SNR estimado = ${snrEstimate ?? "—"} dB (${frameDb.length} blocos)`);
       teardownRecording();
 
       setRecordStatus('');
