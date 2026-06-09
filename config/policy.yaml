@@ -39,3 +39,19 @@ audio_intelligibility:
   repeat_pct: 0.35                 # rede de segurança: >=35% incertos -> REPETIR (bem acima do ~14% observado)
   min_utterance_tokens: 4          # enunciados curtos (ok, nome) não acionam nada
   max_retries_before_give_up: 3    # na N-ésima repetição do mesmo turno, vira give_up + Dica de desistência
+
+# Camada ACÚSTICA do pré-gate (modo áudio). Sinais calculados NO NAVEGADOR a
+# partir do PCM do microfone (DSP puro, sem custo, sem decode no servidor) e
+# enviados como campos no upload; combinados por severidade-máxima com o gate de
+# logprob acima (lib/acousticGate.js). Pega o "confidently-wrong" de música alta,
+# que o logprob é cego por construção (o STT erra COM confiança). Cutpoints
+# iniciais da calibração sintética FLEURS+GTZAN (jun/2026) — REFINAR com logs
+# reais (os [AUDIO:Acoustic] registram os valores crus por turno).
+acoustic:
+  enabled: true
+  snr_enabled: true
+  snr_warn: 20       # energy-SNR (dB, p95-p15 da energia por frame) abaixo disso -> avisar
+  snr_repeat: 12     # abaixo disso -> repetir (crasso: barulho ~no nível da fala)
+  bak_enabled: false # DNSMOS-BAK (modelo local de 1 MB) — ainda não calculado no cliente; plugável
+  bak_warn: 2.5      # background quality (1=barulhento .. 5=limpo) abaixo disso -> avisar
+  bak_repeat: 1.6    # abaixo disso -> repetir

@@ -1500,6 +1500,76 @@
     let recordTimer = null;
     let recordStartedAt = 0;
 
+    // ---- Análise acústica (camada de pré-gate, espelha lib/acousticGate.js) ----
+    // Calculada AQUI porque o PCM do microfone está disponível de graça no
+    // navegador (DSP puro, sem custo, sem decode no servidor). Estima um SNR
+    // sem-referência (p95-p15 da energia por frame) — barulho de fundo alto
+    // comprime a faixa dinâmica e derruba a estimativa. Vira o campo
+    // `acoustic_snr` no upload e dispara um aviso de "ambiente barulhento".
+    // Os cutpoints abaixo são só para o aviso ao vivo; a decisão de tier é do
+    // servidor (config/policy.yaml → acoustic). Mantê-los alinhados.
+    const SNR_WARN_DB = 20;       // abaixo disso: ambiente barulhento (aviso)
+    let audioCtx = null;
+    let audioSource = null;
+    let audioProc = null;
+    let frameDb = [];             // energia (dB) por bloco de áudio
+    let noisyEnv = false;         // estado do aviso ao vivo
+
+    function setupAcoustic(stream) {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return false;
+        audioCtx = new Ctx();
+        audioSource = audioCtx.createMediaStreamSource(stream);
+        audioProc = audioCtx.createScriptProcessor(1024, 1, 1);
+        frameDb = [];
+        noisyEnv = false;
+        audioProc.onaudioprocess = (e) => {
+          const x = e.inputBuffer.getChannelData(0);
+          let sum = 0;
+          for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
+          const db = 10 * Math.log10(sum / x.length + 1e-12);
+          frameDb.push(db);
+          // saída silenciosa (não copiamos input->output) -> sem eco
+        };
+        audioSource.connect(audioProc);
+        audioProc.connect(audioCtx.destination);
+        // Alguns navegadores criam o contexto 'suspended' até um gesto; o clique
+        // de gravar já é um gesto, mas garantimos que os callbacks disparem.
+        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        return true;
+      } catch (err) {
+        console.warn('acoustic setup failed', err);
+        teardownAcoustic();
+        return false;
+      }
+    }
+
+    function teardownAcoustic() {
+      try { if (audioProc) audioProc.onaudioprocess = null; } catch {}
+      try { if (audioSource) audioSource.disconnect(); } catch {}
+      try { if (audioProc) audioProc.disconnect(); } catch {}
+      try { if (audioCtx && audioCtx.state !== 'closed') audioCtx.close(); } catch {}
+      audioProc = null; audioSource = null; audioCtx = null;
+    }
+
+    function percentile(sorted, p) {
+      if (!sorted.length) return null;
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))));
+      return sorted[idx];
+    }
+
+    // SNR sem-referência: p95 (nível de fala) - p15 (piso de ruído), em dB.
+    // null se houver poucos frames (< ~0.5s) para uma estimativa confiável.
+    function computeSnrEstimate() {
+      if (frameDb.length < 24) return null;
+      const s = [...frameDb].sort((a, b) => a - b);
+      const hi = percentile(s, 0.95);
+      const lo = percentile(s, 0.15);
+      if (hi == null || lo == null) return null;
+      return Math.round((hi - lo) * 10) / 10;
+    }
+
     function setRecordStatus(text, isError) {
       const el = document.getElementById('record-status');
       el.textContent = text;
@@ -1532,15 +1602,22 @@
       mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
       mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunks.push(e.data); };
       mediaRecorder.start();
+      setupAcoustic(mediaStream);
       recordStartedAt = Date.now();
       recordTimer = setInterval(() => {
-        setRecordStatus(`🔴 Gravando... ${fmtElapsed(Date.now() - recordStartedAt)} — clique em "Parar e enviar" para mandar, ou "Parar" para descartar.`);
+        // Aviso ao vivo de ambiente barulhento (após ~1s, quando a estimativa
+        // já é confiável). Não bloqueia — o aluno decide regravar ou seguir.
+        const snr = computeSnrEstimate();
+        noisyEnv = snr != null && snr < SNR_WARN_DB;
+        const base = `🔴 Gravando... ${fmtElapsed(Date.now() - recordStartedAt)} — clique em "Parar e enviar" para mandar, ou "Parar" para descartar.`;
+        setRecordStatus(noisyEnv ? `⚠️ Muito barulho de fundo — considere um lugar mais silencioso. ${base}` : base, noisyEnv);
       }, 250);
       return true;
     }
 
     function teardownRecording() {
       if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+      teardownAcoustic();
       if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
       if (mediaRecorder) {
         // Detach handlers so any late dataavailable from this recorder can't
@@ -1663,6 +1740,8 @@
         setRecordStatus('Não foi possível encerrar a gravação. Tente de novo.', true);
         return;
       }
+      // Estima o SNR do PCM ANTES do teardown (que limpa os frames).
+      const snrEstimate = computeSnrEstimate();
       teardownRecording();
 
       setRecordStatus('');
@@ -1675,6 +1754,10 @@
       const thinking = appendThinkingBubble({ studentAudioSec });
 
       const form = new FormData();
+      // Métrica acústica (camada de pré-gate) ANTES do arquivo — ordering seguro
+      // para o busboy/multer expor o campo em req.body. Ausente se Web Audio
+      // indisponível.
+      if (snrEstimate != null) form.append('acoustic_snr', String(snrEstimate));
       form.append('audio', blob, 'student.webm');
       let r, j;
       try {
