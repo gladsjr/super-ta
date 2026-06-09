@@ -1563,11 +1563,18 @@
     // null se houver poucos frames (< ~0.5s) para uma estimativa confiável.
     function computeSnrEstimate() {
       if (frameDb.length < 24) return null;
-      const s = [...frameDb].sort((a, b) => a - b);
-      const hi = percentile(s, 0.95);
-      const lo = percentile(s, 0.15);
-      if (hi == null || lo == null) return null;
-      return Math.round((hi - lo) * 10) / 10;
+      const sorted = [...frameDb].sort((a, b) => a - b);
+      const speech = percentile(sorted, 0.95);
+      if (speech == null) return null;
+      // Exclui quadros de silêncio quase-digital (>50 dB abaixo do pico de fala):
+      // pausas com ruído cortado pelo navegador ou silêncio em volta de uma fala
+      // curta. Sem isso o piso desaba para ~-120 dB e o SNR estoura (clipe curto
+      // com muito silêncio lê SNR enorme -> o gate nunca dispara).
+      const active = sorted.filter((db) => db > speech - 50);
+      if (active.length < 12) return null;
+      const floor = percentile(active, 0.15);
+      if (floor == null) return null;
+      return Math.round((speech - floor) * 10) / 10;
     }
 
     function setRecordStatus(text, isError) {
