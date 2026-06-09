@@ -722,8 +722,13 @@ router.get("/s/:submissionToken/narrator-audio", requireSubmissionToken, require
 // GET /s/:submissionToken/audio/:turnId
 // Serve o áudio do entrevistador a partir do cache em memória.
 // 404 se o turno foi evictado (cache LRU).
+// NÃO usa requireNotFinalized: é uma leitura de áudio já gerado. O finalize seta
+// completion_reason ANTES de a resposta voltar, então o áudio da DESPEDIDA (que
+// vem no mesmo /chat que finaliza) seria barrado com 410 e o aluno veria um
+// player quebrado — nunca ouvindo o adeus. A sessão e o cache sobrevivem ao
+// finalize, então servir aqui é seguro (read-only).
 // ============================================================================
-router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, requireNotFinalized, (req, res) => {
+router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
     if (!sess) return res.status(404).json({ error: "session not found" });
