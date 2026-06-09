@@ -8,6 +8,7 @@
     "db:migrate": "node scripts/migrate.mjs",
     "db:migrate-fs": "node scripts/migrate-fs-to-db.mjs",
     "audio:gc": "node scripts/audio-gc.mjs",
+    "analyze:authorship": "node scripts/detect-ai-answers.mjs",
     "test:audio": "node tests/audio-e2e/run.mjs",
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"
