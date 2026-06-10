@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "36QNQy9w2uH6FSZBvAn2z"
+uri = "file://.local/reports/analise-autoria-fgv-mineracao.md"
+type = "text"
+title = "Análise de autoria — FGV Mineração (Markdown, lê no celular)"
+
+[[outputs]]
+id = "I3oxaI0aWsv6T3X0AFZeg"
+uri = "file://.local/reports/analise-autoria-fgv-mineracao.html.tar.gz"
+type = "unspecified"
+title = "Mesmo relatório em HTML estilizado (compactado)"
