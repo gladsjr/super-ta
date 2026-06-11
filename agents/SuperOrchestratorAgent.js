@@ -26,10 +26,17 @@ import { ACTION_SCHEMA_DESCRIPTION, validateAction } from "../lib/superOrchestra
 export class SuperOrchestratorAgent {
     static TYPE = "super_orchestrator";
 
-    constructor(openaiClient, model) {
+    constructor(openaiClient, model, reasoningEffort = null) {
         if (!model) throw new Error("Missing model for SuperOrchestratorAgent");
+        if (reasoningEffort != null && !["minimal", "low", "medium", "high"].includes(reasoningEffort)) {
+            throw new Error(`Invalid reasoningEffort for SuperOrchestratorAgent: ${reasoningEffort}`);
+        }
         this.client = openaiClient;
         this.model = model;
+        // Opt-in: quando setado, injeta reasoning.effort no payload. Produção
+        // (routes/interview.js) não passa → payload sem `reasoning` = default da
+        // API. Usado hoje só pelo harness A/B para testar low vs medium.
+        this.reasoningEffort = reasoningEffort;
         this.systemPromptBody = `Sua função: conduzir UM TURNO da conversa de role-play. A cada chamada você recebe o estado completo (agenda da persona que você encarna, análise prévia da entrega sob avaliação, plano de perguntas, seu próprio bloco de memory carregado do turno anterior, e a última fala recebida da outra ponta da cena). Você decide a próxima ação e devolve um JSON no schema abaixo. O CÓDIGO traduz seu output em comportamento real — falar com a outra ponta via TTS, abrir um modal lateral, mostrar uma orientação prática, encerrar a conversa, etc.
 
 VOCÊ É A PERSONA descrita na AGENDA DO ENTREVISTADOR no user prompt. Encarne-a integralmente: papel, autoridade, relacionamento com a outra ponta, objetivos, preocupações, critérios, estilo. Dentro da cena, não há "aluno" nem "avaliação" — há a sua persona conduzindo o caso com quem entregou o trabalho. A camada que vai usar a transcrição depois é invisível para a cena.
@@ -253,6 +260,9 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
             // auto-truncation evita 4xx por estouro de contexto.
             truncation: "auto",
         };
+        if (this.reasoningEffort) {
+            payload.reasoning = { effort: this.reasoningEffort };
+        }
         if (vectorStoreId) {
             payload.tools = [{ type: "file_search", vector_store_ids: [vectorStoreId] }];
         }

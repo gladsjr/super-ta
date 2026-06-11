@@ -19,6 +19,8 @@
 //   AB_REPEATS (2)  AB_QUESTION_COUNT (6)  AB_MAX_STUDENT_TURNS (24)
 //   AB_PERSONAS ("preparado,adversarial,fraco")
 //   AB_PRINCIPAL_MODEL / AB_FAST_MODEL / AB_JUDGE_MODEL (default: policy.yaml)
+//   AB_PRINCIPAL_EFFORT / AB_FAST_EFFORT (reasoning effort por braço; default
+//     da API = medium = produção. Valores: minimal|low|medium|high)
 //   AB_SKIP_JUDGE (set p/ pular o juiz)  AB_CONCURRENCY (1)
 
 import "dotenv/config";
@@ -45,6 +47,11 @@ async function main() {
     const STRONG = env("AB_PRINCIPAL_MODEL", PRINCIPAL_REASONING_MODEL);
     const FAST = env("AB_FAST_MODEL", FAST_MODEL);
     const JUDGE = env("AB_JUDGE_MODEL", STRONG);
+    // Reasoning effort por braço (opcional). Ausente = default da API (medium),
+    // = comportamento de produção. Setar p/ testar low vs medium.
+    const STRONG_EFFORT = env("AB_PRINCIPAL_EFFORT", null);
+    const FAST_EFFORT = env("AB_FAST_EFFORT", null);
+    const armLabel = (model, effort) => `${model} (effort=${effort || "default"})`;
     const QC = parseInt(env("AB_QUESTION_COUNT", "6"), 10);
     const REPEATS = parseInt(env("AB_REPEATS", "2"), 10);
     const MAXT = parseInt(env("AB_MAX_STUDENT_TURNS", "24"), 10);
@@ -54,7 +61,7 @@ async function main() {
     for (const k of personaKeys) if (!PERSONAS[k]) throw new Error(`persona desconhecida: ${k} (válidas: ${Object.keys(PERSONAS).join(", ")})`);
 
     console.log("================ A/B super-orquestrador ================");
-    console.log(`forte=${STRONG}  rápido=${FAST}  juiz=${JUDGE}`);
+    console.log(`forte=${armLabel(STRONG, STRONG_EFFORT)}  rápido=${armLabel(FAST, FAST_EFFORT)}  juiz=${JUDGE}`);
     console.log(`personas=[${personaKeys.join(", ")}]  repetições=${REPEATS}  perguntas=${QC}  max_turns_aluno=${MAXT}`);
     console.log(`-> ${personaKeys.length * REPEATS} entrevistas por braço\n`);
 
@@ -83,15 +90,17 @@ async function main() {
             console.log(`  [forte] conduzindo + counterfactual(rápido) por turno...`);
             const strongRun = await runInterview({
                 label: `${pk}-r${r}-strong`, orchestratorModel: STRONG, orchestratorClient: strongDriverClient,
+                orchestratorEffort: STRONG_EFFORT,
                 studentModel: FAST, persona, interviewerYaml, analysis: prep.analysis, plan: prep.plan,
                 vectorStoreId: prep.vectorStoreId, questionCount: QC, maxStudentTurns: MAXT,
-                counterfactual: { model: FAST, client: fastCfClient },
+                counterfactual: { model: FAST, client: fastCfClient, effort: FAST_EFFORT },
             });
             console.log(`    -> turnos=${strongRun.counts.interviewerTurns} asks=${strongRun.counts.asks} follow_ups=${strongRun.counts.followUps} fim=${strongRun.finalizeReason} flags_recalc=${strongRun.recomputeFlags.length}`);
 
             console.log(`  [rápido] conduzindo entrevista independente...`);
             const fastRun = await runInterview({
                 label: `${pk}-r${r}-fast`, orchestratorModel: FAST, orchestratorClient: fastIndepClient,
+                orchestratorEffort: FAST_EFFORT,
                 studentModel: FAST, persona, interviewerYaml, analysis: prep.analysis, plan: prep.plan,
                 vectorStoreId: prep.vectorStoreId, questionCount: QC, maxStudentTurns: MAXT,
                 counterfactual: null,
@@ -196,18 +205,18 @@ async function main() {
     const lines = [];
     lines.push(`# A/B super-orquestrador — ${stamp}`);
     lines.push("");
-    lines.push(`- Modelo forte (baseline): \`${STRONG}\``);
-    lines.push(`- Modelo rápido (candidato): \`${FAST}\``);
+    lines.push(`- Braço baseline (forte): \`${armLabel(STRONG, STRONG_EFFORT)}\``);
+    lines.push(`- Braço candidato (rápido): \`${armLabel(FAST, FAST_EFFORT)}\``);
     lines.push(`- Juiz: \`${JUDGE}\` (cego, ordem A/B randomizada)`);
     lines.push(`- ${nInterviews} entrevistas por braço (${personaKeys.length} personas × ${REPEATS} repetições), ${QC} perguntas no plano`);
-    lines.push(`- Plano + análise gerados 1× no modelo forte e compartilhados (única variável = modelo do orquestrador)`);
+    lines.push(`- Plano + análise gerados 1× no modelo forte e compartilhados (única variável = braço do orquestrador)`);
     lines.push("");
     lines.push(`## Custo por entrevista (conduzindo a conversa toda)`);
     lines.push("");
     lines.push(`| Braço | $/entrevista | total | latência/turno (p50 / p95) |`);
     lines.push(`|---|---|---|---|`);
-    lines.push(`| forte (\`${STRONG}\`) | ${usd(perInterview.strong_usd)} | ${usd(cost.strongDriver.total_cost_usd)} | ${cost.strongDriver.latency_ms.p50} / ${cost.strongDriver.latency_ms.p95} ms |`);
-    lines.push(`| rápido (\`${FAST}\`) | ${usd(perInterview.fast_usd)} | ${usd(cost.fastIndependent.total_cost_usd)} | ${cost.fastIndependent.latency_ms.p50} / ${cost.fastIndependent.latency_ms.p95} ms |`);
+    lines.push(`| forte (\`${armLabel(STRONG, STRONG_EFFORT)}\`) | ${usd(perInterview.strong_usd)} | ${usd(cost.strongDriver.total_cost_usd)} | ${cost.strongDriver.latency_ms.p50} / ${cost.strongDriver.latency_ms.p95} ms |`);
+    lines.push(`| rápido (\`${armLabel(FAST, FAST_EFFORT)}\`) | ${usd(perInterview.fast_usd)} | ${usd(cost.fastIndependent.total_cost_usd)} | ${cost.fastIndependent.latency_ms.p50} / ${cost.fastIndependent.latency_ms.p95} ms |`);
     const savePct = perInterview.strong_usd > 0 ? (100 * (1 - perInterview.fast_usd / perInterview.strong_usd)).toFixed(1) : "—";
     const speedup = (cost.fastIndependent.latency_ms.p50 && cost.strongDriver.latency_ms.p50)
         ? (cost.strongDriver.latency_ms.p50 / cost.fastIndependent.latency_ms.p50).toFixed(2) + "×" : "—";
@@ -252,7 +261,7 @@ async function main() {
     const summary = lines.join("\n");
     fs.writeFileSync(path.join(outDir, "summary.md"), summary);
     fs.writeFileSync(path.join(outDir, "raw.json"), JSON.stringify({
-        config: { STRONG, FAST, JUDGE, QC, REPEATS, MAXT, personaKeys },
+        config: { STRONG, FAST, JUDGE, STRONG_EFFORT, FAST_EFFORT, QC, REPEATS, MAXT, personaKeys },
         cost, perInterview,
         counterfactual: { tally: cfTally, dims: cfDims, recompute: { strong: cfRecompStrong, fast: cfRecompFast, total: cfTotal }, judgements: cfJudgements },
         holistic: { tally: holTally, scores: holScore, judgements: holisticJudgements },

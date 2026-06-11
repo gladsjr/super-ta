@@ -32,6 +32,8 @@ Saída em `tests/ab-orchestrator/out/<timestamp>/`:
 | `AB_PERSONAS` | `preparado,adversarial,fraco` | subconjunto de personas |
 | `AB_PRINCIPAL_MODEL` | policy.yaml | sobrescreve o modelo forte |
 | `AB_FAST_MODEL` | policy.yaml | sobrescreve o modelo rápido |
+| `AB_PRINCIPAL_EFFORT` | default da API | `reasoning.effort` do braço forte (`minimal\|low\|medium\|high`) |
+| `AB_FAST_EFFORT` | default da API | `reasoning.effort` do braço rápido (`minimal\|low\|medium\|high`) |
 | `AB_JUDGE_MODEL` | = forte | modelo do juiz |
 | `AB_SKIP_JUDGE` | — | pula o juiz (só custo/latência + transcrições) |
 

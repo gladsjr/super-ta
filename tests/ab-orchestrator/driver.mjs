@@ -83,7 +83,7 @@ async function runCounterfactual({ cf, convMirror, sharedInputs, turnLog, memory
                 items: convMirror.map((m) => ({ role: m.role, content: m.content })),
             });
         }
-        const cfAgent = new SuperOrchestratorAgent(cf.client, cf.model);
+        const cfAgent = new SuperOrchestratorAgent(cf.client, cf.model, cf.effort ?? null);
         const parsed = await cfAgent.evaluate({
             ...sharedInputs,
             memory,
@@ -105,6 +105,7 @@ export async function runInterview({
     label,
     orchestratorModel,
     orchestratorClient,
+    orchestratorEffort = null,
     studentModel,
     persona,
     interviewerYaml,
@@ -113,9 +114,9 @@ export async function runInterview({
     vectorStoreId,
     questionCount,
     maxStudentTurns = 24,
-    counterfactual = null, // { model, client } | null
+    counterfactual = null, // { model, client, effort } | null
 }) {
-    const agent = new SuperOrchestratorAgent(orchestratorClient, orchestratorModel);
+    const agent = new SuperOrchestratorAgent(orchestratorClient, orchestratorModel, orchestratorEffort);
     const minTurns = Math.ceil(questionCount / 2);
     const maxTurns = questionCount * 3;
 
@@ -293,6 +294,7 @@ export async function runInterview({
         label,
         persona: persona.name,
         orchestratorModel,
+        orchestratorEffort,
         transcript,
         turnLog,
         phase,
