@@ -14,6 +14,12 @@ PRINCÍPIO DE COERÊNCIA — leia antes de gerar qualquer pergunta:
 - O REGISTRO da pergunta vem da persona, não da rigorosidade do que se quer verificar.
 
 ==================================================
+PRINCÍPIO DA RESPOSTA FORMULÁVEL DE CABEÇA — leia antes de gerar qualquer pergunta:
+==================================================
+
+{{extemporaneous_principle}}
+
+==================================================
 PARÂMETROS DA TAREFA
 ==================================================
 

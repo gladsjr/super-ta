@@ -172,6 +172,8 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
 2. **`systemPromptBody` + preâmbulo padronizado em classes de agente** ([agents/](../agents/)):
     Todo agente compõe seu system prompt como `renderAgentPreamble({audience, interactionMode, studentName})` + body específico. O preâmbulo enquadra a cena (SuperTA, identidade dupla, audience, modo, nome do aluno quando disponível). Ver [lib/agentPreamble.js](../lib/agentPreamble.js).
 
+   - **`EXTEMPORANEOUS_ANSWER_PRINCIPLE`** (constante exportada em [lib/agentPreamble.js](../lib/agentPreamble.js)) — princípio mode-independente "a pergunta deve pressupor resposta formulável de cabeça, assumindo domínio do trabalho". Fonte única, injetada IDENTICAMENTE nos dois pontos que emitem perguntas: o template do plano (via placeholder `{{extemporaneous_principle}}` em [interview_prompt_template.txt](../config/interview_prompt_template.txt), preenchido por [lib/interviewPrompt.js](../lib/interviewPrompt.js)) e o `systemPromptBody` do [SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js).
+
    **Conjunto ativo após a reforma do super-orquestrador:**
    - [PrepBuilderAgent.js](../agents/PrepBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`. Duas chamadas serializadas em `/upload`: `analyzeWork` (análise do trabalho) → `buildPlan` (plano de 10 perguntas informado pela análise).
    - [IntroductionAgent.js](../agents/IntroductionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`. Roteiro determinístico de 3 beats: `ask_name` / `present_self` / `begin`.

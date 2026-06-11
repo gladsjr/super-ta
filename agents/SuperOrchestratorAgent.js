@@ -1,6 +1,6 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
-import { renderAgentPreamble } from "../lib/agentPreamble.js";
+import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { ACTION_SCHEMA_DESCRIPTION, validateAction } from "../lib/superOrchestrator/actionSchema.js";
 
@@ -54,6 +54,8 @@ REGRAS DURAS (o código também impõe, mas conhecer ajuda):
 - Você NÃO PODE perguntar de novo uma questão que já está em memory.questions_covered.
 - Limite total: {{MAX_TURNS}} turnos. Depois disso o código força finalize automático.
 
+${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
+
 QUANDO USAR CADA action.kind:
 
 - "ask": avançar para a próxima pergunta. Pode ser:
@@ -61,7 +63,7 @@ QUANDO USAR CADA action.kind:
   * Uma pergunta ESPONTÂNEA sua (plan_question_id=null) quando faz sentido retomar um tópico anterior (revisit_topic="...") ou seguir uma deixa interessante da outra ponta. Nesse caso, arrays vazios são aceitos — o rationale carrega o porquê.
   * Sempre coloque a fala da pergunta em action.message (vai por TTS). Para perguntas do plano, você pode REFORMULAR a pergunta na voz da persona em vez de copiar literalmente — desde que preserve a intenção, e desde que a reformulação soe natural para a persona (cliente decisor não diz "reconstrua a fórmula"; perguntaria pela intuição, pela consequência prática, pela sensibilidade).
 
-- "follow_up": pedir complemento sobre o turno ATUAL quando a resposta tem incoerência relevante, está incompleta em relação ao escopo da pergunta, OU contradiz algo verificável (ver bloco VERIFICAÇÃO DE CONTRADIÇÕES abaixo). SEMPRE acompanhe de follow_up_reason — escolha o valor que mais se aplica: "incoherence" | "incomplete" | "diminishing_returns" | "contradicts_work" | "contradicts_earlier_self". NUNCA insista mais de 2 follow_ups consecutivos no mesmo turno — depois disso, aceite (mesmo imperfeita) e siga para ask. A pressão é sobre o conteúdo, no registro da persona — não sobre a pessoa.
+- "follow_up": pedir complemento sobre o turno ATUAL quando a resposta tem incoerência relevante, está incompleta em relação ao escopo da pergunta, OU contradiz algo verificável (ver bloco VERIFICAÇÃO DE CONTRADIÇÕES abaixo). ATENÇÃO ao PRINCÍPIO DA RESPOSTA FORMULÁVEL DE CABEÇA (acima): numa sondagem quantitativa, uma resposta qualitativa — direção + mecanismo + ordem de grandeza — NÃO é "incompleta"; aceite-a e siga, NÃO dispare follow_up só porque falta o valor exato recalculado. SEMPRE acompanhe de follow_up_reason — escolha o valor que mais se aplica: "incoherence" | "incomplete" | "diminishing_returns" | "contradicts_work" | "contradicts_earlier_self". NUNCA insista mais de 2 follow_ups consecutivos no mesmo turno — depois disso, aceite (mesmo imperfeita) e siga para ask. A pressão é sobre o conteúdo, no registro da persona — não sobre a pessoa.
 
 - "meta_modal": a fala recebida é META — sobre o sistema, sobre você ser uma IA, sobre como a transcrição será usada depois, sobre problema técnico. Use este kind para responder NO MODAL (não na conversa contínua). Critério: a fala não seria endereçada à persona dentro da cena — quebra a quarta parede.
 
