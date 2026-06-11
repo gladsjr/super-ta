@@ -21,10 +21,11 @@ import { openai } from "../lib/openaiClient.js";
 import { transcribeAudio, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
-import { STT_MODEL, AUDIO_INTELLIGIBILITY, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
+import { STT_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
-import { detectIntelligibilitySpans } from "../lib/audioIntelligibility.js";
+import { classifyAudio } from "../lib/audioIntelligibility.js";
+import { classifyAcoustic, combineTiers } from "../lib/acousticGate.js";
 import {
     introductionAgent,
     audioIntelligibilityAgent,
@@ -189,24 +190,17 @@ async function archiveStudentAudio({ submissionId, submissionToken, buffer, mime
 // A mensagem ininteligível do aluno NÃO é empurrada como turno do usuário —
 // fica apenas registrada como intervenção para auditoria do professor.
 // ============================================================================
-async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist }) {
-    const { spans, aggregate } = detectIntelligibilitySpans(logprobs, {
-        low_logprob_threshold: AUDIO_INTELLIGIBILITY.low_logprob_threshold,
-        min_consecutive_low_tokens: AUDIO_INTELLIGIBILITY.min_consecutive_low_tokens,
-        min_utterance_tokens: AUDIO_INTELLIGIBILITY.min_utterance_tokens,
-    });
+// Parse de campo de formulário numérico (multipart → string). Devolve número
+// finito ou null (ausente / não-numérico / NaN / Infinity).
+function numOrNull(v) {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
 
-    // Loga aggregate SEMPRE — passou ou não — para calibração futura dos limiares.
-    log.info(
-        "AUDIO:Gate",
-        `tokens=${aggregate?.totalTokens ?? 0} low=${aggregate?.lowTokens ?? 0}` +
-        ` mean=${aggregate?.meanLogprob != null ? aggregate.meanLogprob.toFixed(2) : "—"}` +
-        ` min=${aggregate?.minLogprob != null ? aggregate.minLogprob.toFixed(2) : "—"}` +
-        ` spans=${spans.length}`
-    );
-
-    if (spans.length === 0) return { gated: false };
-
+// `reason` ("logprob" | "acoustic") ajusta o texto da Dica fora do roleplay:
+// logprob destaca trechos transcritos; acústico fala de barulho de fundo.
+async function runAudioRepeat({ sess, transcript, spans, aggregate, persist, reason = "logprob" }) {
     // Segmento lógico do contador.
     const inIntro = sess.currentPhase === "intro";
     let attempt;
@@ -256,7 +250,14 @@ async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist
         };
     }
 
-    // Empurra a fala do entrevistador no conv (visível ao aluno).
+    // Retém a transcrição (marcada baixa-confiança) no contexto do orquestrador —
+    // NÃO descarta. No próximo turno, com a repetição, ele reconstrói o sentido e
+    // o aluno não precisa repetir tudo. Não é a resposta do turno (currentTurn.answer
+    // só é setado quando uma tentativa passa pelo orquestrador).
+    const markedStudent = `[transcrição de áudio com baixa confiança] ${transcript}`;
+    sess.conv_chat.push({ role: "user", content: markedStudent });
+    sess.conv_eval.push({ role: "user", content: markedStudent, metadata: { audio_low_confidence: true, timestamp: Date.now() } });
+    // Empurra a fala do entrevistador (pedido de repetição) no conv.
     sess.conv_chat.push({ role: "assistant", content: phrased.message });
     sess.conv_eval.push({
         role: "assistant",
@@ -265,10 +266,12 @@ async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist
     });
     sess.history = sess.conv_chat;
     try {
+        await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: markedStudent }] });
         await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: phrased.message }] });
+        await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: markedStudent }] });
         await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: phrased.message }] });
     } catch (err) {
-        log.error("CHAT", `remote write (audio intelligibility) failed: ${err.message}`);
+        log.error("CHAT", `remote write (audio repeat) failed: ${err.message}`);
     }
     await logLastConvItem(sess.conversationId_chat, "CONV:chat");
 
@@ -286,7 +289,9 @@ async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist
         spans: spans.map(s => s.text),
         aggregate,
         assistant_response: phrased.message,
-        reason: phrased.reason || `algoritmo detectou ${spans.length} trecho(s) de baixa confiança; tentativa ${attempt}/${max}`,
+        reason: phrased.reason || (reason === "acoustic"
+            ? `gate acústico (barulho de fundo / SNR baixo); tentativa ${attempt}/${max}`
+            : `algoritmo detectou ${spans.length} trecho(s) de baixa confiança; tentativa ${attempt}/${max}`),
         at: new Date().toISOString(),
     };
     if (inIntro) {
@@ -315,24 +320,37 @@ async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist
     // entrevistador não entendeu. É a própria fala do aluno (não a pergunta do
     // entrevistador), então não há preocupação de anti-cola.
     const unclear = spans.map(s => s.text);
-    const hint = mode === "give_up"
-        ? {
+    const isAcoustic = reason === "acoustic";
+    let hint;
+    if (mode === "give_up") {
+        hint = {
             kind: "audio_give_up",
             title: "Problemas com o áudio?",
-            body: "O entrevistador não está conseguindo te entender. Veja abaixo como o seu áudio foi transcrito — os trechos destacados não ficaram claros. Você pode ajustar o microfone (ou mudar para um ambiente mais silencioso) e gravar de novo. Se achar que o problema é do sistema, use o botão \"Desistir da entrevista\" no topo, deixe um comentário descrevendo o que aconteceu, e peça outro link ao seu professor.",
+            body: isAcoustic
+                ? "O entrevistador não está conseguindo te ouvir por causa do barulho de fundo. Procure um ambiente mais silencioso (ou reduza o som ao redor), aproxime o microfone e grave de novo. Se achar que o problema é do sistema, use o botão \"Desistir da entrevista\" no topo, deixe um comentário descrevendo o que aconteceu, e peça outro link ao seu professor."
+                : "O entrevistador não está conseguindo te entender. Veja abaixo como o seu áudio foi transcrito — os trechos destacados não ficaram claros. Você pode ajustar o microfone (ou mudar para um ambiente mais silencioso) e gravar de novo. Se achar que o problema é do sistema, use o botão \"Desistir da entrevista\" no topo, deixe um comentário descrevendo o que aconteceu, e peça outro link ao seu professor.",
             transcript,
             unclear,
-        }
-        : {
+        };
+    } else if (isAcoustic) {
+        hint = {
+            kind: "audio_repeat",
+            title: "Tem bastante barulho de fundo no seu áudio",
+            body: "O som ao redor estava alto e o entrevistador não conseguiu te ouvir bem. Procure um lugar mais silencioso (ou reduza a fonte de barulho), aproxime o microfone e grave a sua resposta de novo, com calma.",
+            transcript,
+            unclear,
+        };
+    } else {
+        hint = {
             kind: "audio_repeat",
             title: "O entrevistador não entendeu parte do que você disse",
             body: "Veja abaixo como o seu áudio foi transcrito — os trechos destacados não ficaram claros. Tente gravar de novo, com calma, reforçando essas partes.",
             transcript,
             unclear,
         };
+    }
 
     return {
-        gated: true,
         response: {
             channel: "chat",
             assistant: phrased.message,
@@ -345,6 +363,28 @@ async function runAudioIntelligibilityGate({ sess, transcript, logprobs, persist
             },
             ...audio,
         },
+    };
+}
+
+// Dica não-bloqueante do caso "avisar": a resposta do aluno SEGUE normalmente
+// (vai ao orquestrador, o entrevistador responde) e esta Dica aparece junto,
+// destacando os trechos incertos — o aluno corrige se foi mal-entendido.
+function buildAvisarDica(transcript, spans, reason = "logprob") {
+    if (reason === "acoustic") {
+        return {
+            kind: "audio_warn",
+            title: "Detectamos barulho de fundo no seu áudio",
+            body: "O som ao redor estava um pouco alto. Eu segui com a resposta normalmente; se eu entendi algo errado, é só me corrigir na próxima — ou, se quiser, procure um lugar mais silencioso para as próximas respostas.",
+            transcript,
+            unclear: spans.map(s => s.text),
+        };
+    }
+    return {
+        kind: "audio_warn",
+        title: "Parte do seu áudio pode ter saído mal",
+        body: "Veja como o seu áudio foi transcrito — os trechos destacados podem ter saído errados. Eu segui com a resposta normalmente; se eu entendi algo errado, é só me corrigir na próxima.",
+        transcript,
+        unclear: spans.map(s => s.text),
     };
 }
 
@@ -682,8 +722,13 @@ router.get("/s/:submissionToken/narrator-audio", requireSubmissionToken, require
 // GET /s/:submissionToken/audio/:turnId
 // Serve o áudio do entrevistador a partir do cache em memória.
 // 404 se o turno foi evictado (cache LRU).
+// NÃO usa requireNotFinalized: é uma leitura de áudio já gerado. O finalize seta
+// completion_reason ANTES de a resposta voltar, então o áudio da DESPEDIDA (que
+// vem no mesmo /chat que finaliza) seria barrado com 410 e o aluno veria um
+// player quebrado — nunca ouvindo o adeus. A sessão e o cache sobrevivem ao
+// finalize, então servir aqui é seguro (read-only).
 // ============================================================================
-router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, requireNotFinalized, (req, res) => {
+router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
     if (!sess) return res.status(404).json({ error: "session not found" });
@@ -781,21 +826,57 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     const persist = () => persistConversationLog(sess);
 
     // ------------------------------------------------------------------
-    // Pré-gate de inteligibilidade (modo áudio). Roda ANTES do bloco intro
-    // ou triagem — se o áudio veio com trechos ininteligíveis (decidido por
-    // lib/audioIntelligibility.js sobre os logprobs do STT), o entrevistador
-    // pede repetição ou faz a virada de roleplay (give_up) na N-ésima vez. A
-    // mensagem do aluno é descartada (registrada apenas como intervenção no
-    // log do professor); o turno NÃO avança.
+    // Classificação de inteligibilidade (modo áudio). Roda ANTES do bloco intro
+    // ou triagem. Três desfechos — NUNCA se descarta a fala (o áudio já foi
+    // arquivado acima):
+    //   "seguir"  → segue normal.
+    //   "avisar"  → segue normal, mas anexa uma Dica não-bloqueante à resposta.
+    //   "repetir" → pede repetição + Dica, e RETÉM a transcrição no contexto do
+    //               orquestrador (marcada baixa-confiança) para o aluno não
+    //               repetir tudo. O turno não avança (return aqui).
     // ------------------------------------------------------------------
-    if (hasAudio && AUDIO_INTELLIGIBILITY.enabled && studentAudioLogprobs) {
-        const gateResult = await runAudioIntelligibilityGate({
-            sess,
-            transcript: message,
-            logprobs: studentAudioLogprobs,
-            persist,
-        });
-        if (gateResult.gated) return res.json(gateResult.response);
+    // Dois votantes independentes, combinados por SEVERIDADE-MÁXIMA:
+    //   (1) logprob (server-side, à prova de adulteração) — garble "barulhento"
+    //       de respostas longas, onde o STT fica incerto.
+    //   (2) acústico (calculado no navegador, reportado no upload) — barulho de
+    //       fundo / SNR baixo, que pega o "confidently-wrong" de música alta
+    //       (o STT erra COM confiança → invisível ao logprob por construção).
+    // Cada votante mapeia para seguir/avisar/repetir; vence o pior. Um votante
+    // sem sinal vota "seguir" (mudo). spans/aggregate do logprob alimentam o
+    // destaque na Dica; um desfecho dirigido pelo acústico não tem spans.
+    let dicaPayload = null;
+    if (hasAudio) {
+        const votes = [];
+        let spans = [];
+        let aggregate = null;
+        if (AUDIO_INTELLIGIBILITY.enabled && studentAudioLogprobs) {
+            const cls = classifyAudio(studentAudioLogprobs, AUDIO_INTELLIGIBILITY);
+            spans = cls.spans;
+            aggregate = cls.aggregate;
+            votes.push({ tier: cls.outcome, source: "logprob" });
+            const m = cls.metrics || {};
+            log.info("AUDIO:Gate", `logprob=${cls.outcome} tokens=${cls.aggregate?.totalTokens ?? 0}` +
+                ` pctWarn=${m.pctWarn != null ? (m.pctWarn * 100).toFixed(0) + "%" : "—"} runRepeat=${m.maxRunRepeat ?? 0} spans=${cls.spans.length}`);
+        }
+        if (ACOUSTIC.enabled) {
+            const snr = numOrNull(req.body?.acoustic_snr);
+            const bak = numOrNull(req.body?.acoustic_bak);
+            const ac = classifyAcoustic({ snr, bak }, ACOUSTIC);
+            if (ac.sources.length) votes.push({ tier: ac.tier, source: ac.sources.join("+") });
+            log.info("AUDIO:Acoustic", `snr=${snr ?? "—"}dB(${ac.tiers.snr ?? "off"}) bak=${bak ?? "—"}(${ac.tiers.bak ?? "off"}) -> ${ac.tier}`);
+        }
+        const combined = combineTiers(votes);
+        const acousticDriven = combined.sources.length > 0 && !combined.sources.includes("logprob");
+        const reason = acousticDriven ? "acoustic" : "logprob";
+        if (combined.tier !== "seguir") {
+            log.info("AUDIO:Gate", `combined=${combined.tier} sources=${combined.sources.join(",")} reason=${reason}`);
+        }
+        if (combined.tier === "repetir") {
+            const result = await runAudioRepeat({ sess, transcript: message, spans, aggregate, persist, reason });
+            return res.json(result.response);
+        } else if (combined.tier === "avisar") {
+            dicaPayload = buildAvisarDica(message, spans, reason);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -866,7 +947,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             log.info("CHAT", `intro present_self${sess.studentName ? ` name="${sess.studentName}"` : ""} ${log.preview(intro.message, 120)}`);
             await logLastConvItem(sess.conversationId_chat, "CONV:chat");
             persist();
-            return res.json({ channel: "chat", assistant: intro.message, ...audio });
+            return res.json({ channel: "chat", assistant: intro.message, ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) });
         }
 
         // ---- Beat begin: o aluno deu o "ok". Garante o plano e transiciona. ----
@@ -942,7 +1023,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         log.info("CHAT", `intro begin + first plan question ${log.preview(combined, 160)}`);
         await logLastConvItem(sess.conversationId_chat, "CONV:chat");
         persist();
-        return res.json({ channel: "chat", assistant: combined, phase: "interviewing", ...audio });
+        return res.json({ channel: "chat", assistant: combined, phase: "interviewing", ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) });
     }
 
     // ------------------------------------------------------------------
@@ -989,6 +1070,11 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Despacha o payload final. Em SSE, vira event: result + end. Em JSON,
     // res.json clássico. Toda saída bem-sucedida desta rota passa aqui.
     const sendFinal = (payload) => {
+        // Caso "avisar": anexa a Dica não-bloqueante à resposta normal (a menos
+        // que o próprio fluxo já tenha uma, ex.: hint de áudio).
+        if (dicaPayload && !payload.audio_intelligibility) {
+            payload = { ...payload, audio_intelligibility: { hint: dicaPayload } };
+        }
         if (useSSE) {
             clearHeartbeat();
             res.write(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);

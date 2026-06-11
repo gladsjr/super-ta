@@ -21,14 +21,37 @@ triage:
 # Pré-gate de inteligibilidade no modo áudio. Decisão "pedir repetição" é puro
 # código sobre os logprobs do STT (lib/audioIntelligibility.js); o LLM
 # (AudioIntelligibilityAgent) entra só para fraseiar a fala em personagem.
-# Calibração: ajuste estes números depois de observar logs reais.
-# Recalibrado em jun/2026 após observar over-triggering em entrevistas reais de
-# áudio (gate disparando por 2 tokens incertos no meio de respostas fluentes de
-# 100-300 tokens). Antes: T=-0.3 (~74%) / K=2. Os logs [AUDIO:Gate] registram o
-# aggregate (mean/min/lowTokens) de TODO áudio — use-os para refinar.
+# Três desfechos por confiança do STT (conf = e^logprob), calibrados em jun/2026
+# contra 51 áudios REAIS (Joaquim+Lucas+Bruno). NUNCA se descarta a fala: o áudio
+# é arquivado e, no caso "repetir", a transcrição entra no contexto do orquestrador
+# (o aluno não repete tudo). Desfechos:
+#   seguir  — seu áudio está ok; segue normal.
+#   avisar  — alguns trechos incertos; o entrevistador responde NORMAL + uma Dica
+#             não-bloqueante destacando os trechos. Não regrava.
+#   repetir — muita coisa ruim; pede repetição + Dica (mantendo o contexto).
+# Nos 51 áudios reais: repetir=0, avisar=~6, seguir=resto (o gate antigo bloqueava ~40%).
 audio_intelligibility:
   enabled: true
-  low_logprob_threshold: -1.2      # token "inseguro": logprob abaixo disso (~prob < 30%). Antes -0.3 (~74%) flagava incerteza normal de fala fluente.
-  min_consecutive_low_tokens: 3    # tamanho mínimo de um trecho ininteligível (antes 2): exige um trecho de fato embolado, não um par isolado de tokens incertos.
-  min_utterance_tokens: 4          # piso: enunciados curtos (ok, sim, "Maria") não gateiam
-  max_retries_before_give_up: 3    # na N-ésima vez do mesmo turno, vira a fala + Dica de desistência
+  warn_logprob_threshold: -0.69    # token "incerto": logprob < disso (~conf < 50%)
+  warn_pct: 0.05                   # >=5% dos tokens incertos -> AVISAR (Dica, não bloqueia)
+  repeat_logprob_threshold: -1.2   # token "ruim": logprob < disso (~conf < 30%)
+  repeat_consecutive: 8            # run de >=8 tokens ruins consecutivos -> REPETIR (trecho sustentado de garble)
+  repeat_pct: 0.35                 # rede de segurança: >=35% incertos -> REPETIR (bem acima do ~14% observado)
+  min_utterance_tokens: 4          # enunciados curtos (ok, nome) não acionam nada
+  max_retries_before_give_up: 3    # na N-ésima repetição do mesmo turno, vira give_up + Dica de desistência
+
+# Camada ACÚSTICA do pré-gate (modo áudio). Sinais calculados NO NAVEGADOR a
+# partir do PCM do microfone (DSP puro, sem custo, sem decode no servidor) e
+# enviados como campos no upload; combinados por severidade-máxima com o gate de
+# logprob acima (lib/acousticGate.js). Pega o "confidently-wrong" de música alta,
+# que o logprob é cego por construção (o STT erra COM confiança). Cutpoints
+# iniciais da calibração sintética FLEURS+GTZAN (jun/2026) — REFINAR com logs
+# reais (os [AUDIO:Acoustic] registram os valores crus por turno).
+acoustic:
+  enabled: true
+  snr_enabled: true
+  snr_warn: 20       # energy-SNR (dB, p95-p15 da energia por frame) abaixo disso -> avisar
+  snr_repeat: 12     # abaixo disso -> repetir (crasso: barulho ~no nível da fala)
+  bak_enabled: false # DNSMOS-BAK (modelo local de 1 MB) — ainda não calculado no cliente; plugável
+  bak_warn: 2.5      # background quality (1=barulhento .. 5=limpo) abaixo disso -> avisar
+  bak_repeat: 1.6    # abaixo disso -> repetir

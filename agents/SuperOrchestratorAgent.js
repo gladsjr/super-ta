@@ -263,44 +263,67 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
 
         log.prompt("AGENT:SuperOrchestrator", `system+user (${systemPrompt.length + userContent.length} chars)${wantStream ? " [stream]" : ""}`);
 
+        // Retry SÓ na chamada da API — a classe transitória (timeout/5xx/429)
+        // que vira "tive um problema aqui" para o aluno sem culpa dele. NÃO
+        // re-tentamos falha de parse/schema: aí o response já foi obtido (e
+        // provavelmente commitado na Conversations API), então um novo call
+        // duplicaria o item do turno. Também não re-tentamos depois de já ter
+        // saído texto parcial (firstDeltaFired) — pode ter commitado. Esgotado
+        // o retry, o erro sobe e o caller cai no fallback (ask_repeat).
+        const MAX_API_ATTEMPTS = 2;
+        let firstDeltaFired = false;
         let text;
-        if (wantStream) {
-            payload.stream = true;
-            const stream = await log.span("AGENT:SuperOrchestrator", "responses.create[stream]", () =>
-                meteredResponses(
-                    { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
-                    () => this.client.responses.create(payload)
-                )
-            );
-            const collected = [];
-            let firstDeltaFired = false;
-            let finalResponse = null;
-            for await (const event of stream) {
-                if (event?.type === "response.output_text.delta") {
-                    if (!firstDeltaFired) {
-                        firstDeltaFired = true;
-                        try { onFirstDelta(); }
-                        catch (cbErr) { log.error("AGENT:SuperOrchestrator", `onFirstDelta callback threw: ${cbErr.message}`); }
+        let apiErr = null;
+        for (let attempt = 1; attempt <= MAX_API_ATTEMPTS; attempt++) {
+            try {
+                if (wantStream) {
+                    payload.stream = true;
+                    const stream = await log.span("AGENT:SuperOrchestrator", `responses.create[stream]${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
+                        meteredResponses(
+                            { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
+                            () => this.client.responses.create(payload)
+                        )
+                    );
+                    const collected = [];
+                    let finalResponse = null;
+                    for await (const event of stream) {
+                        if (event?.type === "response.output_text.delta") {
+                            if (!firstDeltaFired) {
+                                firstDeltaFired = true;
+                                try { onFirstDelta(); }
+                                catch (cbErr) { log.error("AGENT:SuperOrchestrator", `onFirstDelta callback threw: ${cbErr.message}`); }
+                            }
+                            if (typeof event.delta === "string") collected.push(event.delta);
+                        } else if (event?.type === "response.completed") {
+                            finalResponse = event.response ?? null;
+                        }
                     }
-                    if (typeof event.delta === "string") collected.push(event.delta);
-                } else if (event?.type === "response.completed") {
-                    finalResponse = event.response ?? null;
+                    // Preferimos output_text da Response completa (canônico). Cai
+                    // pra concatenação dos deltas se a Response não veio.
+                    text = finalResponse?.output_text
+                        ?? collected.join("")
+                        ?? "";
+                } else {
+                    const response = await log.span("AGENT:SuperOrchestrator", `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
+                        meteredResponses(
+                            { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
+                            () => this.client.responses.create(payload)
+                        )
+                    );
+                    text = response.output_text || "";
                 }
+                apiErr = null;
+                break;
+            } catch (err) {
+                apiErr = err;
+                log.error("AGENT:SuperOrchestrator", `chamada falhou (tentativa ${attempt}/${MAX_API_ATTEMPTS}): ${err.message}`);
+                // Não re-tenta se já saiu texto parcial (risco de duplicar o item
+                // do turno) ou se esgotou as tentativas.
+                if (firstDeltaFired || attempt >= MAX_API_ATTEMPTS) break;
+                await new Promise((r) => setTimeout(r, 600 * attempt));
             }
-            // Preferimos output_text da Response completa (canônico). Cai pra
-            // concatenação dos deltas se por algum motivo a Response não veio.
-            text = finalResponse?.output_text
-                ?? collected.join("")
-                ?? "";
-        } else {
-            const response = await log.span("AGENT:SuperOrchestrator", "responses.create", () =>
-                meteredResponses(
-                    { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
-                    () => this.client.responses.create(payload)
-                )
-            );
-            text = response.output_text || "";
         }
+        if (apiErr) throw apiErr;
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) {
             log.error("AGENT:SuperOrchestrator", `no JSON in response: ${log.preview(text, 200)}`);

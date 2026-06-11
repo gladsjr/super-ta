@@ -30,7 +30,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 function parseArgs(argv) {
     // 127.0.0.1 (não "localhost"): o fetch do Node resolve localhost para IPv6
     // (::1) primeiro, mas o servidor escuta em IPv4 (0.0.0.0) — localhost falha.
-    const a = { persona: "bem_preparado", voice: "coral", questions: 3, headed: false, keepServer: false, base: "http://127.0.0.1:5000", work: null };
+    const a = { persona: "bem_preparado", voice: "coral", questions: 3, headed: false, keepServer: false, base: "http://127.0.0.1:5000", work: null, pdf: null, workText: null };
     for (let i = 0; i < argv.length; i++) {
         const v = argv[i];
         if (v === "--persona") a.persona = argv[++i];
@@ -42,6 +42,10 @@ function parseArgs(argv) {
         // Modo remoto (ambiente de teste/prod): trabalho já existente; cunha só
         // uma submissão via token, sem login. --voice/--questions são ignorados.
         else if (v === "--work") a.work = argv[++i];
+        // --pdf: usa ESTE PDF como o trabalho (em vez do PDF de teste padrão).
+        // --work-text: texto do trabalho para o aluno-simulador responder ancorado.
+        else if (v === "--pdf") a.pdf = argv[++i];
+        else if (v === "--work-text") a.workText = argv[++i];
     }
     return a;
 }
@@ -166,6 +170,17 @@ async function main() {
             log(`[seed] criando trabalho em modo audio (voz=${ARGS.voice}, perguntas=${ARGS.questions})...`);
             s = await seed({ base: ARGS.base, voice: ARGS.voice, questionCount: ARGS.questions });
         }
+        // --pdf: substitui o PDF de teste padrão pelo trabalho real informado.
+        if (ARGS.pdf) {
+            s.trabalhoPdf = fs.readFileSync(ARGS.pdf);
+            log(`[seed] usando PDF informado: ${path.basename(ARGS.pdf)} (${(s.trabalhoPdf.length / 1024).toFixed(0)} KB)`);
+        }
+        // --work-text: texto do trabalho p/ o aluno-simulador responder ancorado.
+        let workText = null;
+        if (ARGS.workText) {
+            workText = fs.readFileSync(ARGS.workText, "utf8");
+            log(`[seed] aluno ancorado no texto do trabalho (${(workText.length / 1000).toFixed(0)}k chars)`);
+        }
         report.seed = { workToken: s.workToken, subToken: s.subToken, studentUrl: s.studentUrl, remote: !!ARGS.work };
         log(`[seed] aluno: ${s.studentUrl}`);
 
@@ -267,7 +282,7 @@ async function main() {
 
             // 1. Gera a fala do aluno pra pergunta atual.
             log(`[turno ${turnN}] gerando resposta do aluno (${persona.name})...`);
-            const answerText = await nextAnswer({ persona, history, question: currentQuestion });
+            const answerText = await nextAnswer({ persona, history, question: currentQuestion, workText });
             log(`[aluno] ${answerText.slice(0, 120)}`);
             const b64 = await speak(answerText, persona.voice);
             fs.writeFileSync(path.join(audioDir, `turn${String(turnN).padStart(2, "0")}_aluno.mp3`), Buffer.from(b64, "base64"));
