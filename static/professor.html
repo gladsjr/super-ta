@@ -198,13 +198,8 @@
             <option value="blocked">Bloqueadas</option>
           </select>
           <span class="spacer"></span>
-          <button id="eval-new-btn" class="btn" type="button" title="Gera a avaliação do entrevistador para as entrevistas com conversa que ainda não foram avaliadas">Avaliar não avaliadas</button>
-          <button id="eval-all-btn" class="btn" type="button" title="Regenera a avaliação de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
-          <button id="derive-all-btn" class="btn" type="button" title="Gera a devolutiva formativa (versão do aluno) das avaliações que ainda não têm — só prévia, nada é publicado">Gerar devolutivas</button>
-          <button id="publish-all-btn" class="btn" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas (e revisadas) que ainda não foram publicadas">Publicar devolutivas</button>
           <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
         </div>
-        <div id="eval-batch-status" class="hint hidden"></div>
         <table id="sub-table" class="table hidden">
           <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th><th>Avaliação</th><th>Ações</th></tr></thead>
           <tbody></tbody>
@@ -212,6 +207,36 @@
         <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
         <div id="sub-filtered-empty" class="table-empty hidden">Nenhuma entrevista neste filtro.</div>
       </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Avaliações e devolutivas</h3>
+      <p class="card-sub">
+        O fluxo tem três passos, todos em lote:
+        <strong>1</strong> avaliar as entrevistas (relatório interno — só você vê) →
+        <strong>2</strong> gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa) →
+        <strong>3</strong> publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.
+      </p>
+
+      <label class="label" for="fb-guidelines">Diretrizes para a devolutiva (opcional) — tom, formato, o que destacar</label>
+      <textarea id="fb-guidelines" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários e termine com um encorajamento."></textarea>
+      <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
+        <input type="checkbox" id="fb-include-opinion" checked style="margin-top: 3px"/>
+        <span class="card-sub" style="margin:0">Incluir a <strong>opinião do entrevistador</strong> nas devolutivas (a impressão da persona, publicada como está, com ressalva de autoria — não editável). O lote aplica a escolha a todas as entrevistas; dá para ajustar aluno a aluno na página da conversa.</span>
+      </label>
+      <div class="row" style="margin-top: var(--sp-3)">
+        <button id="save-feedback-settings" class="btn" type="button">Salvar configurações</button>
+        <span id="feedback-settings-msg" class="hint"></span>
+      </div>
+
+      <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
+        <button id="eval-new-btn" class="btn btn-primary" type="button" title="Gera o relatório interno das entrevistas com conversa que ainda não foram avaliadas">1 · Avaliar entrevistas</button>
+        <button id="derive-all-btn" class="btn btn-primary" type="button" title="Gera a devolutiva (prévia) das avaliações que ainda não têm — salva as configurações acima e as usa; nada é publicado">2 · Gerar devolutivas</button>
+        <button id="publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas — salva e aplica as configurações acima a todas">3 · Publicar devolutivas</button>
+        <span class="spacer"></span>
+        <button id="eval-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regenera o relatório interno de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
+      </div>
+      <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
   </div>
 
@@ -338,6 +363,10 @@ async function load() {
   } catch (e) {
     console.error('applyIdentityStateToUI falhou (ignorado, não bloqueia a lista):', e);
   }
+
+  // Configurações de devolutiva do trabalho
+  document.getElementById('fb-guidelines').value = j.work.feedback_guidelines ?? '';
+  document.getElementById('fb-include-opinion').checked = j.work.include_interviewer_opinion !== false;
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -921,14 +950,46 @@ async function startBatch(path, body, confirmMsg) {
   }
 }
 
+// Salva as configurações de devolutiva do trabalho. Os lotes de gerar e
+// publicar salvam antes de rodar — o que está na tela é o que vale.
+async function saveFeedbackSettings(showMsg) {
+  const msg = document.getElementById('feedback-settings-msg');
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        feedback_guidelines: document.getElementById('fb-guidelines').value.trim() || null,
+        include_interviewer_opinion: document.getElementById('fb-include-opinion').checked,
+      }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      msg.textContent = 'Falha ao salvar: ' + (j.error || r.status);
+      return false;
+    }
+    if (showMsg) { msg.textContent = 'Configurações salvas.'; setTimeout(() => { msg.textContent = ''; }, 3000); }
+    return true;
+  } catch (err) {
+    msg.textContent = 'Falha ao salvar: ' + err.message;
+    return false;
+  }
+}
+
+document.getElementById('save-feedback-settings').onclick = () => saveFeedbackSettings(true);
+
 document.getElementById('eval-new-btn').onclick = () =>
   startBatch('evaluations', { force: false }, null);
 document.getElementById('eval-all-btn').onclick = () =>
   startBatch('evaluations', { force: true }, 'Reavaliar TODAS as entrevistas com conversa, inclusive as já avaliadas? Cada avaliação consome orçamento do trabalho.');
-document.getElementById('derive-all-btn').onclick = () =>
-  startBatch('evaluations/student-versions', { force: false }, 'Gerar as devolutivas (versão do aluno) das avaliações que ainda não têm? Nada é publicado — você revisa as prévias antes. Cada geração consome orçamento do trabalho.');
-document.getElementById('publish-all-btn').onclick = () =>
-  startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas já geradas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Revise as prévias antes (coluna Avaliação → abrir relatório).');
+document.getElementById('derive-all-btn').onclick = async () => {
+  if (!await saveFeedbackSettings(false)) return;
+  startBatch('evaluations/student-versions', { force: false }, 'Gerar as devolutivas (prévias) das avaliações que ainda não têm, usando as diretrizes acima? Nada é publicado — você revisa antes. Cada geração consome orçamento do trabalho.');
+};
+document.getElementById('publish-all-btn').onclick = async () => {
+  if (!await saveFeedbackSettings(false)) return;
+  startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas já geradas que ainda não foram publicadas? A escolha sobre a opinião do entrevistador (acima) é aplicada a todas, e elas ficam visíveis imediatamente na página de cada aluno.');
+};
 
 // Se já houver um lote em andamento quando a página abre (ex.: professor saiu
 // e voltou), retoma o acompanhamento.

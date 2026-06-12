@@ -343,6 +343,20 @@
         <summary id="student-eval-preview-summary">Devolutiva (o que o aluno vê)</summary>
         <div id="student-eval-preview-body"></div>
       </details>
+      <div id="rederive-form" class="student-eval-editor hidden">
+        <div class="sf-label">Regerar a devolutiva automática</div>
+        <p class="eval-publish-help" style="margin-top: 0;">
+          As diretrizes abaixo orientam a geração (tom, formato, o que destacar)
+          e valem para o <strong>trabalho inteiro</strong> — editar aqui salva
+          para todos. A edição manual desta devolutiva, se houver, é preservada.
+        </p>
+        <textarea id="rederive-guidelines" class="editor-textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários."></textarea>
+        <div class="eval-publish-row" style="margin-top: var(--sp-2);">
+          <button class="btn btn-primary btn-sm" id="rederive-go-btn">Salvar diretrizes e regerar</button>
+          <button class="btn btn-sm" id="rederive-cancel-btn">Cancelar</button>
+        </div>
+      </div>
+
       <div id="student-eval-editor" class="student-eval-editor hidden">
         <div class="sf-label">Editar devolutiva</div>
         <label class="editor-label" for="edit-summary">Resumo</label>
@@ -693,7 +707,7 @@ function renderStudentPreview(ev) {
 // Último estado conhecido da devolutiva (payload do servidor).
 let pubState = null;
 
-const PUB_BTN_IDS = ['eval-derive-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-rederive-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'opinion-toggle'];
+const PUB_BTN_IDS = ['eval-derive-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-rederive-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'opinion-toggle', 'rederive-go-btn', 'rederive-cancel-btn'];
 
 function setPubButtonsDisabled(disabled) {
   PUB_BTN_IDS.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = disabled; });
@@ -745,6 +759,7 @@ function renderPublication(j) {
     preview.classList.add('hidden');
   }
   document.getElementById('student-eval-editor').classList.add('hidden');
+  document.getElementById('rederive-form').classList.add('hidden');
 }
 
 async function pubRequest(method, path, body) {
@@ -784,12 +799,41 @@ document.getElementById('eval-derive-btn').addEventListener('click', async () =>
   await pubRequest('POST', 'student-version');
   btn.textContent = 'Gerar devolutiva (prévia)';
 });
-document.getElementById('eval-rederive-btn').addEventListener('click', async () => {
-  if (!confirm('Regerar a versão automática a partir da avaliação atual? A edição do professor, se houver, é preservada e continua sendo a versão efetiva.')) return;
-  const btn = document.getElementById('eval-rederive-btn');
+document.getElementById('eval-rederive-btn').addEventListener('click', () => {
+  document.getElementById('rederive-guidelines').value = pubState?.feedback_guidelines ?? '';
+  document.getElementById('rederive-form').classList.remove('hidden');
+  document.getElementById('student-eval-editor').classList.add('hidden');
+});
+document.getElementById('rederive-cancel-btn').addEventListener('click', () => {
+  document.getElementById('rederive-form').classList.add('hidden');
+});
+document.getElementById('rederive-go-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('rederive-go-btn');
+  btn.disabled = true;
   btn.textContent = 'Regerando…';
-  await pubRequest('POST', 'student-version?force=true');
-  btn.textContent = 'Regerar automática';
+  try {
+    // Salva as diretrizes no trabalho (PATCH parcial) e regenera com elas.
+    const guidelines = document.getElementById('rederive-guidelines').value.trim() || null;
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback_guidelines: guidelines }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || `HTTP ${r.status}`);
+    }
+    if (pubState) pubState.feedback_guidelines = guidelines;
+    await pubRequest('POST', 'student-version?force=true');
+    document.getElementById('rederive-form').classList.add('hidden');
+  } catch (err) {
+    const errEl = document.getElementById('eval-publish-error');
+    errEl.textContent = `Falha ao regerar: ${err.message}`;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Salvar diretrizes e regerar';
+  }
 });
 document.getElementById('eval-publish-btn').addEventListener('click', () => pubRequest('POST', 'publish'));
 document.getElementById('eval-unpublish-btn').addEventListener('click', () => pubRequest('DELETE', 'publish'));

@@ -114,7 +114,7 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | `ConfigAssistantAgent` (chat do assistente de configuração, em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | preâmbulo + `systemPromptBody` |
 | `EnunciadoCoherenceAgent` (avalia adequação do enunciado, em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | preâmbulo + `systemPromptBody` |
 | `InterviewEvaluatorAgent` (avalia a entrevista sob a perspectiva do entrevistador, em `/w/:workToken/submissions/:subToken/evaluation`) | [agents/InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js#L162) | preâmbulo (`professor_via_ui`) + `systemPromptBody` (inclui `EXTEMPORANEOUS_ANSWER_PRINCIPLE`) + agenda + transcrição serializada com métricas de forma/entrega por turno ([lib/deliverySignals.js](../lib/deliverySignals.js), compartilhado com o forense `scripts/detect-ai-answers.mjs`); PDFs (enunciado + entrega) via `input_file` |
-| `StudentFeedbackAgent` (deriva a devolutiva FORMATIVA ao aluno — PRÉVIA, sem publicar — em `/w/:workToken/submissions/:subToken/evaluation/student-version` e no lote `/w/:workToken/evaluations/student-versions`; publicar é passo separado em `/evaluation/publish`) | [agents/StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js#L74) | preâmbulo (`student_via_ui`) + `systemPromptBody` + relatório interno como input; saída sanitizada por `FORBIDDEN_PATTERNS` no código (vazou → retry → falha explícita) |
+| `StudentFeedbackAgent` (deriva a devolutiva FORMATIVA ao aluno — PRÉVIA, sem publicar — em `/w/:workToken/submissions/:subToken/evaluation/student-version` e no lote `/w/:workToken/evaluations/student-versions`; publicar é passo separado em `/evaluation/publish`) | [agents/StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js#L100) | preâmbulo (`student_via_ui`) + `systemPromptBody` + diretrizes do professor (`works.feedback_guidelines` — tom/formato/ênfases; `per_question` opcional) + relatório interno como input; saída sanitizada por `FORBIDDEN_PATTERNS` no código (vazou → retry → falha explícita) |
 | Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [lib/sessionLifecycle.js — initOrResumeSession / validateResources / rebuildSession](../lib/sessionLifecycle.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `work_analysis` (e `interview_plan`) salvos no `runtime_state_json` |
 
 ## Configuração do trabalho (página do professor)
@@ -172,7 +172,7 @@ flowchart LR
   click ConfigAgent "vscode://file/c:/Users/glads/src/super-ta/agents/ConfigAssistantAgent.js" "Abre ConfigAssistantAgent"
   click CoherenceAgent "vscode://file/c:/Users/glads/src/super-ta/agents/EnunciadoCoherenceAgent.js" "Abre EnunciadoCoherenceAgent"
   click EvalAgent "vscode://file/c:/Users/glads/src/super-ta/agents/InterviewEvaluatorAgent.js:162" "Abre o systemPromptBody do InterviewEvaluatorAgent"
-  click FeedbackAgent "vscode://file/c:/Users/glads/src/super-ta/agents/StudentFeedbackAgent.js:74" "Abre o systemPromptBody do StudentFeedbackAgent"
+  click FeedbackAgent "vscode://file/c:/Users/glads/src/super-ta/agents/StudentFeedbackAgent.js:100" "Abre o systemPromptBody do StudentFeedbackAgent"
 ```
 
 Características:
