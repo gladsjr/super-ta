@@ -114,6 +114,7 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | `ConfigAssistantAgent` (chat do assistente de configuração, em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | preâmbulo + `systemPromptBody` |
 | `EnunciadoCoherenceAgent` (avalia adequação do enunciado, em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | preâmbulo + `systemPromptBody` |
 | `InterviewEvaluatorAgent` (avalia a entrevista sob a perspectiva do entrevistador, em `/w/:workToken/submissions/:subToken/evaluation`) | [agents/InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js#L162) | preâmbulo (`professor_via_ui`) + `systemPromptBody` (inclui `EXTEMPORANEOUS_ANSWER_PRINCIPLE`) + agenda + transcrição serializada com métricas de forma/entrega por turno ([lib/deliverySignals.js](../lib/deliverySignals.js), compartilhado com o forense `scripts/detect-ai-answers.mjs`); PDFs (enunciado + entrega) via `input_file` |
+| `StudentFeedbackAgent` (deriva a devolutiva FORMATIVA publicável ao aluno, em `/w/:workToken/submissions/:subToken/evaluation/publish` e no lote `/w/:workToken/evaluations/publish`) | [agents/StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js#L74) | preâmbulo (`student_via_ui`) + `systemPromptBody` + relatório interno como input; saída sanitizada por `FORBIDDEN_PATTERNS` no código (vazou → retry → falha explícita) |
 | Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [lib/sessionLifecycle.js — initOrResumeSession / validateResources / rebuildSession](../lib/sessionLifecycle.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `work_analysis` (e `interview_plan`) salvos no `runtime_state_json` |
 
 ## Configuração do trabalho (página do professor)
@@ -137,6 +138,12 @@ flowchart LR
   EvalCache -- "miss / force" --> EvalAgent["InterviewEvaluatorAgent<br/>(principal_reasoning_model,<br/>input_file=enunciado+entrega,<br/>agenda + transcrição em texto)"]
   EvalAgent --> OutEvalFresh>"Relatório novo + cache"]
 
+  ConvUI --> PublishHandler["POST /submissions/:subToken/evaluation/publish<br/>(DELETE despublica)"]
+  ProfUI --> PublishBatch["POST /evaluations/publish<br/>(lote: serial em background)"]
+  PublishBatch --> PublishHandler
+  PublishHandler --> FeedbackAgent["StudentFeedbackAgent<br/>(principal_reasoning_model,<br/>deriva devolutiva FORMATIVA do<br/>relatório interno; gate de sanitização<br/>no código + retry)"]
+  FeedbackAgent --> OutPublished>"student_evaluation_json + published_at<br/>(visível em GET /s/:t/evaluation,<br/>sem expirar com a janela de 7 dias)"]
+
   ChatHandler --> ConfigAgent["ConfigAssistantAgent<br/>(fast_model, JSON action)"]
   ConfigAgent --> ActExplain>"action=null<br/>(explica metodologia)"]
   ConfigAgent --> ActPersona>"action=recommend_persona<br/>(carrega template no editor)"]
@@ -153,14 +160,15 @@ flowchart LR
   classDef gate  fill:#fff4dc,stroke:#8a6100,color:#0f1b2d;
   classDef out   fill:#e7f4eb,stroke:#1f6c3b,color:#0f1b2d;
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
-  class ChatHandler,CoherenceHandler,ConfigAgent,CoherenceAgent,EvalHandler,BatchHandler,EvalAgent agent
+  class ChatHandler,CoherenceHandler,ConfigAgent,CoherenceAgent,EvalHandler,BatchHandler,EvalAgent,PublishHandler,PublishBatch,FeedbackAgent agent
   class Cache,EvalCache gate
-  class ActExplain,ActPersona,ActYaml,ActCheck,OutCached,OutFresh,OutEvalCached,OutEvalFresh out
+  class ActExplain,ActPersona,ActYaml,ActCheck,OutCached,OutFresh,OutEvalCached,OutEvalFresh,OutPublished out
   class ProfUI,ConvUI entry
 
   click ConfigAgent "vscode://file/c:/Users/glads/src/super-ta/agents/ConfigAssistantAgent.js" "Abre ConfigAssistantAgent"
   click CoherenceAgent "vscode://file/c:/Users/glads/src/super-ta/agents/EnunciadoCoherenceAgent.js" "Abre EnunciadoCoherenceAgent"
   click EvalAgent "vscode://file/c:/Users/glads/src/super-ta/agents/InterviewEvaluatorAgent.js:162" "Abre o systemPromptBody do InterviewEvaluatorAgent"
+  click FeedbackAgent "vscode://file/c:/Users/glads/src/super-ta/agents/StudentFeedbackAgent.js:74" "Abre o systemPromptBody do StudentFeedbackAgent"
 ```
 
 Características:
@@ -191,7 +199,8 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice`. **UMA chamada por turno** na fase `interviewing`. Devolve uma `action` no schema definido em [lib/superOrchestrator/actionSchema.js](../lib/superOrchestrator/actionSchema.js). Mantém estado entre turnos via `memory` em `runtime_state.super_orchestrator.memory`. Em modo áudio, roda com `stream: true` para sinalizar `responding` ao frontend via SSE no primeiro token de texto.
    - [ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) — modelo: `fast_model`, audience: `professor_via_ui` (chat do assistente de configuração na página do professor).
    - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado, recebe PDF via `input_file`).
-   - [InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Avalia a entrevista realizada sob a perspectiva do entrevistador (rota `/w/:workToken/submissions/:subToken/evaluation`, botão na página da conversa). Recebe os dois PDFs via `input_file`, a agenda renderizada e a transcrição serializada em texto com métricas de FORMA/ENTREGA por turno (latência, tempo até começar a falar, palavras/s, caracteres/s, disfluências, registro escrito, polimento — [lib/deliverySignals.js](../lib/deliverySignals.js), mesma fonte de heurísticas do forense `scripts/detect-ai-answers.mjs`; nunca os bytes de áudio); injeta o `EXTEMPORANEOUS_ANSWER_PRINCIPLE` para não punir respostas de direção+mecanismo+ordem de grandeza. Avaliação holística: conteúdo decide o mérito por pergunta; forma alimenta o campo `delivery` e corrobora sinais de autoria. Resultado cacheado em `submissions.evaluation_json`.
+   - [InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Avalia a entrevista realizada sob a perspectiva do entrevistador (rota `/w/:workToken/submissions/:subToken/evaluation`, botão na página da conversa). Recebe os dois PDFs via `input_file`, a agenda renderizada e a transcrição serializada em texto com métricas de FORMA/ENTREGA por turno (latência, tempo até começar a falar, palavras/s, caracteres/s, disfluências, registro escrito, polimento — [lib/deliverySignals.js](../lib/deliverySignals.js), mesma fonte de heurísticas do forense `scripts/detect-ai-answers.mjs`; nunca os bytes de áudio); injeta o `EXTEMPORANEOUS_ANSWER_PRINCIPLE` para não punir respostas de direção+mecanismo+ordem de grandeza. Avaliação holística: conteúdo decide o mérito por pergunta; forma alimenta o campo `delivery` e corrobora sinais de autoria. Resultado cacheado em `submissions.evaluation_json` — NUNCA exposto ao aluno.
+   - [StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_ui`. Deriva do relatório interno a devolutiva FORMATIVA que o professor publica ao aluno (rotas `/evaluation/publish` individual e `/evaluations/publish` em lote): sem nota/juízo interno, sem autoria, sem forma/entrega, sem follow-ups do professor. Sanitização em duas camadas — regras duras no prompt + varredura `FORBIDDEN_PATTERNS` no código (se vazar, re-tenta apontando o vazamento; persistindo, falha em vez de publicar). Cache em `submissions.student_evaluation_json`; visibilidade controlada por `evaluation_published_at` (aluno lê em `GET /s/:t/evaluation`, sem expirar com a janela de revisão).
 3. **Strings inline em `routes/`**:
    - [INTERVIEWER_ADAPT_INSTRUCTIONS](../routes/work.js) — instruções para "Adaptar ao enunciado".
 

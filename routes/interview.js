@@ -1514,6 +1514,29 @@ router.get("/s/:submissionToken/student-audio/:audioIdx", requireSubmissionToken
     }
 });
 
+// Devolutiva publicada pelo professor (versão formativa do StudentFeedbackAgent
+// — NUNCA a avaliação interna). Diferente do /review, NÃO expira com a janela
+// de 7 dias: a publicação pode acontecer semanas depois da entrevista, e a
+// visibilidade é controlada pelo professor (evaluation_published_at).
+router.get("/s/:submissionToken/evaluation", requireSubmissionToken, async (req, res) => {
+    if (!req.submission.completion_reason) return res.status(409).json({ error: "not_finalized" });
+    try {
+        const student = await db.getStudentEvaluation(req.submission.id);
+        res.set("Cache-Control", "no-store");
+        if (!student?.published_at) {
+            return res.json({ published: false, evaluation: null });
+        }
+        res.json({
+            published: true,
+            published_at: student.published_at,
+            evaluation: student.report,
+        });
+    } catch (err) {
+        log.error("REVIEW", `evaluation fetch failed token=${req.submission.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "failed_to_load_evaluation" });
+    }
+});
+
 // Submit do comentário ao professor. Single-shot: uma vez que student_comment
 // estiver setado (não-null), não atualiza mais. Dentro da janela de revisão.
 router.post("/s/:submissionToken/comment", requireSubmissionToken, express.json({ limit: "16kb" }), async (req, res) => {

@@ -237,6 +237,23 @@
   .eval-signal.questions .sig-dir { color: var(--warning-700); }
   .eval-signal .sig-where { color: var(--ink-400); font-size: var(--fs-xs); }
 
+  .eval-publish { margin-top: var(--sp-4); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3); }
+  .eval-publish-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+  .eval-publish-help { color: var(--ink-500); font-size: var(--fs-xs); margin: var(--sp-2) 0 0; }
+  details.student-eval-preview {
+    margin-top: var(--sp-3);
+    background: var(--bg-muted);
+    border: 1px solid var(--ink-100);
+    border-radius: var(--r-md);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-sm);
+  }
+  details.student-eval-preview summary { cursor: pointer; color: var(--ink-700); font-weight: 500; }
+  details.student-eval-preview[open] summary { margin-bottom: var(--sp-2); }
+  .student-eval-preview .sf-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--ink-500); margin: var(--sp-3) 0 var(--sp-1); }
+  .student-eval-preview ul { margin: 0; padding-left: 1.2rem; }
+  .student-eval-preview .sf-text { white-space: pre-wrap; line-height: 1.5; }
+
   .finalization-card {
     margin-top: var(--sp-4);
     background: var(--bg-muted);
@@ -288,6 +305,25 @@
     </div>
     <div class="notice notice-error eval-error hidden" id="eval-error"></div>
     <div id="eval-body"></div>
+
+    <div id="eval-publish-block" class="eval-publish hidden">
+      <div class="eval-publish-row">
+        <span id="eval-publish-status" class="eval-meta"></span>
+        <button class="btn btn-sm" id="eval-publish-btn">Publicar para o aluno</button>
+        <button class="btn btn-sm hidden" id="eval-unpublish-btn">Despublicar</button>
+        <button class="btn btn-ghost btn-sm hidden" id="eval-republish-btn" title="Gera de novo a versão do aluno a partir da avaliação atual e republica">Regerar versão do aluno</button>
+      </div>
+      <p class="eval-publish-help">
+        O aluno NUNCA vê este relatório. Publicar gera (e mostra abaixo) uma
+        devolutiva formativa — sem juízo interno, sinais de autoria ou análise
+        de forma — visível na página do aluno enquanto estiver publicada.
+      </p>
+      <div class="notice notice-error eval-error hidden" id="eval-publish-error"></div>
+      <details class="student-eval-preview hidden" id="student-eval-preview">
+        <summary>Versão do aluno (prévia do que ele vê)</summary>
+        <div id="student-eval-preview-body"></div>
+      </details>
+    </div>
   </section>
 
   <details class="intro hidden" id="intro">
@@ -587,9 +623,94 @@ async function loadEvaluation() {
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation`);
     if (!r.ok) return;
     const j = await r.json();
-    if (j.evaluation) renderEvaluation(j.evaluation, j.evaluated_at);
+    if (j.evaluation) {
+      renderEvaluation(j.evaluation, j.evaluated_at);
+      renderPublication(j);
+    }
   } catch { /* leitura do cache é best-effort; o botão continua funcional */ }
 }
+
+// ---- Publicação da devolutiva ao aluno ----
+
+function renderStudentPreview(ev) {
+  const list = (title, items) => {
+    const arr = Array.isArray(items) ? items.filter(x => x && String(x).trim()) : [];
+    if (!arr.length) return '';
+    return `<div class="sf-label">${escapeHtml(title)}</div><ul>${arr.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+  };
+  const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
+    <div class="sf-text" style="margin-top: var(--sp-2);"><strong>Pergunta ${Number(q.turn_index) + 1}</strong> — ${escapeHtml(q.question_gist ?? '')}<br>${escapeHtml(q.feedback ?? '')}</div>`).join('');
+  return `
+    <div class="sf-text">${escapeHtml(ev.summary ?? '')}</div>
+    ${perQuestion ? `<div class="sf-label">Pergunta a pergunta</div>${perQuestion}` : ''}
+    ${list('O que sustentou bem', ev.strengths)}
+    ${list('O que pode melhorar', ev.improvement_areas)}
+    ${list('Sugestões de estudo', ev.study_suggestions)}`;
+}
+
+function renderPublication(j) {
+  const block = document.getElementById('eval-publish-block');
+  block.classList.remove('hidden');
+  const statusEl = document.getElementById('eval-publish-status');
+  const pubBtn = document.getElementById('eval-publish-btn');
+  const unpubBtn = document.getElementById('eval-unpublish-btn');
+  const repubBtn = document.getElementById('eval-republish-btn');
+  const preview = document.getElementById('student-eval-preview');
+
+  if (j.published_at) {
+    statusEl.innerHTML = `<span class="badge badge-completed">publicada para o aluno</span> em ${fmtTime(j.published_at)}`;
+    pubBtn.classList.add('hidden');
+    unpubBtn.classList.remove('hidden');
+    repubBtn.classList.remove('hidden');
+  } else {
+    statusEl.textContent = j.student_evaluation ? 'devolutiva gerada, mas não publicada' : 'não publicada';
+    pubBtn.classList.remove('hidden');
+    unpubBtn.classList.add('hidden');
+    repubBtn.classList.toggle('hidden', !j.student_evaluation);
+  }
+  if (j.student_evaluation) {
+    document.getElementById('student-eval-preview-body').innerHTML = renderStudentPreview(j.student_evaluation);
+    preview.classList.remove('hidden');
+  } else {
+    preview.classList.add('hidden');
+  }
+}
+
+async function publishEvaluation({ force }) {
+  const errEl = document.getElementById('eval-publish-error');
+  errEl.classList.add('hidden');
+  const btns = ['eval-publish-btn', 'eval-unpublish-btn', 'eval-republish-btn'].map(id => document.getElementById(id));
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation/publish${force ? '?force=true' : ''}`, { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    renderPublication({ published_at: j.published_at, student_evaluation: j.student_evaluation });
+  } catch (err) {
+    errEl.textContent = `Falha ao publicar: ${err.message}`;
+    errEl.classList.remove('hidden');
+  } finally {
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
+
+async function unpublishEvaluation() {
+  const errEl = document.getElementById('eval-publish-error');
+  errEl.classList.add('hidden');
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation/publish`, { method: 'DELETE' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    loadEvaluation();
+  } catch (err) {
+    errEl.textContent = `Falha ao despublicar: ${err.message}`;
+    errEl.classList.remove('hidden');
+  }
+}
+
+document.getElementById('eval-publish-btn').addEventListener('click', () => publishEvaluation({ force: false }));
+document.getElementById('eval-republish-btn').addEventListener('click', () => publishEvaluation({ force: true }));
+document.getElementById('eval-unpublish-btn').addEventListener('click', unpublishEvaluation);
 
 async function generateEvaluation() {
   const btn = document.getElementById('eval-btn');
@@ -604,6 +725,7 @@ async function generateEvaluation() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     renderEvaluation(j.evaluation, j.evaluated_at);
+    loadEvaluation(); // sincroniza o bloco de publicação (estado vem do GET)
   } catch (err) {
     errEl.textContent = `Falha ao gerar a avaliação: ${err.message}`;
     errEl.classList.remove('hidden');
