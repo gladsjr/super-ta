@@ -200,7 +200,8 @@
           <span class="spacer"></span>
           <button id="eval-new-btn" class="btn" type="button" title="Gera a avaliação do entrevistador para as entrevistas com conversa que ainda não foram avaliadas">Avaliar não avaliadas</button>
           <button id="eval-all-btn" class="btn" type="button" title="Regenera a avaliação de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
-          <button id="publish-all-btn" class="btn" type="button" title="Gera a devolutiva formativa (versão do aluno) das avaliações ainda não publicadas e as torna visíveis na página de cada aluno">Publicar devolutivas</button>
+          <button id="derive-all-btn" class="btn" type="button" title="Gera a devolutiva formativa (versão do aluno) das avaliações que ainda não têm — só prévia, nada é publicado">Gerar devolutivas</button>
+          <button id="publish-all-btn" class="btn" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas (e revisadas) que ainda não foram publicadas">Publicar devolutivas</button>
           <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
         </div>
         <div id="eval-batch-status" class="hint hidden"></div>
@@ -408,11 +409,13 @@ function renderSubmissionsTable() {
     const convCell = hasConv
       ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">Ver conversa ↗</a>`
       : `<span class="muted">—</span>`;
-    const publishedBadge = s.evaluation_published_at
+    const feedbackBadge = s.evaluation_published_at
       ? ` <span class="badge badge-accent" title="Devolutiva visível para o aluno desde ${new Date(s.evaluation_published_at).toLocaleString()}">publicada</span>`
-      : '';
+      : (s.has_student_version
+        ? ` <span class="badge badge-pending" title="Devolutiva gerada, aguardando revisão/publicação — o aluno ainda não vê">devolutiva pronta</span>`
+        : '');
     const evalCell = s.has_evaluation
-      ? `<a href="${convUrl}" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir relatório"><span class="badge badge-completed">avaliada</span></a>${publishedBadge}`
+      ? `<a href="${convUrl}" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir relatório"><span class="badge badge-completed">avaliada</span></a>${feedbackBadge}`
       : `<span class="muted">—</span>`;
     const blockedBadge = s.is_blocked ? `<span class="badge-blocked">bloqueada</span>` : '';
     const actionBtn = s.is_blocked
@@ -862,6 +865,7 @@ function renderBatchStatus(j) {
   const el = document.getElementById('eval-batch-status');
   const lines = [
     batchLine(j.batch, 'Avaliando entrevistas', 'avaliada'),
+    batchLine(j.derive, 'Gerando devolutivas (prévias)', 'gerada'),
     batchLine(j.publish, 'Publicando devolutivas', 'publicada'),
   ].filter(Boolean);
   if (lines.length === 0) { el.classList.add('hidden'); return; }
@@ -875,7 +879,7 @@ async function pollBatchStatus() {
     if (!r.ok) return;
     const j = await r.json();
     renderBatchStatus(j);
-    const anyRunning = j.batch?.running || j.publish?.running;
+    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running;
     if (anyRunning) {
       evalWasRunning = true;
       setEvalButtonsDisabled(true);
@@ -891,6 +895,7 @@ async function pollBatchStatus() {
 function setEvalButtonsDisabled(disabled) {
   document.getElementById('eval-new-btn').disabled = disabled;
   document.getElementById('eval-all-btn').disabled = disabled;
+  document.getElementById('derive-all-btn').disabled = disabled;
   document.getElementById('publish-all-btn').disabled = disabled;
 }
 
@@ -920,8 +925,10 @@ document.getElementById('eval-new-btn').onclick = () =>
   startBatch('evaluations', { force: false }, null);
 document.getElementById('eval-all-btn').onclick = () =>
   startBatch('evaluations', { force: true }, 'Reavaliar TODAS as entrevistas com conversa, inclusive as já avaliadas? Cada avaliação consome orçamento do trabalho.');
+document.getElementById('derive-all-btn').onclick = () =>
+  startBatch('evaluations/student-versions', { force: false }, 'Gerar as devolutivas (versão do aluno) das avaliações que ainda não têm? Nada é publicado — você revisa as prévias antes. Cada geração consome orçamento do trabalho.');
 document.getElementById('publish-all-btn').onclick = () =>
-  startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas das entrevistas avaliadas que ainda não foram publicadas? A versão do aluno (formativa, sem material interno) é gerada agora e fica visível na página de cada aluno.');
+  startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas já geradas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Revise as prévias antes (coluna Avaliação → abrir relatório).');
 
 // Se já houver um lote em andamento quando a página abre (ex.: professor saiu
 // e voltou), retoma o acompanhamento.

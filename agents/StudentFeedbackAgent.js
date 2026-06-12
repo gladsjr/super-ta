@@ -64,6 +64,32 @@ export function findForbiddenLeaks(reportObject) {
     return FORBIDDEN_PATTERNS.filter(re => re.test(text)).map(re => String(re));
 }
 
+// Validação de FORMA da devolutiva (sem o vínculo com o relatório interno).
+// Usada pelo agente (que adiciona a checagem de contagem de per_question) e
+// pela rota de edição manual do professor (PUT /student-version).
+export function validateStudentFeedbackShape(r) {
+    if (!r || typeof r !== "object") throw new Error("devolutiva deve ser um objeto");
+    if (typeof r.summary !== "string" || !r.summary.trim()) {
+        throw new Error("summary ausente ou vazio");
+    }
+    if (!Array.isArray(r.per_question)) {
+        throw new Error("per_question deve ser array");
+    }
+    for (const q of r.per_question) {
+        if (!Number.isInteger(q.turn_index)) {
+            throw new Error(`turn_index inválido "${q.turn_index}"`);
+        }
+        if (typeof q.feedback !== "string" || !q.feedback.trim()) {
+            throw new Error("per_question.feedback vazio");
+        }
+    }
+    for (const key of ["strengths", "improvement_areas", "study_suggestions"]) {
+        if (!Array.isArray(r[key])) {
+            throw new Error(`${key} deve ser array`);
+        }
+    }
+}
+
 export class StudentFeedbackAgent {
     static TYPE = "student_feedback";
 
@@ -73,7 +99,7 @@ export class StudentFeedbackAgent {
         this.model = model;
         this.systemPromptBody = `Sua função específica: escrever a DEVOLUTIVA AO ENTREVISTADO a partir do relatório interno de avaliação de uma entrevista (JSON no input). O relatório interno foi escrito para o operador do sistema e NÃO pode ser mostrado cru; você produz a versão que a própria pessoa entrevistada vai ler.
 
-PROPÓSITO: devolutiva FORMATIVA. A pessoa deve terminar a leitura sabendo (i) como foi a conversa, (ii) o que ela sustentou bem, (iii) onde a resposta ficou devendo em cada pergunta e (iv) o que vale estudar ou preparar melhor. Tom: direto, respeitoso, construtivo — como um bom entrevistador devolvendo impressões a um candidato que ele respeita.
+PROPÓSITO: devolutiva FORMATIVA (apresentada ao leitor como avaliação do professor). A pessoa deve terminar a leitura sabendo (i) como foi a conversa, (ii) o que ela sustentou bem, (iii) onde a resposta ficou devendo em cada pergunta e (iv) o que vale estudar ou preparar melhor. Tom: neutro, direto, respeitoso, construtivo. (A opinião do entrevistador-persona NÃO é gerada aqui — o sistema publica, à parte, a impressão registrada no próprio relatório interno.)
 
 REGRAS DURAS DE CONTEÚDO (a parte mais importante da sua função):
 - NUNCA mencione, direta ou indiretamente: dúvidas de autoria, suspeita de ajuda externa, uso de ferramentas/assistentes, velocidade de digitação ou de fala, tempo de resposta, pausas, hesitação, fluência, "texto pronto", leitura, espontaneidade, naturalidade da entrega, ou qualquer análise da FORMA como a resposta foi produzida. Esses temas existem no relatório interno (campos authorship_*, delivery, sinais de forma) e DEVEM ser completamente omitidos — nem eco, nem eufemismo ("respostas muito bem preparadas" é eco; não use).
@@ -173,28 +199,10 @@ ${JSON.stringify(internalReport, null, 2)}`;
     }
 
     _validateReport(r, internalReport) {
-        if (typeof r.summary !== "string" || !r.summary.trim()) {
-            throw new Error("StudentFeedback: missing summary");
-        }
-        if (!Array.isArray(r.per_question)) {
-            throw new Error("StudentFeedback: per_question must be array");
-        }
+        validateStudentFeedbackShape(r);
         const expected = Array.isArray(internalReport.per_question) ? internalReport.per_question.length : 0;
         if (r.per_question.length !== expected) {
             throw new Error(`StudentFeedback: per_question tem ${r.per_question.length} itens, esperado ${expected}`);
-        }
-        for (const q of r.per_question) {
-            if (!Number.isInteger(q.turn_index)) {
-                throw new Error(`StudentFeedback: invalid turn_index "${q.turn_index}"`);
-            }
-            if (typeof q.feedback !== "string" || !q.feedback.trim()) {
-                throw new Error("StudentFeedback: per_question.feedback vazio");
-            }
-        }
-        for (const key of ["strengths", "improvement_areas", "study_suggestions"]) {
-            if (!Array.isArray(r[key])) {
-                throw new Error(`StudentFeedback: ${key} must be array`);
-            }
         }
     }
 }
