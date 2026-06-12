@@ -175,6 +175,64 @@
   .pending-turn .block.question { background: var(--bg-raised); border-left-color: var(--ink-300); }
   .pending-turn .block.rationale { background: var(--bg-raised); border-left-color: var(--ink-300); }
 
+  .evaluation-card {
+    margin-top: var(--sp-4);
+    background: var(--bg-raised);
+    border: 1px solid var(--ink-100);
+    border-left: 4px solid var(--q-border);
+    border-radius: var(--r-lg);
+    padding: var(--sp-4) var(--sp-5);
+    box-shadow: var(--sh-sm);
+  }
+  .evaluation-card .eval-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+  }
+  .evaluation-card .eval-header h2 { margin: 0; font-size: var(--fs-md); }
+  .evaluation-card .eval-meta { color: var(--ink-400); font-size: var(--fs-xs); }
+  .eval-empty-note { color: var(--ink-500); font-size: var(--fs-sm); margin-top: var(--sp-2); }
+  .eval-error { margin-top: var(--sp-2); }
+  .eval-badges { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-3); }
+  .eval-badge {
+    display: inline-block;
+    border-radius: var(--r-sm);
+    padding: var(--sp-1) var(--sp-2);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .eval-badge.q-strong       { background: var(--a-bg); border-color: var(--a-border); color: var(--success-700); }
+  .eval-badge.q-adequate     { background: var(--q-bg); border-color: var(--q-border); color: var(--accent-700); }
+  .eval-badge.q-weak         { background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700); }
+  .eval-badge.q-poor         { background: #fbeaea; border-color: #c98787; color: #8a2525; }
+  .eval-badge.a-high         { background: var(--a-bg); border-color: var(--a-border); color: var(--success-700); }
+  .eval-badge.a-medium       { background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700); }
+  .eval-badge.a-low          { background: #fbeaea; border-color: #c98787; color: #8a2525; }
+  .eval-section-title { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--ink-500); margin: var(--sp-4) 0 var(--sp-1); }
+  .eval-text { white-space: pre-wrap; line-height: 1.5; }
+  .eval-list { margin: 0; padding-left: 1.2rem; }
+  .eval-list li { margin: var(--sp-1) 0; }
+  .eval-pq { border: 1px solid var(--ink-100); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin-top: var(--sp-2); font-size: var(--fs-sm); }
+  .eval-pq .pq-head { display: flex; justify-content: space-between; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
+  .eval-pq .pq-gist { font-weight: 600; color: var(--ink-700); }
+  .eval-pq .pq-evidence { color: var(--ink-500); font-size: var(--fs-xs); margin-top: var(--sp-1); font-style: italic; }
+  .pq-tag { font-size: var(--fs-xs); font-weight: 600; border-radius: var(--r-sm); padding: 0 var(--sp-2); }
+  .pq-tag.convincing   { background: var(--a-bg); color: var(--success-700); }
+  .pq-tag.partial      { background: var(--r-bg); color: var(--warning-700); }
+  .pq-tag.evasive      { background: var(--r-bg); color: #b8732a; }
+  .pq-tag.inconsistent { background: #fbeaea; color: #8a2525; }
+  .pq-tag.unanswered   { background: var(--ink-50); color: var(--ink-500); }
+  .eval-signal { margin-top: var(--sp-2); font-size: var(--fs-sm); padding-left: var(--sp-3); border-left: 3px solid var(--ink-200); }
+  .eval-signal.supports  { border-left-color: var(--a-border); }
+  .eval-signal.questions { border-left-color: var(--r-border); }
+  .eval-signal .sig-dir { font-weight: 600; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; }
+  .eval-signal.supports .sig-dir  { color: var(--success-700); }
+  .eval-signal.questions .sig-dir { color: var(--warning-700); }
+  .eval-signal .sig-where { color: var(--ink-400); font-size: var(--fs-xs); }
+
   .finalization-card {
     margin-top: var(--sp-4);
     background: var(--bg-muted);
@@ -210,6 +268,23 @@
 
   <div id="notfound" class="notice notice-error hidden">Conversa não encontrada.</div>
   <div id="empty" class="notice notice-info hidden">Nenhuma conversa registrada para esta submissão ainda.</div>
+
+  <section id="evaluation" class="evaluation-card hidden">
+    <div class="eval-header">
+      <h2>Avaliação do entrevistador</h2>
+      <div>
+        <span class="eval-meta" id="eval-meta"></span>
+        <button class="btn btn-primary btn-sm" id="eval-btn">Gerar avaliação</button>
+      </div>
+    </div>
+    <div class="eval-empty-note" id="eval-empty-note">
+      Relatório de como o aluno sustentou o trabalho nesta entrevista, sob a
+      perspectiva do entrevistador. Usa o enunciado, o trabalho enviado e a
+      transcrição completa. A geração leva por volta de um minuto.
+    </div>
+    <div class="notice notice-error eval-error hidden" id="eval-error"></div>
+    <div id="eval-body"></div>
+  </section>
 
   <details class="intro hidden" id="intro">
     <summary id="intro-summary">Apresentação inicial</summary>
@@ -418,6 +493,111 @@ function renderPendingQuestion(q) {
     </section>`;
 }
 
+// ---- Avaliação do entrevistador (relatório sob demanda, cacheado) ----
+
+const DEFENSE_LABEL = {
+  strong: 'Defesa sólida',
+  adequate: 'Defesa adequada',
+  weak: 'Defesa frágil',
+  poor: 'Defesa insuficiente',
+};
+const AUTHORSHIP_LABEL = {
+  high: 'Autoria: confiança alta',
+  medium: 'Autoria: confiança média',
+  low: 'Autoria: confiança baixa',
+};
+const ASSESSMENT_LABEL = {
+  convincing: 'convincente',
+  partial: 'parcial',
+  evasive: 'evasiva',
+  inconsistent: 'inconsistente',
+  unanswered: 'sem resposta',
+};
+
+function renderEvalList(title, items) {
+  const arr = Array.isArray(items) ? items.filter(x => x != null && String(x).trim() !== '') : [];
+  if (arr.length === 0) return '';
+  return `
+    <div class="eval-section-title">${escapeHtml(title)}</div>
+    <ul class="eval-list">${arr.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+}
+
+function renderEvaluation(ev, evaluatedAt) {
+  const overall = ev.overall || {};
+  const badges = `
+    <div class="eval-badges">
+      <span class="eval-badge q-${escapeHtml(overall.defense_quality ?? '')}">${escapeHtml(DEFENSE_LABEL[overall.defense_quality] ?? overall.defense_quality ?? '—')}</span>
+      <span class="eval-badge a-${escapeHtml(overall.authorship_confidence ?? '')}">${escapeHtml(AUTHORSHIP_LABEL[overall.authorship_confidence] ?? overall.authorship_confidence ?? '—')}</span>
+    </div>`;
+  const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
+    <div class="eval-pq">
+      <div class="pq-head">
+        <span class="pq-gist">Turno ${Number(q.turn_index) + 1} — ${escapeHtml(q.question_gist ?? '')}</span>
+        <span class="pq-tag ${escapeHtml(q.answer_assessment ?? '')}">${escapeHtml(ASSESSMENT_LABEL[q.answer_assessment] ?? q.answer_assessment ?? '—')}</span>
+      </div>
+      <div class="eval-text">${escapeHtml(q.comment ?? '')}</div>
+      ${q.evidence ? `<div class="pq-evidence">Evidência: ${escapeHtml(q.evidence)}</div>` : ''}
+    </div>`).join('');
+  const signals = (Array.isArray(ev.authorship_signals) ? ev.authorship_signals : []).map(s => `
+    <div class="eval-signal ${escapeHtml(s.direction ?? '')}">
+      <span class="sig-dir">${s.direction === 'supports' ? 'sustenta autoria' : 'vale sondar'}</span>
+      <div class="eval-text">${escapeHtml(s.signal ?? '')}</div>
+      ${s.where ? `<div class="sig-where">${escapeHtml(s.where)}</div>` : ''}
+    </div>`).join('');
+
+  document.getElementById('eval-meta').textContent =
+    evaluatedAt ? `gerada em ${fmtTime(evaluatedAt)}` : '';
+  document.getElementById('eval-btn').textContent = 'Reavaliar';
+  document.getElementById('eval-empty-note').classList.add('hidden');
+  document.getElementById('eval-body').innerHTML = `
+    ${badges}
+    <div class="eval-section-title">Resumo</div>
+    <div class="eval-text">${escapeHtml(overall.summary ?? '')}</div>
+    <div class="eval-section-title">Impressão do entrevistador</div>
+    <div class="eval-text">${escapeHtml(ev.interviewer_impression ?? '')}</div>
+    ${perQuestion ? `<div class="eval-section-title">Pergunta a pergunta</div>${perQuestion}` : ''}
+    ${renderEvalList('Pontos fortes da defesa', ev.strengths)}
+    ${renderEvalList('Pontos fracos da defesa', ev.weaknesses)}
+    ${signals ? `<div class="eval-section-title">Sinais de autoria</div>${signals}` : ''}
+    ${renderEvalList('Sugestões de follow-up presencial', ev.follow_up_suggestions)}
+    ${renderEvalList('Ressalvas desta avaliação', ev.caveats)}`;
+}
+
+async function loadEvaluation() {
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation`);
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j.evaluation) renderEvaluation(j.evaluation, j.evaluated_at);
+  } catch { /* leitura do cache é best-effort; o botão continua funcional */ }
+}
+
+async function generateEvaluation() {
+  const btn = document.getElementById('eval-btn');
+  const errEl = document.getElementById('eval-error');
+  errEl.classList.add('hidden');
+  const hadReport = btn.textContent === 'Reavaliar';
+  btn.disabled = true;
+  btn.textContent = 'Avaliando…';
+  try {
+    const force = hadReport ? '?force=true' : '';
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation${force}`, { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    renderEvaluation(j.evaluation, j.evaluated_at);
+  } catch (err) {
+    errEl.textContent = `Falha ao gerar a avaliação: ${err.message}`;
+    errEl.classList.remove('hidden');
+    if (hadReport) btn.textContent = 'Reavaliar';
+    else btn.textContent = 'Gerar avaliação';
+  } finally {
+    btn.disabled = false;
+    if (btn.textContent === 'Avaliando…') btn.textContent = 'Reavaliar';
+  }
+}
+
+document.getElementById('eval-btn').addEventListener('click', generateEvaluation);
+
 async function load() {
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/conversation`);
   if (r.status === 404) {
@@ -537,6 +717,12 @@ async function load() {
     turnsEl.innerHTML = '<div class="notice notice-info">Entrevista iniciada, mas ainda sem perguntas registradas.</div>';
   } else {
     turnsEl.innerHTML = turns.map(renderTurn).join('');
+  }
+
+  // Avaliação do entrevistador: só faz sentido com pelo menos uma resposta.
+  if (turns.some(t => typeof t.answer === 'string' && t.answer.trim())) {
+    document.getElementById('evaluation').classList.remove('hidden');
+    loadEvaluation();
   }
 
   const pending = Array.isArray(conv.pending_questions) ? conv.pending_questions : [];

@@ -113,6 +113,7 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 | `INTERVIEWER_ADAPT_INSTRUCTIONS` (botão "Adaptar ao enunciado") | [routes/work.js](../routes/work.js) | string literal usada como `instructions` na chamada da Responses API |
 | `ConfigAssistantAgent` (chat do assistente de configuração, em `/w/:workToken/config-chat`) | [agents/ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) | preâmbulo + `systemPromptBody` |
 | `EnunciadoCoherenceAgent` (avalia adequação do enunciado, em `/w/:workToken/enunciado/coherence`) | [agents/EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) | preâmbulo + `systemPromptBody` |
+| `InterviewEvaluatorAgent` (avalia a entrevista sob a perspectiva do entrevistador, em `/w/:workToken/submissions/:subToken/evaluation`) | [agents/InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js#L145) | preâmbulo (`professor_via_ui`) + `systemPromptBody` (inclui `EXTEMPORANEOUS_ANSWER_PRINCIPLE`) + agenda + transcrição serializada; PDFs (enunciado + entrega) via `input_file` |
 | Retomada de sessão após restart (`/start`: hidrata do BD + valida recursos OpenAI + rebuild quando necessário) | [lib/sessionLifecycle.js — initOrResumeSession / validateResources / rebuildSession](../lib/sessionLifecycle.js), [lib/sessionState.js](../lib/sessionState.js) | nenhum LLM novo — rebuild reusa `work_analysis` (e `interview_plan`) salvos no `runtime_state_json` |
 
 ## Configuração do trabalho (página do professor)
@@ -127,6 +128,12 @@ assistente NUNCA salva — só propõe; o professor aplica via UI.
 flowchart LR
   ProfUI(["/w/:workToken<br/>(professor.html)"]) --> ChatHandler["POST /config-chat"]
   ProfUI --> CoherenceHandler["POST /enunciado/coherence"]
+  ConvUI(["/w/:workToken/s/:subToken<br/>(conversation.html)"]) --> EvalHandler["POST /submissions/:subToken/evaluation"]
+
+  EvalHandler --> EvalCache{"Cache em<br/>submissions.evaluation_json?"}
+  EvalCache -- "hit (sem ?force)" --> OutEvalCached>"Relatório do cache"]
+  EvalCache -- "miss / force" --> EvalAgent["InterviewEvaluatorAgent<br/>(principal_reasoning_model,<br/>input_file=enunciado+entrega,<br/>agenda + transcrição em texto)"]
+  EvalAgent --> OutEvalFresh>"Relatório novo + cache"]
 
   ChatHandler --> ConfigAgent["ConfigAssistantAgent<br/>(fast_model, JSON action)"]
   ConfigAgent --> ActExplain>"action=null<br/>(explica metodologia)"]
@@ -144,13 +151,14 @@ flowchart LR
   classDef gate  fill:#fff4dc,stroke:#8a6100,color:#0f1b2d;
   classDef out   fill:#e7f4eb,stroke:#1f6c3b,color:#0f1b2d;
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
-  class ChatHandler,CoherenceHandler,ConfigAgent,CoherenceAgent agent
-  class Cache gate
-  class ActExplain,ActPersona,ActYaml,ActCheck,OutCached,OutFresh out
-  class ProfUI entry
+  class ChatHandler,CoherenceHandler,ConfigAgent,CoherenceAgent,EvalHandler,EvalAgent agent
+  class Cache,EvalCache gate
+  class ActExplain,ActPersona,ActYaml,ActCheck,OutCached,OutFresh,OutEvalCached,OutEvalFresh out
+  class ProfUI,ConvUI entry
 
   click ConfigAgent "vscode://file/c:/Users/glads/src/super-ta/agents/ConfigAssistantAgent.js" "Abre ConfigAssistantAgent"
   click CoherenceAgent "vscode://file/c:/Users/glads/src/super-ta/agents/EnunciadoCoherenceAgent.js" "Abre EnunciadoCoherenceAgent"
+  click EvalAgent "vscode://file/c:/Users/glads/src/super-ta/agents/InterviewEvaluatorAgent.js:145" "Abre o systemPromptBody do InterviewEvaluatorAgent"
 ```
 
 Características:
@@ -181,6 +189,7 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice`. **UMA chamada por turno** na fase `interviewing`. Devolve uma `action` no schema definido em [lib/superOrchestrator/actionSchema.js](../lib/superOrchestrator/actionSchema.js). Mantém estado entre turnos via `memory` em `runtime_state.super_orchestrator.memory`. Em modo áudio, roda com `stream: true` para sinalizar `responding` ao frontend via SSE no primeiro token de texto.
    - [ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) — modelo: `fast_model`, audience: `professor_via_ui` (chat do assistente de configuração na página do professor).
    - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado, recebe PDF via `input_file`).
+   - [InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Avalia a entrevista realizada sob a perspectiva do entrevistador (rota `/w/:workToken/submissions/:subToken/evaluation`, botão na página da conversa). Recebe os dois PDFs via `input_file`, a agenda renderizada e a transcrição serializada em texto (com metadados de áudio quando houver — nunca os bytes); injeta o `EXTEMPORANEOUS_ANSWER_PRINCIPLE` para não punir respostas de direção+mecanismo+ordem de grandeza. Resultado cacheado em `submissions.evaluation_json`.
 3. **Strings inline em `routes/`**:
    - [INTERVIEWER_ADAPT_INSTRUCTIONS](../routes/work.js) — instruções para "Adaptar ao enunciado".
 
