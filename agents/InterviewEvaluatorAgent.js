@@ -2,6 +2,7 @@ import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
 import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
+import { buildDeliveryReport } from "../lib/deliverySignals.js";
 
 /**
  * InterviewEvaluatorAgent
@@ -38,6 +39,10 @@ import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
  *     ],
  *     "strengths": [ "<frase>" ],
  *     "weaknesses": [ "<frase>" ],
+ *     "delivery": {
+ *       "overall_impression": "natural" | "mixed" | "scripted" | "inconclusive",
+ *       "observations": [ "<frase>" ]
+ *     },
  *     "authorship_signals": [
  *       { "direction": "supports" | "questions", "signal": "<frase>", "where": "<turno/trecho>" }
  *     ],
@@ -47,8 +52,11 @@ import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
  */
 
 // Serializa o conversation_json (e metadados de áudio, se houver) num texto
-// estável para o avaliador. Exportada para teste unitário.
+// estável para o avaliador, com as métricas de forma/entrega de cada turno
+// (lib/deliverySignals.js) anotadas junto à resposta. Exportada para teste.
 export function renderTranscriptForEvaluation(conversation, audioArtifacts = []) {
+    const delivery = buildDeliveryReport(conversation, audioArtifacts);
+    const deliveryByTurn = new Map(delivery.turns.map(t => [t.index, t]));
     const lines = [];
     const persona = conversation?.interviewer_persona;
     if (persona?.name) {
@@ -84,9 +92,23 @@ export function renderTranscriptForEvaluation(conversation, audioArtifacts = [])
         } else {
             lines.push("RESPOSTA FINAL: (sem resposta registrada)");
         }
-        const latency = secondsBetween(t.asked_at, t.answered_at);
-        if (latency != null) {
-            lines.push(`(tempo pergunta -> resposta final: ${latency}s)`);
+        const d = deliveryByTurn.get(t.index);
+        if (d) {
+            const parts = [`${d.words} palavras`];
+            if (d.latency_s != null) parts.push(`${d.latency_s}s entre a pergunta e a resposta final`);
+            if (d.cps != null) parts.push(`${d.cps} caracteres/s digitados`);
+            if (d.recording) {
+                parts.push(`gravação final de ${d.recording.duration_s}s`);
+                if (d.recording.thinking_s != null) parts.push(`~${d.recording.thinking_s}s entre a última fala do entrevistador e o início da resposta (inclui a escuta da pergunta)`);
+                if (d.recording.wps != null) parts.push(`${d.recording.wps} palavras/s ao falar`);
+            }
+            parts.push(`disfluências: ${d.disfluencies}`);
+            parts.push(`registro escrito: ${d.written_register}`);
+            parts.push(`polimento: ${d.polish}`);
+            lines.push(`FORMA DA RESPOSTA: ${parts.join("; ")}.`);
+            for (const f of d.flags) {
+                lines.push(`SINAL AUTOMÁTICO DE FORMA: ${f}`);
+            }
         }
         lines.push("");
     }
@@ -110,26 +132,21 @@ export function renderTranscriptForEvaluation(conversation, audioArtifacts = [])
         lines.push("Entrevista NÃO finalizada formalmente (interrompida ou ainda em andamento).");
     }
 
-    const artifacts = Array.isArray(audioArtifacts) ? audioArtifacts : [];
-    if (artifacts.length > 0) {
-        const durations = artifacts.map(a => (a.duration_s != null ? Number(a.duration_s) : null));
-        const known = durations.filter(d => d != null);
-        const total = known.reduce((acc, d) => acc + d, 0);
-        lines.push("");
-        lines.push("=== METADADOS DE ÁUDIO (entrevista em modo voz) ===");
-        lines.push("As falas do respondente acima são transcrições automáticas (STT) de gravações de voz.");
-        lines.push(`Gravações: ${artifacts.length}; duração total conhecida: ${Math.round(total)}s; durações individuais (s): ${durations.map(d => d == null ? "?" : Math.round(d)).join(", ")}.`);
+    lines.push("");
+    lines.push("=== CONTEXTO DOS SINAIS DE FORMA ===");
+    if (delivery.mode === "audio") {
+        lines.push("Entrevista em modo VOZ: as falas do respondente acima são transcrições automáticas (STT) de gravações.");
+        if (delivery.mapped_by === "unreliable") {
+            lines.push("Não foi possível casar com segurança cada gravação ao seu turno — os tempos por gravação foram omitidos.");
+        }
+    } else {
+        lines.push("Entrevista em modo TEXTO: o respondente digitou as respostas.");
+    }
+    for (const shift of delivery.register_shifts) {
+        lines.push(`SINAL AUTOMÁTICO DE FORMA (conjunto): mudança de registro — ${shift}`);
     }
 
     return lines.join("\n");
-}
-
-function secondsBetween(fromIso, toIso) {
-    if (!fromIso || !toIso) return null;
-    const from = Date.parse(fromIso);
-    const to = Date.parse(toIso);
-    if (Number.isNaN(from) || Number.isNaN(to) || to < from) return null;
-    return Math.round((to - from) / 1000);
 }
 
 export class InterviewEvaluatorAgent {
@@ -156,11 +173,18 @@ ${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
 
 Consequência para VOCÊ, avaliador: quando o entrevistador pediu um número que exigiria recálculo e a resposta veio com direção + mecanismo + ordem de grandeza, isso é resposta COMPLETA — classifique pelo mérito do raciocínio, NUNCA como "evasive" por faltar o valor exato. Recusar-se a chutar um número na hora é sinal de seriedade, não de fraqueza.
 
+FORMA E ENTREGA (dimensão holística — campo "delivery"):
+Um entrevistador de verdade não ouve só o conteúdo: percebe ritmo, hesitação, cadência, registro de linguagem e tempo de reação. A transcrição traz, por turno, uma linha "FORMA DA RESPOSTA" (palavras, tempos, velocidade de fala/digitação, disfluências, registro escrito 0..1, polimento 0..1) e linhas "SINAL AUTOMÁTICO DE FORMA" quando alguma heurística disparou. Semântica dos principais:
+- "registro escrito" alto numa FALA = subordinação e vocabulário de prosa que quase ninguém improvisa oralmente; combinado com ZERO disfluências numa resposta longa, é compatível com leitura de texto pronto.
+- velocidade de digitação acima de ~22 caracteres/s em resposta longa = compatível com colagem.
+- "~Ns entre a última fala do entrevistador e o início da resposta" (modo voz) = aproximação do tempo pensando antes de falar; inclui a escuta da pergunta, então valores moderados são NORMAIS.
+- "mudança de registro" = resposta muito mais estruturada que a mediana do próprio respondente — sugere ajuda seletiva nas perguntas difíceis.
+Incorpore essas percepções na sua avaliação como a persona faria: comente-as em "delivery", deixe-as colorir o interviewer_impression e, quando convergirem com sinais de conteúdo, alimente os authorship_signals. São heurísticas com risco real de falso positivo (gente que digita rápido, fala formal por hábito, pensa devagar) — então NUNCA rebaixe o mérito de conteúdo de uma resposta (per_question) por sinal de forma, e NUNCA conclua autoria a partir de tempo isolado. Forma corrobora; conteúdo decide.
+
 SOBRE AUTORIA (authorship_confidence e authorship_signals):
 - Você emite SINAIS, nunca acusações. "questions" significa "valeria sondar pessoalmente", não "colou".
-- Sinais que SUSTENTAM autoria: corrigir-se com naturalidade, recordar bastidores e tentativas descartadas, defender escolhas com vocabulário próprio, admitir limitações específicas do próprio trabalho.
-- Sinais que LEVANTAM dúvida: não reconhecer conteúdo central da própria entrega, fluência desproporcional em tema que o documento trata superficialmente (ou o inverso), respostas que parecem lidas/decoradas sem conexão com a pergunta concreta.
-- Em modo voz, use os metadados de áudio com MUITA parcimônia: durações e latências são contexto fraco (a pessoa pode pensar devagar). Nunca baseie um sinal de autoria APENAS em tempo.
+- Sinais que SUSTENTAM autoria: corrigir-se com naturalidade, recordar bastidores e tentativas descartadas, defender escolhas com vocabulário próprio, admitir limitações específicas do próprio trabalho, fala espontânea com disfluências naturais.
+- Sinais que LEVANTAM dúvida: não reconhecer conteúdo central da própria entrega, fluência desproporcional em tema que o documento trata superficialmente (ou o inverso), respostas que parecem lidas/decoradas sem conexão com a pergunta concreta, sinais de forma convergentes (registro escrito + zero disfluência + latência longa) em respostas decisivas.
 
 REGRAS DURAS:
 - per_question: exatamente UM item por turno da transcrição, na mesma ordem, com o MESMO turn_index. Turno sem resposta registrada = "unanswered".
@@ -188,12 +212,18 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
   ],
   "strengths": [ "<ponto em que a defesa foi bem>" ],
   "weaknesses": [ "<ponto em que a defesa ficou devendo>" ],
+  "delivery": {
+    "overall_impression": "natural" | "mixed" | "scripted" | "inconclusive",
+    "observations": [ "<percepção de forma/entrega, com o turno e o porquê>" ]
+  },
   "authorship_signals": [
     { "direction": "supports" | "questions", "signal": "<o que foi observado>", "where": "<turno N / trecho>" }
   ],
   "follow_up_suggestions": [ "<pergunta concreta para o professor>" ],
   "caveats": [ "<limitação desta avaliação>" ]
-}`;
+}
+
+Sobre "delivery": overall_impression resume como o respondente SOOU (natural = fala/digitação espontânea; scripted = entrega com cara de texto pronto; mixed = variou entre turnos; inconclusive = pouca informação de forma). observations: 0 a 6 itens concretos, cada um ancorado em turno(s).`;
     }
 
     /**
@@ -301,6 +331,16 @@ Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a p
             if (!Array.isArray(r[key])) {
                 throw new Error(`InterviewEvaluator: ${key} must be array`);
             }
+        }
+        const VALID_DELIVERY = new Set(["natural", "mixed", "scripted", "inconclusive"]);
+        if (!r.delivery || typeof r.delivery !== "object") {
+            throw new Error("InterviewEvaluator: missing delivery");
+        }
+        if (!VALID_DELIVERY.has(r.delivery.overall_impression)) {
+            throw new Error(`InterviewEvaluator: invalid delivery.overall_impression "${r.delivery.overall_impression}"`);
+        }
+        if (!Array.isArray(r.delivery.observations)) {
+            throw new Error("InterviewEvaluator: delivery.observations must be array");
         }
         if (!Array.isArray(r.authorship_signals)) {
             throw new Error("InterviewEvaluator: authorship_signals must be array");
