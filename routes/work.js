@@ -18,7 +18,7 @@ import {
     isWorkBudgetExceeded,
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
-import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent } from "../lib/agents.js";
+import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent, studentFeedbackAgent } from "../lib/agents.js";
 import { streamAudio } from "../lib/audioStore.js";
 import {
     PRINCIPAL_REASONING_MODEL,
@@ -335,11 +335,17 @@ router.get("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, a
         if (!found || found.work_id !== req.work.id) {
             return res.status(404).json({ error: "submission not found" });
         }
-        const cached = await db.getEvaluationCache(found.id);
+        const [cached, student] = await Promise.all([
+            db.getEvaluationCache(found.id),
+            db.getStudentEvaluation(found.id),
+        ]);
         res.set("Cache-Control", "no-store");
         res.json({
             evaluation: cached?.report ?? null,
             evaluated_at: cached?.evaluated_at ?? null,
+            student_evaluation: student?.report ?? null,
+            student_evaluation_at: student?.generated_at ?? null,
+            published_at: student?.published_at ?? null,
         });
     } catch (err) {
         log.error("EVALUATION", `read failed submission=${subToken}: ${err.message}`);
@@ -433,6 +439,75 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
     }
 });
 
+// ---- Publicação da devolutiva ao aluno ----
+// A avaliação interna NUNCA vai crua ao aluno: publicar = derivar (e cachear)
+// a versão formativa via StudentFeedbackAgent + marcar evaluation_published_at.
+// force=true regenera a versão do aluno mesmo se já existir.
+async function publishSubmissionNow(work, found, { force }) {
+    const subToken = found.submission_token;
+    const internal = await db.getEvaluationCache(found.id);
+    if (!internal) {
+        throw Object.assign(
+            new Error("não há avaliação do entrevistador para esta submissão — avalie antes de publicar"),
+            { notReady: true, httpStatus: 409 }
+        );
+    }
+    let student = force ? null : await db.getStudentEvaluation(found.id);
+    let generated = false;
+    if (!student) {
+        log.info("PUBLISH", `derive student feedback submission=${subToken} force=${force}`);
+        const report = await studentFeedbackAgent.derive({
+            internalReport: internal.report,
+            meterCtx: { workId: work.id },
+        });
+        const generatedAt = await db.setStudentEvaluation(found.id, report);
+        student = { report, generated_at: generatedAt, published_at: null };
+        generated = true;
+    }
+    const publishedAt = await db.setEvaluationPublished(found.id, true);
+    log.info("PUBLISH", `published submission=${subToken} generated=${generated}`);
+    return {
+        student_evaluation: student.report,
+        student_evaluation_at: student.generated_at,
+        published_at: publishedAt,
+        generated,
+    };
+}
+
+router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireWithinBudget, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    const force = String(req.query?.force ?? "").toLowerCase() === "true";
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        const result = await publishSubmissionNow(req.work, found, { force });
+        res.json(result);
+    } catch (err) {
+        if (err.notReady) return res.status(err.httpStatus ?? 409).json({ error: err.message });
+        log.error("PUBLISH", `failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao publicar a devolutiva", detail: err.message });
+    }
+});
+
+// Despublica (a versão do aluno fica guardada; republicar não regenera).
+router.delete("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        await db.setEvaluationPublished(found.id, false);
+        log.info("PUBLISH", `unpublished submission=${subToken}`);
+        res.json({ ok: true, published_at: null });
+    } catch (err) {
+        log.error("PUBLISH", `unpublish failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao despublicar a devolutiva" });
+    }
+});
+
 // ---- Avaliação em LOTE (todas as submissões do trabalho) ----
 // Roda em background, SERIAL (uma submissão por vez): mantém a carga na API
 // previsível e permite checar o orçamento entre itens. Estado em memória por
@@ -491,8 +566,8 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
     const force = req.body?.force === true;
     try {
         const existing = batchEvalRuns.get(req.work.id);
-        if (existing?.running) {
-            return res.status(409).json({ error: "já existe uma avaliação em lote em andamento para este trabalho", batch: publicBatchState(existing) });
+        if (existing?.running || batchPublishRuns.get(req.work.id)?.running) {
+            return res.status(409).json({ error: "já existe um lote em andamento para este trabalho", batch: publicBatchState(existing) });
         }
         const subs = await db.listSubmissionsForWork(req.work.id);
         // Candidatas: têm conversa (status derivado != pending). A elegibilidade
@@ -532,9 +607,90 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
     }
 });
 
+// ---- Publicação em LOTE das devolutivas ----
+// Mesmo padrão do lote de avaliação: serial, em background, estado em memória.
+// Elegíveis: submissões COM avaliação interna; sem force, pula as já
+// publicadas. force=true regenera a versão do aluno e republica todas.
+const batchPublishRuns = new Map(); // work.id -> estado
+
+async function runBatchPublish(work, queue, state) {
+    log.info("PUBLISH", `batch start work=${work.work_token} total=${queue.length} force=${state.force}`);
+    for (const sub of queue) {
+        try {
+            if (await isWorkBudgetExceeded(work.id)) {
+                state.stopped_reason = "budget_exhausted";
+                log.warn("PUBLISH", `batch interrompido por orçamento work=${work.work_token} done=${state.done}/${state.total}`);
+                break;
+            }
+            const found = await db.findSubmissionByToken(sub.submission_token);
+            if (!found || found.work_id !== work.id) { state.skipped++; continue; }
+            await publishSubmissionNow(work, found, { force: state.force });
+            state.ok++;
+        } catch (err) {
+            if (err.notReady) {
+                state.skipped++;
+            } else {
+                state.failed.push({ submission_token: sub.submission_token, student_label: sub.student_label, error: err.message });
+                log.error("PUBLISH", `batch item failed submission=${sub.submission_token}: ${err.message}`);
+            }
+        } finally {
+            state.done++;
+        }
+    }
+    state.running = false;
+    state.finished_at = new Date().toISOString();
+    log.info("PUBLISH", `batch done work=${work.work_token} ok=${state.ok} skipped=${state.skipped} failed=${state.failed.length} stopped=${state.stopped_reason ?? "-"}`);
+}
+
+router.post("/w/:workToken/evaluations/publish", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), async (req, res) => {
+    const force = req.body?.force === true;
+    try {
+        const runningEval = batchEvalRuns.get(req.work.id);
+        const runningPub = batchPublishRuns.get(req.work.id);
+        if (runningEval?.running || runningPub?.running) {
+            return res.status(409).json({ error: "já existe um lote em andamento para este trabalho" });
+        }
+        const subs = await db.listSubmissionsForWork(req.work.id);
+        const queue = subs.filter(s => s.has_evaluation && (force || !s.evaluation_published_at));
+        if (queue.length === 0) {
+            return res.status(400).json({
+                error: force
+                    ? "nenhuma submissão com avaliação para publicar — avalie as entrevistas antes"
+                    : "nenhuma devolutiva nova para publicar — todas as avaliadas já estão publicadas",
+            });
+        }
+        const state = {
+            running: true,
+            force,
+            total: queue.length,
+            done: 0,
+            ok: 0,
+            skipped: 0,
+            failed: [],
+            stopped_reason: null,
+            started_at: new Date().toISOString(),
+            finished_at: null,
+        };
+        batchPublishRuns.set(req.work.id, state);
+        runBatchPublish(req.work, queue, state).catch(err => {
+            log.error("PUBLISH", `batch crashed work=${req.work.work_token}: ${err.message}`);
+            state.running = false;
+            state.finished_at = new Date().toISOString();
+            state.stopped_reason = "internal_error";
+        });
+        res.json({ started: true, total: queue.length, force });
+    } catch (err) {
+        log.error("PUBLISH", `batch start failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao iniciar a publicação em lote", detail: err.message });
+    }
+});
+
 router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
     res.set("Cache-Control", "no-store");
-    res.json({ batch: publicBatchState(batchEvalRuns.get(req.work.id)) });
+    res.json({
+        batch: publicBatchState(batchEvalRuns.get(req.work.id)),
+        publish: publicBatchState(batchPublishRuns.get(req.work.id)),
+    });
 });
 
 // ============================================================================

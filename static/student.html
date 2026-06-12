@@ -553,6 +553,11 @@
         <h3 id="review-title">Entrevista encerrada — revise antes de comentar</h3>
         <p id="review-intro" class="muted">Você tem <strong id="review-deadline-label">7 dias</strong> para revisar a entrevista e deixar um comentário ao professor. O comentário é enviado uma única vez — escreva com calma.</p>
 
+        <details class="review-section hidden" id="review-feedback" open>
+          <summary>Devolutiva do entrevistador</summary>
+          <div id="review-feedback-body" class="review-body"></div>
+        </details>
+
         <details class="review-section" id="review-conv" open>
           <summary>Conversa completa</summary>
           <div id="review-conv-body" class="review-body"></div>
@@ -585,6 +590,13 @@
         <div class="check">✓</div>
         <h1 id="final-title">Entrevista registrada</h1>
         <p class="lead" id="final-msg">Obrigado pela participação. Você pode fechar esta página.</p>
+      </div>
+
+      <!-- Devolutiva publicada pelo professor. Não depende da janela de 7
+           dias — aparece junto da tela de revisão E da tela final. -->
+      <div id="feedback-card" class="card hidden">
+        <h3>Devolutiva do entrevistador</h3>
+        <div id="feedback-card-body" class="review-body"></div>
       </div>
 
     </div>
@@ -714,6 +726,48 @@
       if (msgText) document.getElementById('final-msg').textContent = msgText;
       card.classList.remove('hidden');
       hideChatActions();
+      // Devolutiva publicada não expira com a janela de revisão — aparece
+      // mesmo na tela final.
+      loadStudentEvaluation('feedback-card');
+    }
+
+    // ---- Devolutiva publicada pelo professor ----
+    function renderStudentFeedback(ev) {
+      const list = (title, items) => {
+        const arr = Array.isArray(items) ? items.filter(x => x && String(x).trim()) : [];
+        if (!arr.length) return '';
+        return `<div class="conv-section-label">${escapeHtml(title)}</div>
+          <ul style="margin: 0 0 var(--sp-3); padding-left: 1.2rem;">${arr.map(x => `<li style="margin: var(--sp-1) 0;">${escapeHtml(x)}</li>`).join('')}</ul>`;
+      };
+      const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
+        <div class="conv-line"><span class="who">pergunta ${Number(q.turn_index) + 1}:</span><span class="text">${escapeHtml(q.question_gist ?? '')}</span></div>
+        <div class="conv-line"><span class="who">devolutiva:</span><span class="text">${escapeHtml(q.feedback ?? '')}</span></div>`).join('');
+      return `
+        <p style="white-space: pre-wrap;">${escapeHtml(ev.summary ?? '')}</p>
+        ${perQuestion ? `<div class="conv-section-label">Pergunta a pergunta</div>${perQuestion}` : ''}
+        ${list('O que você sustentou bem', ev.strengths)}
+        ${list('O que pode melhorar', ev.improvement_areas)}
+        ${list('Sugestões de estudo', ev.study_suggestions)}`;
+    }
+
+    // target: 'review' (seção dentro do review-card) ou 'feedback-card'
+    // (card independente, usado na tela final). Silencioso quando não há
+    // devolutiva publicada.
+    async function loadStudentEvaluation(target) {
+      try {
+        const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/evaluation`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!j.published || !j.evaluation) return;
+        const html = renderStudentFeedback(j.evaluation);
+        if (target === 'review') {
+          document.getElementById('review-feedback-body').innerHTML = html;
+          document.getElementById('review-feedback').classList.remove('hidden');
+        } else {
+          document.getElementById('feedback-card-body').innerHTML = html;
+          document.getElementById('feedback-card').classList.remove('hidden');
+        }
+      } catch { /* devolutiva é opcional — nunca quebra a tela */ }
     }
 
     // Chama /finalize SEM comentário (a coleta do comentário acontece depois,
@@ -760,6 +814,7 @@
         return;
       }
       renderReview(j);
+      loadStudentEvaluation('review');
     }
 
     function renderReview(data) {

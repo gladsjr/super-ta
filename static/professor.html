@@ -200,6 +200,7 @@
           <span class="spacer"></span>
           <button id="eval-new-btn" class="btn" type="button" title="Gera a avaliação do entrevistador para as entrevistas com conversa que ainda não foram avaliadas">Avaliar não avaliadas</button>
           <button id="eval-all-btn" class="btn" type="button" title="Regenera a avaliação de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
+          <button id="publish-all-btn" class="btn" type="button" title="Gera a devolutiva formativa (versão do aluno) das avaliações ainda não publicadas e as torna visíveis na página de cada aluno">Publicar devolutivas</button>
           <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
         </div>
         <div id="eval-batch-status" class="hint hidden"></div>
@@ -407,8 +408,11 @@ function renderSubmissionsTable() {
     const convCell = hasConv
       ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">Ver conversa ↗</a>`
       : `<span class="muted">—</span>`;
+    const publishedBadge = s.evaluation_published_at
+      ? ` <span class="badge badge-accent" title="Devolutiva visível para o aluno desde ${new Date(s.evaluation_published_at).toLocaleString()}">publicada</span>`
+      : '';
     const evalCell = s.has_evaluation
-      ? `<a href="${convUrl}" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir relatório"><span class="badge badge-completed">avaliada</span></a>`
+      ? `<a href="${convUrl}" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir relatório"><span class="badge badge-completed">avaliada</span></a>${publishedBadge}`
       : `<span class="muted">—</span>`;
     const blockedBadge = s.is_blocked ? `<span class="badge-blocked">bloqueada</span>` : '';
     const actionBtn = s.is_blocked
@@ -840,10 +844,8 @@ document.getElementById('download-csv').onclick = () => {
 let evalPollTimer = null;
 let evalWasRunning = false;
 
-function renderBatchStatus(batch) {
-  const el = document.getElementById('eval-batch-status');
-  if (!batch) { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
+function batchLine(batch, verbing, doneNoun) {
+  if (!batch) return '';
   const failedNote = batch.failed.length
     ? ` · <strong>${batch.failed.length} falha${batch.failed.length === 1 ? '' : 's'}</strong> (${batch.failed.map(f => escapeHtml(f.student_label || f.submission_token)).join(', ')})`
     : '';
@@ -851,10 +853,20 @@ function renderBatchStatus(batch) {
     ? ' · <strong>interrompida: orçamento esgotado</strong>'
     : (batch.stopped_reason ? ` · interrompida (${escapeHtml(batch.stopped_reason)})` : '');
   if (batch.running) {
-    el.innerHTML = `⏳ Avaliando entrevistas (${batch.done}/${batch.total})… ${batch.ok} avaliada${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}. Cada avaliação leva por volta de um minuto; pode sair desta página e voltar.`;
-  } else {
-    el.innerHTML = `✔ Avaliação em lote concluída: ${batch.ok} avaliada${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'} (sem conversa, sem respostas ou já avaliadas)${failedNote}${stoppedNote}.`;
+    return `⏳ ${verbing} (${batch.done}/${batch.total})… ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}. Cada item leva por volta de um minuto; pode sair desta página e voltar.`;
   }
+  return `✔ Lote concluído: ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}${stoppedNote}.`;
+}
+
+function renderBatchStatus(j) {
+  const el = document.getElementById('eval-batch-status');
+  const lines = [
+    batchLine(j.batch, 'Avaliando entrevistas', 'avaliada'),
+    batchLine(j.publish, 'Publicando devolutivas', 'publicada'),
+  ].filter(Boolean);
+  if (lines.length === 0) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.innerHTML = lines.join('<br>');
 }
 
 async function pollBatchStatus() {
@@ -862,8 +874,9 @@ async function pollBatchStatus() {
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/evaluations/status`);
     if (!r.ok) return;
     const j = await r.json();
-    renderBatchStatus(j.batch);
-    if (j.batch?.running) {
+    renderBatchStatus(j);
+    const anyRunning = j.batch?.running || j.publish?.running;
+    if (anyRunning) {
       evalWasRunning = true;
       setEvalButtonsDisabled(true);
       evalPollTimer = setTimeout(pollBatchStatus, 5000);
@@ -878,34 +891,37 @@ async function pollBatchStatus() {
 function setEvalButtonsDisabled(disabled) {
   document.getElementById('eval-new-btn').disabled = disabled;
   document.getElementById('eval-all-btn').disabled = disabled;
+  document.getElementById('publish-all-btn').disabled = disabled;
 }
 
-async function startBatchEvaluation(force) {
-  if (force && !confirm('Reavaliar TODAS as entrevistas com conversa, inclusive as já avaliadas? Cada avaliação consome orçamento do trabalho.')) return;
+async function startBatch(path, body, confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
   setEvalButtonsDisabled(true);
   try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/evaluations`, {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force }),
+      body: JSON.stringify(body),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      alert(j.error || 'Falha ao iniciar a avaliação em lote.');
+      alert(j.error || 'Falha ao iniciar o lote.');
       setEvalButtonsDisabled(false);
-      if (j.batch) renderBatchStatus(j.batch);
       return;
     }
-    renderBatchStatus({ running: true, total: j.total, done: 0, ok: 0, skipped: 0, failed: [] });
-    if (!evalPollTimer) evalPollTimer = setTimeout(pollBatchStatus, 3000);
+    if (!evalPollTimer) evalPollTimer = setTimeout(pollBatchStatus, 1500);
   } catch (err) {
-    alert('Falha ao iniciar a avaliação em lote: ' + err.message);
+    alert('Falha ao iniciar o lote: ' + err.message);
     setEvalButtonsDisabled(false);
   }
 }
 
-document.getElementById('eval-new-btn').onclick = () => startBatchEvaluation(false);
-document.getElementById('eval-all-btn').onclick = () => startBatchEvaluation(true);
+document.getElementById('eval-new-btn').onclick = () =>
+  startBatch('evaluations', { force: false }, null);
+document.getElementById('eval-all-btn').onclick = () =>
+  startBatch('evaluations', { force: true }, 'Reavaliar TODAS as entrevistas com conversa, inclusive as já avaliadas? Cada avaliação consome orçamento do trabalho.');
+document.getElementById('publish-all-btn').onclick = () =>
+  startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas das entrevistas avaliadas que ainda não foram publicadas? A versão do aluno (formativa, sem material interno) é gerada agora e fica visível na página de cada aluno.');
 
 // Se já houver um lote em andamento quando a página abre (ex.: professor saiu
 // e voltou), retoma o acompanhamento.
