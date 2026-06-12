@@ -265,34 +265,52 @@ Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a p
                     { type: "input_file", file_id: studentFileId },
                 ],
             }],
+            // Saída estruturada estrita: a API só devolve JSON conforme o
+            // schema — elimina o "JSON com vírgula faltando" que já perdeu
+            // uma avaliação de 96s em produção (jun/2026).
+            text: {
+                format: {
+                    type: "json_schema",
+                    name: "interview_evaluation",
+                    strict: true,
+                    schema: REPORT_SCHEMA,
+                },
+            },
         };
 
         log.prompt("AGENT:InterviewEvaluator", systemPrompt + "\n\n" + userText);
-        const response = await log.span("AGENT:InterviewEvaluator", "responses.create", () =>
-            meteredResponses(
-                { ...meterCtx, agentLabel: "AGENT:InterviewEvaluator", model: this.model },
-                () => this.client.responses.create(payload)
-            )
-        );
 
-        const text = response.output_text || "";
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) {
-            log.error("AGENT:InterviewEvaluator", `no JSON: ${log.preview(text, 200)}`);
-            throw new Error("InterviewEvaluator: no JSON in response");
+        // Diferente do SuperOrchestrator (que NÃO pode re-tentar parse porque
+        // a chamada commita estado na Conversations API), o avaliador é
+        // one-shot e sem efeito colateral até o cache ser gravado — re-tentar
+        // a chamada INTEIRA em falha de API, parse ou validação é seguro;
+        // custa só outra chamada, em vez de perder o lote/clique do professor.
+        const MAX_ATTEMPTS = 2;
+        let lastErr = null;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                const response = await log.span("AGENT:InterviewEvaluator", `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
+                    meteredResponses(
+                        { ...meterCtx, agentLabel: "AGENT:InterviewEvaluator", model: this.model },
+                        () => this.client.responses.create(payload)
+                    )
+                );
+
+                const text = response.output_text || "";
+                // Com json_schema estrito o texto já É o JSON; o match fica
+                // como cinto-e-suspensório para qualquer envelope inesperado.
+                const match = text.match(/\{[\s\S]*\}/);
+                if (!match) throw new Error(`InterviewEvaluator: no JSON in response (${log.preview(text, 120)})`);
+                const parsed = JSON.parse(match[0]);
+                this._validateReport(parsed);
+                log.info("AGENT:InterviewEvaluator", `ok defense=${parsed.overall.defense_quality} authorship=${parsed.overall.authorship_confidence} per_question=${parsed.per_question.length}${attempt > 1 ? ` (na tentativa ${attempt})` : ""}`);
+                return parsed;
+            } catch (err) {
+                lastErr = err;
+                log.error("AGENT:InterviewEvaluator", `tentativa ${attempt}/${MAX_ATTEMPTS} falhou: ${err.message}`);
+            }
         }
-
-        let parsed;
-        try {
-            parsed = JSON.parse(match[0]);
-        } catch (err) {
-            log.error("AGENT:InterviewEvaluator", `JSON parse failed: ${err.message}`);
-            throw new Error("InterviewEvaluator: invalid JSON in response");
-        }
-
-        this._validateReport(parsed);
-        log.info("AGENT:InterviewEvaluator", `ok defense=${parsed.overall.defense_quality} authorship=${parsed.overall.authorship_confidence} per_question=${parsed.per_question.length}`);
-        return parsed;
+        throw lastErr;
     }
 
     _validateReport(r) {
@@ -352,3 +370,68 @@ Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a p
         }
     }
 }
+
+// JSON Schema do relatório para a saída estruturada estrita da Responses API
+// (text.format type=json_schema). Regras do modo strict: todo objeto declara
+// additionalProperties:false e lista TODAS as propriedades em required.
+// Manter em sincronia com o contrato do systemPromptBody e _validateReport
+// (que segue rodando como defesa em profundidade).
+const REPORT_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["overall", "interviewer_impression", "per_question", "strengths", "weaknesses", "delivery", "authorship_signals", "follow_up_suggestions", "caveats"],
+    properties: {
+        overall: {
+            type: "object",
+            additionalProperties: false,
+            required: ["defense_quality", "authorship_confidence", "summary"],
+            properties: {
+                defense_quality: { type: "string", enum: ["strong", "adequate", "weak", "poor"] },
+                authorship_confidence: { type: "string", enum: ["high", "medium", "low"] },
+                summary: { type: "string" },
+            },
+        },
+        interviewer_impression: { type: "string" },
+        per_question: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["turn_index", "question_gist", "answer_assessment", "comment", "evidence"],
+                properties: {
+                    turn_index: { type: "integer" },
+                    question_gist: { type: "string" },
+                    answer_assessment: { type: "string", enum: ["convincing", "partial", "evasive", "inconsistent", "unanswered"] },
+                    comment: { type: "string" },
+                    evidence: { type: "string" },
+                },
+            },
+        },
+        strengths: { type: "array", items: { type: "string" } },
+        weaknesses: { type: "array", items: { type: "string" } },
+        delivery: {
+            type: "object",
+            additionalProperties: false,
+            required: ["overall_impression", "observations"],
+            properties: {
+                overall_impression: { type: "string", enum: ["natural", "mixed", "scripted", "inconclusive"] },
+                observations: { type: "array", items: { type: "string" } },
+            },
+        },
+        authorship_signals: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["direction", "signal", "where"],
+                properties: {
+                    direction: { type: "string", enum: ["supports", "questions"] },
+                    signal: { type: "string" },
+                    where: { type: "string" },
+                },
+            },
+        },
+        follow_up_suggestions: { type: "array", items: { type: "string" } },
+        caveats: { type: "array", items: { type: "string" } },
+    },
+};
