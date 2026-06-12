@@ -254,6 +254,18 @@
   .student-eval-preview ul { margin: 0; padding-left: 1.2rem; }
   .student-eval-preview .sf-text { white-space: pre-wrap; line-height: 1.5; }
 
+  .student-eval-editor {
+    margin-top: var(--sp-3);
+    background: var(--bg-muted);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--r-md);
+    padding: var(--sp-3);
+  }
+  .student-eval-editor .sf-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--ink-500); margin-bottom: var(--sp-2); }
+  .editor-label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-700); margin: var(--sp-3) 0 var(--sp-1); }
+  .editor-textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--fs-sm); padding: var(--sp-2); border: 1px solid var(--ink-200); border-radius: var(--r-sm); background: var(--bg-raised); resize: vertical; }
+  .editor-q-gist { font-size: var(--fs-sm); color: var(--ink-700); margin: var(--sp-3) 0 var(--sp-1); }
+
   .finalization-card {
     margin-top: var(--sp-4);
     background: var(--bg-muted);
@@ -309,20 +321,40 @@
     <div id="eval-publish-block" class="eval-publish hidden">
       <div class="eval-publish-row">
         <span id="eval-publish-status" class="eval-meta"></span>
-        <button class="btn btn-sm" id="eval-publish-btn">Publicar para o aluno</button>
+        <button class="btn btn-sm hidden" id="eval-derive-btn" title="Gera a versão formativa que o aluno pode ver — só a prévia; nada é publicado">Gerar devolutiva (prévia)</button>
+        <button class="btn btn-primary btn-sm hidden" id="eval-publish-btn" title="Torna a devolutiva abaixo visível na página do aluno">Publicar para o aluno</button>
         <button class="btn btn-sm hidden" id="eval-unpublish-btn">Despublicar</button>
-        <button class="btn btn-ghost btn-sm hidden" id="eval-republish-btn" title="Gera de novo a versão do aluno a partir da avaliação atual e republica">Regerar versão do aluno</button>
+        <button class="btn btn-ghost btn-sm hidden" id="eval-edit-btn">Editar devolutiva</button>
+        <button class="btn btn-ghost btn-sm hidden" id="eval-rederive-btn" title="Refaz a versão automática a partir da avaliação atual (a edição do professor, se houver, é preservada e continua valendo)">Regerar automática</button>
+        <button class="btn btn-ghost btn-sm hidden" id="eval-discard-edit-btn" title="Descarta a edição do professor — a versão automática volta a valer">Restaurar automática</button>
       </div>
       <p class="eval-publish-help">
-        O aluno NUNCA vê este relatório. Publicar gera (e mostra abaixo) uma
-        devolutiva formativa — sem juízo interno, sinais de autoria ou análise
-        de forma — visível na página do aluno enquanto estiver publicada.
+        O aluno NUNCA vê este relatório. O fluxo é: gerar a devolutiva
+        formativa (prévia abaixo) → revisar (e editar, se quiser; a automática
+        fica preservada) → publicar. O aluno só vê depois de publicada.
       </p>
       <div class="notice notice-error eval-error hidden" id="eval-publish-error"></div>
-      <details class="student-eval-preview hidden" id="student-eval-preview">
-        <summary>Versão do aluno (prévia do que ele vê)</summary>
+      <div class="notice eval-error hidden" id="eval-publish-warning" style="background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700);"></div>
+      <details class="student-eval-preview hidden" id="student-eval-preview" open>
+        <summary id="student-eval-preview-summary">Devolutiva (o que o aluno vê)</summary>
         <div id="student-eval-preview-body"></div>
       </details>
+      <div id="student-eval-editor" class="student-eval-editor hidden">
+        <div class="sf-label">Editar devolutiva</div>
+        <label class="editor-label" for="edit-summary">Resumo</label>
+        <textarea id="edit-summary" class="editor-textarea" rows="4"></textarea>
+        <div id="edit-per-question"></div>
+        <label class="editor-label" for="edit-strengths">O que sustentou bem (um item por linha)</label>
+        <textarea id="edit-strengths" class="editor-textarea" rows="4"></textarea>
+        <label class="editor-label" for="edit-improvements">O que pode melhorar (um item por linha)</label>
+        <textarea id="edit-improvements" class="editor-textarea" rows="4"></textarea>
+        <label class="editor-label" for="edit-study">Sugestões de estudo (um item por linha)</label>
+        <textarea id="edit-study" class="editor-textarea" rows="4"></textarea>
+        <div class="eval-publish-row" style="margin-top: var(--sp-2);">
+          <button class="btn btn-primary btn-sm" id="eval-save-edit-btn">Salvar edição</button>
+          <button class="btn btn-sm" id="eval-cancel-edit-btn">Cancelar</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -648,69 +680,155 @@ function renderStudentPreview(ev) {
     ${list('Sugestões de estudo', ev.study_suggestions)}`;
 }
 
+// Último estado conhecido da devolutiva (payload do servidor).
+let pubState = null;
+
+const PUB_BTN_IDS = ['eval-derive-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-rederive-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn'];
+
+function setPubButtonsDisabled(disabled) {
+  PUB_BTN_IDS.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = disabled; });
+}
+
 function renderPublication(j) {
+  pubState = j;
   const block = document.getElementById('eval-publish-block');
   block.classList.remove('hidden');
   const statusEl = document.getElementById('eval-publish-status');
-  const pubBtn = document.getElementById('eval-publish-btn');
-  const unpubBtn = document.getElementById('eval-unpublish-btn');
-  const repubBtn = document.getElementById('eval-republish-btn');
-  const preview = document.getElementById('student-eval-preview');
+  const show = (id, visible) => document.getElementById(id).classList.toggle('hidden', !visible);
 
-  if (j.published_at) {
-    statusEl.innerHTML = `<span class="badge badge-completed">publicada para o aluno</span> em ${fmtTime(j.published_at)}`;
-    pubBtn.classList.add('hidden');
-    unpubBtn.classList.remove('hidden');
-    repubBtn.classList.remove('hidden');
+  const hasVersion = !!j.student_evaluation;
+  const isEdited = !!j.student_evaluation_edited;
+  const published = !!j.published_at;
+
+  let statusHtml;
+  if (!hasVersion) {
+    statusHtml = 'devolutiva ainda não gerada';
   } else {
-    statusEl.textContent = j.student_evaluation ? 'devolutiva gerada, mas não publicada' : 'não publicada';
-    pubBtn.classList.remove('hidden');
-    unpubBtn.classList.add('hidden');
-    repubBtn.classList.toggle('hidden', !j.student_evaluation);
+    const versionNote = isEdited
+      ? `<span class="badge badge-accent" title="A versão automática fica preservada — Restaurar automática descarta a edição">editada pelo professor</span>`
+      : 'versão automática';
+    statusHtml = published
+      ? `<span class="badge badge-completed">publicada para o aluno</span> em ${fmtTime(j.published_at)} · ${versionNote}`
+      : `não publicada (o aluno não vê) · ${versionNote}`;
   }
-  if (j.student_evaluation) {
+  statusEl.innerHTML = statusHtml;
+
+  show('eval-derive-btn', !hasVersion);
+  show('eval-publish-btn', hasVersion && !published);
+  show('eval-unpublish-btn', published);
+  show('eval-edit-btn', hasVersion);
+  show('eval-rederive-btn', hasVersion);
+  show('eval-discard-edit-btn', isEdited);
+
+  const preview = document.getElementById('student-eval-preview');
+  if (hasVersion) {
+    document.getElementById('student-eval-preview-summary').textContent =
+      `Devolutiva (o que o aluno ${published ? 'vê' : 'verá quando publicada'})${isEdited ? ' — versão editada' : ''}`;
     document.getElementById('student-eval-preview-body').innerHTML = renderStudentPreview(j.student_evaluation);
     preview.classList.remove('hidden');
   } else {
     preview.classList.add('hidden');
   }
+  document.getElementById('student-eval-editor').classList.add('hidden');
 }
 
-async function publishEvaluation({ force }) {
+async function pubRequest(method, path, body) {
   const errEl = document.getElementById('eval-publish-error');
+  const warnEl = document.getElementById('eval-publish-warning');
   errEl.classList.add('hidden');
-  const btns = ['eval-publish-btn', 'eval-unpublish-btn', 'eval-republish-btn'].map(id => document.getElementById(id));
-  btns.forEach(b => { b.disabled = true; });
+  warnEl.classList.add('hidden');
+  setPubButtonsDisabled(true);
   try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation/publish${force ? '?force=true' : ''}`, { method: 'POST' });
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation/${path}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    renderPublication({ published_at: j.published_at, student_evaluation: j.student_evaluation });
+    if (Array.isArray(j.warnings) && j.warnings.length > 0) {
+      warnEl.textContent = 'Atenção: a edição contém termos que o sistema evita mostrar ao aluno (autoria, forma de entrega, tempos). Revise se foi intencional.';
+      warnEl.classList.remove('hidden');
+    }
+    // Respostas parciais (ex.: despublicar devolve só published_at) são
+    // mescladas sobre o estado anterior.
+    renderPublication({ ...pubState, ...j });
+    return j;
   } catch (err) {
-    errEl.textContent = `Falha ao publicar: ${err.message}`;
+    errEl.textContent = `Falha: ${err.message}`;
     errEl.classList.remove('hidden');
+    return null;
   } finally {
-    btns.forEach(b => { b.disabled = false; });
+    setPubButtonsDisabled(false);
   }
 }
 
-async function unpublishEvaluation() {
-  const errEl = document.getElementById('eval-publish-error');
-  errEl.classList.add('hidden');
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation/publish`, { method: 'DELETE' });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    loadEvaluation();
-  } catch (err) {
-    errEl.textContent = `Falha ao despublicar: ${err.message}`;
-    errEl.classList.remove('hidden');
-  }
+document.getElementById('eval-derive-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('eval-derive-btn');
+  btn.textContent = 'Gerando…';
+  await pubRequest('POST', 'student-version');
+  btn.textContent = 'Gerar devolutiva (prévia)';
+});
+document.getElementById('eval-rederive-btn').addEventListener('click', async () => {
+  if (!confirm('Regerar a versão automática a partir da avaliação atual? A edição do professor, se houver, é preservada e continua sendo a versão efetiva.')) return;
+  const btn = document.getElementById('eval-rederive-btn');
+  btn.textContent = 'Regerando…';
+  await pubRequest('POST', 'student-version?force=true');
+  btn.textContent = 'Regerar automática';
+});
+document.getElementById('eval-publish-btn').addEventListener('click', () => pubRequest('POST', 'publish'));
+document.getElementById('eval-unpublish-btn').addEventListener('click', () => pubRequest('DELETE', 'publish'));
+document.getElementById('eval-discard-edit-btn').addEventListener('click', () => {
+  if (!confirm('Descartar a edição do professor? A versão automática volta a ser a que o aluno vê.')) return;
+  pubRequest('DELETE', 'student-version');
+});
+
+// ---- Editor da devolutiva ----
+
+function openEditor() {
+  const ev = pubState?.student_evaluation;
+  if (!ev) return;
+  document.getElementById('edit-summary').value = ev.summary ?? '';
+  const pqEl = document.getElementById('edit-per-question');
+  pqEl.innerHTML = (Array.isArray(ev.per_question) ? ev.per_question : []).map((q, i) => `
+    <div class="editor-q-gist"><strong>Pergunta ${Number(q.turn_index) + 1}</strong> — ${escapeHtml(q.question_gist ?? '')}</div>
+    <textarea class="editor-textarea edit-pq-feedback" data-i="${i}" rows="3">${escapeHtml(q.feedback ?? '')}</textarea>`).join('');
+  const joinLines = arr => (Array.isArray(arr) ? arr : []).join('\n');
+  document.getElementById('edit-strengths').value = joinLines(ev.strengths);
+  document.getElementById('edit-improvements').value = joinLines(ev.improvement_areas);
+  document.getElementById('edit-study').value = joinLines(ev.study_suggestions);
+  document.getElementById('student-eval-editor').classList.remove('hidden');
+  document.getElementById('student-eval-preview').classList.add('hidden');
 }
 
-document.getElementById('eval-publish-btn').addEventListener('click', () => publishEvaluation({ force: false }));
-document.getElementById('eval-republish-btn').addEventListener('click', () => publishEvaluation({ force: true }));
-document.getElementById('eval-unpublish-btn').addEventListener('click', unpublishEvaluation);
+function collectEditor() {
+  const base = pubState?.student_evaluation;
+  const splitLines = v => v.split('\n').map(x => x.trim()).filter(Boolean);
+  const perQuestion = (Array.isArray(base?.per_question) ? base.per_question : []).map((q, i) => ({
+    turn_index: q.turn_index,
+    question_gist: q.question_gist ?? '',
+    feedback: document.querySelector(`.edit-pq-feedback[data-i="${i}"]`)?.value?.trim() ?? '',
+  }));
+  return {
+    summary: document.getElementById('edit-summary').value.trim(),
+    per_question: perQuestion,
+    strengths: splitLines(document.getElementById('edit-strengths').value),
+    improvement_areas: splitLines(document.getElementById('edit-improvements').value),
+    study_suggestions: splitLines(document.getElementById('edit-study').value),
+  };
+}
+
+document.getElementById('eval-edit-btn').addEventListener('click', openEditor);
+document.getElementById('eval-cancel-edit-btn').addEventListener('click', () => {
+  document.getElementById('student-eval-editor').classList.add('hidden');
+  document.getElementById('student-eval-preview').classList.remove('hidden');
+});
+document.getElementById('eval-save-edit-btn').addEventListener('click', async () => {
+  const report = collectEditor();
+  if (!report.summary) { alert('O resumo não pode ficar vazio.'); return; }
+  if (report.per_question.some(q => !q.feedback)) { alert('O feedback de cada pergunta não pode ficar vazio.'); return; }
+  await pubRequest('PUT', 'student-version', { report });
+});
 
 async function generateEvaluation() {
   const btn = document.getElementById('eval-btn');

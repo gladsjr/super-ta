@@ -19,6 +19,7 @@ import {
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
 import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent, studentFeedbackAgent } from "../lib/agents.js";
+import { validateStudentFeedbackShape, findForbiddenLeaks } from "../agents/StudentFeedbackAgent.js";
 import { streamAudio } from "../lib/audioStore.js";
 import {
     PRINCIPAL_REASONING_MODEL,
@@ -343,9 +344,7 @@ router.get("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, a
         res.json({
             evaluation: cached?.report ?? null,
             evaluated_at: cached?.evaluated_at ?? null,
-            student_evaluation: student?.report ?? null,
-            student_evaluation_at: student?.generated_at ?? null,
-            published_at: student?.published_at ?? null,
+            ...studentEvaluationPayload(student),
         });
     } catch (err) {
         log.error("EVALUATION", `read failed submission=${subToken}: ${err.message}`);
@@ -439,42 +438,65 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
     }
 });
 
-// ---- Publicação da devolutiva ao aluno ----
-// A avaliação interna NUNCA vai crua ao aluno: publicar = derivar (e cachear)
-// a versão formativa via StudentFeedbackAgent + marcar evaluation_published_at.
-// force=true regenera a versão do aluno mesmo se já existir.
-async function publishSubmissionNow(work, found, { force }) {
+// ---- Devolutiva ao aluno: gerar (prévia) é SEPARADO de publicar ----
+// A avaliação interna NUNCA vai crua ao aluno. O fluxo é: gerar a versão
+// formativa (StudentFeedbackAgent) → professor revisa a prévia (e pode
+// EDITAR; a automática fica preservada em coluna própria) → publicar.
+// Publicar nunca gera: exige versão existente.
+
+function studentEvaluationPayload(student) {
+    return {
+        student_evaluation: student?.report ?? null,            // efetiva (editada ?? automática)
+        student_evaluation_auto: student?.auto_report ?? null,
+        student_evaluation_at: student?.generated_at ?? null,
+        student_evaluation_edited: student?.edited_report ?? null,
+        student_evaluation_edited_at: student?.edited_at ?? null,
+        published_at: student?.published_at ?? null,
+    };
+}
+
+// Gera a versão AUTOMÁTICA (sem publicar). force=true regenera; a versão
+// editada (se houver) não é tocada — ela continua sendo a efetiva até o
+// professor restaurar a automática.
+async function deriveStudentVersionNow(work, found, { force }) {
     const subToken = found.submission_token;
     const internal = await db.getEvaluationCache(found.id);
     if (!internal) {
         throw Object.assign(
-            new Error("não há avaliação do entrevistador para esta submissão — avalie antes de publicar"),
+            new Error("não há avaliação do entrevistador para esta submissão — avalie antes de gerar a devolutiva"),
             { notReady: true, httpStatus: 409 }
         );
     }
-    let student = force ? null : await db.getStudentEvaluation(found.id);
-    let generated = false;
-    if (!student) {
-        log.info("PUBLISH", `derive student feedback submission=${subToken} force=${force}`);
-        const report = await studentFeedbackAgent.derive({
-            internalReport: internal.report,
-            meterCtx: { workId: work.id },
-        });
-        const generatedAt = await db.setStudentEvaluation(found.id, report);
-        student = { report, generated_at: generatedAt, published_at: null };
-        generated = true;
+    const existing = await db.getStudentEvaluation(found.id);
+    if (existing?.auto_report && !force) {
+        return { ...studentEvaluationPayload(existing), generated: false };
     }
-    const publishedAt = await db.setEvaluationPublished(found.id, true);
-    log.info("PUBLISH", `published submission=${subToken} generated=${generated}`);
-    return {
-        student_evaluation: student.report,
-        student_evaluation_at: student.generated_at,
-        published_at: publishedAt,
-        generated,
-    };
+    log.info("PUBLISH", `derive student feedback submission=${subToken} force=${force}`);
+    const report = await studentFeedbackAgent.derive({
+        internalReport: internal.report,
+        meterCtx: { workId: work.id },
+    });
+    await db.setStudentEvaluation(found.id, report);
+    const student = await db.getStudentEvaluation(found.id);
+    return { ...studentEvaluationPayload(student), generated: true };
 }
 
-router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireWithinBudget, async (req, res) => {
+// Publica a versão EFETIVA existente. Nunca gera.
+async function publishSubmissionNow(work, found) {
+    const student = await db.getStudentEvaluation(found.id);
+    if (!student) {
+        throw Object.assign(
+            new Error("não há devolutiva gerada para esta submissão — gere (e revise) antes de publicar"),
+            { notReady: true, httpStatus: 409 }
+        );
+    }
+    const publishedAt = await db.setEvaluationPublished(found.id, true);
+    log.info("PUBLISH", `published submission=${found.submission_token} edited=${!!student.edited_report}`);
+    return { ...studentEvaluationPayload(student), published_at: publishedAt };
+}
+
+// Gera a versão automática (prévia, sem publicar). ?force=true regenera.
+router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireWithinBudget, async (req, res) => {
     const subToken = String(req.params.subToken || "").toLowerCase();
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
     try {
@@ -482,7 +504,65 @@ router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWor
         if (!found || found.work_id !== req.work.id) {
             return res.status(404).json({ error: "submission not found" });
         }
-        const result = await publishSubmissionNow(req.work, found, { force });
+        const result = await deriveStudentVersionNow(req.work, found, { force });
+        res.json(result);
+    } catch (err) {
+        if (err.notReady) return res.status(err.httpStatus ?? 409).json({ error: err.message });
+        log.error("PUBLISH", `derive failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar a devolutiva", detail: err.message });
+    }
+});
+
+// Salva a versão EDITADA pelo professor. A automática fica preservada.
+// Edição é autoridade do professor: vocabulário interno não bloqueia, mas é
+// devolvido em `warnings` para a UI avisar.
+router.put("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, express.json({ limit: "256kb" }), async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        const report = req.body?.report;
+        try { validateStudentFeedbackShape(report); }
+        catch (err) { return res.status(400).json({ error: `devolutiva inválida: ${err.message}` }); }
+        await db.setStudentEvaluationEdited(found.id, report);
+        const student = await db.getStudentEvaluation(found.id);
+        const warnings = findForbiddenLeaks(report);
+        log.info("PUBLISH", `edited saved submission=${subToken} warnings=${warnings.length}`);
+        res.json({ ...studentEvaluationPayload(student), warnings });
+    } catch (err) {
+        log.error("PUBLISH", `edit save failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar a edição", detail: err.message });
+    }
+});
+
+// Descarta a edição (a automática volta a ser a efetiva).
+router.delete("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        await db.setStudentEvaluationEdited(found.id, null);
+        const student = await db.getStudentEvaluation(found.id);
+        log.info("PUBLISH", `edited discarded submission=${subToken}`);
+        res.json(studentEvaluationPayload(student));
+    } catch (err) {
+        log.error("PUBLISH", `edit discard failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao descartar a edição" });
+    }
+});
+
+router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        const result = await publishSubmissionNow(req.work, found);
         res.json(result);
     } catch (err) {
         if (err.notReady) return res.status(err.httpStatus ?? 409).json({ error: err.message });
@@ -491,7 +571,7 @@ router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWor
     }
 });
 
-// Despublica (a versão do aluno fica guardada; republicar não regenera).
+// Despublica (as versões ficam guardadas; republicar não regenera).
 router.delete("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, async (req, res) => {
     const subToken = String(req.params.subToken || "").toLowerCase();
     try {
@@ -565,9 +645,8 @@ async function runBatchEvaluation(work, queue, state) {
 router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), async (req, res) => {
     const force = req.body?.force === true;
     try {
-        const existing = batchEvalRuns.get(req.work.id);
-        if (existing?.running || batchPublishRuns.get(req.work.id)?.running) {
-            return res.status(409).json({ error: "já existe um lote em andamento para este trabalho", batch: publicBatchState(existing) });
+        if (anyBatchRunning(req.work.id)) {
+            return res.status(409).json({ error: "já existe um lote em andamento para este trabalho" });
         }
         const subs = await db.listSubmissionsForWork(req.work.id);
         // Candidatas: têm conversa (status derivado != pending). A elegibilidade
@@ -607,31 +686,60 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
     }
 });
 
-// ---- Publicação em LOTE das devolutivas ----
+// ---- Lotes de devolutiva: GERAR (prévias) e PUBLICAR — separados ----
 // Mesmo padrão do lote de avaliação: serial, em background, estado em memória.
-// Elegíveis: submissões COM avaliação interna; sem force, pula as já
-// publicadas. force=true regenera a versão do aluno e republica todas.
-const batchPublishRuns = new Map(); // work.id -> estado
+// Gerar: submissões COM avaliação interna; sem force, pula as que já têm
+//   versão automática. Custa LLM por item.
+// Publicar: submissões COM versão gerada; sem force, pula as já publicadas.
+//   Não custa LLM (só marca a visibilidade) — por isso não derruba o lote
+//   por orçamento.
+const batchDeriveRuns = new Map();  // work.id -> estado (gerar prévias)
+const batchPublishRuns = new Map(); // work.id -> estado (publicar)
 
-async function runBatchPublish(work, queue, state) {
-    log.info("PUBLISH", `batch start work=${work.work_token} total=${queue.length} force=${state.force}`);
+function anyBatchRunning(workId) {
+    return batchEvalRuns.get(workId)?.running
+        || batchDeriveRuns.get(workId)?.running
+        || batchPublishRuns.get(workId)?.running;
+}
+
+function newBatchState(force, total) {
+    return {
+        running: true,
+        force,
+        total,
+        done: 0,
+        ok: 0,
+        skipped: 0,
+        failed: [],
+        stopped_reason: null,
+        started_at: new Date().toISOString(),
+        finished_at: null,
+    };
+}
+
+// Runner genérico dos lotes de devolutiva: itera a fila chamando itemFn por
+// submissão. checkBudget=true re-checa o orçamento a cada item (operações
+// que custam LLM).
+async function runBatchOver(scope, work, queue, state, itemFn, { checkBudget }) {
+    log.info(scope, `batch start work=${work.work_token} total=${queue.length} force=${state.force}`);
     for (const sub of queue) {
         try {
-            if (await isWorkBudgetExceeded(work.id)) {
+            if (checkBudget && await isWorkBudgetExceeded(work.id)) {
                 state.stopped_reason = "budget_exhausted";
-                log.warn("PUBLISH", `batch interrompido por orçamento work=${work.work_token} done=${state.done}/${state.total}`);
+                log.warn(scope, `batch interrompido por orçamento work=${work.work_token} done=${state.done}/${state.total}`);
                 break;
             }
             const found = await db.findSubmissionByToken(sub.submission_token);
             if (!found || found.work_id !== work.id) { state.skipped++; continue; }
-            await publishSubmissionNow(work, found, { force: state.force });
-            state.ok++;
+            const r = await itemFn(found);
+            if (r?.skipped) state.skipped++;
+            else state.ok++;
         } catch (err) {
             if (err.notReady) {
                 state.skipped++;
             } else {
                 state.failed.push({ submission_token: sub.submission_token, student_label: sub.student_label, error: err.message });
-                log.error("PUBLISH", `batch item failed submission=${sub.submission_token}: ${err.message}`);
+                log.error(scope, `batch item failed submission=${sub.submission_token}: ${err.message}`);
             }
         } finally {
             state.done++;
@@ -639,56 +747,71 @@ async function runBatchPublish(work, queue, state) {
     }
     state.running = false;
     state.finished_at = new Date().toISOString();
-    log.info("PUBLISH", `batch done work=${work.work_token} ok=${state.ok} skipped=${state.skipped} failed=${state.failed.length} stopped=${state.stopped_reason ?? "-"}`);
+    log.info(scope, `batch done work=${work.work_token} ok=${state.ok} skipped=${state.skipped} failed=${state.failed.length} stopped=${state.stopped_reason ?? "-"}`);
 }
 
-router.post("/w/:workToken/evaluations/publish", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), async (req, res) => {
-    const force = req.body?.force === true;
-    try {
-        const runningEval = batchEvalRuns.get(req.work.id);
-        const runningPub = batchPublishRuns.get(req.work.id);
-        if (runningEval?.running || runningPub?.running) {
-            return res.status(409).json({ error: "já existe um lote em andamento para este trabalho" });
+function startBatchRoute({ map, scope, queueFilter, emptyError, itemFn, checkBudget }) {
+    return async (req, res) => {
+        const force = req.body?.force === true;
+        try {
+            if (anyBatchRunning(req.work.id)) {
+                return res.status(409).json({ error: "já existe um lote em andamento para este trabalho" });
+            }
+            const subs = await db.listSubmissionsForWork(req.work.id);
+            const queue = subs.filter(s => queueFilter(s, force));
+            if (queue.length === 0) {
+                return res.status(400).json({ error: emptyError(force) });
+            }
+            const state = newBatchState(force, queue.length);
+            map.set(req.work.id, state);
+            runBatchOver(scope, req.work, queue, state, found => itemFn(req.work, found, force), { checkBudget })
+                .catch(err => {
+                    log.error(scope, `batch crashed work=${req.work.work_token}: ${err.message}`);
+                    state.running = false;
+                    state.finished_at = new Date().toISOString();
+                    state.stopped_reason = "internal_error";
+                });
+            res.json({ started: true, total: queue.length, force });
+        } catch (err) {
+            log.error(scope, `batch start failed: ${err.message}`);
+            res.status(500).json({ error: "falha ao iniciar o lote", detail: err.message });
         }
-        const subs = await db.listSubmissionsForWork(req.work.id);
-        const queue = subs.filter(s => s.has_evaluation && (force || !s.evaluation_published_at));
-        if (queue.length === 0) {
-            return res.status(400).json({
-                error: force
-                    ? "nenhuma submissão com avaliação para publicar — avalie as entrevistas antes"
-                    : "nenhuma devolutiva nova para publicar — todas as avaliadas já estão publicadas",
-            });
-        }
-        const state = {
-            running: true,
-            force,
-            total: queue.length,
-            done: 0,
-            ok: 0,
-            skipped: 0,
-            failed: [],
-            stopped_reason: null,
-            started_at: new Date().toISOString(),
-            finished_at: null,
-        };
-        batchPublishRuns.set(req.work.id, state);
-        runBatchPublish(req.work, queue, state).catch(err => {
-            log.error("PUBLISH", `batch crashed work=${req.work.work_token}: ${err.message}`);
-            state.running = false;
-            state.finished_at = new Date().toISOString();
-            state.stopped_reason = "internal_error";
-        });
-        res.json({ started: true, total: queue.length, force });
-    } catch (err) {
-        log.error("PUBLISH", `batch start failed: ${err.message}`);
-        res.status(500).json({ error: "falha ao iniciar a publicação em lote", detail: err.message });
-    }
-});
+    };
+}
+
+router.post("/w/:workToken/evaluations/student-versions", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchDeriveRuns,
+    scope: "PUBLISH",
+    queueFilter: (s, force) => s.has_evaluation && (force || !s.has_student_version),
+    emptyError: force => force
+        ? "nenhuma submissão com avaliação — avalie as entrevistas antes de gerar devolutivas"
+        : "nenhuma devolutiva nova para gerar — todas as avaliadas já têm versão do aluno",
+    itemFn: async (work, found, force) => {
+        const r = await deriveStudentVersionNow(work, found, { force });
+        return { skipped: !r.generated };
+    },
+    checkBudget: true,
+}));
+
+router.post("/w/:workToken/evaluations/publish", requireWorkToken, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchPublishRuns,
+    scope: "PUBLISH",
+    queueFilter: (s, force) => s.has_student_version && (force || !s.evaluation_published_at),
+    emptyError: force => force
+        ? "nenhuma devolutiva gerada para publicar — gere as versões do aluno antes"
+        : "nenhuma devolutiva nova para publicar — todas as geradas já estão publicadas",
+    itemFn: async (work, found) => {
+        await publishSubmissionNow(work, found);
+        return { skipped: false };
+    },
+    checkBudget: false,
+}));
 
 router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
     res.set("Cache-Control", "no-store");
     res.json({
         batch: publicBatchState(batchEvalRuns.get(req.work.id)),
+        derive: publicBatchState(batchDeriveRuns.get(req.work.id)),
         publish: publicBatchState(batchPublishRuns.get(req.work.id)),
     });
 });
