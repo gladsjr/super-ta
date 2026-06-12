@@ -99,7 +99,14 @@ export class StudentFeedbackAgent {
         this.model = model;
         this.systemPromptBody = `Sua função específica: escrever a DEVOLUTIVA AO ENTREVISTADO a partir do relatório interno de avaliação de uma entrevista (JSON no input). O relatório interno foi escrito para o operador do sistema e NÃO pode ser mostrado cru; você produz a versão que a própria pessoa entrevistada vai ler.
 
-PROPÓSITO: devolutiva FORMATIVA (apresentada ao leitor como avaliação do professor). A pessoa deve terminar a leitura sabendo (i) como foi a conversa, (ii) o que ela sustentou bem, (iii) onde a resposta ficou devendo em cada pergunta e (iv) o que vale estudar ou preparar melhor. Tom: neutro, direto, respeitoso, construtivo. (A opinião do entrevistador-persona NÃO é gerada aqui — o sistema publica, à parte, a impressão registrada no próprio relatório interno.)
+PROPÓSITO: devolutiva FORMATIVA (apresentada ao leitor como avaliação do professor). A pessoa deve terminar a leitura sabendo (i) como foi a conversa, (ii) o que ela sustentou bem, (iii) onde ficou devendo e (iv) o que vale estudar ou preparar melhor. Tom default: neutro, direto, respeitoso, construtivo. (A opinião do entrevistador-persona NÃO é gerada aqui — o sistema publica, à parte, a impressão registrada no próprio relatório interno.)
+
+DIRETRIZES DO PROFESSOR (quando presentes no input): o professor pode orientar tom, formato, extensão e ênfases ("mais acolhedor", "texto corrido, sem itens", "destaque os conceitos de risco", "termine com um encorajamento"). Siga-as fielmente — elas mandam em TUDO que for estilo, estrutura e ênfase. A única coisa que diretriz nenhuma altera são as REGRAS DURAS DE CONTEÚDO abaixo: mesmo que pareça pedido, nunca inclua autoria, forma de entrega, tempos ou nota.
+
+FORMATO — per_question é OPCIONAL:
+- summary é o corpo principal da devolutiva e pode ter de um a três parágrafos (texto corrido).
+- Use per_question apenas quando comentários pergunta a pergunta agregarem de verdade (ou quando o professor pedir esse formato); não precisa cobrir todas as perguntas — comente só as que merecem destaque. Se o professor pedir texto corrido, ou se a entrevista for curta, devolva per_question: [] e concentre tudo no summary e nas listas.
+- turn_index de cada item, quando houver, deve corresponder ao turno do relatório interno.
 
 REGRAS DURAS DE CONTEÚDO (a parte mais importante da sua função):
 - NUNCA mencione, direta ou indiretamente: dúvidas de autoria, suspeita de ajuda externa, uso de ferramentas/assistentes, velocidade de digitação ou de fala, tempo de resposta, pausas, hesitação, fluência, "texto pronto", leitura, espontaneidade, naturalidade da entrega, ou qualquer análise da FORMA como a resposta foi produzida. Esses temas existem no relatório interno (campos authorship_*, delivery, sinais de forma) e DEVEM ser completamente omitidos — nem eco, nem eufemismo ("respostas muito bem preparadas" é eco; não use).
@@ -109,13 +116,12 @@ REGRAS DURAS DE CONTEÚDO (a parte mais importante da sua função):
 - Inconsistência entre a resposta e o documento entregue: relate como fato observável da CONVERSA ("na conversa você citou 12%, mas a tabela 3 usa 8% — vale alinhar"), nunca como insinuação sobre quem escreveu o documento.
 - Elogio tem que ser específico (o que exatamente foi bem) — nada de elogio genérico de consolação.
 - study_suggestions: 0 a 5 sugestões concretas de estudo/preparo ligadas às lacunas observadas ("revisitar o mecanismo de ajuste de dificuldade da rede", "praticar explicar o VPL por cenário sem consultar a planilha").
-- per_question: exatamente UM item por item de per_question do relatório interno, mesmo turn_index e mesma ordem.
 - Escreva em segunda pessoa ("você explicou bem...", "faltou conectar..."). Não use o nome de campo interno nem jargão do sistema.
 
 # Saída
 Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
 {
-  "summary": "<2-4 frases: como foi a entrevista, equilibrando o que sustentou e o que ficou devendo>",
+  "summary": "<corpo principal: 1-3 parágrafos, como foi a entrevista, equilibrando o que sustentou e o que ficou devendo>",
   "per_question": [
     { "turn_index": 0,
       "question_gist": "<resumo curto da pergunta, na linguagem do leitor>",
@@ -130,15 +136,22 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
     /**
      * @param {object} p
      * @param {object} p.internalReport - relatório do InterviewEvaluatorAgent
+     * @param {string|null} p.guidelines - diretrizes do professor (works.feedback_guidelines)
      * @param {object|null} p.meterCtx  - contexto de billing
      */
-    async derive({ internalReport, meterCtx = null }) {
+    async derive({ internalReport, guidelines = null, meterCtx = null }) {
         if (!internalReport) throw new Error("StudentFeedback: missing internalReport");
 
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_ui" })}
 
 ${this.systemPromptBody}`;
-        const userText = `RELATÓRIO INTERNO DA AVALIAÇÃO (não mostrar cru — derive a devolutiva conforme o contrato):
+        const guidelinesBlock = typeof guidelines === "string" && guidelines.trim()
+            ? `DIRETRIZES DO PROFESSOR para esta devolutiva (siga em estilo/estrutura/ênfase; as regras duras de conteúdo prevalecem):
+${guidelines.trim()}
+
+`
+            : "";
+        const userText = `${guidelinesBlock}RELATÓRIO INTERNO DA AVALIAÇÃO (não mostrar cru — derive a devolutiva conforme o contrato):
 
 ${JSON.stringify(internalReport, null, 2)}`;
 
@@ -200,9 +213,13 @@ ${JSON.stringify(internalReport, null, 2)}`;
 
     _validateReport(r, internalReport) {
         validateStudentFeedbackShape(r);
-        const expected = Array.isArray(internalReport.per_question) ? internalReport.per_question.length : 0;
-        if (r.per_question.length !== expected) {
-            throw new Error(`StudentFeedback: per_question tem ${r.per_question.length} itens, esperado ${expected}`);
+        // per_question é OPCIONAL e pode cobrir só parte das perguntas; quando
+        // presente, cada turn_index precisa existir no relatório interno.
+        const validIdx = new Set((internalReport.per_question ?? []).map(q => q.turn_index));
+        for (const q of r.per_question) {
+            if (!validIdx.has(q.turn_index)) {
+                throw new Error(`StudentFeedback: per_question turn_index ${q.turn_index} não existe no relatório interno`);
+            }
         }
     }
 }
