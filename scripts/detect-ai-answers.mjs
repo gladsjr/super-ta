@@ -28,153 +28,16 @@
 import "dotenv/config";
 import fs from "fs";
 import { pool } from "../auth.js";
-
-// ---------------------------------------------------------------------
-// Limiares (ajustáveis). Documentados para auditoria — não são mágicos.
-// ---------------------------------------------------------------------
-const TH = {
-    // Modo texto: caracteres por segundo entre a pergunta e a resposta.
-    // Digitação humana sustentada raramente passa de ~12-15 cps; datilógrafo
-    // rápido ~10. Acima disso, numa resposta longa, cheira a colagem.
-    PASTE_CPS: 22,
-    PASTE_MIN_CHARS: 180, // só vale o sinal de colagem em respostas longas
-    // Modo áudio: palavras por segundo do áudio do turno. Fala espontânea em
-    // PT ~2-3 wps (120-180 wpm); leitura fluente tende a ser mais alta e MUITO
-    // estável. Sinal fraco isolado — combinar com registro escrito + latência.
-    FAST_SPEECH_WPS: 3.2,
-    // Latência (s) antes de responder, alta o suficiente pra ter ido num LLM,
-    // copiado a pergunta, gerado e voltado. Calibrar com bom senso.
-    LONG_LATENCY_S: 75,
-    // Resposta longa e estruturada o bastante pra parecer gerada.
-    LONG_ANSWER_WORDS: 60,
-};
-
-// Marcadores de formatação típicos de saída de LLM (raros na digitação humana
-// apressada de um chat).
-const MD_BULLET = /^[\s>]*[-*•·]\s+/m;
-const MD_NUMBERED = /^[\s>]*\d+[.)]\s+/m;
-const MD_HEADER = /^#{1,6}\s+/m;
-const MD_BOLD = /\*\*[^*\n]+\*\*|__[^_\n]+__/;
-const MD_CODE = /`[^`\n]+`|```/;
-const EM_DASH = /—/g;
-
-// Conectivos / clichês de prosa expositiva formal (registro de LLM em PT-BR).
-const FORMAL_CONNECTORS = [
-    /\bé importante (notar|ressaltar|destacar|mencionar)\b/i,
-    /\bvale (ressaltar|destacar|notar|mencionar|lembrar)\b/i,
-    /\bem (resumo|suma|síntese)\b/i,
-    /\bde (modo|maneira) geral\b/i,
-    /\bno geral\b/i,
-    /\bpor um lado\b/i,
-    /\bpor outro lado\b/i,
-    /\bademais\b/i,
-    /\boutrossim\b/i,
-    /\bportanto\b/i,
-    /\bdessa forma\b/i,
-    /\bdesta forma\b/i,
-    /\bsendo assim\b/i,
-    /\bem síntese\b/i,
-    /\bcabe (ressaltar|destacar)\b/i,
-    /\bvisto que\b/i,
-    /\bademais\b/i,
-];
-
-// Marcadores de REGISTRO ESCRITO numa fala: subordinação e vocabulário de
-// prosa expositiva que quase ninguém produz oralmente de improviso, mas que
-// um LLM gera o tempo todo. Sinal central do "leu um texto pronto em áudio",
-// onde markdown não existe (STT não transcreve formatação).
-const WRITTEN_REGISTER = [
-    /\bsegundo (a|o) qual\b/i,
-    /\bde modo que\b/i,
-    /\bde forma que\b/i,
-    /\bde maneira que\b/i,
-    /\bao passo que\b/i,
-    /\bna medida em que\b/i,
-    /\buma vez que\b/i,
-    /\btendo em vista\b/i,
-    /\bno que (tange|concerne|diz respeito)\b/i,
-    /\bconferindo\b/i,
-    /\bsustentando\b/i,
-    /\bgarantindo\b/i,
-    /\bevidenciando\b/i,
-    /\bcorroborando\b/i,
-    /\bem virtude (de|da|do)\b/i,
-    /\bmediante\b/i,
-    /\bporquanto\b/i,
-    /\bconsoante\b/i,
-];
-
-// Marcadores de fala espontânea (disfluências). MUITOS = humano falando ao
-// vivo; ZERO numa resposta longa de áudio = possível leitura de texto pronto.
-const DISFLUENCY = [
-    /\bé\.\.\.|\beh\b|\bahn?\b|\bhmm+\b|\buhm+\b/i,
-    /\btipo\b/i,
-    /\bné\b/i,
-    /\bassim\b/i,
-    /\bsei lá\b/i,
-    /\bcomo é que (é|fala|chama)\b/i,
-    /\bdeixa eu (ver|pensar)\b/i,
-    /\.\.\./,
-];
-
-// ---------------------------------------------------------------------
-// Helpers de medição
-// ---------------------------------------------------------------------
-function words(text) {
-    if (!text) return 0;
-    return text.trim().split(/\s+/).filter(Boolean).length;
-}
-function countMatches(text, regexes) {
-    if (!text) return 0;
-    let n = 0;
-    for (const re of regexes) if (re.test(text)) n++;
-    return n;
-}
-function secondsBetween(a, b) {
-    if (!a || !b) return null;
-    const ta = Date.parse(a), tb = Date.parse(b);
-    if (Number.isNaN(ta) || Number.isNaN(tb)) return null;
-    return (tb - ta) / 1000;
-}
-function num(x) {
-    const n = Number(x);
-    return Number.isFinite(n) ? n : null;
-}
-
-// "Polish score" 0..1 de uma resposta: quão estruturada/formal/sem-fricção é.
-// Usado para detectar mudança de registro DENTRO do mesmo aluno.
-function polishScore(text) {
-    if (!text) return 0;
-    let s = 0;
-    if (MD_BULLET.test(text) || MD_NUMBERED.test(text)) s += 0.30;
-    if (MD_HEADER.test(text)) s += 0.15;
-    if (MD_BOLD.test(text)) s += 0.20;
-    if (MD_CODE.test(text)) s += 0.10;
-    const fc = countMatches(text, FORMAL_CONNECTORS);
-    s += Math.min(0.30, fc * 0.12);
-    if ((text.match(EM_DASH) || []).length >= 2) s += 0.10;
-    // Pontuação "completa": termina com . ! ? e tem vírgulas — prosa cuidada.
-    if (/[.!?]\s*$/.test(text.trim()) && (text.match(/,/g) || []).length >= 2) s += 0.10;
-    return Math.min(1, s);
-}
-
-// Registro escrito numa FALA transcrita (0..1): frases longas + subordinação
-// formal. Captura o "leu texto de IA em voz alta" que o polishScore (baseado
-// em markdown) não pega, porque a transcrição não tem formatação.
-function writtenRegisterScore(text) {
-    if (!text) return 0;
-    let s = 0;
-    const sentences = text.split(/[.!?]+/).map(x => x.trim()).filter(Boolean);
-    const avgLen = sentences.length ? words(text) / sentences.length : words(text);
-    if (avgLen >= 28) s += 0.45;
-    else if (avgLen >= 20) s += 0.30;
-    else if (avgLen >= 15) s += 0.15;
-    const wr = countMatches(text, WRITTEN_REGISTER);
-    s += Math.min(0.45, wr * 0.20);
-    const fc = countMatches(text, FORMAL_CONNECTORS);
-    s += Math.min(0.20, fc * 0.10);
-    return Math.min(1, s);
-}
+// Limiares, bancos de expressões e medidores vivem em lib/deliverySignals.js
+// (fonte única, compartilhada com o InterviewEvaluatorAgent — que recebe os
+// mesmos sinais como contexto de forma na avaliação da entrevista).
+import {
+    TH,
+    MD_BULLET, MD_NUMBERED, MD_HEADER, MD_BOLD, MD_CODE, EM_DASH,
+    FORMAL_CONNECTORS, DISFLUENCY,
+    words, countMatches, secondsBetween, num, median,
+    polishScore, writtenRegisterScore,
+} from "../lib/deliverySignals.js";
 
 // ---------------------------------------------------------------------
 // Análise de um turno respondido
@@ -333,12 +196,6 @@ function parseMaybeJson(v) {
     if (typeof v === "object") return v;
     if (typeof v === "string") { try { return JSON.parse(v); } catch { return null; } }
     return null;
-}
-function median(arr) {
-    const a = arr.filter(x => typeof x === "number").sort((x, y) => x - y);
-    if (!a.length) return 0;
-    const m = Math.floor(a.length / 2);
-    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
 function esc(s) {
     return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

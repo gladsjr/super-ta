@@ -211,6 +211,10 @@
   .eval-badge.a-high         { background: var(--a-bg); border-color: var(--a-border); color: var(--success-700); }
   .eval-badge.a-medium       { background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700); }
   .eval-badge.a-low          { background: #fbeaea; border-color: #c98787; color: #8a2525; }
+  .eval-badge.d-natural      { background: var(--a-bg); border-color: var(--a-border); color: var(--success-700); }
+  .eval-badge.d-mixed        { background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700); }
+  .eval-badge.d-scripted     { background: #fbeaea; border-color: #c98787; color: #8a2525; }
+  .eval-badge.d-inconclusive { background: var(--ink-50); border-color: var(--ink-200); color: var(--ink-500); }
   .eval-section-title { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--ink-500); margin: var(--sp-4) 0 var(--sp-1); }
   .eval-text { white-space: pre-wrap; line-height: 1.5; }
   .eval-list { margin: 0; padding-left: 1.2rem; }
@@ -513,6 +517,12 @@ const ASSESSMENT_LABEL = {
   inconsistent: 'inconsistente',
   unanswered: 'sem resposta',
 };
+const DELIVERY_LABEL = {
+  natural: 'Entrega: natural/espontânea',
+  mixed: 'Entrega: variou entre turnos',
+  scripted: 'Entrega: com cara de texto pronto',
+  inconclusive: 'Entrega: inconclusiva',
+};
 
 function renderEvalList(title, items) {
   const arr = Array.isArray(items) ? items.filter(x => x != null && String(x).trim() !== '') : [];
@@ -549,6 +559,12 @@ function renderEvaluation(ev, evaluatedAt) {
     evaluatedAt ? `gerada em ${fmtTime(evaluatedAt)}` : '';
   document.getElementById('eval-btn').textContent = 'Reavaliar';
   document.getElementById('eval-empty-note').classList.add('hidden');
+  const delivery = ev.delivery || null;
+  const deliveryHtml = delivery ? `
+    <div class="eval-section-title">Forma e entrega</div>
+    <div class="eval-badges"><span class="eval-badge d-${escapeHtml(delivery.overall_impression ?? '')}">${escapeHtml(DELIVERY_LABEL[delivery.overall_impression] ?? delivery.overall_impression ?? '—')}</span></div>
+    ${Array.isArray(delivery.observations) && delivery.observations.length ? `<ul class="eval-list">${delivery.observations.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}` : '';
+
   document.getElementById('eval-body').innerHTML = `
     ${badges}
     <div class="eval-section-title">Resumo</div>
@@ -558,6 +574,7 @@ function renderEvaluation(ev, evaluatedAt) {
     ${perQuestion ? `<div class="eval-section-title">Pergunta a pergunta</div>${perQuestion}` : ''}
     ${renderEvalList('Pontos fortes da defesa', ev.strengths)}
     ${renderEvalList('Pontos fracos da defesa', ev.weaknesses)}
+    ${deliveryHtml}
     ${signals ? `<div class="eval-section-title">Sinais de autoria</div>${signals}` : ''}
     ${renderEvalList('Sugestões de follow-up presencial', ev.follow_up_suggestions)}
     ${renderEvalList('Ressalvas desta avaliação', ev.caveats)}`;

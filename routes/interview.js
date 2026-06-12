@@ -144,7 +144,7 @@ function reviewWindowState(submission) {
 // audio_idx é sequencial por submission, batendo com a ordem dos uploads de
 // áudio do aluno; isso permite o painel do professor casar áudio com fala na
 // conv_chat pela ordem.
-async function archiveStudentAudio({ submissionId, submissionToken, buffer, mimetype, durationS }) {
+async function archiveStudentAudio({ submissionId, submissionToken, buffer, mimetype, durationS, turnIndex = null }) {
     if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
     try {
         const audioIdx = await db.nextAudioIdxForSubmission(submissionId);
@@ -158,6 +158,7 @@ async function archiveStudentAudio({ submissionId, submissionToken, buffer, mime
         await db.recordStudentAudioArtifact({
             submissionId,
             audioIdx,
+            turnIndex,
             objectKey: result.key,
             mimetype,
             byteSize: result.byte_size ?? buffer.length,
@@ -802,12 +803,18 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Acontece ANTES do pré-gate — áudios ininteligíveis também são
     // arquivados como evidência pra eventual auditoria. Falha silenciosa.
     if (studentAudioBuffer) {
+        // turn_index: a fala pertence ao último turno aberto na fase
+        // interviewing (resposta ou intervenção dele). Na intro não há turno.
+        const archiveTurnIndex = sess.currentPhase === "interviewing" && Array.isArray(sess.turnLog) && sess.turnLog.length > 0
+            ? sess.turnLog[sess.turnLog.length - 1].index
+            : null;
         archiveStudentAudio({
             submissionId: req.submission.id,
             submissionToken: token,
             buffer: studentAudioBuffer,
             mimetype: studentAudioMimetype,
             durationS: studentAudioDurationSec,
+            turnIndex: archiveTurnIndex,
         }).catch(err => log.error("AUDIO_STORE", `archive promise rejeitada: ${err.message}`));
     }
     // Cap de tamanho (defesa contra injection por mensagem longa). Áudio raramente
