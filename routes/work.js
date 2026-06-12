@@ -446,12 +446,14 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
 
 function studentEvaluationPayload(student) {
     return {
-        student_evaluation: student?.report ?? null,            // efetiva (editada ?? automática)
+        student_evaluation: student?.report ?? null,            // efetiva (editada ?? automática; opinião sempre da automática)
         student_evaluation_auto: student?.auto_report ?? null,
         student_evaluation_at: student?.generated_at ?? null,
         student_evaluation_edited: student?.edited_report ?? null,
         student_evaluation_edited_at: student?.edited_at ?? null,
         published_at: student?.published_at ?? null,
+        include_interviewer_opinion: student?.include_interviewer_opinion ?? true,
+        has_interviewer_opinion: student?.has_interviewer_opinion ?? false,
     };
 }
 
@@ -526,6 +528,9 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/student-version", req
         const report = req.body?.report;
         try { validateStudentFeedbackShape(report); }
         catch (err) { return res.status(400).json({ error: `devolutiva inválida: ${err.message}` }); }
+        // A opinião do entrevistador NÃO é editável — vem sempre do relatório
+        // interno na composição da efetiva. Qualquer cópia enviada é descartada.
+        delete report.interviewer_opinion;
         await db.setStudentEvaluationEdited(found.id, report);
         const student = await db.getStudentEvaluation(found.id);
         const warnings = findForbiddenLeaks(report);
@@ -552,6 +557,28 @@ router.delete("/w/:workToken/submissions/:subToken/evaluation/student-version", 
     } catch (err) {
         log.error("PUBLISH", `edit discard failed submission=${subToken}: ${err.message}`);
         res.status(500).json({ error: "falha ao descartar a edição" });
+    }
+});
+
+// Liga/desliga a inclusão da opinião do entrevistador no que o aluno vê.
+// É a ÚNICA escolha do professor sobre essa parte — o texto não é editável.
+router.patch("/w/:workToken/submissions/:subToken/evaluation/interviewer-opinion", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    if (typeof req.body?.include !== "boolean") {
+        return res.status(400).json({ error: "include (boolean) required" });
+    }
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        await db.setIncludeInterviewerOpinion(found.id, req.body.include);
+        const student = await db.getStudentEvaluation(found.id);
+        log.info("PUBLISH", `interviewer-opinion include=${req.body.include} submission=${subToken}`);
+        res.json(studentEvaluationPayload(student));
+    } catch (err) {
+        log.error("PUBLISH", `interviewer-opinion toggle failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao atualizar a inclusão da opinião do entrevistador" });
     }
 });
 

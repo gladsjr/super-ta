@@ -145,7 +145,7 @@ flowchart LR
   ConvUI --> PublishHandler["POST /submissions/:subToken/evaluation/publish<br/>(só marca visibilidade — nunca gera;<br/>DELETE despublica)"]
   ProfUI --> PublishBatch["POST /evaluations/publish<br/>(lote, sem custo LLM)"]
   PublishBatch --> PublishHandler
-  FeedbackAgent --> OutPublished>"automática em student_evaluation_json,<br/>edição do professor em student_evaluation_edited_json<br/>(efetiva = editada ?? automática); published_at controla<br/>GET /s/:t/evaluation, sem expirar com a janela de 7 dias"]
+  FeedbackAgent --> OutPublished>"automática em student_evaluation_json,<br/>edição do professor em student_evaluation_edited_json<br/>(efetiva = editada ?? automática + opinião do entrevistador<br/>= interviewer_impression do relatório interno, não editável,<br/>incluída se include_interviewer_opinion); published_at controla<br/>GET /s/:t/evaluation, sem expirar com a janela de 7 dias"]
   PublishHandler --> OutPublished
 
   ChatHandler --> ConfigAgent["ConfigAssistantAgent<br/>(fast_model, JSON action)"]
