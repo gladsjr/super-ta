@@ -17,7 +17,7 @@ The system adheres to core rules: critical components fail fast without architec
 
 ### Project Structure
 - `routes/interview.js`: Student-facing endpoints (`/start`, `/upload`, `/chat`, `/audio`, `/finalize`, `/intro/advance`). The `/chat` handler dispatches by phase: `intro` → `IntroductionAgent` (3 beats); `interviewing` → `SuperOrchestratorAgent` (one reasoning call per turn).
-- `routes/work.js`: Professor-facing endpoints (`/info`, `/conversation`, `/interviewer`, `/config-chat`, `/enunciado/coherence`, submission management).
+- `routes/work.js`: Professor-facing endpoints (`/info`, `/conversation`, `/interviewer`, `/config-chat`, `/enunciado/coherence`, `/submissions/:subToken/evaluation`, submission management).
 - `routes/admin.js`: Admin endpoints (works, users).
 - `agents/`: All agent classes. Per the super-orchestrator reform: `PrepBuilderAgent` (one-shot on `/upload`, analyze + build plan), `IntroductionAgent` (3 beats), `AudioIntelligibilityAgent` (pre-gate phrasing only), `SuperOrchestratorAgent` (per-turn orchestration in `interviewing`), `ConfigAssistantAgent` + `EnunciadoCoherenceAgent` (professor-facing).
 - `lib/`: Shared infrastructure (db, sessionLifecycle, sessionState, conversationUtils, audio, billing, middleware, agentPreamble, interviewPrompt, audioIntelligibility, superOrchestrator/actionSchema).
@@ -59,6 +59,7 @@ All agents are classes under `agents/` and use the Responses API, designed to fa
 - **`SuperOrchestratorAgent`** — one reasoning call per turn in `interviewing`. Replaces the entire legacy per-turn agent fleet.
 - **`ConfigAssistantAgent`** — professor-facing config chat (`/config-chat`).
 - **`EnunciadoCoherenceAgent`** — professor-facing assignment-statement evaluator (`/enunciado/coherence`).
+- **`InterviewEvaluatorAgent`** — professor-facing post-interview evaluator (`/w/:workToken/submissions/:subToken/evaluation`). Assesses how the student defended the work from the interviewer persona's perspective: both PDFs via `input_file`, rendered agenda, transcript serialized to text (audio metadata only — never audio bytes). Output cached in `submissions.evaluation_json`; `?force=true` regenerates.
 
 ### Orchestration Model
 The state machine resides in `routes/interview.js`. Code controls phase transitions and code-side guardrails (cap, early-finalize block, schema validation, fallback). Inside the `interviewing` phase, the **super-orchestrator decides everything else** — including when to ask, which question (planned or spontaneous), when to follow up, when to redirect a meta-question to the modal, when to show a hint, and when to finalize. The action JSON it returns is the contract; the dispatcher only does the I/O around it.

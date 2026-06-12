@@ -17,7 +17,7 @@ import {
     getWorkBalance,
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
-import { configAssistantAgent, enunciadoCoherenceAgent } from "../lib/agents.js";
+import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent } from "../lib/agents.js";
 import { streamAudio } from "../lib/audioStore.js";
 import {
     PRINCIPAL_REASONING_MODEL,
@@ -315,6 +315,113 @@ router.get("/w/:workToken/submissions/:subToken/audio/:audioIdx", requireWorkTok
     } catch (err) {
         log.error("WORK", `audio fetch failed submission=${subToken}: ${err.message}`);
         res.status(500).json({ error: "failed to fetch audio" });
+    }
+});
+
+// ============================================================================
+// Avaliação da entrevista sob a perspectiva do entrevistador
+// ============================================================================
+// Funcionalidade do professor: o InterviewEvaluatorAgent lê enunciado + entrega
+// (PDFs) + transcrição (+ metadados de áudio quando houver) e produz um
+// relatório estruturado de como o aluno sustentou o trabalho diante da persona.
+// Resultado é cacheado em submissions.evaluation_json; ?force=true regenera.
+// GET é leitura barata do cache (a página da conversa consulta no load).
+
+router.get("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+        const cached = await db.getEvaluationCache(found.id);
+        res.set("Cache-Control", "no-store");
+        res.json({
+            evaluation: cached?.report ?? null,
+            evaluated_at: cached?.evaluated_at ?? null,
+        });
+    } catch (err) {
+        log.error("EVALUATION", `read failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "failed to read evaluation" });
+    }
+});
+
+router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, requireWithinBudget, async (req, res) => {
+    const subToken = String(req.params.subToken || "").toLowerCase();
+    const force = String(req.query?.force ?? "").toLowerCase() === "true";
+    try {
+        const found = await db.findSubmissionByToken(subToken);
+        if (!found || found.work_id !== req.work.id) {
+            return res.status(404).json({ error: "submission not found" });
+        }
+
+        if (!force) {
+            const cached = await db.getEvaluationCache(found.id);
+            if (cached) {
+                log.info("EVALUATION", `cache hit submission=${subToken}`);
+                return res.json({ evaluation: cached.report, evaluated_at: cached.evaluated_at, cached: true });
+            }
+        }
+
+        const conversationText = await db.getConversationJson(found.id);
+        if (!conversationText) {
+            return res.status(409).json({ error: "a entrevista ainda não começou — nada para avaliar" });
+        }
+        let conversation;
+        try { conversation = JSON.parse(conversationText); }
+        catch (err) {
+            log.error("EVALUATION", `conversation parse failed submission=${subToken}: ${err.message}`);
+            return res.status(500).json({ error: "failed to read conversation" });
+        }
+        const answeredTurns = (Array.isArray(conversation.turns) ? conversation.turns : [])
+            .filter(t => typeof t?.answer === "string" && t.answer.trim());
+        if (answeredTurns.length === 0) {
+            return res.status(409).json({ error: "a entrevista ainda não tem respostas — nada para avaliar" });
+        }
+
+        const [enunciadoBlob, studentBlob, interviewerYamlText] = await Promise.all([
+            db.getEnunciadoBlob(req.work.id),
+            db.getStudentPdfBlob(found.id),
+            db.getInterviewerYaml(req.work.id),
+        ]);
+        if (!enunciadoBlob) return res.status(400).json({ error: "enunciado ausente — não dá para avaliar" });
+        if (!studentBlob) return res.status(400).json({ error: "trabalho do aluno ausente — não dá para avaliar" });
+        if (!interviewerYamlText) return res.status(400).json({ error: "entrevistador não configurado — não dá para avaliar" });
+
+        let audioArtifacts = [];
+        try {
+            audioArtifacts = await db.listStudentAudioArtifactsForSubmission(found.id);
+        } catch (err) {
+            log.error("EVALUATION", `audio list failed submission=${subToken}: ${err.message}`);
+        }
+
+        log.info("EVALUATION", `start submission=${subToken} turns=${answeredTurns.length} audio=${audioArtifacts.length} force=${force}`);
+        const [enunciadoUpload, studentUpload] = await Promise.all([
+            openai.files.create({
+                file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
+                purpose: "user_data",
+            }),
+            openai.files.create({
+                file: await OpenAI.toFile(studentBlob.pdf, studentBlob.filename || "trabalho.pdf"),
+                purpose: "user_data",
+            }),
+        ]);
+        log.info("EVALUATION", `uploaded files enunciado=${enunciadoUpload.id} trabalho=${studentUpload.id}`);
+
+        const report = await interviewEvaluatorAgent.evaluate({
+            enunciadoFileId: enunciadoUpload.id,
+            studentFileId: studentUpload.id,
+            interviewerYamlText,
+            conversation,
+            audioArtifacts,
+            meterCtx: { workId: req.work.id },
+        });
+        const evaluatedAt = await db.setEvaluationCache(found.id, report);
+        log.info("EVALUATION", `ok submission=${subToken} defense=${report.overall.defense_quality}`);
+        res.json({ evaluation: report, evaluated_at: evaluatedAt, cached: false });
+    } catch (err) {
+        log.error("EVALUATION", `failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao avaliar a entrevista", detail: err.message });
     }
 });
 
