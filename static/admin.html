@@ -259,6 +259,8 @@ function renderWorks() {
     const profUrl = '/w/' + encodeURIComponent(w.work_token);
     const pending = Number(w.pending || 0);
     const inprog = Number(w.in_progress || 0);
+    const completed = Number(w.completed || 0);
+    const gaveUp = Number(w.gave_up || 0);
     const enunBadge = w.assignment_pdf
       ? '<span class="badge badge-accent">enunciado ✓</span>'
       : '<span class="badge">sem enunciado</span>';
@@ -283,6 +285,8 @@ function renderWorks() {
           <div class="work-stats">
             <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
             <span class="badge badge-in_progress">${inprog} em andamento</span>
+            <span class="badge badge-completed">${completed} finalizada${completed === 1 ? '' : 's'}</span>
+            ${gaveUp > 0 ? `<span class="badge badge-gave_up">${gaveUp} desisti${gaveUp === 1 ? 'u' : 'ram'}</span>` : ''}
             ${enunBadge}
           </div>
           <div class="budget-block">

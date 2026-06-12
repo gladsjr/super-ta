@@ -15,6 +15,7 @@ import {
     meteredResponses,
     meteredTts,
     getWorkBalance,
+    isWorkBudgetExceeded,
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
 import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent } from "../lib/agents.js";
@@ -346,6 +347,75 @@ router.get("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, a
     }
 });
 
+// Avalia UMA submissão (compartilhada entre a rota individual e o lote).
+// Erros "esperados" (entrevista sem respostas, insumos ausentes) saem com
+// err.notReady=true e err.httpStatus — o lote os trata como "pulada".
+async function evaluateSubmissionNow(work, found, { force }) {
+    const subToken = found.submission_token;
+    if (!force) {
+        const cached = await db.getEvaluationCache(found.id);
+        if (cached) {
+            log.info("EVALUATION", `cache hit submission=${subToken}`);
+            return { evaluation: cached.report, evaluated_at: cached.evaluated_at, cached: true };
+        }
+    }
+
+    const notReady = (msg, httpStatus) => Object.assign(new Error(msg), { notReady: true, httpStatus });
+
+    const conversationText = await db.getConversationJson(found.id);
+    if (!conversationText) throw notReady("a entrevista ainda não começou — nada para avaliar", 409);
+    let conversation;
+    try { conversation = JSON.parse(conversationText); }
+    catch (err) {
+        log.error("EVALUATION", `conversation parse failed submission=${subToken}: ${err.message}`);
+        throw new Error("failed to read conversation");
+    }
+    const answeredTurns = (Array.isArray(conversation.turns) ? conversation.turns : [])
+        .filter(t => typeof t?.answer === "string" && t.answer.trim());
+    if (answeredTurns.length === 0) throw notReady("a entrevista ainda não tem respostas — nada para avaliar", 409);
+
+    const [enunciadoBlob, studentBlob, interviewerYamlText] = await Promise.all([
+        db.getEnunciadoBlob(work.id),
+        db.getStudentPdfBlob(found.id),
+        db.getInterviewerYaml(work.id),
+    ]);
+    if (!enunciadoBlob) throw notReady("enunciado ausente — não dá para avaliar", 400);
+    if (!studentBlob) throw notReady("trabalho do aluno ausente — não dá para avaliar", 400);
+    if (!interviewerYamlText) throw notReady("entrevistador não configurado — não dá para avaliar", 400);
+
+    let audioArtifacts = [];
+    try {
+        audioArtifacts = await db.listStudentAudioArtifactsForSubmission(found.id);
+    } catch (err) {
+        log.error("EVALUATION", `audio list failed submission=${subToken}: ${err.message}`);
+    }
+
+    log.info("EVALUATION", `start submission=${subToken} turns=${answeredTurns.length} audio=${audioArtifacts.length} force=${force}`);
+    const [enunciadoUpload, studentUpload] = await Promise.all([
+        openai.files.create({
+            file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
+            purpose: "user_data",
+        }),
+        openai.files.create({
+            file: await OpenAI.toFile(studentBlob.pdf, studentBlob.filename || "trabalho.pdf"),
+            purpose: "user_data",
+        }),
+    ]);
+    log.info("EVALUATION", `uploaded files enunciado=${enunciadoUpload.id} trabalho=${studentUpload.id}`);
+
+    const report = await interviewEvaluatorAgent.evaluate({
+        enunciadoFileId: enunciadoUpload.id,
+        studentFileId: studentUpload.id,
+        interviewerYamlText,
+        conversation,
+        audioArtifacts,
+        meterCtx: { workId: work.id },
+    });
+    const evaluatedAt = await db.setEvaluationCache(found.id, report);
+    log.info("EVALUATION", `ok submission=${subToken} defense=${report.overall.defense_quality}`);
+    return { evaluation: report, evaluated_at: evaluatedAt, cached: false };
+}
+
 router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, requireWithinBudget, async (req, res) => {
     const subToken = String(req.params.subToken || "").toLowerCase();
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
@@ -354,75 +424,117 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
         if (!found || found.work_id !== req.work.id) {
             return res.status(404).json({ error: "submission not found" });
         }
-
-        if (!force) {
-            const cached = await db.getEvaluationCache(found.id);
-            if (cached) {
-                log.info("EVALUATION", `cache hit submission=${subToken}`);
-                return res.json({ evaluation: cached.report, evaluated_at: cached.evaluated_at, cached: true });
-            }
-        }
-
-        const conversationText = await db.getConversationJson(found.id);
-        if (!conversationText) {
-            return res.status(409).json({ error: "a entrevista ainda não começou — nada para avaliar" });
-        }
-        let conversation;
-        try { conversation = JSON.parse(conversationText); }
-        catch (err) {
-            log.error("EVALUATION", `conversation parse failed submission=${subToken}: ${err.message}`);
-            return res.status(500).json({ error: "failed to read conversation" });
-        }
-        const answeredTurns = (Array.isArray(conversation.turns) ? conversation.turns : [])
-            .filter(t => typeof t?.answer === "string" && t.answer.trim());
-        if (answeredTurns.length === 0) {
-            return res.status(409).json({ error: "a entrevista ainda não tem respostas — nada para avaliar" });
-        }
-
-        const [enunciadoBlob, studentBlob, interviewerYamlText] = await Promise.all([
-            db.getEnunciadoBlob(req.work.id),
-            db.getStudentPdfBlob(found.id),
-            db.getInterviewerYaml(req.work.id),
-        ]);
-        if (!enunciadoBlob) return res.status(400).json({ error: "enunciado ausente — não dá para avaliar" });
-        if (!studentBlob) return res.status(400).json({ error: "trabalho do aluno ausente — não dá para avaliar" });
-        if (!interviewerYamlText) return res.status(400).json({ error: "entrevistador não configurado — não dá para avaliar" });
-
-        let audioArtifacts = [];
-        try {
-            audioArtifacts = await db.listStudentAudioArtifactsForSubmission(found.id);
-        } catch (err) {
-            log.error("EVALUATION", `audio list failed submission=${subToken}: ${err.message}`);
-        }
-
-        log.info("EVALUATION", `start submission=${subToken} turns=${answeredTurns.length} audio=${audioArtifacts.length} force=${force}`);
-        const [enunciadoUpload, studentUpload] = await Promise.all([
-            openai.files.create({
-                file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
-                purpose: "user_data",
-            }),
-            openai.files.create({
-                file: await OpenAI.toFile(studentBlob.pdf, studentBlob.filename || "trabalho.pdf"),
-                purpose: "user_data",
-            }),
-        ]);
-        log.info("EVALUATION", `uploaded files enunciado=${enunciadoUpload.id} trabalho=${studentUpload.id}`);
-
-        const report = await interviewEvaluatorAgent.evaluate({
-            enunciadoFileId: enunciadoUpload.id,
-            studentFileId: studentUpload.id,
-            interviewerYamlText,
-            conversation,
-            audioArtifacts,
-            meterCtx: { workId: req.work.id },
-        });
-        const evaluatedAt = await db.setEvaluationCache(found.id, report);
-        log.info("EVALUATION", `ok submission=${subToken} defense=${report.overall.defense_quality}`);
-        res.json({ evaluation: report, evaluated_at: evaluatedAt, cached: false });
+        const result = await evaluateSubmissionNow(req.work, found, { force });
+        res.json(result);
     } catch (err) {
+        if (err.notReady) return res.status(err.httpStatus ?? 409).json({ error: err.message });
         log.error("EVALUATION", `failed submission=${subToken}: ${err.message}`);
         res.status(500).json({ error: "falha ao avaliar a entrevista", detail: err.message });
     }
+});
+
+// ---- Avaliação em LOTE (todas as submissões do trabalho) ----
+// Roda em background, SERIAL (uma submissão por vez): mantém a carga na API
+// previsível e permite checar o orçamento entre itens. Estado em memória por
+// work — sobrevive só enquanto o processo vive; se o servidor reiniciar no
+// meio, basta disparar de novo (com force=false o cache pula as já feitas).
+const batchEvalRuns = new Map(); // work.id -> estado
+
+function publicBatchState(state) {
+    if (!state) return null;
+    return {
+        running: state.running,
+        force: state.force,
+        total: state.total,
+        done: state.done,
+        ok: state.ok,
+        skipped: state.skipped,
+        failed: state.failed,
+        stopped_reason: state.stopped_reason,
+        started_at: state.started_at,
+        finished_at: state.finished_at,
+    };
+}
+
+async function runBatchEvaluation(work, queue, state) {
+    log.info("EVALUATION", `batch start work=${work.work_token} total=${queue.length} force=${state.force}`);
+    for (const sub of queue) {
+        // Orçamento re-checado a cada item: o lote para no meio se esgotar.
+        try {
+            if (await isWorkBudgetExceeded(work.id)) {
+                state.stopped_reason = "budget_exhausted";
+                log.warn("EVALUATION", `batch interrompido por orçamento work=${work.work_token} done=${state.done}/${state.total}`);
+                break;
+            }
+            const found = await db.findSubmissionByToken(sub.submission_token);
+            if (!found || found.work_id !== work.id) { state.skipped++; continue; }
+            const r = await evaluateSubmissionNow(work, found, { force: state.force });
+            if (r.cached) state.skipped++;
+            else state.ok++;
+        } catch (err) {
+            if (err.notReady) {
+                state.skipped++;
+            } else {
+                state.failed.push({ submission_token: sub.submission_token, student_label: sub.student_label, error: err.message });
+                log.error("EVALUATION", `batch item failed submission=${sub.submission_token}: ${err.message}`);
+            }
+        } finally {
+            state.done++;
+        }
+    }
+    state.running = false;
+    state.finished_at = new Date().toISOString();
+    log.info("EVALUATION", `batch done work=${work.work_token} ok=${state.ok} skipped=${state.skipped} failed=${state.failed.length} stopped=${state.stopped_reason ?? "-"}`);
+}
+
+router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), async (req, res) => {
+    const force = req.body?.force === true;
+    try {
+        const existing = batchEvalRuns.get(req.work.id);
+        if (existing?.running) {
+            return res.status(409).json({ error: "já existe uma avaliação em lote em andamento para este trabalho", batch: publicBatchState(existing) });
+        }
+        const subs = await db.listSubmissionsForWork(req.work.id);
+        // Candidatas: têm conversa (status derivado != pending). A elegibilidade
+        // fina (tem resposta? insumos presentes?) é decidida item a item no
+        // loop — itens não-prontos contam como "puladas", não como erro.
+        const queue = subs.filter(s => s.status !== "pending" && (force || !s.has_evaluation));
+        if (queue.length === 0) {
+            return res.status(400).json({
+                error: force
+                    ? "nenhuma entrevista com conversa para avaliar"
+                    : "nenhuma entrevista nova para avaliar — todas as elegíveis já têm avaliação",
+            });
+        }
+        const state = {
+            running: true,
+            force,
+            total: queue.length,
+            done: 0,
+            ok: 0,
+            skipped: 0,
+            failed: [],
+            stopped_reason: null,
+            started_at: new Date().toISOString(),
+            finished_at: null,
+        };
+        batchEvalRuns.set(req.work.id, state);
+        runBatchEvaluation(req.work, queue, state).catch(err => {
+            log.error("EVALUATION", `batch crashed work=${req.work.work_token}: ${err.message}`);
+            state.running = false;
+            state.finished_at = new Date().toISOString();
+            state.stopped_reason = "internal_error";
+        });
+        res.json({ started: true, total: queue.length, force });
+    } catch (err) {
+        log.error("EVALUATION", `batch start failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao iniciar a avaliação em lote", detail: err.message });
+    }
+});
+
+router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ batch: publicBatchState(batchEvalRuns.get(req.work.id)) });
 });
 
 // ============================================================================

@@ -129,6 +129,8 @@ flowchart LR
   ProfUI(["/w/:workToken<br/>(professor.html)"]) --> ChatHandler["POST /config-chat"]
   ProfUI --> CoherenceHandler["POST /enunciado/coherence"]
   ConvUI(["/w/:workToken/s/:subToken<br/>(conversation.html)"]) --> EvalHandler["POST /submissions/:subToken/evaluation"]
+  ProfUI --> BatchHandler["POST /evaluations<br/>(lote: serial em background,<br/>orçamento checado por item)"]
+  BatchHandler --> EvalHandler
 
   EvalHandler --> EvalCache{"Cache em<br/>submissions.evaluation_json?"}
   EvalCache -- "hit (sem ?force)" --> OutEvalCached>"Relatório do cache"]
@@ -151,7 +153,7 @@ flowchart LR
   classDef gate  fill:#fff4dc,stroke:#8a6100,color:#0f1b2d;
   classDef out   fill:#e7f4eb,stroke:#1f6c3b,color:#0f1b2d;
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
-  class ChatHandler,CoherenceHandler,ConfigAgent,CoherenceAgent,EvalHandler,EvalAgent agent
+  class ChatHandler,CoherenceHandler,ConfigAgent,CoherenceAgent,EvalHandler,BatchHandler,EvalAgent agent
   class Cache,EvalCache gate
   class ActExplain,ActPersona,ActYaml,ActCheck,OutCached,OutFresh,OutEvalCached,OutEvalFresh out
   class ProfUI,ConvUI entry
