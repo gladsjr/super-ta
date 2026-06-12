@@ -10,6 +10,7 @@
     "audio:gc": "node scripts/audio-gc.mjs",
     "analyze:authorship": "node scripts/detect-ai-answers.mjs",
     "test:audio": "node tests/audio-e2e/run.mjs",
+    "test:ab-orchestrator": "node -r dotenv/config tests/ab-orchestrator/run.mjs",
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"
   },
