@@ -10,6 +10,10 @@ toca no Postgres, não usa PDFs reais (gera PDFs sintéticos). Não altera nenhu
 fiação de produção — instancia o orquestrador com o modelo de cada braço
 diretamente.
 
+> **Resultados já levantados** (modelo × esforço de raciocínio, com glossário dos
+> termos e os números) estão em
+> [`docs/super-orchestrator-model-experiments.md`](../../docs/super-orchestrator-model-experiments.md).
+
 ## Como rodar
 
 ```bash
