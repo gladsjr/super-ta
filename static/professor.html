@@ -230,6 +230,10 @@
     <div class="card">
       <h3 class="card-title">Tokens de envio para alunos</h3>
       <p class="card-sub">Gere tokens para cada aluno e compartilhe com eles. Cada token abre uma entrevista independente.</p>
+      <label class="row" style="align-items:flex-start; gap: var(--sp-2); margin: 0 0 var(--sp-3); cursor:pointer">
+        <input type="checkbox" id="sub-is-test" style="margin-top:3px"/>
+        <span class="card-sub" style="margin:0">Gerar como <strong>entrevista(s) de teste</strong> — só entrevistas de teste podem ser abertas por você para simular o aluno; as reais não expõem esse caminho (proteção). A marcação vale para o que você gerar agora e não muda depois.</span>
+      </label>
       <div class="sub-form">
         <div>
           <label class="label" for="sub-label">Nome do aluno</label>
@@ -260,6 +264,8 @@
             <option value="all">Todas</option>
             <option value="active" selected>Ativas</option>
             <option value="blocked">Bloqueadas</option>
+            <option value="test">De teste</option>
+            <option value="real">Reais</option>
           </select>
           <span class="spacer"></span>
           <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
@@ -493,6 +499,8 @@ function renderSubmissionsTable() {
   const filtered = lastSubmissions.filter(s => {
     if (filter === 'active') return !s.is_blocked;
     if (filter === 'blocked') return !!s.is_blocked;
+    if (filter === 'test') return !!s.is_test;
+    if (filter === 'real') return !s.is_test;
     return true;
   });
 
@@ -523,15 +531,19 @@ function renderSubmissionsTable() {
     const actionBtn = s.is_blocked
       ? `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta entrevista">Liberar</button>`
       : `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', true)" title="Pausa a entrevista; o aluno perde acesso até você liberar">Bloquear</button>`;
+    const abrirLink = s.is_test
+      ? `<a href="${url}" target="_blank" title="Abrir e simular o aluno (entrevista de teste)">abrir ↗</a>`
+      : '';
+    const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
     return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
       <td>
         <div class="row-tight">
           <code class="token-chip">${escapeHtml(s.submission_token)}</code>
           <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${s.submission_token}')">📋</button>
-          <a href="${url}" target="_blank" title="Abrir página do aluno">abrir ↗</a>
+          ${abrirLink}
         </div>
       </td>
-      <td>${escapeHtml(s.student_label || '—')}</td>
+      <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span>${blockedBadge}</td>
       <td>${convCell}</td>
       <td>${evalCell}</td>
@@ -1023,9 +1035,10 @@ document.getElementById('create-subs').onclick = async () => {
   const count = Number(document.getElementById('sub-count').value) || 1;
   msg.textContent = '';
   if (!label) { msg.textContent = 'Informe o nome do aluno.'; return; }
+  const is_test = document.getElementById('sub-is-test').checked;
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label, count })
+    body: JSON.stringify({ label, count, is_test })
   });
   const j = await r.json();
   if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
@@ -1046,9 +1059,10 @@ document.getElementById('create-bulk').onclick = async () => {
   const prev = btn.textContent;
   btn.textContent = 'Gerando…';
   try {
+    const is_test = document.getElementById('sub-is-test').checked;
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labels }),
+      body: JSON.stringify({ labels, is_test }),
     });
     const j = await r.json();
     if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
