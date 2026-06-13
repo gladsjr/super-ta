@@ -27,6 +27,16 @@
   .table-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
   .table-toolbar .spacer { flex: 1; }
 
+  /* Abas das seções do trabalho (Cenário · Alunos · Avaliação) */
+  .tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--ink-200); margin-bottom: var(--sp-4); flex-wrap: wrap; }
+  .tab-btn {
+    border: none; background: transparent; cursor: pointer;
+    padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); font-weight: 600;
+    color: var(--ink-500); border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--ink-900); }
+  .tab-btn.is-active { color: var(--accent-700); border-bottom-color: var(--accent-700); }
+
   .badge-blocked {
     background: #fde2e2;
     color: #8a1c1c;
@@ -91,6 +101,13 @@
       <div class="meta-row" id="meta"></div>
     </div>
 
+    <nav class="tabs" role="tablist" aria-label="Seções do trabalho">
+      <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Cenário</button>
+      <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
+      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; devolutivas</button>
+    </nav>
+
+    <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
       <p class="card-sub" id="enunciado-status">—</p>
@@ -207,7 +224,9 @@
         <span id="question-count-msg" class="hint"></span>
       </div>
     </div>
+    </div><!-- /tab-cenario -->
 
+    <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
     <div class="card">
       <h3 class="card-title">Tokens de envio para alunos</h3>
       <p class="card-sub">Gere tokens para cada aluno e compartilhe com eles. Cada token abre uma entrevista independente.</p>
@@ -253,7 +272,9 @@
         <div id="sub-filtered-empty" class="table-empty hidden">Nenhuma entrevista neste filtro.</div>
       </div>
     </div>
+    </div><!-- /tab-alunos -->
 
+    <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
     <div class="card">
       <h3 class="card-title">Avaliações e devolutivas</h3>
       <p class="card-sub">
@@ -283,6 +304,7 @@
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
+    </div><!-- /tab-avaliacao -->
   </div>
 
 </main>
@@ -1555,6 +1577,33 @@ async function copyToken(btn, token) {
   btn.disabled = true;
   setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
 }
+
+// Abas das seções (Cenário · Alunos · Avaliação). Estado persistido por
+// localStorage e deep-linkável por hash (#alunos, #avaliacao).
+const TAB_NAMES = ['cenario', 'alunos', 'avaliacao'];
+function setTab(name) {
+  if (!TAB_NAMES.includes(name)) name = 'cenario';
+  TAB_NAMES.forEach(t => {
+    const panel = document.getElementById('tab-' + t);
+    const btn = document.getElementById('tab-btn-' + t);
+    const active = t === name;
+    if (panel) panel.classList.toggle('hidden', !active);
+    if (btn) { btn.classList.toggle('is-active', active); btn.setAttribute('aria-selected', String(active)); }
+  });
+  try { localStorage.setItem('prof_tab', name); } catch (e) {}
+  if (history.replaceState) history.replaceState(null, '', '#' + name);
+}
+TAB_NAMES.forEach(t => {
+  const btn = document.getElementById('tab-btn-' + t);
+  if (btn) btn.onclick = () => setTab(t);
+});
+(function initTab() {
+  const fromHash = (location.hash || '').replace('#', '');
+  let initial = 'cenario';
+  if (TAB_NAMES.includes(fromHash)) initial = fromHash;
+  else { try { const s = localStorage.getItem('prof_tab'); if (TAB_NAMES.includes(s)) initial = s; } catch (e) {} }
+  setTab(initial);
+})();
 
 // loadVoices() popula o dropdown de vozes; load() aplica a voz salva. A
 // ordem importa: precisamos das opções no DOM antes de tentar selecionar.
