@@ -2,7 +2,7 @@ import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
 import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
-import { ACTION_SCHEMA_DESCRIPTION, validateAction } from "../lib/superOrchestrator/actionSchema.js";
+import { ACTION_SCHEMA_DESCRIPTION, validateAction, extractReadyAction } from "../lib/superOrchestrator/actionSchema.js";
 
 /**
  * SuperOrchestratorAgent — FASE 3: real.
@@ -168,6 +168,10 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
      *        chain-of-thought interno e antes do output completo). Usado pelo
      *        despachante SSE para sinalizar "respondendo" ao frontend no
      *        momento real em que a fala começa a ser produzida.
+     * @param {function(string,string):void} [p.onMessageReady] - callback
+     *        opcional disparado UMA VEZ quando action.kind e action.message
+     *        fecham no JSON em streaming (antes de rationale/memory). Recebe
+     *        (kind, message). Usado para disparar o TTS cedo. Ver extractReadyAction.
      * @param {number|null} [p.minTurnsBeforeFinalize] - piso de turnos antes de
      *        poder finalizar; derivado do nº de perguntas em routes/interview.js.
      * @param {number|null} [p.maxTurns] - teto duro de turnos; idem.
@@ -186,6 +190,7 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
         interactionMode = "text",
         meterCtx = null,
         onFirstDelta = null,
+        onMessageReady = null,
         minTurnsBeforeFinalize = null,
         maxTurns = null,
     }) {
@@ -298,6 +303,7 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
                     );
                     const collected = [];
                     let finalResponse = null;
+                    let messageSignaled = false;
                     for await (const event of stream) {
                         if (event?.type === "response.output_text.delta") {
                             if (!firstDeltaFired) {
@@ -306,6 +312,17 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
                                 catch (cbErr) { log.error("AGENT:SuperOrchestrator", `onFirstDelta callback threw: ${cbErr.message}`); }
                             }
                             if (typeof event.delta === "string") collected.push(event.delta);
+                            // Streaming-parse: assim que action.kind + action.message
+                            // fecham no JSON parcial, sinaliza para o caller disparar o
+                            // TTS sem esperar rationale/memory. Dispara no máximo uma vez.
+                            if (!messageSignaled && typeof onMessageReady === "function") {
+                                const ready = extractReadyAction(collected.join(""));
+                                if (ready) {
+                                    messageSignaled = true;
+                                    try { onMessageReady(ready.kind, ready.message); }
+                                    catch (cbErr) { log.error("AGENT:SuperOrchestrator", `onMessageReady threw: ${cbErr.message}`); }
+                                }
+                            }
                         } else if (event?.type === "response.completed") {
                             finalResponse = event.response ?? null;
                         }
