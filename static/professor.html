@@ -27,6 +27,16 @@
   .table-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
   .table-toolbar .spacer { flex: 1; }
 
+  /* Abas das seções do trabalho (Cenário · Alunos · Avaliação) */
+  .tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--ink-200); margin-bottom: var(--sp-4); flex-wrap: wrap; }
+  .tab-btn {
+    border: none; background: transparent; cursor: pointer;
+    padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); font-weight: 600;
+    color: var(--ink-500); border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--ink-900); }
+  .tab-btn.is-active { color: var(--accent-700); border-bottom-color: var(--accent-700); }
+
   .badge-blocked {
     background: #fde2e2;
     color: #8a1c1c;
@@ -91,6 +101,13 @@
       <div class="meta-row" id="meta"></div>
     </div>
 
+    <nav class="tabs" role="tablist" aria-label="Seções do trabalho">
+      <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Cenário</button>
+      <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
+      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; devolutivas</button>
+    </nav>
+
+    <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
       <p class="card-sub" id="enunciado-status">—</p>
@@ -207,10 +224,16 @@
         <span id="question-count-msg" class="hint"></span>
       </div>
     </div>
+    </div><!-- /tab-cenario -->
 
+    <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
     <div class="card">
       <h3 class="card-title">Tokens de envio para alunos</h3>
       <p class="card-sub">Gere tokens para cada aluno e compartilhe com eles. Cada token abre uma entrevista independente.</p>
+      <label class="row" style="align-items:flex-start; gap: var(--sp-2); margin: 0 0 var(--sp-3); cursor:pointer">
+        <input type="checkbox" id="sub-is-test" style="margin-top:3px"/>
+        <span class="card-sub" style="margin:0">Gerar como <strong>entrevista(s) de teste</strong> — só entrevistas de teste podem ser abertas por você para simular o aluno; as reais não expõem esse caminho (proteção). A marcação vale para o que você gerar agora e não muda depois.</span>
+      </label>
       <div class="sub-form">
         <div>
           <label class="label" for="sub-label">Nome do aluno</label>
@@ -241,6 +264,8 @@
             <option value="all">Todas</option>
             <option value="active" selected>Ativas</option>
             <option value="blocked">Bloqueadas</option>
+            <option value="test">De teste</option>
+            <option value="real">Reais</option>
           </select>
           <span class="spacer"></span>
           <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
@@ -253,7 +278,9 @@
         <div id="sub-filtered-empty" class="table-empty hidden">Nenhuma entrevista neste filtro.</div>
       </div>
     </div>
+    </div><!-- /tab-alunos -->
 
+    <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
     <div class="card">
       <h3 class="card-title">Avaliações e devolutivas</h3>
       <p class="card-sub">
@@ -262,6 +289,11 @@
         <strong>2</strong> gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa) →
         <strong>3</strong> publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.
       </p>
+
+      <div class="row" style="margin-bottom: var(--sp-3)">
+        <button id="open-cockpit" class="btn" type="button" title="Abre as avaliações com navegação lado a lado entre os alunos (cada turno com sua avaliação)">Abrir avaliações lado a lado ↗</button>
+        <span id="open-cockpit-msg" class="hint"></span>
+      </div>
 
       <label class="label" for="fb-guidelines">Diretrizes para a devolutiva (opcional) — tom, formato, o que destacar</label>
       <textarea id="fb-guidelines" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários e termine com um encorajamento."></textarea>
@@ -283,6 +315,7 @@
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
+    </div><!-- /tab-avaliacao -->
   </div>
 
 </main>
@@ -471,6 +504,8 @@ function renderSubmissionsTable() {
   const filtered = lastSubmissions.filter(s => {
     if (filter === 'active') return !s.is_blocked;
     if (filter === 'blocked') return !!s.is_blocked;
+    if (filter === 'test') return !!s.is_test;
+    if (filter === 'real') return !s.is_test;
     return true;
   });
 
@@ -487,7 +522,7 @@ function renderSubmissionsTable() {
     const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token);
     const hasConv = s.status !== 'pending';
     const convCell = hasConv
-      ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">Ver conversa ↗</a>`
+      ? `<a href="${convUrl}?view=conversa" target="_blank" title="Ver só a conversa (sem avaliação)">Ver conversa ↗</a>`
       : `<span class="muted">—</span>`;
     const feedbackBadge = s.evaluation_published_at
       ? ` <span class="badge badge-accent" title="Devolutiva visível para o aluno desde ${new Date(s.evaluation_published_at).toLocaleString()}">publicada</span>`
@@ -495,21 +530,25 @@ function renderSubmissionsTable() {
         ? ` <span class="badge badge-pending" title="Devolutiva gerada, aguardando revisão/publicação — o aluno ainda não vê">devolutiva pronta</span>`
         : '');
     const evalCell = s.has_evaluation
-      ? `<a href="${convUrl}" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir relatório"><span class="badge badge-completed">avaliada</span></a>${feedbackBadge}`
+      ? `<a href="${convUrl}?view=avaliacao" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir avaliação lado a lado"><span class="badge badge-completed">avaliada</span></a>${feedbackBadge}`
       : `<span class="muted">—</span>`;
     const blockedBadge = s.is_blocked ? `<span class="badge-blocked">bloqueada</span>` : '';
     const actionBtn = s.is_blocked
       ? `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta entrevista">Liberar</button>`
       : `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', true)" title="Pausa a entrevista; o aluno perde acesso até você liberar">Bloquear</button>`;
+    const abrirLink = s.is_test
+      ? `<a href="${url}" target="_blank" title="Abrir e simular o aluno (entrevista de teste)">abrir ↗</a>`
+      : '';
+    const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
     return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
       <td>
         <div class="row-tight">
           <code class="token-chip">${escapeHtml(s.submission_token)}</code>
           <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${s.submission_token}')">📋</button>
-          <a href="${url}" target="_blank" title="Abrir página do aluno">abrir ↗</a>
+          ${abrirLink}
         </div>
       </td>
-      <td>${escapeHtml(s.student_label || '—')}</td>
+      <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span>${blockedBadge}</td>
       <td>${convCell}</td>
       <td>${evalCell}</td>
@@ -1001,9 +1040,10 @@ document.getElementById('create-subs').onclick = async () => {
   const count = Number(document.getElementById('sub-count').value) || 1;
   msg.textContent = '';
   if (!label) { msg.textContent = 'Informe o nome do aluno.'; return; }
+  const is_test = document.getElementById('sub-is-test').checked;
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label, count })
+    body: JSON.stringify({ label, count, is_test })
   });
   const j = await r.json();
   if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
@@ -1024,9 +1064,10 @@ document.getElementById('create-bulk').onclick = async () => {
   const prev = btn.textContent;
   btn.textContent = 'Gerando…';
   try {
+    const is_test = document.getElementById('sub-is-test').checked;
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labels }),
+      body: JSON.stringify({ labels, is_test }),
     });
     const j = await r.json();
     if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
@@ -1043,6 +1084,14 @@ document.getElementById('sub-filter').addEventListener('change', renderSubmissio
 
 document.getElementById('download-csv').onclick = () => {
   window.location.href = `/w/${encodeURIComponent(workToken)}/submissions.csv`;
+};
+
+document.getElementById('open-cockpit').onclick = () => {
+  const msg = document.getElementById('open-cockpit-msg');
+  msg.textContent = '';
+  const first = (lastSubmissions || []).find(s => s.status !== 'pending');
+  if (!first) { msg.textContent = 'Nenhuma entrevista com conversa para avaliar ainda.'; return; }
+  window.open(`/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(first.submission_token)}?view=avaliacao`, '_blank');
 };
 
 // ---- Avaliação em lote das entrevistas ----
@@ -1555,6 +1604,33 @@ async function copyToken(btn, token) {
   btn.disabled = true;
   setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
 }
+
+// Abas das seções (Cenário · Alunos · Avaliação). Estado persistido por
+// localStorage e deep-linkável por hash (#alunos, #avaliacao).
+const TAB_NAMES = ['cenario', 'alunos', 'avaliacao'];
+function setTab(name) {
+  if (!TAB_NAMES.includes(name)) name = 'cenario';
+  TAB_NAMES.forEach(t => {
+    const panel = document.getElementById('tab-' + t);
+    const btn = document.getElementById('tab-btn-' + t);
+    const active = t === name;
+    if (panel) panel.classList.toggle('hidden', !active);
+    if (btn) { btn.classList.toggle('is-active', active); btn.setAttribute('aria-selected', String(active)); }
+  });
+  try { localStorage.setItem('prof_tab', name); } catch (e) {}
+  if (history.replaceState) history.replaceState(null, '', '#' + name);
+}
+TAB_NAMES.forEach(t => {
+  const btn = document.getElementById('tab-btn-' + t);
+  if (btn) btn.onclick = () => setTab(t);
+});
+(function initTab() {
+  const fromHash = (location.hash || '').replace('#', '');
+  let initial = 'cenario';
+  if (TAB_NAMES.includes(fromHash)) initial = fromHash;
+  else { try { const s = localStorage.getItem('prof_tab'); if (TAB_NAMES.includes(s)) initial = s; } catch (e) {} }
+  setTab(initial);
+})();
 
 // loadVoices() popula o dropdown de vozes; load() aplica a voz salva. A
 // ordem importa: precisamos das opções no DOM antes de tentar selecionar.
