@@ -98,8 +98,12 @@ export function renderTranscriptForEvaluation(conversation, audioArtifacts = [])
             if (d.latency_s != null) parts.push(`${d.latency_s}s entre a pergunta e a resposta final`);
             if (d.cps != null) parts.push(`${d.cps} caracteres/s digitados`);
             if (d.recording) {
-                parts.push(`gravação final de ${d.recording.duration_s}s`);
-                if (d.recording.thinking_s != null) parts.push(`~${d.recording.thinking_s}s entre a última fala do entrevistador e o início da resposta (inclui a escuta da pergunta)`);
+                if (d.recording.duration_s != null) parts.push(`gravação de ${d.recording.duration_s}s`);
+                if (d.recording.time_to_start_s != null) {
+                    parts.push(d.recording.start_source === "client"
+                        ? `${d.recording.time_to_start_s}s até começar a falar (medido: da pergunta pronta ao iniciar a gravação)`
+                        : `~${d.recording.time_to_start_s}s entre a última fala do entrevistador e o início da resposta (aproximado, inclui a escuta da pergunta)`);
+                }
                 if (d.recording.wps != null) parts.push(`${d.recording.wps} palavras/s ao falar`);
             }
             parts.push(`disfluências: ${d.disfluencies}`);
@@ -177,7 +181,8 @@ FORMA E ENTREGA (dimensão holística — campo "delivery"):
 Um entrevistador de verdade não ouve só o conteúdo: percebe ritmo, hesitação, cadência, registro de linguagem e tempo de reação. A transcrição traz, por turno, uma linha "FORMA DA RESPOSTA" (palavras, tempos, velocidade de fala/digitação, disfluências, registro escrito 0..1, polimento 0..1) e linhas "SINAL AUTOMÁTICO DE FORMA" quando alguma heurística disparou. Semântica dos principais:
 - "registro escrito" alto numa FALA = subordinação e vocabulário de prosa que quase ninguém improvisa oralmente; combinado com ZERO disfluências numa resposta longa, é compatível com leitura de texto pronto.
 - velocidade de digitação acima de ~22 caracteres/s em resposta longa = compatível com colagem.
-- "~Ns entre a última fala do entrevistador e o início da resposta" (modo voz) = aproximação do tempo pensando antes de falar; inclui a escuta da pergunta, então valores moderados são NORMAIS.
+- "Ns até começar a falar (medido)" (modo voz) = tempo real entre a pergunta ficar pronta e o respondente iniciar a gravação. Pensar um pouco é normal; tempos muito longos antes de respostas longas e polidas podem indicar consulta. "~Ns ... (aproximado)" é a versão estimada por timestamps (inclui a escuta da pergunta) — mais ruidosa.
+- "gravou Xs mas disse quase nada" = abriu o microfone e quase não falou — possível tentativa de "começar" só para ganhar tempo (anti-gaming do início rápido).
 - "mudança de registro" = resposta muito mais estruturada que a mediana do próprio respondente — sugere ajuda seletiva nas perguntas difíceis.
 Incorpore essas percepções na sua avaliação como a persona faria: comente-as em "delivery", deixe-as colorir o interviewer_impression e, quando convergirem com sinais de conteúdo, alimente os authorship_signals. São heurísticas com risco real de falso positivo (gente que digita rápido, fala formal por hábito, pensa devagar) — então NUNCA rebaixe o mérito de conteúdo de uma resposta (per_question) por sinal de forma, e NUNCA conclua autoria a partir de tempo isolado. Forma corrobora; conteúdo decide.
 
@@ -233,17 +238,30 @@ Sobre "delivery": overall_impression resume como o respondente SOOU (natural = f
      * @param {string} p.interviewerYamlText - YAML cru do entrevistador
      * @param {object} p.conversation    - conversation_json parseado
      * @param {Array}  p.audioArtifacts  - metadados das gravações (pode ser vazio)
+     * @param {boolean} p.expectSpontaneous - o trabalho declarou exigir "resposta de cabeça"
      * @param {object|null} p.meterCtx   - contexto de billing
      */
-    async evaluate({ enunciadoFileId, studentFileId, interviewerYamlText, conversation, audioArtifacts = [], meterCtx = null }) {
+    async evaluate({ enunciadoFileId, studentFileId, interviewerYamlText, conversation, audioArtifacts = [], expectSpontaneous = false, meterCtx = null }) {
         if (!enunciadoFileId) throw new Error("InterviewEvaluator: missing enunciadoFileId");
         if (!studentFileId) throw new Error("InterviewEvaluator: missing studentFileId");
         if (!interviewerYamlText) throw new Error("InterviewEvaluator: missing interviewerYamlText");
         if (!conversation) throw new Error("InterviewEvaluator: missing conversation");
 
+        // Quando o trabalho declarou exigir espontaneidade ("de cabeça"), a
+        // forma/entrega vira CRITÉRIO declarado — o campo delivery deixa de ser
+        // só corroboração e passa a ser uma dimensão reportada de propósito.
+        const spontaneityBlock = expectSpontaneous ? `
+
+ESTE TRABALHO EXIGE RESPOSTA "DE CABEÇA" (CRITÉRIO DECLARADO AO RESPONDENTE):
+O respondente foi avisado, na abertura, de que se espera resposta espontânea, na hora, com as próprias palavras — pode pensar, pausar, hesitar e se corrigir, mas NÃO consultar IA, pesquisar nem ler texto pronto. Portanto, neste trabalho, a dimensão "delivery" NÃO é só corroboração: é uma dimensão de avaliação por direito próprio, que o professor pediu para medir. Avalie em "delivery" se o respondente correspondeu a essa expectativa, usando as linhas de FORMA e os SINAIS automáticos:
+- O que CUMPRE a expectativa (delivery="natural"): começar a falar em tempo razoável, fala conversacional COM hesitações/autocorreções/disfluências naturais, conteúdo construído na hora. ATENÇÃO: hesitar, gaguejar e se corrigir é PROVA A FAVOR, não defeito — não confunda "fluência polida" com espontaneidade; o monólogo perfeito demais é o suspeito.
+- O que CONTRARIA (delivery="scripted"): textura de leitura (registro escrito + zero disfluência + ritmo constante), tempos de início longos seguidos de respostas longas e polidas, ou abrir o microfone e quase não falar (stall) repetidamente.
+- "mixed" quando varia entre turnos; "inconclusive" quando há pouca informação de forma (ex.: modo texto curto, sem instrumentação).
+REGRAS QUE PERMANECEM (mesmo sendo critério): conteúdo e espontaneidade são EIXOS SEPARADOS — nunca rebaixe o mérito de uma resposta em per_question por causa da forma. NUNCA acuse: você reporta evidências de forma para o PROFESSOR decidir o peso; um respondente lento, ansioso, não-nativo ou que pensa devagar pode disparar sinais sem ter feito nada errado. Em "delivery.observations", seja concreto (cite o turno e o sinal) e calibre a confiança honestamente.` : "";
+
         const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
 
-${this.systemPromptBody}`;
+${this.systemPromptBody}${spontaneityBlock}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const transcript = renderTranscriptForEvaluation(conversation, audioArtifacts);
         const userText = `**AGENDA DO ENTREVISTADOR**

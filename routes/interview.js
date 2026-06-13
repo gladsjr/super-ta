@@ -804,6 +804,14 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         message = (req.body?.message || "").toString();
     }
     if (!message) return res.status(400).json({ error: "empty message" });
+    // Instrumentação de espontaneidade (Fase 2): tempos do cliente (modo áudio).
+    // time_to_start = da pergunta pronta ao apertar gravar; record_duration = fala.
+    // Gravados no turno (conversation_json) para a avaliação da espontaneidade.
+    const clientTimeToStartMs = numOrNull(req.body?.client_time_to_start_ms);
+    const clientRecordDurationMs = numOrNull(req.body?.client_record_duration_ms);
+    const clientTiming = (clientTimeToStartMs != null || clientRecordDurationMs != null)
+        ? { time_to_start_ms: clientTimeToStartMs, record_duration_ms: clientRecordDurationMs }
+        : null;
     // Arquivamento da gravação do aluno (best-effort, audio mode apenas).
     // Acontece ANTES do pré-gate — áudios ininteligíveis também são
     // arquivados como evidência pra eventual auditoria. Falha silenciosa.
@@ -1125,6 +1133,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             currentTurn.answer = message;
             currentTurn.answered_at = new Date().toISOString();
             currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+            if (clientTiming) currentTurn.client_timing = clientTiming;
         }
         const audio = await attachAudio(sess, forcedMessage);
         sess.conv_chat.push({ role: "assistant", content: forcedMessage });
@@ -1292,6 +1301,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 assistant_audio_duration_seconds: assistantAudioSec,
                 rationale,
                 follow_up_reason: parsed.action.follow_up_reason ?? null,
+                client_timing: clientTiming,
                 at: new Date().toISOString(),
             });
         }
@@ -1309,6 +1319,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             currentTurn.answer = message;
             currentTurn.answered_at = new Date().toISOString();
             currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+            if (clientTiming) currentTurn.client_timing = clientTiming;
         }
         const planQId = parsed.action.plan_question_id ?? null;
         const planQuestion = planQId != null
@@ -1354,6 +1365,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             currentTurn.answer = message;
             currentTurn.answered_at = new Date().toISOString();
             currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+            if (clientTiming) currentTurn.client_timing = clientTiming;
         }
         sess.currentPhase = "finalizing";
         sess.conversationCompleted = true;

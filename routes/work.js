@@ -440,6 +440,7 @@ async function evaluateSubmissionNow(work, found, { force }) {
         interviewerYamlText,
         conversation,
         audioArtifacts,
+        expectSpontaneous: work.expect_spontaneous === true,
         meterCtx: { workId: work.id },
     });
     const evaluatedAt = await db.setEvaluationCache(found.id, report);

@@ -1581,6 +1581,10 @@
     let recordedChunks = [];
     let recordTimer = null;
     let recordStartedAt = 0;
+    // Instrumentação de espontaneidade (Fase 2): instante em que a pergunta do
+    // entrevistador terminou de tocar — referência para o "tempo até começar a
+    // falar". Atualizado em afterInterviewerAudio.
+    let questionReadyAt = 0;
 
     // ---- Análise acústica (camada de pré-gate, espelha lib/acousticGate.js) ----
     // Calculada AQUI porque o PCM do microfone está disponível de graça no
@@ -1754,7 +1758,7 @@
       const audioEl = wrap?.querySelector ? wrap.querySelector('audio') : null;
       if (interactionMode !== 'audio' || !audioEl) { cb(); return; }
       let done = false;
-      const fire = () => { if (!done) { done = true; cb(); } };
+      const fire = () => { if (!done) { done = true; questionReadyAt = Date.now(); cb(); } };
       if (audioEl.ended) { fire(); return; }
       audioEl.addEventListener('ended', fire, { once: true });
       audioEl.addEventListener('error', fire, { once: true });
@@ -1850,6 +1854,15 @@
       // para o busboy/multer expor o campo em req.body. Ausente se Web Audio
       // indisponível.
       if (snrEstimate != null) form.append('acoustic_snr', String(snrEstimate));
+      // Instrumentação de espontaneidade (Fase 2): tempo até começar a falar
+      // (da pergunta pronta ao apertar gravar) e duração da fala. Campos de
+      // texto ANTES do arquivo (mesma razão do acoustic_snr).
+      if (questionReadyAt && recordStartedAt && recordStartedAt >= questionReadyAt) {
+        form.append('client_time_to_start_ms', String(recordStartedAt - questionReadyAt));
+      }
+      if (recordStartedAt) {
+        form.append('client_record_duration_ms', String(Date.now() - recordStartedAt));
+      }
       form.append('audio', blob, 'student.webm');
       let r, j;
       try {
