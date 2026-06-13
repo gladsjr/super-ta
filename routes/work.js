@@ -276,6 +276,8 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
             if (conversation && artifacts.length > 0) {
                 conversation.student_audio = artifacts.map(a => ({
                     audio_idx: a.audio_idx,
+                    turn_index: a.turn_index,                 // casa a gravação com o turno (null = intro/sem turno)
+                    intervention_index: a.intervention_index,
                     mimetype: a.mimetype,
                     duration_s: a.duration_s ? Number(a.duration_s) : null,
                     byte_size: a.byte_size,

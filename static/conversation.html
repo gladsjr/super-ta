@@ -41,6 +41,10 @@
   .turn-eval-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
   .turn-eval .te-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; color: var(--accent-700, #1d4ed8); }
 
+  /* Voz do aluno colada ao turno */
+  .turn-audio { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg-muted); border-radius: var(--r-md); }
+  .turn-audio-label { font-size: var(--fs-xs); font-weight: 600; color: var(--ink-500); margin-bottom: var(--sp-1); }
+
   .block { border-left: 4px solid transparent; padding: var(--sp-2) var(--sp-3); border-radius: 0 var(--r-md) var(--r-md) 0; margin-top: var(--sp-2); }
   .block .label { font-weight: 600; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--sp-1); color: var(--ink-500); }
   .block .content { white-space: pre-wrap; line-height: 1.5; color: var(--ink-900); }
@@ -489,6 +493,18 @@ const subToken = parts[3];
 // Default conversa — o caminho "Ver conversa" não revela a avaliação.
 const VIEW_MODE = new URLSearchParams(location.search).get('view') === 'avaliacao' ? 'avaliacao' : 'conversa';
 
+// Gravações do aluno agrupadas por turno (modo áudio). Populado em load() antes
+// de renderizar os turnos; renderTurn lê daqui para pôr a voz junto de cada turno.
+let audioByTurn = new Map();
+function fmtAudioDur(s) { return s == null ? '—' : (s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s/60)}m${String(Math.round(s%60)).padStart(2,'0')}s`); }
+function fmtAudioSize(b) { return b == null ? '—' : (b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`); }
+function renderAudioRow(a) {
+  return `<div class="audio-row">
+    <div class="audio-meta"><strong>🎙 #${a.audio_idx}</strong> <span>${fmtAudioDur(a.duration_s)}</span> <span>${fmtAudioSize(a.byte_size)}</span> <span>${escapeHtml(a.mimetype ?? '—')}</span></div>
+    <audio controls preload="none" src="${escapeHtml(a.audio_url)}"></audio>
+  </div>`;
+}
+
 document.getElementById('back-link').href = '/w/' + encodeURIComponent(workToken || '');
 
 // ---- Cockpit: navegação lateral entre alunos (setas + teclado) ----
@@ -635,6 +651,14 @@ function renderTurn(turn) {
       <span class="arrow">→</span>Transição: "${escapeHtml(turn.transition_to_next)}"
     </div>` : '';
 
+  // Voz do aluno deste turno, logo abaixo da resposta (modo áudio).
+  const turnAudios = audioByTurn.get(turn.index) || [];
+  const audioBlock = turnAudios.length ? `
+    <div class="turn-audio">
+      <div class="turn-audio-label">🎙 Voz do aluno neste turno</div>
+      ${turnAudios.map(renderAudioRow).join('')}
+    </div>` : '';
+
   const metaRows = [
     ['Objectives', m.objectives],
     ['Concerns', m.concerns],
@@ -653,6 +677,7 @@ function renderTurn(turn) {
       ${rBlock}
       ${ivBlock}
       ${aBlock}
+      ${audioBlock}
       ${tBlock}
       <details class="meta">
         <summary>Metadados da pergunta</summary>
@@ -1191,22 +1216,20 @@ async function load() {
     document.getElementById('doc-map-body').textContent = JSON.stringify(conv.document_map, null, 2);
   }
 
+  // Gravações do aluno: agrupa por turno para colá-las à conversa (renderTurn).
+  // Só sobra no bloco coletivo o que não casa com um turno (ex.: intro).
   const studentAudios = Array.isArray(conv.student_audio) ? conv.student_audio : [];
-  if (studentAudios.length > 0) {
-    const fmtDur = s => s == null ? '—' : (s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s/60)}m${String(Math.round(s%60)).padStart(2,'0')}s`);
-    const fmtSize = b => b == null ? '—' : (b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`);
+  audioByTurn = new Map();
+  const unmatchedAudios = [];
+  studentAudios.forEach(a => {
+    if (a.turn_index == null) { unmatchedAudios.push(a); return; }
+    if (!audioByTurn.has(a.turn_index)) audioByTurn.set(a.turn_index, []);
+    audioByTurn.get(a.turn_index).push(a);
+  });
+  if (unmatchedAudios.length > 0) {
     document.getElementById('student-audio-summary').textContent =
-      `Gravações do aluno (${studentAudios.length})`;
-    document.getElementById('student-audio-body').innerHTML = studentAudios.map(a => `
-      <div class="audio-row">
-        <div class="audio-meta">
-          <strong>#${a.audio_idx}</strong>
-          <span>${fmtDur(a.duration_s)}</span>
-          <span>${fmtSize(a.byte_size)}</span>
-          <span>${escapeHtml(a.mimetype ?? '—')}</span>
-        </div>
-        <audio controls preload="none" src="${escapeHtml(a.audio_url)}"></audio>
-      </div>`).join('');
+      `Outras gravações do aluno (${unmatchedAudios.length}) — fora dos turnos`;
+    document.getElementById('student-audio-body').innerHTML = unmatchedAudios.map(renderAudioRow).join('');
     document.getElementById('student-audio').classList.remove('hidden');
   }
 
