@@ -138,7 +138,7 @@ flowchart LR
   EvalCache -- "miss / force" --> EvalAgent["InterviewEvaluatorAgent<br/>(principal_reasoning_model,<br/>input_file=enunciado+entrega,<br/>agenda + transcrição em texto)"]
   EvalAgent --> OutEvalFresh>"Relatório novo + cache"]
 
-  ConvUI --> DeriveHandler["POST /submissions/:subToken/evaluation/student-version<br/>(gera a PRÉVIA, sem publicar; PUT salva edição<br/>do professor, DELETE descarta a edição)"]
+  ConvUI --> DeriveHandler["POST /submissions/:subToken/evaluation/student-version<br/>(gera a PRÉVIA, sem publicar; body {guidelines} = diretriz ad-hoc;<br/>PUT salva edição, DELETE descarta; PATCH /sections = visibilidade)"]
   ProfUI --> DeriveBatch["POST /evaluations/student-versions<br/>(lote de prévias)"]
   DeriveBatch --> DeriveHandler
   DeriveHandler --> FeedbackAgent["StudentFeedbackAgent<br/>(principal_reasoning_model,<br/>deriva devolutiva FORMATIVA do<br/>relatório interno; gate de sanitização<br/>no código + retry)"]

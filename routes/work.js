@@ -61,6 +61,9 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 interviewer_gender: req.work.interviewer_gender,
                 feedback_guidelines: req.work.feedback_guidelines,
                 include_interviewer_opinion: req.work.include_interviewer_opinion,
+                include_strengths: req.work.include_strengths,
+                include_improvement_areas: req.work.include_improvement_areas,
+                include_study_suggestions: req.work.include_study_suggestions,
                 budget_usd: balance?.budget_usd ?? 0,
                 spent_usd: balance?.spent_usd ?? 0,
                 remaining_usd: balance?.remaining_usd ?? 0,
@@ -441,23 +444,33 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
     }
 });
 
+// Chaves de seção aceitas nos PATCHes (espelha db.FEEDBACK_SECTIONS).
+const SECTION_KEYS = ["interviewer_opinion", "strengths", "improvement_areas", "study_suggestions"];
+
 // Configurações de devolutiva do TRABALHO: diretrizes de geração (tom,
-// formato, ênfases) e default de inclusão da opinião do entrevistador.
-// Valem para os lotes (que propagam o default às submissões tocadas).
+// formato, ênfases) e defaults de visibilidade das seções. Valem para os
+// lotes (que propagam às submissões tocadas). PATCH parcial. Com
+// apply_to_all=true, propaga as flags a TODAS as submissões na hora (sem LLM).
 router.patch("/w/:workToken/feedback-settings", requireWorkToken, express.json({ limit: "32kb" }), async (req, res) => {
     const guidelines = req.body?.feedback_guidelines;
     if (guidelines !== null && guidelines !== undefined && typeof guidelines !== "string") {
         return res.status(400).json({ error: "feedback_guidelines deve ser string ou null" });
     }
-    // PATCH parcial: campo ausente mantém o valor atual do trabalho.
-    const includeOpinion = typeof req.body?.include_interviewer_opinion === "boolean"
-        ? req.body.include_interviewer_opinion
-        : req.work.include_interviewer_opinion;
+    // Campo ausente mantém o valor atual do trabalho.
+    const sections = {};
+    for (const k of SECTION_KEYS) {
+        const col = k === "interviewer_opinion" ? "include_interviewer_opinion" : `include_${k}`;
+        sections[k] = typeof req.body?.[k] === "boolean" ? req.body[k] : req.work[col];
+    }
     const newGuidelines = guidelines === undefined ? req.work.feedback_guidelines : guidelines;
     try {
-        const saved = await db.setWorkFeedbackSettings(req.work.id, newGuidelines ?? null, includeOpinion);
-        log.info("PUBLISH", `feedback settings work=${req.work.work_token} guidelines=${saved.feedback_guidelines ? saved.feedback_guidelines.length + " chars" : "-"} include_opinion=${saved.include_interviewer_opinion}`);
-        res.json({ ok: true, ...saved });
+        const saved = await db.setWorkFeedbackSettings(req.work.id, newGuidelines ?? null, sections);
+        if (req.body?.apply_to_all === true) {
+            await db.applyWorkSectionsToAllSubmissions(req.work.id);
+            log.info("PUBLISH", `feedback sections applied to all submissions work=${req.work.work_token}`);
+        }
+        log.info("PUBLISH", `feedback settings work=${req.work.work_token} guidelines=${saved.feedback_guidelines ? saved.feedback_guidelines.length + " chars" : "-"} sections=${JSON.stringify(sections)}`);
+        res.json({ ok: true, feedback_guidelines: saved.feedback_guidelines, sections });
     } catch (err) {
         log.error("PUBLISH", `feedback settings failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar as configurações de devolutiva" });
@@ -470,14 +483,28 @@ router.patch("/w/:workToken/feedback-settings", requireWorkToken, express.json({
 // EDITAR; a automática fica preservada em coluna própria) → publicar.
 // Publicar nunca gera: exige versão existente.
 
+// Defaults de visibilidade do trabalho, no formato de db.setSubmissionSections.
+function workSectionDefaults(work) {
+    return {
+        interviewer_opinion: work.include_interviewer_opinion !== false,
+        strengths: work.include_strengths !== false,
+        improvement_areas: work.include_improvement_areas !== false,
+        study_suggestions: work.include_study_suggestions !== false,
+    };
+}
+
 function studentEvaluationPayload(student) {
     return {
-        student_evaluation: student?.report ?? null,            // efetiva (editada ?? automática; opinião sempre da automática)
+        student_evaluation: student?.report ?? null,            // efetiva: base − seções desligadas + opinião se ligada
+        student_evaluation_base: student?.base_report ?? null,  // base sem filtro (para o editor)
         student_evaluation_auto: student?.auto_report ?? null,
         student_evaluation_at: student?.generated_at ?? null,
         student_evaluation_edited: student?.edited_report ?? null,
         student_evaluation_edited_at: student?.edited_at ?? null,
         published_at: student?.published_at ?? null,
+        sections: student?.sections ?? null,                    // visibilidade por seção
+        section_has: student?.section_has ?? null,              // presença de conteúdo por seção
+        // compat
         include_interviewer_opinion: student?.include_interviewer_opinion ?? true,
         has_interviewer_opinion: student?.has_interviewer_opinion ?? false,
     };
@@ -486,7 +513,10 @@ function studentEvaluationPayload(student) {
 // Gera a versão AUTOMÁTICA (sem publicar). force=true regenera; a versão
 // editada (se houver) não é tocada — ela continua sendo a efetiva até o
 // professor restaurar a automática.
-async function deriveStudentVersionNow(work, found, { force }) {
+// guidelinesOverride: undefined = usa as diretrizes do trabalho (lote);
+// string|null = diretriz AD-HOC desta geração (experimento do professor num
+// aluno, sem alterar o padrão do trabalho).
+async function deriveStudentVersionNow(work, found, { force, guidelinesOverride }) {
     const subToken = found.submission_token;
     const internal = await db.getEvaluationCache(found.id);
     if (!internal) {
@@ -499,10 +529,11 @@ async function deriveStudentVersionNow(work, found, { force }) {
     if (existing?.auto_report && !force) {
         return { ...studentEvaluationPayload(existing), generated: false };
     }
-    log.info("PUBLISH", `derive student feedback submission=${subToken} force=${force} guidelines=${work.feedback_guidelines ? "yes" : "no"}`);
+    const guidelines = guidelinesOverride === undefined ? (work.feedback_guidelines ?? null) : guidelinesOverride;
+    log.info("PUBLISH", `derive student feedback submission=${subToken} force=${force} guidelines=${guidelines ? "yes" : "no"}${guidelinesOverride !== undefined ? " (ad-hoc)" : ""}`);
     const report = await studentFeedbackAgent.derive({
         internalReport: internal.report,
-        guidelines: work.feedback_guidelines ?? null,
+        guidelines,
         meterCtx: { workId: work.id },
     });
     await db.setStudentEvaluation(found.id, report);
@@ -525,15 +556,25 @@ async function publishSubmissionNow(work, found) {
 }
 
 // Gera a versão automática (prévia, sem publicar). ?force=true regenera.
-router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireWithinBudget, async (req, res) => {
+// Body opcional { guidelines }: diretriz AD-HOC desta geração (experimento
+// num aluno) — NÃO altera o padrão do trabalho. Ausente = usa o padrão.
+router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
     const subToken = String(req.params.subToken || "").toLowerCase();
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
+    const hasOverride = req.body && Object.prototype.hasOwnProperty.call(req.body, "guidelines");
+    const rawOverride = req.body?.guidelines;
+    if (hasOverride && rawOverride !== null && typeof rawOverride !== "string") {
+        return res.status(400).json({ error: "guidelines deve ser string ou null" });
+    }
+    const guidelinesOverride = hasOverride
+        ? (typeof rawOverride === "string" && rawOverride.trim() ? rawOverride.trim() : null)
+        : undefined;
     try {
         const found = await db.findSubmissionByToken(subToken);
         if (!found || found.work_id !== req.work.id) {
             return res.status(404).json({ error: "submission not found" });
         }
-        const result = await deriveStudentVersionNow(req.work, found, { force });
+        const result = await deriveStudentVersionNow(req.work, found, { force, guidelinesOverride });
         res.json(result);
     } catch (err) {
         if (err.notReady) return res.status(err.httpStatus ?? 409).json({ error: err.message });
@@ -587,25 +628,31 @@ router.delete("/w/:workToken/submissions/:subToken/evaluation/student-version", 
     }
 });
 
-// Liga/desliga a inclusão da opinião do entrevistador no que o aluno vê.
-// É a ÚNICA escolha do professor sobre essa parte — o texto não é editável.
-router.patch("/w/:workToken/submissions/:subToken/evaluation/interviewer-opinion", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
+// Liga/desliga a visibilidade de seções da devolutiva DESTE aluno (toggle
+// instantâneo, sem regerar). Body: subconjunto de SECTION_KEYS → boolean.
+// A opinião do entrevistador é uma dessas seções; o texto não é editável,
+// só a inclusão.
+router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
     const subToken = String(req.params.subToken || "").toLowerCase();
-    if (typeof req.body?.include !== "boolean") {
-        return res.status(400).json({ error: "include (boolean) required" });
+    const partial = {};
+    for (const k of SECTION_KEYS) {
+        if (typeof req.body?.[k] === "boolean") partial[k] = req.body[k];
+    }
+    if (Object.keys(partial).length === 0) {
+        return res.status(400).json({ error: `informe ao menos uma seção (${SECTION_KEYS.join(", ")}) como boolean` });
     }
     try {
         const found = await db.findSubmissionByToken(subToken);
         if (!found || found.work_id !== req.work.id) {
             return res.status(404).json({ error: "submission not found" });
         }
-        await db.setIncludeInterviewerOpinion(found.id, req.body.include);
+        await db.setSubmissionSections(found.id, partial);
         const student = await db.getStudentEvaluation(found.id);
-        log.info("PUBLISH", `interviewer-opinion include=${req.body.include} submission=${subToken}`);
+        log.info("PUBLISH", `sections ${JSON.stringify(partial)} submission=${subToken}`);
         res.json(studentEvaluationPayload(student));
     } catch (err) {
-        log.error("PUBLISH", `interviewer-opinion toggle failed submission=${subToken}: ${err.message}`);
-        res.status(500).json({ error: "falha ao atualizar a inclusão da opinião do entrevistador" });
+        log.error("PUBLISH", `sections toggle failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao atualizar as seções da devolutiva" });
     }
 });
 
@@ -841,10 +888,10 @@ router.post("/w/:workToken/evaluations/student-versions", requireWorkToken, requ
         ? "nenhuma submissão com avaliação — avalie as entrevistas antes de gerar devolutivas"
         : "nenhuma devolutiva nova para gerar — todas as avaliadas já têm versão do aluno",
     itemFn: async (work, found, force) => {
-        // O lote aplica o default do trabalho para a opinião do entrevistador
-        // a todas as submissões tocadas; ajuste fino por aluno vem depois,
-        // na página da conversa.
-        await db.setIncludeInterviewerOpinion(found.id, work.include_interviewer_opinion !== false);
+        // O lote aplica os defaults de visibilidade do trabalho (opinião e
+        // seções) a todas as submissões tocadas; ajuste fino por aluno vem
+        // depois, na página da conversa.
+        await db.setSubmissionSections(found.id, workSectionDefaults(work));
         const r = await deriveStudentVersionNow(work, found, { force });
         return { skipped: !r.generated };
     },
@@ -859,7 +906,7 @@ router.post("/w/:workToken/evaluations/publish", requireWorkToken, express.json(
         ? "nenhuma devolutiva gerada para publicar — gere as versões do aluno antes"
         : "nenhuma devolutiva nova para publicar — todas as geradas já estão publicadas",
     itemFn: async (work, found) => {
-        await db.setIncludeInterviewerOpinion(found.id, work.include_interviewer_opinion !== false);
+        await db.setSubmissionSections(found.id, workSectionDefaults(work));
         await publishSubmissionNow(work, found);
         return { skipped: false };
     },

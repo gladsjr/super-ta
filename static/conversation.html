@@ -266,6 +266,31 @@
   .editor-textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--fs-sm); padding: var(--sp-2); border: 1px solid var(--ink-200); border-radius: var(--r-sm); background: var(--bg-raised); resize: vertical; }
   .editor-q-gist { font-size: var(--fs-sm); color: var(--ink-700); margin: var(--sp-3) 0 var(--sp-1); }
 
+  .cockpit-nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    background: var(--bg-raised);
+    border: 1px solid var(--ink-100);
+    border-radius: var(--r-md);
+    padding: var(--sp-2) var(--sp-3);
+    margin-bottom: var(--sp-3);
+    box-shadow: var(--sh-sm);
+  }
+  .cockpit-counter { font-size: var(--fs-sm); color: var(--ink-700); font-weight: 600; text-align: center; flex: 1; }
+  .cockpit-counter .muted { font-weight: 400; color: var(--ink-500); }
+
+  .eval-sections { margin-top: var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3); }
+  .eval-sections .sf-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--ink-500); margin-bottom: var(--sp-2); }
+  .eval-section-toggle { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-1) 0; font-size: var(--fs-sm); cursor: pointer; }
+  .eval-section-toggle input { margin-top: 3px; }
+  .eval-section-toggle.empty { color: var(--ink-400); }
+  .eval-sections-apply { margin-top: var(--sp-2); }
+
   .finalization-card {
     margin-top: var(--sp-4);
     background: var(--bg-muted);
@@ -293,6 +318,12 @@
 </header>
 
 <main class="page">
+
+  <div id="cockpit-nav" class="cockpit-nav hidden">
+    <button class="btn btn-sm" id="nav-prev" title="Aluno anterior (←)">◀ Anterior</button>
+    <span id="nav-counter" class="cockpit-counter"></span>
+    <button class="btn btn-sm" id="nav-next" title="Próximo aluno (→)">Próximo ▶</button>
+  </div>
 
   <div class="page-header">
     <h1 id="work-name">Conversa</h1>
@@ -333,10 +364,28 @@
         formativa (prévia abaixo) → revisar (e editar, se quiser; a automática
         fica preservada) → publicar. O aluno só vê depois de publicada.
       </p>
-      <label class="eval-publish-help hidden" id="opinion-toggle-row" style="display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;">
-        <input type="checkbox" id="opinion-toggle">
-        <span>Incluir a <strong>opinião do entrevistador</strong> no que o aluno vê (a impressão registrada na avaliação, publicada como está — você decide incluir ou não, mas não a edita)</span>
-      </label>
+      <div class="eval-sections hidden" id="eval-sections">
+        <div class="sf-label">Seções incluídas no que o aluno vê</div>
+        <label class="eval-section-toggle" id="sec-row-interviewer_opinion">
+          <input type="checkbox" data-section="interviewer_opinion">
+          <span><strong>Opinião do entrevistador</strong> — a impressão registrada na avaliação, publicada como está (não editável; você só decide incluir)</span>
+        </label>
+        <label class="eval-section-toggle" id="sec-row-strengths">
+          <input type="checkbox" data-section="strengths">
+          <span><strong>O que sustentou bem</strong></span>
+        </label>
+        <label class="eval-section-toggle" id="sec-row-improvement_areas">
+          <input type="checkbox" data-section="improvement_areas">
+          <span><strong>O que pode melhorar</strong></span>
+        </label>
+        <label class="eval-section-toggle" id="sec-row-study_suggestions">
+          <input type="checkbox" data-section="study_suggestions">
+          <span><strong>Sugestões de estudo</strong></span>
+        </label>
+        <div class="eval-sections-apply">
+          <button class="btn btn-ghost btn-sm" id="sections-apply-all-btn" title="Usa estas escolhas de seção como padrão do trabalho e aplica a todos os alunos (não regenera nada)">Aplicar estas seções a todos os alunos</button>
+        </div>
+      </div>
       <div class="notice notice-error eval-error hidden" id="eval-publish-error"></div>
       <div class="notice eval-error hidden" id="eval-publish-warning" style="background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700);"></div>
       <details class="student-eval-preview hidden" id="student-eval-preview" open>
@@ -344,15 +393,20 @@
         <div id="student-eval-preview-body"></div>
       </details>
       <div id="rederive-form" class="student-eval-editor hidden">
-        <div class="sf-label">Regerar a devolutiva automática</div>
+        <div class="sf-label">Regerar a devolutiva — experimentar diretrizes</div>
         <p class="eval-publish-help" style="margin-top: 0;">
-          As diretrizes abaixo orientam a geração (tom, formato, o que destacar)
-          e valem para o <strong>trabalho inteiro</strong> — editar aqui salva
-          para todos. A edição manual desta devolutiva, se houver, é preservada.
+          As diretrizes orientam a geração (tom, formato, o que destacar).
+          Aqui você experimenta <strong>só neste aluno</strong> — o padrão do
+          trabalho não muda até você marcar a opção abaixo. A edição manual
+          desta devolutiva, se houver, é preservada.
         </p>
         <textarea id="rederive-guidelines" class="editor-textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários."></textarea>
+        <label class="eval-section-toggle" style="margin-top: var(--sp-2);">
+          <input type="checkbox" id="rederive-save-default">
+          <span>Salvar estas diretrizes como padrão do trabalho (afeta as próximas gerações em lote)</span>
+        </label>
         <div class="eval-publish-row" style="margin-top: var(--sp-2);">
-          <button class="btn btn-primary btn-sm" id="rederive-go-btn">Salvar diretrizes e regerar</button>
+          <button class="btn btn-primary btn-sm" id="rederive-go-btn">Regerar para este aluno</button>
           <button class="btn btn-sm" id="rederive-cancel-btn">Cancelar</button>
         </div>
       </div>
@@ -423,6 +477,46 @@ const workToken = parts[1];
 const subToken = parts[3];
 
 document.getElementById('back-link').href = '/w/' + encodeURIComponent(workToken || '');
+
+// ---- Cockpit: navegação lateral entre alunos (setas + teclado) ----
+// Reaproveita a própria página: prev/next navegam para a conversa do aluno
+// vizinho. A lista vem de /w/:t/info (mesma ordem do painel), filtrando os
+// que têm conversa (status != pendente — pendentes não têm o que revisar).
+let cockpitPrev = null, cockpitNext = null;
+async function setupCockpitNav() {
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/info`);
+    if (!r.ok) return;
+    const j = await r.json();
+    const list = (j.submissions || []).filter(s => s.status !== 'pending');
+    const idx = list.findIndex(s => s.submission_token === subToken);
+    if (idx === -1 || list.length <= 1) return;
+    cockpitPrev = idx > 0 ? list[idx - 1] : null;
+    cockpitNext = idx < list.length - 1 ? list[idx + 1] : null;
+    const nav = document.getElementById('cockpit-nav');
+    document.getElementById('nav-counter').innerHTML =
+      `Aluno ${idx + 1} de ${list.length} <span class="muted">· ${escapeHtml(list[idx].student_label || subToken)}</span>`;
+    const prevBtn = document.getElementById('nav-prev');
+    const nextBtn = document.getElementById('nav-next');
+    prevBtn.disabled = !cockpitPrev;
+    nextBtn.disabled = !cockpitNext;
+    if (cockpitPrev) prevBtn.title = `Anterior: ${cockpitPrev.student_label || cockpitPrev.submission_token} (←)`;
+    if (cockpitNext) nextBtn.title = `Próximo: ${cockpitNext.student_label || cockpitNext.submission_token} (→)`;
+    nav.classList.remove('hidden');
+  } catch { /* nav é melhoria; se falhar, a página segue normal */ }
+}
+function gotoSubmission(s) {
+  if (s) location.href = `/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(s.submission_token)}`;
+}
+document.getElementById('nav-prev').addEventListener('click', () => gotoSubmission(cockpitPrev));
+document.getElementById('nav-next').addEventListener('click', () => gotoSubmission(cockpitNext));
+document.addEventListener('keydown', e => {
+  // Não sequestra setas quando o foco está num campo de texto (editor/diretrizes).
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'textarea' || tag === 'input' || e.target.isContentEditable) return;
+  if (e.key === 'ArrowLeft') gotoSubmission(cockpitPrev);
+  else if (e.key === 'ArrowRight') gotoSubmission(cockpitNext);
+});
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -707,10 +801,12 @@ function renderStudentPreview(ev) {
 // Último estado conhecido da devolutiva (payload do servidor).
 let pubState = null;
 
-const PUB_BTN_IDS = ['eval-derive-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-rederive-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'opinion-toggle', 'rederive-go-btn', 'rederive-cancel-btn'];
+const PUB_BTN_IDS = ['eval-derive-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-rederive-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'rederive-go-btn', 'rederive-cancel-btn', 'sections-apply-all-btn'];
+const SECTION_KEYS = ['interviewer_opinion', 'strengths', 'improvement_areas', 'study_suggestions'];
 
 function setPubButtonsDisabled(disabled) {
   PUB_BTN_IDS.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = disabled; });
+  document.querySelectorAll('#eval-sections input[type=checkbox]').forEach(c => { c.disabled = disabled; });
 }
 
 function renderPublication(j) {
@@ -744,10 +840,19 @@ function renderPublication(j) {
   show('eval-rederive-btn', hasVersion);
   show('eval-discard-edit-btn', isEdited);
 
-  // Toggle da opinião do entrevistador (só faz sentido com versão gerada).
-  show('opinion-toggle-row', hasVersion && !!j.has_interviewer_opinion);
-  const toggle = document.getElementById('opinion-toggle');
-  toggle.checked = j.include_interviewer_opinion !== false;
+  // Toggles de seção (só fazem sentido com versão gerada). Cada seção só
+  // aparece se tiver conteúdo (section_has); a opinião é uma seção também.
+  const sections = j.sections || {};
+  const sectionHas = j.section_has || {};
+  show('eval-sections', hasVersion);
+  for (const key of SECTION_KEYS) {
+    const row = document.getElementById('sec-row-' + key);
+    const cb = row.querySelector('input');
+    const hasContent = !!sectionHas[key];
+    row.classList.toggle('hidden', !hasContent);
+    row.classList.toggle('empty', !hasContent);
+    cb.checked = sections[key] !== false;
+  }
 
   const preview = document.getElementById('student-eval-preview');
   if (hasVersion) {
@@ -801,6 +906,7 @@ document.getElementById('eval-derive-btn').addEventListener('click', async () =>
 });
 document.getElementById('eval-rederive-btn').addEventListener('click', () => {
   document.getElementById('rederive-guidelines').value = pubState?.feedback_guidelines ?? '';
+  document.getElementById('rederive-save-default').checked = false;
   document.getElementById('rederive-form').classList.remove('hidden');
   document.getElementById('student-eval-editor').classList.add('hidden');
 });
@@ -812,19 +918,19 @@ document.getElementById('rederive-go-btn').addEventListener('click', async () =>
   btn.disabled = true;
   btn.textContent = 'Regerando…';
   try {
-    // Salva as diretrizes no trabalho (PATCH parcial) e regenera com elas.
     const guidelines = document.getElementById('rederive-guidelines').value.trim() || null;
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback_guidelines: guidelines }),
-    });
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || `HTTP ${r.status}`);
+    // Só salva como padrão do trabalho se o professor pedir explicitamente.
+    if (document.getElementById('rederive-save-default').checked) {
+      const r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback_guidelines: guidelines }),
+      });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+      if (pubState) pubState.feedback_guidelines = guidelines;
     }
-    if (pubState) pubState.feedback_guidelines = guidelines;
-    await pubRequest('POST', 'student-version?force=true');
+    // Regera SÓ este aluno, com a diretriz como override ad-hoc (não toca o trabalho).
+    await pubRequest('POST', 'student-version?force=true', { guidelines });
     document.getElementById('rederive-form').classList.add('hidden');
   } catch (err) {
     const errEl = document.getElementById('eval-publish-error');
@@ -832,13 +938,39 @@ document.getElementById('rederive-go-btn').addEventListener('click', async () =>
     errEl.classList.remove('hidden');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Salvar diretrizes e regerar';
+    btn.textContent = 'Regerar para este aluno';
   }
 });
 document.getElementById('eval-publish-btn').addEventListener('click', () => pubRequest('POST', 'publish'));
 document.getElementById('eval-unpublish-btn').addEventListener('click', () => pubRequest('DELETE', 'publish'));
-document.getElementById('opinion-toggle').addEventListener('change', e =>
-  pubRequest('PATCH', 'interviewer-opinion', { include: e.target.checked }));
+document.querySelectorAll('#eval-sections input[data-section]').forEach(cb => {
+  cb.addEventListener('change', e =>
+    pubRequest('PATCH', 'sections', { [e.target.dataset.section]: e.target.checked }));
+});
+document.getElementById('sections-apply-all-btn').addEventListener('click', async () => {
+  const sections = pubState?.sections || {};
+  if (!confirm('Usar estas escolhas de seção (incluindo a opinião do entrevistador) como padrão do trabalho e aplicar a TODOS os alunos? Não regenera nada — só muda o que cada aluno vê.')) return;
+  const errEl = document.getElementById('eval-publish-error');
+  errEl.classList.add('hidden');
+  setPubButtonsDisabled(true);
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...sections, apply_to_all: true }),
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+    const warnEl = document.getElementById('eval-publish-warning');
+    warnEl.textContent = '✔ Seções aplicadas a todos os alunos deste trabalho.';
+    warnEl.style.background = 'var(--a-bg)'; warnEl.style.borderColor = 'var(--a-border)'; warnEl.style.color = 'var(--success-700)';
+    warnEl.classList.remove('hidden');
+  } catch (err) {
+    errEl.textContent = `Falha ao aplicar a todos: ${err.message}`;
+    errEl.classList.remove('hidden');
+  } finally {
+    setPubButtonsDisabled(false);
+  }
+});
 document.getElementById('eval-discard-edit-btn').addEventListener('click', () => {
   if (!confirm('Descartar a edição do professor? A versão automática volta a ser a que o aluno vê.')) return;
   pubRequest('DELETE', 'student-version');
@@ -847,7 +979,9 @@ document.getElementById('eval-discard-edit-btn').addEventListener('click', () =>
 // ---- Editor da devolutiva ----
 
 function openEditor() {
-  const ev = pubState?.student_evaluation;
+  // Edita a BASE sem filtro de visibilidade — uma seção desligada continua
+  // editável (o toggle só controla o que o aluno vê, não o conteúdo).
+  const ev = pubState?.student_evaluation_base ?? pubState?.student_evaluation;
   if (!ev) return;
   document.getElementById('edit-summary').value = ev.summary ?? '';
   const pqEl = document.getElementById('edit-per-question');
@@ -863,7 +997,7 @@ function openEditor() {
 }
 
 function collectEditor() {
-  const base = pubState?.student_evaluation;
+  const base = pubState?.student_evaluation_base ?? pubState?.student_evaluation;
   const splitLines = v => v.split('\n').map(x => x.trim()).filter(Boolean);
   const perQuestion = (Array.isArray(base?.per_question) ? base.per_question : []).map((q, i) => ({
     turn_index: q.turn_index,
@@ -1056,6 +1190,7 @@ async function load() {
 }
 
 load();
+setupCockpitNav();
 </script>
 </body>
 </html>
