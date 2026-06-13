@@ -514,6 +514,7 @@ dialog .dlg-actions {
   top: 0;
   right: 0;
   height: 100vh;
+  height: 100dvh; /* desconta o teclado/URL bar no mobile; mantém o rodapé (input) visível */
   width: 420px;
   max-width: 100vw;
   background: var(--bg-raised);
@@ -556,6 +557,8 @@ dialog .dlg-actions {
 .drawer-footer {
   border-top: 1px solid var(--ink-100);
   padding: var(--sp-3) var(--sp-5);
+  /* respeita o home indicator em telas com notch */
+  padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom));
   background: var(--bg-raised);
 }
 .drawer-footer .row { gap: var(--sp-2); }
