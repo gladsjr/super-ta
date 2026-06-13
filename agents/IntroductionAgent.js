@@ -36,7 +36,22 @@ export class IntroductionAgent {
         this.model = model;
     }
 
-    bodyFor(step) {
+    // Bloco diegético opcional: quando o trabalho exige "resposta de cabeça",
+    // a persona combina essa expectativa na abertura, no registro dela e
+    // ancorada no cenário de negócio (conversa ao vivo) — nunca como aviso
+    // jurídico ou ameaça. Injetado só no beat present_self (onde há espaço).
+    spontaneityContract() {
+        return `
+
+EXPECTATIVA DE RESPOSTA "DE CABEÇA" (este trabalho exige espontaneidade — comunique nesta fala, ANTES de pedir o "ok"):
+No SEU jeito de falar e ancorado no fato de ser uma conversa AO VIVO (você é uma pessoa ocupada, trocando isso em tempo real), combine com a outra ponta — de leve, como quem alinha as regras do jogo, não como quem desconfia — que você espera respostas espontâneas, ditas na hora:
+- a pessoa pode pensar um pouco, pausar, hesitar, se corrigir, até errar e refazer — isso é NORMAL e bem-vindo;
+- o que importa é responder com as PRÓPRIAS palavras, no momento;
+- não vale parar para pesquisar, consultar IA ou ler um texto pronto — é uma conversa, não uma prova escrita.
+Diga isso em 1-2 frases integradas naturalmente à sua fala (NÃO como lista, NÃO como termo de uso). Tom leve e respeitoso.`;
+    }
+
+    bodyFor(step, { expectSpontaneous = false } = {}) {
         const common = `Você está na fase de ABERTURA da conversa — breve e social, NÃO técnica. Você assume integralmente o papel descrito na agenda; sua identidade pessoal (nome, cidade) vem no prompt. Dentro da cena, você está encontrando a pessoa que entregou um trabalho ao seu papel — chame-a do jeito que a sua persona chamaria (cliente, fornecedor, consultor, interlocutor, etc., conforme o caso).
 
 USO DA IDENTIDADE PESSOAL:
@@ -81,11 +96,11 @@ IMPORTANTE: você JÁ se apresentou na fala anterior (veja o HISTÓRICO DO INTRO
 - Fale UM POUCO MAIS sobre o que te traz a esta conversa: incorpore de forma natural seus OBJETIVOS (\`objectives\`) e PREOCUPAÇÕES (\`concerns\`) principais — o que você quer entender e o que costuma te preocupar. Sem listar mecanicamente, sem repetir o que já disse na abertura.
 - TERMINE pedindo um sinal da pessoa para começar. Deixe explícito que, quando estiver pronta, basta dar um "ok". Ex.: "Quando você estiver pronto, me dá um ok que a gente começa.", "Pode ser? Se sim, é só me dar um ok."
 - NÃO faça a primeira pergunta substantiva. NÃO faça outras perguntas além do pedido de "ok".
-- 2-4 frases.
+- 2-4 frases${expectSpontaneous ? " (pode chegar a 5 com o alinhamento de espontaneidade abaixo)" : ""}.${expectSpontaneous ? this.spontaneityContract() : ""}
 
 Formato de saída — APENAS JSON válido, sem markdown:
 {
-  "message": "<cumprimento + o que te traz à conversa + pedido de 'ok'>",
+  "message": "<cumprimento + o que te traz à conversa${expectSpontaneous ? " + alinhamento de espontaneidade" : ""} + pedido de 'ok'>",
   "student_name": "<primeiro nome da pessoa ou null>",
   "student_gender_preference": "<'f' | 'm' | 'n' | null — só se DECLARADO explicitamente>",
   "reason": "<motivo curto>"
@@ -110,10 +125,10 @@ Formato de saída — APENAS JSON válido, sem markdown:
         throw new Error(`IntroductionAgent: step inválido "${step}"`);
     }
 
-    async evaluate({ step, interviewerYamlText, persona, introHistory, studentMessage, studentName = null, studentGenderHint = null, meterCtx = null, interactionMode = "text" }) {
+    async evaluate({ step, interviewerYamlText, persona, introHistory, studentMessage, studentName = null, studentGenderHint = null, meterCtx = null, interactionMode = "text", expectSpontaneous = false }) {
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
 
-${this.bodyFor(step)}`;
+${this.bodyFor(step, { expectSpontaneous })}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const personaBlock = `Nome: ${persona.name}
 Cidade de origem (RESERVA — só mencione se a conversa puxar): ${persona.city}

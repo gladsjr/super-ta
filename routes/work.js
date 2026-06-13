@@ -61,6 +61,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 question_count: req.work.question_count,
                 interviewer_name: req.work.interviewer_name,
                 interviewer_gender: req.work.interviewer_gender,
+                expect_spontaneous: req.work.expect_spontaneous,
                 feedback_guidelines: req.work.feedback_guidelines,
                 include_interviewer_opinion: req.work.include_interviewer_opinion,
                 include_strengths: req.work.include_strengths,
@@ -189,6 +190,23 @@ router.post("/w/:workToken/interaction", requireWorkToken, express.json({ limit:
     } catch (err) {
         log.error("WORK", `set interaction failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar modo de interação", detail: err.message });
+    }
+});
+
+// Expectativa de "resposta de cabeça" (espontânea). Quando ligada, a persona
+// combina a expectativa na abertura e o aluno vê o aviso. Vale para novas
+// tentativas (re-sincronizado no /start e /upload do aluno).
+router.patch("/w/:workToken/expect-spontaneous", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
+    if (typeof req.body?.expect_spontaneous !== "boolean") {
+        return res.status(400).json({ error: "expect_spontaneous (boolean) required" });
+    }
+    try {
+        await db.setWorkExpectSpontaneous(req.work.id, req.body.expect_spontaneous);
+        log.info("WORK", `expect_spontaneous=${req.body.expect_spontaneous} work=${req.work.work_token}`);
+        res.json({ ok: true, expect_spontaneous: req.body.expect_spontaneous });
+    } catch (err) {
+        log.error("WORK", `set expect_spontaneous failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar a expectativa de espontaneidade", detail: err.message });
     }
 });
 

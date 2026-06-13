@@ -188,6 +188,14 @@
         <div id="identity-warning" class="hint" style="margin-top: var(--sp-2); color: #b8732a"></div>
       </div>
 
+      <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
+        <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
+          <input type="checkbox" id="expect-spontaneous" style="margin-top: 3px"/>
+          <span class="card-sub" style="margin:0">Exigir <strong>resposta "de cabeça"</strong> (espontânea). O entrevistador combina isso na abertura — conversa ao vivo, pode pensar/pausar/se corrigir, mas responder com as próprias palavras, sem consultar IA, pesquisar ou ler texto pronto. Salva na hora.</span>
+        </label>
+        <div id="spontaneous-msg" class="hint" style="margin-top: var(--sp-1)"></div>
+      </div>
+
       <div class="row" style="margin-top: var(--sp-3)">
         <button id="save-interaction" class="btn btn-primary">Salvar modo e identidade</button>
         <button id="clear-identity" class="btn" type="button" title="Volta ao sorteio aleatório a cada upload">Limpar identidade</button>
@@ -418,6 +426,7 @@ async function load() {
   // Configurações de devolutiva do trabalho
   document.getElementById('fb-guidelines').value = j.work.feedback_guidelines ?? '';
   document.getElementById('fb-include-opinion').checked = j.work.include_interviewer_opinion !== false;
+  document.getElementById('expect-spontaneous').checked = j.work.expect_spontaneous === true;
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -1153,6 +1162,24 @@ async function saveFeedbackSettings(showMsg) {
 }
 
 document.getElementById('save-feedback-settings').onclick = () => saveFeedbackSettings(true);
+
+// Salva a expectativa de resposta de cabeça na hora (toggle).
+document.getElementById('expect-spontaneous').addEventListener('change', async (e) => {
+  const msg = document.getElementById('spontaneous-msg');
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/expect-spontaneous`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expect_spontaneous: e.target.checked }),
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.status); }
+    msg.textContent = e.target.checked ? 'Ativado: o entrevistador vai combinar isso na abertura.' : 'Desativado.';
+    setTimeout(() => { msg.textContent = ''; }, 3000);
+  } catch (err) {
+    msg.textContent = 'Falha ao salvar: ' + err.message;
+    e.target.checked = !e.target.checked; // reverte visualmente
+  }
+});
 
 document.getElementById('eval-new-btn').onclick = () =>
   startBatch('evaluations', { force: false }, null);

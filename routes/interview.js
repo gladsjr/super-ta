@@ -489,6 +489,10 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
             catch (err) { log.error("PREGEN", `kickoff(memhit) failed: ${err.message}`); }
         }
 
+        // Re-sincroniza a expectativa de espontaneidade com a config atual do
+        // trabalho (igual ao modo): vale para o aviso ao aluno no /start.
+        sess.expectSpontaneous = req.work.expect_spontaneous === true;
+
         res.json({
             work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
             submission: { status: req.submission.status === "pending" ? "in_progress" : req.submission.status, student_label: req.submission.student_label },
@@ -546,6 +550,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
     // fica imutável até o próximo upload.
     sess.interactionMode = req.work.interaction_mode || "text";
     sess.voice = req.work.voice || null;
+    sess.expectSpontaneous = req.work.expect_spontaneous === true;
     // Persona segue, em ordem de prioridade: (1) override do professor, (2)
     // gênero da voz em modo áudio, (3) sorteio balanceado em modo texto.
     // A pré-geração no /start já escolheu uma persona; só re-picka se a config
@@ -925,6 +930,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                     studentMessage: message,
                     meterCtx: sessionMeterCtx(sess),
                     interactionMode: sess.interactionMode,
+                    expectSpontaneous: !!sess.expectSpontaneous,
                 });
             } catch (err) {
                 log.error("AGENT:Introduction", `present_self failed, using fallback: ${err.message}`);

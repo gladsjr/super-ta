@@ -54,7 +54,7 @@ Each turn writes a single atomic `UPDATE` to `submissions` covering both `conver
 ### Cognitive Agents
 All agents are classes under `agents/` and use the Responses API, designed to fail fast. The active set:
 - **`PrepBuilderAgent`** — one-shot on `/upload`, in two serialized calls (`analyzeWork` then `buildPlan`).
-- **`IntroductionAgent`** — three deterministic beats for the social opening (`ask_name`, `present_self`, `begin`).
+- **`IntroductionAgent`** — three deterministic beats for the social opening (`ask_name`, `present_self`, `begin`). When the work sets `expect_spontaneous`, `present_self` adds a diegetic "spontaneity contract": the persona communicates that answers are expected "de cabeça" (live conversation; pausing/hesitating/self-correcting is fine, but answer in your own words now — no AI, lookups, or reading a prepared text). The student also sees a notice on the upload screen and in the instructions modal. Opt-in per work (`works.expect_spontaneous`, default false; toggle in the professor panel). Foundation for later phases that measure and evaluate spontaneity.
 - **`AudioIntelligibilityAgent`** — fraseates the audio pre-gate's repeat-or-give-up message (decision is algorithmic, in `lib/audioIntelligibility.js`).
 - **`SuperOrchestratorAgent`** — one reasoning call per turn in `interviewing`. Replaces the entire legacy per-turn agent fleet.
 - **`ConfigAssistantAgent`** — professor-facing config chat (`/config-chat`).
