@@ -40,6 +40,21 @@
   }
   tr.row-blocked td { opacity: 0.65; }
   tr.row-blocked td:last-child { opacity: 1; }
+
+  /* Entrevistador: alternância Simples/Avançado + galeria de personas */
+  .mode-switch { display: inline-flex; border: 1px solid var(--ink-200); border-radius: var(--r-sm); overflow: hidden; }
+  .mode-switch .mode-btn { border: none; background: transparent; padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); cursor: pointer; color: var(--ink-700); }
+  .mode-switch .mode-btn.is-active { background: var(--c-accent, #2563eb); color: #fff; }
+  .persona-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-3); }
+  .persona-card { border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); cursor: pointer; background: #fff; text-align: left; font: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
+  .persona-card:hover { border-color: var(--c-accent, #2563eb); }
+  .persona-card.is-active { border-color: var(--c-accent, #2563eb); box-shadow: 0 0 0 1px var(--c-accent, #2563eb) inset; }
+  .persona-card .pc-head { display: flex; align-items: center; gap: var(--sp-2); }
+  .persona-card .pc-icon { font-size: 1.25rem; line-height: 1; }
+  .persona-card .pc-label { font-weight: 600; }
+  .persona-card .pc-summary { font-size: var(--fs-sm); color: var(--ink-700); }
+  .persona-card .pc-when { font-size: var(--fs-xs); color: var(--ink-500); }
+  .persona-card .pc-active-tag { font-size: var(--fs-xs); font-weight: 600; color: var(--accent-700, #1d4ed8); margin-top: var(--sp-1); }
 </style>
 </head>
 <body>
@@ -85,18 +100,42 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">Estilo do entrevistador</h3>
-      <p class="card-sub" id="interviewer-status">—</p>
-      <div class="row">
-        <label class="label" for="tpl-select" style="margin:0">Template:</label>
-        <select id="tpl-select" class="select" style="flex:1; min-width:240px"></select>
-        <button id="load-tpl" class="btn">Carregar</button>
-        <button id="adapt-interviewer" class="btn" title="Especializa o YAML para o enunciado deste trabalho">Adaptar ao enunciado</button>
+      <div class="row" style="justify-content: space-between; align-items: center; gap: var(--sp-2)">
+        <h3 class="card-title" style="margin:0">Entrevistador</h3>
+        <div class="mode-switch" role="group" aria-label="Modo de configuração do entrevistador">
+          <button type="button" id="iv-mode-simple" class="mode-btn is-active" aria-pressed="true">Simples</button>
+          <button type="button" id="iv-mode-advanced" class="mode-btn" aria-pressed="false">Avançado</button>
+        </div>
       </div>
-      <textarea id="interviewer-yaml" class="textarea code yaml-ta" spellcheck="false" style="margin-top: var(--sp-3)"></textarea>
-      <div class="row" style="margin-top: var(--sp-3)">
-        <button id="save-interviewer" class="btn btn-primary">Salvar</button>
-        <span id="interviewer-msg" class="hint"></span>
+      <p class="card-sub" id="interviewer-status">—</p>
+
+      <!-- MODO SIMPLES: galeria de personas, sem YAML -->
+      <div id="iv-simple">
+        <p class="card-sub">Escolha quem vai conduzir a arguição com o aluno. Clicar numa opção já a deixa ativa.</p>
+        <div id="persona-gallery" class="persona-gallery"></div>
+        <div class="row" style="margin-top: var(--sp-3); align-items:center; gap: var(--sp-3)">
+          <button id="persona-adapt" class="btn" type="button" title="Reescreve a persona escolhida com os termos do seu enunciado">✨ Ajustar ao meu enunciado</button>
+          <span id="persona-msg" class="hint"></span>
+        </div>
+        <div style="margin-top: var(--sp-3)">
+          <button id="iv-show-advanced" class="btn btn-ghost btn-sm" type="button">› Configuração avançada (editar em texto)</button>
+        </div>
+      </div>
+
+      <!-- MODO AVANÇADO: editor de texto (YAML) — opt-in -->
+      <div id="iv-advanced" class="hidden">
+        <p class="card-sub">Edição direta da configuração do entrevistador, em formato de texto (YAML). Para ajuste fino.</p>
+        <div class="row">
+          <label class="label" for="tpl-select" style="margin:0">Partir de:</label>
+          <select id="tpl-select" class="select" style="flex:1; min-width:240px"></select>
+          <button id="load-tpl" class="btn">Carregar</button>
+          <button id="adapt-interviewer" class="btn" title="Especializa a configuração para o enunciado deste trabalho">Adaptar ao enunciado</button>
+        </div>
+        <textarea id="interviewer-yaml" class="textarea code yaml-ta" spellcheck="false" style="margin-top: var(--sp-3)"></textarea>
+        <div class="row" style="margin-top: var(--sp-3)">
+          <button id="save-interviewer" class="btn btn-primary">Salvar</button>
+          <span id="interviewer-msg" class="hint"></span>
+        </div>
       </div>
     </div>
 
@@ -339,14 +378,19 @@ async function load() {
     ? `Enunciado atual: <a href="${enunciadoUrl}" target="_blank">abrir PDF ↗</a>. Envie um novo arquivo para substituir.`
     : 'Nenhum enunciado enviado ainda.';
   document.getElementById('send-enunciado').textContent = j.work.has_enunciado ? 'Substituir' : 'Enviar PDF';
-  document.getElementById('interviewer-status').textContent = j.work.has_interviewer
-    ? 'Interviewer salvo. Edite e salve novamente para substituir.'
-    : 'Nenhum interviewer salvo ainda.';
+  hasEnunciado = !!j.work.has_enunciado;
+  hasSavedInterviewer = !!j.work.has_interviewer;
+  updateInterviewerStatus();
   const adaptBtn = document.getElementById('adapt-interviewer');
-  adaptBtn.disabled = !j.work.has_enunciado;
-  adaptBtn.title = j.work.has_enunciado
-    ? 'Especializa o YAML para o enunciado deste trabalho'
+  adaptBtn.disabled = !hasEnunciado;
+  adaptBtn.title = hasEnunciado
+    ? 'Especializa a configuração para o enunciado deste trabalho'
     : 'Envie o enunciado antes de adaptar';
+  const personaAdaptBtn = document.getElementById('persona-adapt');
+  personaAdaptBtn.disabled = !hasEnunciado;
+  personaAdaptBtn.title = hasEnunciado
+    ? 'Reescreve a persona escolhida com os termos do seu enunciado'
+    : 'Envie o enunciado do trabalho antes de ajustar';
   const avaliarBtn = document.getElementById('avaliar-enunciado');
   avaliarBtn.disabled = !j.work.has_enunciado;
   avaliarBtn.title = j.work.has_enunciado
@@ -548,12 +592,81 @@ document.getElementById('send-enunciado').onclick = async () => {
 };
 
 // Interviewer
+// Estado compartilhado entre o modo Simples (galeria) e o Avançado (YAML).
+// O YAML salvo no backend é a única fonte de verdade; a galeria é só uma vista.
+let personaCatalog = [];       // [{filename,label,icon,summary,when_to_use}]
+let currentMatched = null;     // filename da persona pronta ativa, ou null (customizada)
+let hasSavedInterviewer = false;
+let hasEnunciado = false;
+
+function personaLabel(filename) {
+  const t = personaCatalog.find(p => p.filename === filename);
+  return t ? t.label : String(filename || '').replace(/\.ya?ml$/i, '');
+}
+
+function updateInterviewerStatus() {
+  const el = document.getElementById('interviewer-status');
+  if (!el) return;
+  if (currentMatched) {
+    el.textContent = `Persona ativa: ${personaLabel(currentMatched)}.`;
+  } else if (hasSavedInterviewer) {
+    el.textContent = 'Configuração personalizada ativa (ajustada ou editada à mão).';
+  } else {
+    el.textContent = 'Nenhum entrevistador definido ainda — escolha uma opção abaixo.';
+  }
+}
+
+function renderPersonaGallery() {
+  const gal = document.getElementById('persona-gallery');
+  if (!gal) return;
+  gal.innerHTML = personaCatalog.map(t => {
+    const active = t.filename === currentMatched;
+    return `
+      <button type="button" class="persona-card${active ? ' is-active' : ''}" data-filename="${encodeURIComponent(t.filename)}" onclick="choosePersona(this.dataset.filename)">
+        <span class="pc-head"><span class="pc-icon">${escapeHtml(t.icon || '🗂')}</span><span class="pc-label">${escapeHtml(t.label || t.filename)}</span></span>
+        <span class="pc-summary">${escapeHtml(t.summary || '')}</span>
+        <span class="pc-when">${escapeHtml(t.when_to_use || '')}</span>
+        ${active ? '<span class="pc-active-tag">✓ ativa</span>' : ''}
+      </button>`;
+  }).join('');
+}
+
+async function choosePersona(encodedFilename) {
+  const filename = decodeURIComponent(encodedFilename);
+  const msg = document.getElementById('persona-msg');
+  msg.textContent = '';
+  if (filename === currentMatched) { msg.textContent = 'Essa persona já está ativa.'; return; }
+  if (currentMatched === null && hasSavedInterviewer
+      && !confirm('Sua configuração atual é personalizada. Trocar por esta persona vai substituí-la. Continuar?')) return;
+  msg.textContent = 'Aplicando…';
+  try {
+    const tr = await fetch(`/interviewers/templates/${encodeURIComponent(filename)}`);
+    if (!tr.ok) throw new Error('template');
+    const yamlText = await tr.text();
+    const sr = await fetch(`/w/${encodeURIComponent(workToken)}/interviewer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml: yamlText })
+    });
+    if (!sr.ok) throw new Error('save');
+    document.getElementById('interviewer-yaml').value = yamlText; // mantém o editor avançado em sincronia
+    currentMatched = filename;
+    hasSavedInterviewer = true;
+    renderPersonaGallery();
+    updateInterviewerStatus();
+    msg.textContent = `✓ "${personaLabel(filename)}" ativa.`;
+  } catch (e) {
+    msg.textContent = 'Falha ao aplicar a persona.';
+  }
+}
+
 async function loadInterviewerTemplates() {
   const r = await fetch('/interviewers/templates');
   if (!r.ok) return;
   const j = await r.json();
+  personaCatalog = j.templates || [];
   const sel = document.getElementById('tpl-select');
-  sel.innerHTML = j.templates.map(t => `<option value="${encodeURIComponent(t.filename)}">${escapeHtml(t.filename)}</option>`).join('');
+  sel.innerHTML = personaCatalog.map(t => `<option value="${encodeURIComponent(t.filename)}">${escapeHtml(t.label || t.filename)}</option>`).join('');
+  renderPersonaGallery();
 }
 
 async function loadCurrentInterviewer() {
@@ -561,7 +674,62 @@ async function loadCurrentInterviewer() {
   if (!r.ok) return;
   const j = await r.json();
   if (j.yaml) document.getElementById('interviewer-yaml').value = j.yaml;
+  hasSavedInterviewer = !!j.yaml;
+  currentMatched = j.matched || null;
+  renderPersonaGallery();
+  updateInterviewerStatus();
 }
+
+function setInterviewerMode(mode) {
+  const simple = mode !== 'advanced';
+  document.getElementById('iv-simple').classList.toggle('hidden', !simple);
+  document.getElementById('iv-advanced').classList.toggle('hidden', simple);
+  document.getElementById('iv-mode-simple').classList.toggle('is-active', simple);
+  document.getElementById('iv-mode-advanced').classList.toggle('is-active', !simple);
+  document.getElementById('iv-mode-simple').setAttribute('aria-pressed', String(simple));
+  document.getElementById('iv-mode-advanced').setAttribute('aria-pressed', String(!simple));
+  try { localStorage.setItem('iv_card_mode', simple ? 'simple' : 'advanced'); } catch (e) {}
+}
+
+document.getElementById('iv-mode-simple').onclick = () => setInterviewerMode('simple');
+document.getElementById('iv-mode-advanced').onclick = () => setInterviewerMode('advanced');
+document.getElementById('iv-show-advanced').onclick = () => setInterviewerMode('advanced');
+
+document.getElementById('persona-adapt').onclick = async () => {
+  const msg = document.getElementById('persona-msg');
+  msg.textContent = '';
+  if (!hasEnunciado) { msg.textContent = 'Envie o enunciado do trabalho antes de ajustar.'; return; }
+  if (!hasSavedInterviewer) { msg.textContent = 'Escolha uma persona acima antes de ajustar.'; return; }
+  if (!confirm('Ajustar a persona atual ao seu enunciado? Isso reescreve a configuração com os termos do seu trabalho e pode levar 20–40s.')) return;
+  const btn = document.getElementById('persona-adapt');
+  const prev = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Ajustando…';
+  msg.textContent = 'Ajustando ao enunciado — aguarde.';
+  try {
+    const current = document.getElementById('interviewer-yaml').value.trim();
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/interviewer/adapt`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml: current })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.yaml) { msg.textContent = j.error || 'Falha ao ajustar.'; return; }
+    const sr = await fetch(`/w/${encodeURIComponent(workToken)}/interviewer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yaml: j.yaml })
+    });
+    if (!sr.ok) { msg.textContent = 'Ajustado, mas falhou ao salvar.'; return; }
+    document.getElementById('interviewer-yaml').value = j.yaml;
+    hasSavedInterviewer = true;
+    currentMatched = null; // agora é uma configuração personalizada
+    renderPersonaGallery();
+    updateInterviewerStatus();
+    msg.textContent = '✓ Persona ajustada ao seu enunciado e salva.';
+  } catch (e) {
+    msg.textContent = 'Falha ao ajustar.';
+  } finally {
+    btn.disabled = false; btn.textContent = prev;
+  }
+};
 
 document.getElementById('load-tpl').onclick = async () => {
   const ta = document.getElementById('interviewer-yaml');
@@ -816,7 +984,8 @@ document.getElementById('save-interviewer').onclick = async () => {
   const j = await r.json();
   if (!r.ok) { msg.textContent = 'Erro: ' + (j.detail || j.error || 'falha ao salvar'); return; }
   msg.textContent = 'Salvo.';
-  document.getElementById('interviewer-status').textContent = 'Interviewer salvo. Edite e salve novamente para substituir.';
+  // Re-sincroniza estado casado para a galeria do modo Simples refletir a edição.
+  await loadCurrentInterviewer();
 };
 
 document.getElementById('create-subs').onclick = async () => {
@@ -1094,8 +1263,8 @@ function renderCoherenceReport(report) {
   personasEl.innerHTML = (report.suggested_personas || []).map(p => `
     <div class="coherence-persona">
       <div class="fit fit-${escapeHtml(p.fit)}">${escapeHtml(p.fit)}</div>
-      <div class="body"><strong>${escapeHtml(p.filename)}</strong> — ${escapeHtml(p.reason || '')}</div>
-      <button class="btn" type="button" onclick="loadPersonaFromCoherence('${encodeURIComponent(p.filename)}')">Carregar no editor</button>
+      <div class="body"><strong>${escapeHtml(personaLabel(p.filename))}</strong> — ${escapeHtml(p.reason || '')}</div>
+      <button class="btn" type="button" onclick="loadPersonaFromCoherence('${encodeURIComponent(p.filename)}')">Usar esta persona</button>
     </div>
   `).join('');
 
@@ -1114,6 +1283,7 @@ async function loadPersonaFromCoherence(encodedFilename) {
   const ta = document.getElementById('interviewer-yaml');
   if (ta.value.trim() && !confirm('Substituir o conteúdo atual do editor pelo template?')) return;
   ta.value = yamlText;
+  setInterviewerMode('advanced'); // o resultado vai para o editor — torná-lo visível
   document.getElementById('interviewer-msg').textContent = 'Template carregado no editor. Revise e clique em Salvar.';
   document.getElementById('coherence-dialog').close();
 }
@@ -1217,9 +1387,10 @@ function buildActionCard(action) {
   }
 
   if (action.type === 'recommend_persona') {
+    const friendly = personaLabel(action.payload.filename);
     const label = document.createElement('p');
     label.className = 'label';
-    label.textContent = `Persona sugerida: ${action.payload.filename}`;
+    label.textContent = `Persona sugerida: ${friendly}`;
     card.appendChild(label);
     if (action.payload.rationale) {
       const why = document.createElement('div');
@@ -1231,25 +1402,15 @@ function buildActionCard(action) {
     const btn = document.createElement('button');
     btn.className = 'btn btn-primary';
     btn.type = 'button';
-    btn.textContent = `Carregar ${action.payload.filename} no editor`;
+    btn.textContent = `Usar "${friendly}"`;
     btn.onclick = async () => {
       btn.disabled = true;
-      btn.textContent = 'Carregando…';
-      const r = await fetch(`/interviewers/templates/${encodeURIComponent(action.payload.filename)}`);
-      if (!r.ok) {
-        btn.textContent = 'Falha ao carregar template';
-        return;
-      }
-      const yamlText = await r.text();
-      const ta = document.getElementById('interviewer-yaml');
-      if (ta.value.trim() && !confirm('Substituir o conteúdo atual do editor pelo template?')) {
-        btn.disabled = false;
-        btn.textContent = `Carregar ${action.payload.filename} no editor`;
-        return;
-      }
-      ta.value = yamlText;
-      document.getElementById('interviewer-msg').textContent = 'Template carregado no editor. Revise e clique em Salvar.';
-      btn.textContent = '✓ Carregado no editor (não salvo)';
+      const prev = btn.textContent;
+      btn.textContent = 'Aplicando…';
+      await choosePersona(encodeURIComponent(action.payload.filename));
+      // choosePersona já atualiza a galeria, o status e a mensagem do card Entrevistador.
+      btn.textContent = (action.payload.filename === currentMatched) ? '✓ Persona ativada' : prev;
+      btn.disabled = (action.payload.filename !== currentMatched);
     };
     card.appendChild(btn);
     return card;
@@ -1347,10 +1508,14 @@ async function copyToken(btn, token) {
 // loadVoices() popula o dropdown de vozes; load() aplica a voz salva. A
 // ordem importa: precisamos das opções no DOM antes de tentar selecionar.
 (async () => {
+  // Modo do card Entrevistador: default Simples; respeita a última escolha do professor.
+  let savedMode = 'simple';
+  try { savedMode = localStorage.getItem('iv_card_mode') || 'simple'; } catch (e) {}
+  setInterviewerMode(savedMode);
   await loadVoices();
-  load();
-  loadInterviewerTemplates();
-  loadCurrentInterviewer();
+  await load();                    // define hasEnunciado / hasSavedInterviewer
+  await loadInterviewerTemplates();// popula o catálogo e a galeria
+  await loadCurrentInterviewer();  // marca a persona ativa e o status
 })();
 </script>
 </body>
