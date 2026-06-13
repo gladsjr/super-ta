@@ -55,6 +55,12 @@
   .persona-card .pc-summary { font-size: var(--fs-sm); color: var(--ink-700); }
   .persona-card .pc-when { font-size: var(--fs-xs); color: var(--ink-500); }
   .persona-card .pc-active-tag { font-size: var(--fs-xs); font-weight: 600; color: var(--accent-700, #1d4ed8); margin-top: var(--sp-1); }
+
+  /* Preview do rascunho do entrevistador em construção (assistente) */
+  .chat-draft { padding: 0 var(--sp-4); }
+  .chat-draft details { border: 1px solid var(--ink-200); border-radius: var(--r-sm); background: var(--c-bg-2, #f8fafc); padding: var(--sp-2) var(--sp-3); }
+  .chat-draft summary { cursor: pointer; font-size: var(--fs-sm); font-weight: 600; color: var(--ink-700); }
+  .chat-draft pre { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; }
 </style>
 </head>
 <body>
@@ -296,8 +302,9 @@
     <button id="close-assistant" class="drawer-close" type="button" aria-label="Fechar">✕</button>
   </div>
   <div id="chat-body" class="drawer-body" aria-live="polite"></div>
+  <div id="chat-draft" class="chat-draft hidden"></div>
   <div class="drawer-footer">
-    <textarea id="chat-input" class="textarea" placeholder="Pergunte sobre a metodologia, peça avaliação do enunciado ou recomendação de persona…"></textarea>
+    <textarea id="chat-input" class="textarea" placeholder="Pergunte sobre a metodologia, peça avaliação do enunciado, ou peça para explicar, ajustar ou montar o entrevistador…"></textarea>
     <div class="row" style="margin-top: var(--sp-2); justify-content: space-between; align-items: center">
       <span id="chat-msg" class="hint"></span>
       <button id="chat-send" class="btn btn-primary" type="button">Enviar</button>
@@ -1295,6 +1302,7 @@ async function loadPersonaFromCoherence(encodedFilename) {
 // ============================================================================
 
 const chatHistory = [];
+let chatDraft = null; // rascunho do construtor guiado, carregado entre turnos (efêmero)
 let chatBusy = false;
 
 document.getElementById('open-assistant').onclick = openDrawer;
@@ -1313,7 +1321,7 @@ function openDrawer() {
   document.getElementById('assistant-drawer').setAttribute('aria-hidden', 'false');
   document.getElementById('assistant-backdrop').classList.remove('hidden');
   if (chatHistory.length === 0) {
-    appendChatBubble('assistant', 'Olá! Posso explicar a metodologia do ORATIA, avaliar se seu enunciado se encaixa bem no processo de entrevista, ou recomendar uma persona de entrevistador. O que você quer fazer?');
+    appendChatBubble('assistant', 'Olá! Posso explicar a metodologia, avaliar se seu enunciado se encaixa bem no processo, explicar ou ajustar o entrevistador já configurado, e até montar um do zero com você — eu pergunto os detalhes e vou compondo. O que você quer fazer?');
   }
   document.getElementById('chat-input').focus();
 }
@@ -1342,6 +1350,14 @@ function appendSystemBubble(text, kind) {
   div.textContent = text;
   body.appendChild(div);
   body.scrollTop = body.scrollHeight;
+}
+
+function renderDraftPreview() {
+  const el = document.getElementById('chat-draft');
+  if (!el) return;
+  if (!chatDraft || typeof chatDraft !== 'object') { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.classList.remove('hidden');
+  el.innerHTML = `<details><summary>📝 Rascunho do entrevistador em construção</summary><pre>${escapeHtml(JSON.stringify(chatDraft, null, 2))}</pre></details>`;
 }
 
 function appendTypingIndicator() {
@@ -1436,19 +1452,53 @@ function buildActionCard(action) {
     pre.textContent = action.payload.yaml;
     det.appendChild(pre);
     card.appendChild(det);
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-primary';
-    btn.type = 'button';
-    btn.textContent = 'Aplicar no editor (revisar antes de salvar)';
-    btn.onclick = () => {
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'row';
+    btnRow.style.marginTop = 'var(--sp-2)';
+    btnRow.style.gap = 'var(--sp-2)';
+
+    const reviewBtn = document.createElement('button');
+    reviewBtn.className = 'btn';
+    reviewBtn.type = 'button';
+    reviewBtn.textContent = 'Revisar no editor';
+    reviewBtn.onclick = () => {
       const ta = document.getElementById('interviewer-yaml');
-      if (ta.value.trim() && !confirm('Substituir o conteúdo atual do editor pelo YAML proposto?')) return;
+      if (ta.value.trim() && !confirm('Substituir o conteúdo atual do editor pela proposta?')) return;
       ta.value = action.payload.yaml;
-      document.getElementById('interviewer-msg').textContent = 'YAML proposto carregado no editor. Revise e clique em Salvar.';
-      btn.textContent = '✓ Aplicado no editor (não salvo)';
-      btn.disabled = true;
+      setInterviewerMode('advanced'); // a proposta vai para o editor — torná-lo visível
+      document.getElementById('interviewer-msg').textContent = 'Proposta carregada no editor. Revise e clique em Salvar.';
+      reviewBtn.textContent = '✓ No editor (não salvo)';
+      reviewBtn.disabled = true;
     };
-    card.appendChild(btn);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-primary';
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Aplicar e salvar';
+    saveBtn.onclick = async () => {
+      if (!confirm('Aplicar esta configuração ao entrevistador e salvar agora?')) return;
+      saveBtn.disabled = true;
+      const prev = saveBtn.textContent;
+      saveBtn.textContent = 'Salvando…';
+      try {
+        const sr = await fetch(`/w/${encodeURIComponent(workToken)}/interviewer`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ yaml: action.payload.yaml })
+        });
+        if (!sr.ok) { saveBtn.textContent = 'Falha ao salvar'; saveBtn.disabled = false; saveBtn.textContent = prev; return; }
+        document.getElementById('interviewer-yaml').value = action.payload.yaml;
+        await loadCurrentInterviewer(); // re-sincroniza galeria/status
+        saveBtn.textContent = '✓ Aplicada e salva';
+        reviewBtn.disabled = true;
+      } catch (e) {
+        saveBtn.textContent = prev; saveBtn.disabled = false;
+      }
+    };
+
+    btnRow.appendChild(reviewBtn);
+    btnRow.appendChild(saveBtn);
+    card.appendChild(btnRow);
     return card;
   }
 
@@ -1475,7 +1525,7 @@ async function sendChat() {
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/config-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ history: historySnapshot, message }),
+      body: JSON.stringify({ history: historySnapshot, message, draft: chatDraft }),
     });
     const j = await r.json().catch(() => ({}));
     removeTypingIndicator();
@@ -1486,6 +1536,7 @@ async function sendChat() {
     }
     chatHistory.push({ role: 'user', content: message });
     chatHistory.push({ role: 'assistant', content: j.message });
+    if ('draft' in j) { chatDraft = j.draft || null; renderDraftPreview(); }
     appendChatBubble('assistant', j.message, j.action || null);
   } catch (e) {
     removeTypingIndicator();

@@ -10,7 +10,8 @@ import { requireWorkToken, requireWithinBudget, sanitizeLabel } from "../lib/mid
 import * as db from "../lib/db.js";
 import { pickRandomName } from "../lib/personas.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
-import { personaDisplay, PERSONA_ORDER } from "../config/personas.js";
+import { personaDisplay, PERSONA_ORDER, PERSONAS } from "../config/personas.js";
+import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { AudioCache, synthesizeSpeech } from "../lib/audio.js";
 import {
     meteredResponses,
@@ -1178,12 +1179,18 @@ router.post("/w/:workToken/config-chat", requireWorkToken, requireWithinBudget, 
         .map(m => ({ role: m.role, content: m.content }))
         .slice(-30); // bound por segurança
 
+    // Rascunho do construtor guiado, carregado pelo cliente (efêmero). Aceita só objeto.
+    const draft = (req.body?.draft && typeof req.body.draft === "object" && !Array.isArray(req.body.draft))
+        ? req.body.draft
+        : null;
+
     try {
         const stateBlock = await buildConfigStateBlock(req.work);
         const result = await configAssistantAgent.evaluate({
             history,
             message,
             stateBlock,
+            draft,
             meterCtx: { workId: req.work.id },
         });
         res.json(result);
@@ -1197,18 +1204,30 @@ async function buildConfigStateBlock(work) {
     const coherence = await db.getCoherenceCache(work.id);
     const interviewerYaml = await db.getInterviewerYaml(work.id);
 
-    let originLine = "nenhum (professor ainda não salvou)";
+    let originLine = "nenhum (professor ainda não escolheu/definiu um entrevistador)";
+    let agendaBlock = "";
     if (interviewerYaml) {
         const matchedTemplate = await findMatchingTemplateName(interviewerYaml);
-        originLine = matchedTemplate
-            ? `salvo (baseado em "${matchedTemplate}")`
-            : "salvo (customizado ou adaptado — não corresponde byte-a-byte a nenhuma das 6 personas prontas)";
+        if (matchedTemplate) {
+            const meta = personaDisplay(matchedTemplate);
+            originLine = `persona pronta "${meta.label}" (${matchedTemplate}), sem adaptações`;
+        } else {
+            originLine = "configuração personalizada (adaptada ao enunciado ou editada à mão — não corresponde a nenhuma das personas prontas)";
+        }
+        // Agenda renderizada: significado + valores atuais. NUNCA YAML cru (CLAUDE.md).
+        try {
+            agendaBlock = `\n\n**PERFIL DO ENTREVISTADOR ATUALMENTE CONFIGURADO** (cada campo já vem com seu significado; use para explicar e para adaptar)\n${renderInterviewerAgenda(interviewerYaml)}`;
+        } catch (err) {
+            log.warn("CONFIG_CHAT", `renderInterviewerAgenda failed: ${err.message}`);
+            agendaBlock = "\n\n**PERFIL DO ENTREVISTADOR ATUALMENTE CONFIGURADO**: há um entrevistador salvo, mas não consegui interpretá-lo (provável erro de formatação).";
+        }
     }
 
+    const personasList = PERSONAS.map(p => `${p.label} (${p.filename})`).join(", ");
     const header = `- Nome do trabalho: ${work.name}
 - Enunciado enviado: ${work.assignment_pdf ? "sim" : "não"}
-- Persona/YAML do entrevistador: ${originLine}
-- Templates disponíveis: Teacher Assistant.yaml, Business Owner.yaml, Hiring Manager.yaml, Investor.yaml, Executive Sponsor.yaml, Journalist.yaml`;
+- Entrevistador configurado: ${originLine}
+- Personas prontas disponíveis: ${personasList}${agendaBlock}`;
 
     if (!coherence) {
         return `${header}
