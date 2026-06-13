@@ -284,6 +284,8 @@
   .cockpit-counter { font-size: var(--fs-sm); color: var(--ink-700); font-weight: 600; text-align: center; flex: 1; }
   .cockpit-counter .muted { font-weight: 400; color: var(--ink-500); }
 
+  #sf-controls .sf-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--ink-500); display: block; margin-bottom: var(--sp-1); }
+  .sf-prompt { margin-top: var(--sp-2); }
   .eval-sections { margin-top: var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3); }
   .eval-sections .sf-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--ink-500); margin-bottom: var(--sp-2); }
   .eval-section-toggle { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-1) 0; font-size: var(--fs-sm); cursor: pointer; }
@@ -333,37 +335,38 @@
   <div id="notfound" class="notice notice-error hidden">Conversa não encontrada.</div>
   <div id="empty" class="notice notice-info hidden">Nenhuma conversa registrada para esta submissão ainda.</div>
 
-  <section id="evaluation" class="evaluation-card hidden">
+  <!-- TOPO: a devolutiva ao aluno (o que o professor constrói, ajusta e publica). -->
+  <section id="student-feedback-card" class="evaluation-card hidden">
     <div class="eval-header">
-      <h2>Avaliação do entrevistador</h2>
-      <div>
-        <span class="eval-meta" id="eval-meta"></span>
-        <button class="btn btn-primary btn-sm" id="eval-btn">Gerar avaliação</button>
-      </div>
+      <h2>Devolutiva ao aluno</h2>
+      <span id="eval-publish-status" class="eval-meta"></span>
     </div>
-    <div class="eval-empty-note" id="eval-empty-note">
-      Relatório de como o aluno sustentou o trabalho nesta entrevista, sob a
-      perspectiva do entrevistador. Usa o enunciado, o trabalho enviado e a
-      transcrição completa. A geração leva por volta de um minuto.
-    </div>
-    <div class="notice notice-error eval-error hidden" id="eval-error"></div>
-    <div id="eval-body"></div>
 
-    <div id="eval-publish-block" class="eval-publish hidden">
-      <div class="eval-publish-row">
-        <span id="eval-publish-status" class="eval-meta"></span>
-        <button class="btn btn-sm hidden" id="eval-derive-btn" title="Gera a versão formativa que o aluno pode ver — só a prévia; nada é publicado">Gerar devolutiva (prévia)</button>
+    <div id="sf-needs-eval" class="eval-empty-note hidden">
+      Para criar a devolutiva, gere antes a <strong>Avaliação do entrevistador</strong> (logo abaixo nesta página) — é dela que a devolutiva é derivada.
+    </div>
+
+    <div id="sf-controls" class="hidden">
+      <div class="sf-prompt">
+        <label class="sf-label" for="fb-prompt">Prompt de ajuste da devolutiva — tom, formato, o que destacar</label>
+        <textarea id="fb-prompt" class="editor-textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários."></textarea>
+        <div class="eval-publish-row" style="margin-top: var(--sp-2);">
+          <button class="btn btn-primary btn-sm" id="fb-generate-btn">Gerar devolutiva (este aluno)</button>
+          <button class="btn btn-sm" id="fb-apply-all-btn" title="Salva este prompt como padrão do trabalho e regera a devolutiva de TODOS os alunos">Aplicar prompt a todos os alunos</button>
+        </div>
+        <div id="fb-batch-status" class="hint hidden"></div>
+      </div>
+
+      <div class="eval-publish-row" style="margin-top: var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3);">
         <button class="btn btn-primary btn-sm hidden" id="eval-publish-btn" title="Torna a devolutiva abaixo visível na página do aluno">Publicar para o aluno</button>
         <button class="btn btn-sm hidden" id="eval-unpublish-btn">Despublicar</button>
-        <button class="btn btn-ghost btn-sm hidden" id="eval-edit-btn">Editar devolutiva</button>
-        <button class="btn btn-ghost btn-sm hidden" id="eval-rederive-btn" title="Refaz a versão automática a partir da avaliação atual (a edição do professor, se houver, é preservada e continua valendo)">Regerar automática</button>
-        <button class="btn btn-ghost btn-sm hidden" id="eval-discard-edit-btn" title="Descarta a edição do professor — a versão automática volta a valer">Restaurar automática</button>
+        <button class="btn btn-ghost btn-sm hidden" id="eval-edit-btn">Editar manualmente</button>
+        <button class="btn btn-ghost btn-sm hidden" id="eval-discard-edit-btn" title="Descarta a edição manual — a versão automática volta a valer">Restaurar automática</button>
       </div>
       <p class="eval-publish-help">
-        O aluno NUNCA vê este relatório. O fluxo é: gerar a devolutiva
-        formativa (prévia abaixo) → revisar (e editar, se quiser; a automática
-        fica preservada) → publicar. O aluno só vê depois de publicada.
+        O aluno só vê a devolutiva depois de <strong>Publicar</strong>. Ajuste o prompt e regere quantas vezes quiser antes disso.
       </p>
+
       <div class="eval-sections hidden" id="eval-sections">
         <div class="sf-label">Seções incluídas no que o aluno vê</div>
         <label class="eval-section-toggle" id="sec-row-interviewer_opinion">
@@ -392,24 +395,6 @@
         <summary id="student-eval-preview-summary">Devolutiva (o que o aluno vê)</summary>
         <div id="student-eval-preview-body"></div>
       </details>
-      <div id="rederive-form" class="student-eval-editor hidden">
-        <div class="sf-label">Regerar a devolutiva — experimentar diretrizes</div>
-        <p class="eval-publish-help" style="margin-top: 0;">
-          As diretrizes orientam a geração (tom, formato, o que destacar).
-          Aqui você experimenta <strong>só neste aluno</strong> — o padrão do
-          trabalho não muda até você marcar a opção abaixo. A edição manual
-          desta devolutiva, se houver, é preservada.
-        </p>
-        <textarea id="rederive-guidelines" class="editor-textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários."></textarea>
-        <label class="eval-section-toggle" style="margin-top: var(--sp-2);">
-          <input type="checkbox" id="rederive-save-default">
-          <span>Salvar estas diretrizes como padrão do trabalho (afeta as próximas gerações em lote)</span>
-        </label>
-        <div class="eval-publish-row" style="margin-top: var(--sp-2);">
-          <button class="btn btn-primary btn-sm" id="rederive-go-btn">Regerar para este aluno</button>
-          <button class="btn btn-sm" id="rederive-cancel-btn">Cancelar</button>
-        </div>
-      </div>
 
       <div id="student-eval-editor" class="student-eval-editor hidden">
         <div class="sf-label">Editar devolutiva</div>
@@ -428,6 +413,25 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- REFERÊNCIA: a avaliação interna do entrevistador (o aluno nunca vê). -->
+  <section id="evaluation" class="evaluation-card hidden">
+    <div class="eval-header">
+      <h2>Avaliação do entrevistador <span style="font-weight: 400; color: var(--ink-500); font-size: var(--fs-sm);">(interna — o aluno não vê)</span></h2>
+      <div>
+        <span class="eval-meta" id="eval-meta"></span>
+        <button class="btn btn-sm" id="eval-btn">Gerar avaliação</button>
+      </div>
+    </div>
+    <div class="eval-empty-note" id="eval-empty-note">
+      Relatório de como o aluno sustentou o trabalho nesta entrevista, sob a
+      perspectiva do entrevistador. Usa o enunciado, o trabalho enviado e a
+      transcrição completa. A geração leva por volta de um minuto. A devolutiva
+      ao aluno (acima) é derivada deste relatório.
+    </div>
+    <div class="notice notice-error eval-error hidden" id="eval-error"></div>
+    <div id="eval-body"></div>
   </section>
 
   <details class="intro hidden" id="intro">
@@ -767,10 +771,8 @@ async function loadEvaluation() {
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation`);
     if (!r.ok) return;
     const j = await r.json();
-    if (j.evaluation) {
-      renderEvaluation(j.evaluation, j.evaluated_at);
-      renderPublication(j);
-    }
+    if (j.evaluation) renderEvaluation(j.evaluation, j.evaluated_at);
+    renderFeedbackCard(j);
   } catch { /* leitura do cache é best-effort; o botão continua funcional */ }
 }
 
@@ -801,7 +803,7 @@ function renderStudentPreview(ev) {
 // Último estado conhecido da devolutiva (payload do servidor).
 let pubState = null;
 
-const PUB_BTN_IDS = ['eval-derive-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-rederive-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'rederive-go-btn', 'rederive-cancel-btn', 'sections-apply-all-btn'];
+const PUB_BTN_IDS = ['fb-generate-btn', 'fb-apply-all-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'sections-apply-all-btn'];
 const SECTION_KEYS = ['interviewer_opinion', 'strengths', 'improvement_areas', 'study_suggestions'];
 
 function setPubButtonsDisabled(disabled) {
@@ -809,13 +811,33 @@ function setPubButtonsDisabled(disabled) {
   document.querySelectorAll('#eval-sections input[type=checkbox]').forEach(c => { c.disabled = disabled; });
 }
 
-function renderPublication(j) {
+let promptInit = false;
+
+function renderFeedbackCard(j) {
   pubState = j;
-  const block = document.getElementById('eval-publish-block');
-  block.classList.remove('hidden');
+  const hasInternal = !!j.evaluation;
+  const needsEval = document.getElementById('sf-needs-eval');
+  const controls = document.getElementById('sf-controls');
+
+  // Sem avaliação interna não há de onde derivar a devolutiva.
+  if (!hasInternal) {
+    needsEval.classList.remove('hidden');
+    controls.classList.add('hidden');
+    document.getElementById('eval-publish-status').textContent = '';
+    return;
+  }
+  needsEval.classList.add('hidden');
+  controls.classList.remove('hidden');
+
+  // Prompt pré-preenchido com as diretrizes do trabalho UMA vez (não
+  // sobrescreve o que o professor digitar em re-renders, ex.: toggles).
+  if (!promptInit) {
+    document.getElementById('fb-prompt').value = j.feedback_guidelines ?? '';
+    promptInit = true;
+  }
+
   const statusEl = document.getElementById('eval-publish-status');
   const show = (id, visible) => document.getElementById(id).classList.toggle('hidden', !visible);
-
   const hasVersion = !!j.student_evaluation;
   const isEdited = !!j.student_evaluation_edited;
   const published = !!j.published_at;
@@ -833,11 +855,11 @@ function renderPublication(j) {
   }
   statusEl.innerHTML = statusHtml;
 
-  show('eval-derive-btn', !hasVersion);
+  document.getElementById('fb-generate-btn').textContent =
+    hasVersion ? 'Regerar devolutiva (este aluno)' : 'Gerar devolutiva (este aluno)';
   show('eval-publish-btn', hasVersion && !published);
   show('eval-unpublish-btn', published);
   show('eval-edit-btn', hasVersion);
-  show('eval-rederive-btn', hasVersion);
   show('eval-discard-edit-btn', isEdited);
 
   // Toggles de seção (só fazem sentido com versão gerada). Cada seção só
@@ -864,7 +886,6 @@ function renderPublication(j) {
     preview.classList.add('hidden');
   }
   document.getElementById('student-eval-editor').classList.add('hidden');
-  document.getElementById('rederive-form').classList.add('hidden');
 }
 
 async function pubRequest(method, path, body) {
@@ -886,8 +907,8 @@ async function pubRequest(method, path, body) {
       warnEl.classList.remove('hidden');
     }
     // Respostas parciais (ex.: despublicar devolve só published_at) são
-    // mescladas sobre o estado anterior.
-    renderPublication({ ...pubState, ...j });
+    // mescladas sobre o estado anterior (preserva j.evaluation interna).
+    renderFeedbackCard({ ...pubState, ...j });
     return j;
   } catch (err) {
     errEl.textContent = `Falha: ${err.message}`;
@@ -898,49 +919,70 @@ async function pubRequest(method, path, body) {
   }
 }
 
-document.getElementById('eval-derive-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('eval-derive-btn');
+// Gera/regera a devolutiva SÓ deste aluno, com o prompt do campo como
+// override ad-hoc (não toca o padrão do trabalho).
+document.getElementById('fb-generate-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('fb-generate-btn');
+  const label = btn.textContent;
+  const guidelines = document.getElementById('fb-prompt').value.trim() || null;
+  const force = !!pubState?.student_evaluation;
   btn.textContent = 'Gerando…';
-  await pubRequest('POST', 'student-version');
-  btn.textContent = 'Gerar devolutiva (prévia)';
+  await pubRequest('POST', `student-version${force ? '?force=true' : ''}`, { guidelines });
+  btn.textContent = label;
 });
-document.getElementById('eval-rederive-btn').addEventListener('click', () => {
-  document.getElementById('rederive-guidelines').value = pubState?.feedback_guidelines ?? '';
-  document.getElementById('rederive-save-default').checked = false;
-  document.getElementById('rederive-form').classList.remove('hidden');
-  document.getElementById('student-eval-editor').classList.add('hidden');
-});
-document.getElementById('rederive-cancel-btn').addEventListener('click', () => {
-  document.getElementById('rederive-form').classList.add('hidden');
-});
-document.getElementById('rederive-go-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('rederive-go-btn');
-  btn.disabled = true;
-  btn.textContent = 'Regerando…';
+
+// Aplica o prompt a TODOS: salva como padrão do trabalho e regera a
+// devolutiva de todos os alunos com avaliação (lote em segundo plano).
+document.getElementById('fb-apply-all-btn').addEventListener('click', async () => {
+  const guidelines = document.getElementById('fb-prompt').value.trim() || null;
+  if (!confirm('Salvar este prompt como padrão do trabalho e regerar a devolutiva de TODOS os alunos com avaliação? Cada geração consome orçamento do trabalho.')) return;
+  const errEl = document.getElementById('eval-publish-error');
+  const statusEl = document.getElementById('fb-batch-status');
+  errEl.classList.add('hidden');
+  setPubButtonsDisabled(true);
   try {
-    const guidelines = document.getElementById('rederive-guidelines').value.trim() || null;
-    // Só salva como padrão do trabalho se o professor pedir explicitamente.
-    if (document.getElementById('rederive-save-default').checked) {
-      const r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedback_guidelines: guidelines }),
-      });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
-      if (pubState) pubState.feedback_guidelines = guidelines;
-    }
-    // Regera SÓ este aluno, com a diretriz como override ad-hoc (não toca o trabalho).
-    await pubRequest('POST', 'student-version?force=true', { guidelines });
-    document.getElementById('rederive-form').classList.add('hidden');
+    let r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback_guidelines: guidelines }),
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+    if (pubState) pubState.feedback_guidelines = guidelines;
+    r = await fetch(`/w/${encodeURIComponent(workToken)}/evaluations/student-versions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    statusEl.classList.remove('hidden');
+    statusEl.textContent = '⏳ Regerando as devolutivas de todos os alunos…';
+    pollApplyAll();
   } catch (err) {
-    const errEl = document.getElementById('eval-publish-error');
-    errEl.textContent = `Falha ao regerar: ${err.message}`;
+    errEl.textContent = `Falha ao aplicar a todos: ${err.message}`;
     errEl.classList.remove('hidden');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Regerar para este aluno';
+    setPubButtonsDisabled(false);
   }
 });
+
+async function pollApplyAll() {
+  const statusEl = document.getElementById('fb-batch-status');
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/evaluations/status`);
+    const j = await r.json();
+    const b = j.derive;
+    if (b && b.running) {
+      statusEl.textContent = `⏳ Regerando devolutivas (${b.done}/${b.total})… ${b.ok} geradas${b.failed.length ? `, ${b.failed.length} falhas` : ''}.`;
+      setTimeout(pollApplyAll, 4000);
+    } else {
+      statusEl.textContent = b
+        ? `✔ Devolutivas regeradas: ${b.ok} ok${b.skipped ? `, ${b.skipped} puladas` : ''}${b.failed.length ? `, ${b.failed.length} falhas` : ''}. O prompt agora vale para todos.`
+        : '✔ Concluído.';
+      setPubButtonsDisabled(false);
+      loadEvaluation(); // recarrega a devolutiva deste aluno
+    }
+  } catch {
+    setTimeout(pollApplyAll, 4000);
+  }
+}
 document.getElementById('eval-publish-btn').addEventListener('click', () => pubRequest('POST', 'publish'));
 document.getElementById('eval-unpublish-btn').addEventListener('click', () => pubRequest('DELETE', 'publish'));
 document.querySelectorAll('#eval-sections input[data-section]').forEach(cb => {
@@ -1174,8 +1216,9 @@ async function load() {
     turnsEl.innerHTML = turns.map(renderTurn).join('');
   }
 
-  // Avaliação do entrevistador: só faz sentido com pelo menos uma resposta.
+  // Avaliação e devolutiva: só fazem sentido com pelo menos uma resposta.
   if (turns.some(t => typeof t.answer === 'string' && t.answer.trim())) {
+    document.getElementById('student-feedback-card').classList.remove('hidden');
     document.getElementById('evaluation').classList.remove('hidden');
     loadEvaluation();
   }
