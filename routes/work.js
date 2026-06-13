@@ -1277,6 +1277,8 @@ async function findMatchingTemplateName(savedYamlText) {
 // Quando `labels` está presente ele vence; `label`/`count` são ignorados.
 const BULK_LABEL_CAP = 200;
 router.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
+    // Marcação de teste é definida na criação (decisão de produto: não muda depois).
+    const isTest = req.body?.is_test === true;
     const rawLabels = req.body?.labels;
     if (Array.isArray(rawLabels)) {
         const sanitized = [];
@@ -1295,8 +1297,8 @@ router.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
             return res.status(400).json({ error: `máximo de ${BULK_LABEL_CAP} nomes por envio` });
         }
         try {
-            const rows = await db.createSubmissionsFromLabels(req.work.id, sanitized);
-            log.info("SUBMISSION", `created ${rows.length} submission(s) from labels for work=${req.work.work_token}`);
+            const rows = await db.createSubmissionsFromLabels(req.work.id, sanitized, isTest);
+            log.info("SUBMISSION", `created ${rows.length} submission(s) from labels for work=${req.work.work_token} test=${isTest}`);
             return res.json({ submissions: rows });
         } catch (err) {
             log.error("SUBMISSION", `create-from-labels failed: ${err.message}`);
@@ -1312,8 +1314,8 @@ router.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
     const count = Number.isFinite(rawCount) && rawCount > 0 && rawCount <= 50 ? Math.floor(rawCount) : 1;
 
     try {
-        const rows = await db.createSubmissions(req.work.id, baseLabel, count);
-        log.info("SUBMISSION", `created ${count} submission(s) for work=${req.work.work_token}`);
+        const rows = await db.createSubmissions(req.work.id, baseLabel, count, isTest);
+        log.info("SUBMISSION", `created ${count} submission(s) for work=${req.work.work_token} test=${isTest}`);
         res.json({ submissions: rows });
     } catch (err) {
         log.error("SUBMISSION", `create failed: ${err.message}`);
