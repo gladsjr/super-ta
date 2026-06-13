@@ -43,6 +43,7 @@ import {
     voiceGenderOf,
     sessionToClientState,
     attachAudio,
+    attachAudioChunks,
     maybeRebuildPendingQuestionAudio,
     initOrResumeSession,
     startInterviewPreparation,
@@ -759,6 +760,7 @@ function recordTurnTimings(sess, m, kind) {
         stt_ms: d(m.recv, m.stt),
         think_to_first_token_ms: d(m.stt, m.firstToken),
         first_token_to_tts_ms: d(m.firstToken, m.ttsStart),
+        tts_first_ms: d(m.ttsStart, m.ttsFirst),
         tts_ms: d(m.ttsStart, m.ttsDone),
         tts_to_done_ms: d(m.ttsDone, m.done),
         total_ms: d(m.recv, m.done),
@@ -793,7 +795,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
 
     // Telemetria de latência (modo áudio): marcos absolutos por turno. Viram
     // deltas e são persistidos em server_timings via recordTurnTimings/sendFinal.
-    const tMarks = { recv: Date.now(), stt: null, firstToken: null, ttsStart: null, ttsDone: null, done: null };
+    const tMarks = { recv: Date.now(), stt: null, firstToken: null, ttsStart: null, ttsFirst: null, ttsDone: null, done: null };
     let timingKind = null;
     let message;
     // Duração da mensagem de voz do aluno (segundos). Em modo texto fica null.
@@ -1268,9 +1270,20 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     const rationale = parsed.rationale;
     timingKind = kind;
 
-    // Gera TTS uma vez. Toda kind precisa de áudio (modal inclusive).
+    // Gera TTS. No caminho áudio normal (SSE, exceto meta_modal) sintetiza por
+    // sentenças e emite cada pedaço via SSE (event: audio_chunk) assim que pronto
+    // — o frontend toca a 1ª sentença sem esperar o resto. meta_modal e o
+    // fallback (sem SSE) usam o blob único.
     tMarks.ttsStart = Date.now();
-    const audio = await attachAudio(sess, assistantMessage);
+    let audio;
+    if (useSSE && kind !== "meta_modal") {
+        audio = await attachAudioChunks(sess, assistantMessage, (chunk) => {
+            if (chunk.index === 0 && tMarks.ttsFirst == null) tMarks.ttsFirst = Date.now();
+            res.write(`event: audio_chunk\ndata: ${JSON.stringify(chunk)}\n\n`);
+        });
+    } else {
+        audio = await attachAudio(sess, assistantMessage);
+    }
     tMarks.ttsDone = Date.now();
     const assistantAudioSec = audio.audio_duration_seconds ?? null;
 

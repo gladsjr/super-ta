@@ -54,7 +54,7 @@ function stats(arr) {
 // Coleta métricas de um grupo de runs.
 function collect(runDirs) {
     const perceived = [];
-    const server = { stt_ms: [], think_to_first_token_ms: [], first_token_to_tts_ms: [], tts_ms: [], tts_to_done_ms: [], total_ms: [] };
+    const server = { stt_ms: [], think_to_first_token_ms: [], first_token_to_tts_ms: [], tts_first_ms: [], tts_ms: [], tts_to_done_ms: [], total_ms: [] };
     let runs = 0, withTimings = 0;
     for (const name of runDirs) {
         const dir = resolveRun(name);
@@ -96,7 +96,8 @@ function printGroup(label, g) {
     line("STT", sv.stt_ms);
     line("STT→1º token (raciocínio)", sv.think_to_first_token_ms);
     line("1º token→início TTS", sv.first_token_to_tts_ms);
-    line("TTS (síntese+download)", sv.tts_ms);
+    line("TTS até 1ª sentença", sv.tts_first_ms);
+    line("TTS total (síntese+download)", sv.tts_ms);
     line("TTS→resposta enviada", sv.tts_to_done_ms);
     line("total server (recv→done)", sv.total_ms);
     // GATE: fração do tempo percebido que é TTS.
