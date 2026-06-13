@@ -516,6 +516,9 @@
       <div id="upload-area" class="card">
         <h3 class="card-title">Envio do trabalho</h3>
         <p class="card-sub">Envie o PDF do seu trabalho para iniciar a entrevista.</p>
+        <div id="spontaneity-note" class="notice notice-info hidden" style="margin-bottom: var(--sp-3)">
+          <strong>Responda de cabeça.</strong> É uma conversa ao vivo: pode pensar um pouco, pausar, hesitar e se corrigir — isso é normal. O que se espera é que você responda <strong>com as suas próprias palavras, na hora</strong>, sem consultar IA, pesquisar ou ler um texto pronto.
+        </div>
         <div class="row">
           <input type="file" id="file" class="input" accept="application/pdf" style="flex:1; min-width:260px" />
           <button id="sendFile" class="btn btn-primary">Enviar</button>
@@ -650,6 +653,7 @@
     const submissionToken = location.pathname.split('/').filter(Boolean)[1];
     let phase = 'awaiting_upload';
     let interactionMode = 'text';
+    let expectSpontaneous = false;
     const chat = document.getElementById('chat');
 
     // Cobre dois cenários em que a sessão em memória do servidor sumiu sob nós:
@@ -697,7 +701,12 @@
         try {
           const r = await fetch('/static/student_instructions.html');
           if (r.ok) {
-            body.innerHTML = await r.text();
+            let html = await r.text();
+            // Reforça a expectativa de "resposta de cabeça" quando o trabalho a exige.
+            if (expectSpontaneous) {
+              html += '<hr><h4>Responda de cabeça</h4><p>Esta entrevista é uma conversa ao vivo. Você pode pensar um pouco, pausar, hesitar e se corrigir — isso é esperado. O que se avalia é que você responda <strong>com as suas próprias palavras, na hora</strong>: não vale parar para pesquisar, consultar IA ou ler um texto pronto.</p>';
+            }
+            body.innerHTML = html;
             instructionsLoaded = true;
           } else {
             body.innerHTML = '<p>Não foi possível carregar as instruções agora.</p>';
@@ -1380,6 +1389,13 @@
 
       phase = j.session.currentPhase;
       interactionMode = j.session.interactionMode || 'text';
+      // Expectativa de "resposta de cabeça": mostra o aviso na tela de upload
+      // e marca para reforçar nas instruções. O entrevistador também combina
+      // isso na abertura (lado do servidor).
+      expectSpontaneous = !!j.session.expectSpontaneous;
+      if (expectSpontaneous) {
+        document.getElementById('spontaneity-note')?.classList.remove('hidden');
+      }
       syncTopbarActions();
 
       // Aplica modo na UI: texto ou áudio. Esconde a área de texto no modo
@@ -1565,6 +1581,10 @@
     let recordedChunks = [];
     let recordTimer = null;
     let recordStartedAt = 0;
+    // Instrumentação de espontaneidade (Fase 2): instante em que a pergunta do
+    // entrevistador terminou de tocar — referência para o "tempo até começar a
+    // falar". Atualizado em afterInterviewerAudio.
+    let questionReadyAt = 0;
 
     // ---- Análise acústica (camada de pré-gate, espelha lib/acousticGate.js) ----
     // Calculada AQUI porque o PCM do microfone está disponível de graça no
@@ -1738,7 +1758,7 @@
       const audioEl = wrap?.querySelector ? wrap.querySelector('audio') : null;
       if (interactionMode !== 'audio' || !audioEl) { cb(); return; }
       let done = false;
-      const fire = () => { if (!done) { done = true; cb(); } };
+      const fire = () => { if (!done) { done = true; questionReadyAt = Date.now(); cb(); } };
       if (audioEl.ended) { fire(); return; }
       audioEl.addEventListener('ended', fire, { once: true });
       audioEl.addEventListener('error', fire, { once: true });
@@ -1834,6 +1854,15 @@
       // para o busboy/multer expor o campo em req.body. Ausente se Web Audio
       // indisponível.
       if (snrEstimate != null) form.append('acoustic_snr', String(snrEstimate));
+      // Instrumentação de espontaneidade (Fase 2): tempo até começar a falar
+      // (da pergunta pronta ao apertar gravar) e duração da fala. Campos de
+      // texto ANTES do arquivo (mesma razão do acoustic_snr).
+      if (questionReadyAt && recordStartedAt && recordStartedAt >= questionReadyAt) {
+        form.append('client_time_to_start_ms', String(recordStartedAt - questionReadyAt));
+      }
+      if (recordStartedAt) {
+        form.append('client_record_duration_ms', String(Date.now() - recordStartedAt));
+      }
       form.append('audio', blob, 'student.webm');
       let r, j;
       try {

@@ -489,6 +489,10 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
             catch (err) { log.error("PREGEN", `kickoff(memhit) failed: ${err.message}`); }
         }
 
+        // Re-sincroniza a expectativa de espontaneidade com a config atual do
+        // trabalho (igual ao modo): vale para o aviso ao aluno no /start.
+        sess.expectSpontaneous = req.work.expect_spontaneous === true;
+
         res.json({
             work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
             submission: { status: req.submission.status === "pending" ? "in_progress" : req.submission.status, student_label: req.submission.student_label },
@@ -546,6 +550,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
     // fica imutável até o próximo upload.
     sess.interactionMode = req.work.interaction_mode || "text";
     sess.voice = req.work.voice || null;
+    sess.expectSpontaneous = req.work.expect_spontaneous === true;
     // Persona segue, em ordem de prioridade: (1) override do professor, (2)
     // gênero da voz em modo áudio, (3) sorteio balanceado em modo texto.
     // A pré-geração no /start já escolheu uma persona; só re-picka se a config
@@ -799,6 +804,14 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         message = (req.body?.message || "").toString();
     }
     if (!message) return res.status(400).json({ error: "empty message" });
+    // Instrumentação de espontaneidade (Fase 2): tempos do cliente (modo áudio).
+    // time_to_start = da pergunta pronta ao apertar gravar; record_duration = fala.
+    // Gravados no turno (conversation_json) para a avaliação da espontaneidade.
+    const clientTimeToStartMs = numOrNull(req.body?.client_time_to_start_ms);
+    const clientRecordDurationMs = numOrNull(req.body?.client_record_duration_ms);
+    const clientTiming = (clientTimeToStartMs != null || clientRecordDurationMs != null)
+        ? { time_to_start_ms: clientTimeToStartMs, record_duration_ms: clientRecordDurationMs }
+        : null;
     // Arquivamento da gravação do aluno (best-effort, audio mode apenas).
     // Acontece ANTES do pré-gate — áudios ininteligíveis também são
     // arquivados como evidência pra eventual auditoria. Falha silenciosa.
@@ -925,6 +938,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                     studentMessage: message,
                     meterCtx: sessionMeterCtx(sess),
                     interactionMode: sess.interactionMode,
+                    expectSpontaneous: !!sess.expectSpontaneous,
                 });
             } catch (err) {
                 log.error("AGENT:Introduction", `present_self failed, using fallback: ${err.message}`);
@@ -1119,6 +1133,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             currentTurn.answer = message;
             currentTurn.answered_at = new Date().toISOString();
             currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+            if (clientTiming) currentTurn.client_timing = clientTiming;
         }
         const audio = await attachAudio(sess, forcedMessage);
         sess.conv_chat.push({ role: "assistant", content: forcedMessage });
@@ -1286,6 +1301,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 assistant_audio_duration_seconds: assistantAudioSec,
                 rationale,
                 follow_up_reason: parsed.action.follow_up_reason ?? null,
+                client_timing: clientTiming,
                 at: new Date().toISOString(),
             });
         }
@@ -1303,6 +1319,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             currentTurn.answer = message;
             currentTurn.answered_at = new Date().toISOString();
             currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+            if (clientTiming) currentTurn.client_timing = clientTiming;
         }
         const planQId = parsed.action.plan_question_id ?? null;
         const planQuestion = planQId != null
@@ -1348,6 +1365,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             currentTurn.answer = message;
             currentTurn.answered_at = new Date().toISOString();
             currentTurn.answer_audio_duration_seconds = studentAudioDurationSec;
+            if (clientTiming) currentTurn.client_timing = clientTiming;
         }
         sess.currentPhase = "finalizing";
         sess.conversationCompleted = true;
