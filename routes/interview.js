@@ -43,6 +43,7 @@ import {
     voiceGenderOf,
     sessionToClientState,
     attachAudio,
+    attachAudioChunks,
     maybeRebuildPendingQuestionAudio,
     initOrResumeSession,
     startInterviewPreparation,
@@ -744,6 +745,28 @@ router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, re
     res.send(buffer);
 });
 
+// Telemetria de latência por turno (modo áudio). Converte os marcos absolutos
+// (Date.now) em deltas em ms e acumula em sess.serverTimings, persistido no
+// conversation_json (server_timings) para análise do tempo percebido pelo aluno.
+// Marcos: recv (entrada) → stt (transcrição pronta) → firstToken (1º token do
+// orquestrador, pós chain-of-thought) → ttsStart/ttsDone (síntese+download do
+// áudio) → done (resposta enviada). tts_ms é o alvo da fragmentação.
+function recordTurnTimings(sess, m, kind) {
+    if (!sess.serverTimings) sess.serverTimings = [];
+    const d = (a, b) => (a != null && b != null ? b - a : null);
+    sess.serverTimings.push({
+        kind: kind ?? null,
+        at: new Date().toISOString(),
+        stt_ms: d(m.recv, m.stt),
+        think_to_first_token_ms: d(m.stt, m.firstToken),
+        first_token_to_tts_ms: d(m.firstToken, m.ttsStart),
+        tts_first_ms: d(m.ttsStart, m.ttsFirst),
+        tts_ms: d(m.ttsStart, m.ttsDone),
+        tts_to_done_ms: d(m.ttsDone, m.done),
+        total_ms: d(m.recv, m.done),
+    });
+}
+
 // ============================================================================
 // POST /s/:submissionToken/chat
 // ============================================================================
@@ -770,6 +793,10 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         return res.status(400).json({ error: "esta entrevista está em modo texto — envie uma mensagem escrita" });
     }
 
+    // Telemetria de latência (modo áudio): marcos absolutos por turno. Viram
+    // deltas e são persistidos em server_timings via recordTurnTimings/sendFinal.
+    const tMarks = { recv: Date.now(), stt: null, firstToken: null, ttsStart: null, ttsFirst: null, ttsDone: null, done: null };
+    let timingKind = null;
     let message;
     // Duração da mensagem de voz do aluno (segundos). Em modo texto fica null.
     // Probada do buffer original antes do STT — não depende do shape do response.
@@ -803,6 +830,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     } else {
         message = (req.body?.message || "").toString();
     }
+    tMarks.stt = Date.now();
     if (!message) return res.status(400).json({ error: "empty message" });
     // Instrumentação de espontaneidade (Fase 2): tempos do cliente (modo áudio).
     // time_to_start = da pergunta pronta ao apertar gravar; record_duration = fala.
@@ -1091,6 +1119,10 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Despacha o payload final. Em SSE, vira event: result + end. Em JSON,
     // res.json clássico. Toda saída bem-sucedida desta rota passa aqui.
     const sendFinal = (payload) => {
+        // Telemetria: carimba o fim e registra os deltas do turno (modo áudio)
+        // para análise da latência percebida. Ver server_timings no log.
+        tMarks.done = Date.now();
+        if (isAudioMode) recordTurnTimings(sess, tMarks, timingKind);
         // Caso "avisar": anexa a Dica não-bloqueante à resposta normal (a menos
         // que o próprio fluxo já tenha uma, ex.: hint de áudio).
         if (dicaPayload && !payload.audio_intelligibility) {
@@ -1181,7 +1213,22 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Chama o super-orquestrador. Falha cai pra fallback ask_repeat. Em SSE,
     // passamos onFirstDelta para sinalizar "respondendo" ao frontend no momento
     // real em que o modelo começa a emitir tokens de texto (após o
-    // chain-of-thought interno).
+    // chain-of-thought interno). Em SSE, onMessageReady dispara o TTS cedo
+    // (streaming-parse) assim que a fala fecha, em paralelo com rationale/memory.
+    let earlyTtsPromise = null;
+    let earlyKind = null;
+    let earlyMessage = null;
+    const onMessageReady = (kind, msg) => {
+        if (earlyTtsPromise || kind === "meta_modal") return; // 1x; meta vai p/ modal (blob)
+        earlyKind = kind;
+        earlyMessage = msg;
+        tMarks.ttsStart = Date.now();
+        earlyTtsPromise = attachAudioChunks(sess, msg, (chunk) => {
+            if (chunk.index === 0 && tMarks.ttsFirst == null) tMarks.ttsFirst = Date.now();
+            res.write(`event: audio_chunk\ndata: ${JSON.stringify(chunk)}\n\n`);
+        }).then((a) => { tMarks.ttsDone = Date.now(); return a; })
+          .catch((e) => { log.error("AUDIO", `early TTS falhou: ${e.message}`); return { audio_error: "tts_failed" }; });
+    };
     let parsed;
     try {
         parsed = await evaluateWithConversationLockRetry(() => superOrchestratorAgent.evaluate({
@@ -1203,16 +1250,31 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             minTurnsBeforeFinalize: minTurnsBeforeFinalizeFor(sess),
             maxTurns,
             onFirstDelta: useSSE ? () => {
+                if (tMarks.firstToken == null) tMarks.firstToken = Date.now();
                 res.write(`event: responding\ndata: {}\n\n`);
             } : null,
+            onMessageReady: useSSE ? onMessageReady : null,
         }));
     } catch (err) {
-        log.error("SUPER_ORQ", `agent failed, fallback to ask_repeat: ${err.message}`);
-        parsed = {
-            rationale: `Falha do super-orquestrador: ${err.message}. Pedindo repetição como fallback.`,
-            action: { kind: "ask_repeat", message: "Desculpa, tive um problema aqui. Pode repetir a sua última resposta?" },
-            memory: sess.superOrchestratorMemory ?? null,
-        };
+        log.error("SUPER_ORQ", `agent failed: ${err.message}`);
+        if (earlyMessage && earlyKind) {
+            // A fala JÁ foi emitida via streaming-parse antes de o JSON falhar
+            // (ex.: truncamento após a message). Reconstrói uma ação coerente com
+            // o que a outra ponta já ouviu, em vez do ask_repeat genérico — que
+            // contradiria o áudio que já está tocando.
+            log.error("SUPER_ORQ", `parse final falhou após emitir a fala; reconstruindo ação kind=${earlyKind}`);
+            parsed = {
+                rationale: "(reconstruído: o JSON final do super-orquestrador falhou após a fala já ter sido emitida via streaming)",
+                action: { kind: earlyKind, message: earlyMessage },
+                memory: sess.superOrchestratorMemory ?? null,
+            };
+        } else {
+            parsed = {
+                rationale: `Falha do super-orquestrador: ${err.message}. Pedindo repetição como fallback.`,
+                action: { kind: "ask_repeat", message: "Desculpa, tive um problema aqui. Pode repetir a sua última resposta?" },
+                memory: sess.superOrchestratorMemory ?? null,
+            };
+        }
     }
 
     // Persiste memory que o agente devolveu (mesmo no fallback, copia a antiga).
@@ -1235,9 +1297,32 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     const kind = parsed.action.kind;
     const assistantMessage = parsed.action.message;
     const rationale = parsed.rationale;
+    timingKind = kind;
 
-    // Gera TTS uma vez. Toda kind precisa de áudio (modal inclusive).
-    const audio = await attachAudio(sess, assistantMessage);
+    // Gera TTS. Se o streaming-parse já disparou a síntese durante o stream
+    // (earlyTtsPromise), apenas aguarda — o áudio começou a tocar antes de o JSON
+    // fechar (o ganho desta etapa). Senão: caminho áudio normal (fragmentado,
+    // exceto meta_modal) ou blob único.
+    let audio;
+    if (earlyTtsPromise) {
+        audio = await earlyTtsPromise;
+        // Consistência: a fala tocada deve ser a do JSON final. Divergência indica
+        // bug no streaming-parse — loga (o áudio já foi emitido, irreversível).
+        if (earlyMessage !== assistantMessage) {
+            log.error("SUPER_ORQ", `streaming-parse divergiu: tocado=${log.preview(earlyMessage, 60)} final=${log.preview(assistantMessage, 60)}`);
+        }
+    } else if (useSSE && kind !== "meta_modal") {
+        tMarks.ttsStart = Date.now();
+        audio = await attachAudioChunks(sess, assistantMessage, (chunk) => {
+            if (chunk.index === 0 && tMarks.ttsFirst == null) tMarks.ttsFirst = Date.now();
+            res.write(`event: audio_chunk\ndata: ${JSON.stringify(chunk)}\n\n`);
+        });
+        tMarks.ttsDone = Date.now();
+    } else {
+        tMarks.ttsStart = Date.now();
+        audio = await attachAudio(sess, assistantMessage);
+        tMarks.ttsDone = Date.now();
+    }
     const assistantAudioSec = audio.audio_duration_seconds ?? null;
 
     // ====== Despacha por kind ======

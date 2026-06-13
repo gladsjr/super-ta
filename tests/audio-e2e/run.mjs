@@ -208,6 +208,19 @@ async function main() {
         context.setDefaultTimeout(120000); // TTS + reasoning podem demorar
         const injectJs = fs.readFileSync(path.join(__dirname, "inject.js"), "utf8");
         await context.addInitScript(injectJs);
+        // Cronômetro de latência percebida: registra performance.now() a cada vez
+        // que um <audio> começa a tocar ('playing', capture phase pois não
+        // borbulha). Comparado ao instante do envio, mede "tempo até começar a
+        // ouvir a voz do entrevistador". O áudio do aluno é injetado via
+        // AudioContext (mic falso), não <audio>, então não contamina a medida.
+        await context.addInitScript(() => {
+            window.__superTAAudioPlays = [];
+            document.addEventListener("playing", (e) => {
+                if (e.target && e.target.tagName === "AUDIO") {
+                    window.__superTAAudioPlays.push(performance.now());
+                }
+            }, true);
+        });
 
         const page = await context.newPage();
         page.on("console", (msg) => {
@@ -300,9 +313,25 @@ async function main() {
                 (r) => r.url().includes(`/s/${s.subToken}/chat`) && r.request().method() === "POST",
                 { timeout: 180000 }
             );
+            // Instante do envio no relógio do browser (mesma origem dos plays).
+            const tSend = await page.evaluate(() => performance.now());
             await page.locator("#stop-send-btn").click();
             const res = await chatResp;
             const payload = parseChatBody(res.headers()["content-type"] || "", await res.text());
+
+            // Latência percebida: espera o áudio do entrevistador começar a tocar
+            // e mede do envio até o 1º som após o envio.
+            let perceivedMs = null;
+            await page.waitForFunction(
+                (since) => (window.__superTAAudioPlays || []).some((t) => t > since),
+                tSend,
+                { timeout: 180000 }
+            ).catch(() => {});
+            const firstPlay = await page.evaluate((since) => {
+                const arr = (window.__superTAAudioPlays || []).filter((t) => t > since);
+                return arr.length ? Math.min(...arr) : null;
+            }, tSend);
+            if (firstPlay != null) perceivedMs = Math.round(firstPlay - tSend);
 
             const nextQuestion = questionTextOf(payload);
             const gated = payload.audio_intelligibility || null;
@@ -317,6 +346,7 @@ async function main() {
                 student_answer: answerText,
                 interviewer_reply: nextQuestion,
                 phase,
+                perceived_ms: perceivedMs,
                 audio_error: !!payload.audio_error,
                 intelligibility_gate: gated ? { mode: gated.mode, attempt: gated.attempt, spans: gated.spans } : null,
             });

@@ -1078,6 +1078,39 @@
       if (a) playOrQueueAudio(a);
       return wrap;
     }
+    // Reprodução fragmentada da fala do entrevistador (modo áudio). Os pedaços
+    // chegam via SSE (event: audio_chunk) e tocam em série pela fila global
+    // (playOrQueueAudio); o 1º começa assim que chega — daí vem o ganho de
+    // latência percebida. onDone dispara quando o ÚLTIMO pedaço termina, para
+    // liberar a vez do aluno. O 1º <audio> fica visível (controle nativo); os
+    // demais ficam ocultos e tocam encadeados.
+    function createChunkedTA() {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg ta';
+      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="audio-row"></div></div>`;
+      chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+      const row = wrap.querySelector('.audio-row');
+      let doneCb = null, finished = false;
+      const fire = () => { if (!finished) { finished = true; if (doneCb) doneCb(); } };
+      return {
+        wrap,
+        addChunk(url, isLast) {
+          const a = document.createElement('audio');
+          a.preload = 'auto';
+          a.src = url;
+          if (row.children.length === 0) a.setAttribute('controls', '');
+          else a.style.display = 'none';
+          row.appendChild(a);
+          playOrQueueAudio(a);
+          if (isLast) {
+            a.addEventListener('ended', fire, { once: true });
+            a.addEventListener('error', fire, { once: true });
+            if (a.ended) fire();
+          }
+        },
+        onDone(cb) { doneCb = cb; if (finished) cb(); },
+      };
+    }
     function appendUser(text) {
       const wrap = document.createElement('div');
       wrap.className = 'msg you';
@@ -1095,7 +1128,7 @@
     //   event: error      data: {message, status}  (falha durante o stream)
     // `thinking` é a bolha do entrevistador retornada por appendThinkingBubble;
     // recebemos para poder flipar a label em 'responding' direto do servidor.
-    async function consumeSSE(response, thinking) {
+    async function consumeSSE(response, thinking, onAudioChunk) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -1119,6 +1152,10 @@
           }
           if (eventName === 'responding') {
             if (thinking) thinking.setStage('respondendo');
+          } else if (eventName === 'audio_chunk') {
+            if (typeof onAudioChunk === 'function') {
+              try { onAudioChunk(JSON.parse(dataStr)); } catch {}
+            }
           } else if (eventName === 'result') {
             try { result = JSON.parse(dataStr); }
             catch { streamError = new Error('SSE result com JSON inválido'); }
@@ -1768,10 +1805,14 @@
     // Pós-fala do entrevistador: libera a vez do aluno. Em modo texto, imediato;
     // em áudio, só depois que o áudio do entrevistador termina de tocar. `wrap`
     // é o elemento de mensagem recém-renderizado (contém o <audio> no modo áudio).
-    function handleTurn(j, wrap) {
+    function handleTurn(j, wrap, doneWaiter) {
       if (interactionMode === 'audio') {
         setStudentTurn(false, 'O entrevistador está falando…');
-        afterInterviewerAudio(wrap, () => setStudentTurn(true, 'Clique no botão para gravar sua resposta.'));
+        const release = () => setStudentTurn(true, 'Clique no botão para gravar sua resposta.');
+        // doneWaiter (fala fragmentada) aguarda o ÚLTIMO pedaço; senão, espera
+        // o <audio> único do blob terminar.
+        if (typeof doneWaiter === 'function') doneWaiter(release);
+        else afterInterviewerAudio(wrap, release);
       } else {
         setStudentTurn(true);
       }
@@ -1865,6 +1906,7 @@
       }
       form.append('audio', blob, 'student.webm');
       let r, j;
+      let chunked = null; // preenchido ao receber audio_chunk (fala fragmentada)
       try {
         r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, { method: 'POST', body: form }));
         // Server pode responder em dois formatos:
@@ -1874,7 +1916,12 @@
         //   - JSON: cap, intro, erros — caminho legado de hoje.
         const ct = r.headers.get('content-type') || '';
         if (r.ok && ct.includes('text/event-stream')) {
-          j = await consumeSSE(r, thinking);
+          // Toca cada pedaço de áudio assim que chega: o 1º começa a tocar
+          // antes do 'result', cortando a latência percebida.
+          j = await consumeSSE(r, thinking, (chunk) => {
+            if (!chunked) { thinking.remove(); chunked = createChunkedTA(); }
+            chunked.addChunk(chunk.audio_url, chunk.is_last);
+          });
         } else {
           j = await r.json();
         }
@@ -1907,9 +1954,11 @@
         showMetaDialog(j.assistant_response ?? '', j.audio_url);
         return;
       }
-      thinking.remove();
-      const wrap = appendTA(j.assistant, j.audio_url);
-      if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
+      if (!chunked) thinking.remove();
+      // Se a fala veio fragmentada, o balão e o áudio já existem (tocando desde
+      // o 1º pedaço). Senão, blob único: cria o balão agora.
+      const wrap = chunked ? chunked.wrap : appendTA(j.assistant, j.audio_url);
+      if (!chunked && j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
       if (j.audio_intelligibility?.hint) {
         const _h = j.audio_intelligibility.hint;
         appendDica({ title: _h.title, body: _h.body, transcript: _h.transcript, unclear: _h.unclear });
@@ -1919,7 +1968,7 @@
         syncTopbarActions();
         if (phase === 'finalizing') { enterReviewMode(); return; }
       }
-      handleTurn(j, wrap);
+      handleTurn(j, wrap, chunked ? chunked.onDone : null);
     }
 
     document.getElementById('record-btn').addEventListener('click', async () => {
