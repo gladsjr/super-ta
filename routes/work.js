@@ -10,6 +10,7 @@ import { requireWorkToken, requireWithinBudget, sanitizeLabel } from "../lib/mid
 import * as db from "../lib/db.js";
 import { pickRandomName } from "../lib/personas.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
+import { personaDisplay, PERSONA_ORDER } from "../config/personas.js";
 import { AudioCache, synthesizeSpeech } from "../lib/audio.js";
 import {
     meteredResponses,
@@ -928,7 +929,25 @@ router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
 router.get("/interviewers/templates", async (_req, res) => {
     try {
         const templates = await db.listInterviewerTemplates();
-        res.json({ templates });
+        // Enriquece cada template com a meta amigável do catálogo (config/personas.js)
+        // e ordena pela ordem canônica do catálogo — desconhecidos ao fim, alfabético.
+        const enriched = templates
+            .map(t => {
+                const meta = personaDisplay(t.filename);
+                return {
+                    filename: t.filename,
+                    label: meta.label,
+                    icon: meta.icon,
+                    summary: meta.summary,
+                    when_to_use: meta.when_to_use,
+                };
+            })
+            .sort((a, b) => {
+                const ai = PERSONA_ORDER.has(a.filename) ? PERSONA_ORDER.get(a.filename) : 999;
+                const bi = PERSONA_ORDER.has(b.filename) ? PERSONA_ORDER.get(b.filename) : 999;
+                return ai !== bi ? ai - bi : a.filename.localeCompare(b.filename);
+            });
+        res.json({ templates: enriched });
     } catch (err) {
         log.error("TPL", `list failed: ${err.message}`);
         res.status(500).json({ error: "failed to list templates" });
@@ -953,7 +972,11 @@ router.get("/interviewers/templates/:filename", async (req, res) => {
 router.get("/w/:workToken/interviewer", requireWorkToken, async (req, res) => {
     try {
         const yamlText = await db.getInterviewerYaml(req.work.id);
-        res.json({ yaml: yamlText ?? null });
+        // `matched` = filename da persona pronta que o YAML salvo reproduz
+        // byte-a-byte, ou null se for customizado/adaptado. A galeria do modo
+        // Simples usa isso para marcar o cartão ativo.
+        const matched = yamlText ? await findMatchingTemplateName(yamlText) : null;
+        res.json({ yaml: yamlText ?? null, matched });
     } catch (err) {
         log.error("WORK", `interviewer read failed: ${err.message}`);
         res.status(500).json({ error: "failed to read interviewer" });
