@@ -36,6 +36,11 @@
   .turn-header h2 { margin: 0; font-size: var(--fs-md); }
   .turn-header .time { color: var(--ink-400); font-size: var(--fs-xs); }
 
+  /* Avaliação deste turno (injetada no modo avaliação, dentro de cada .turn) */
+  .turn-eval { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 2px dashed var(--accent-200, #c7d2fe); }
+  .turn-eval-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+  .turn-eval .te-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; color: var(--accent-700, #1d4ed8); }
+
   .block { border-left: 4px solid transparent; padding: var(--sp-2) var(--sp-3); border-radius: 0 var(--r-md) var(--r-md) 0; margin-top: var(--sp-2); }
   .block .label { font-weight: 600; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--sp-1); color: var(--ink-500); }
   .block .content { white-space: pre-wrap; line-height: 1.5; color: var(--ink-900); }
@@ -479,6 +484,10 @@ const parts = location.pathname.split('/').filter(Boolean);
 // Path shape: /w/<workToken>/s/<subToken>
 const workToken = parts[1];
 const subToken = parts[3];
+// Modo da tela, via ?view=: "conversa" mostra só a conversa; "avaliacao" mostra
+// o cockpit completo (avaliação por turno, devolutiva, navegação lado a lado).
+// Default conversa — o caminho "Ver conversa" não revela a avaliação.
+const VIEW_MODE = new URLSearchParams(location.search).get('view') === 'avaliacao' ? 'avaliacao' : 'conversa';
 
 document.getElementById('back-link').href = '/w/' + encodeURIComponent(workToken || '');
 
@@ -488,6 +497,7 @@ document.getElementById('back-link').href = '/w/' + encodeURIComponent(workToken
 // que têm conversa (status != pendente — pendentes não têm o que revisar).
 let cockpitPrev = null, cockpitNext = null;
 async function setupCockpitNav() {
+  if (VIEW_MODE !== 'avaliacao') return; // navegação lado a lado é coisa da avaliação
   try {
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/info`);
     if (!r.ok) return;
@@ -510,7 +520,7 @@ async function setupCockpitNav() {
   } catch { /* nav é melhoria; se falhar, a página segue normal */ }
 }
 function gotoSubmission(s) {
-  if (s) location.href = `/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(s.submission_token)}`;
+  if (s) location.href = `/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(s.submission_token)}?view=${VIEW_MODE}`;
 }
 document.getElementById('nav-prev').addEventListener('click', () => gotoSubmission(cockpitPrev));
 document.getElementById('nav-next').addEventListener('click', () => gotoSubmission(cockpitNext));
@@ -634,7 +644,7 @@ function renderTurn(turn) {
   ].map(([label, v]) => `<dt>${label}</dt><dd>${listBlock(v)}</dd>`).join('');
 
   return `
-    <section class="turn">
+    <section class="turn" id="turn-${turn.index}">
       <div class="turn-header">
         <h2>Turno ${turn.index + 1}${m.id != null ? ` · plan id ${escapeHtml(m.id)}` : ''}</h2>
         <span class="time">${fmtTime(turn.asked_at)}${turn.answered_at ? ' → ' + fmtTime(turn.answered_at) : ''}</span>
@@ -764,6 +774,31 @@ function renderEvaluation(ev, evaluatedAt) {
     ${signals ? `<div class="eval-section-title">Sinais de autoria</div>${signals}` : ''}
     ${renderEvalList('Sugestões de follow-up presencial', ev.follow_up_suggestions)}
     ${renderEvalList('Ressalvas desta avaliação', ev.caveats)}`;
+
+  injectPerTurnEval(ev);
+}
+
+// No modo avaliação, acompanha cada turno da conversa com a avaliação daquele
+// turno (casada por turn_index). É o que dá a vantagem de separar as telas:
+// na conversa, só conversa; na avaliação, cada turno com seu juízo ao lado.
+function injectPerTurnEval(ev) {
+  document.querySelectorAll('.turn-eval').forEach(el => el.remove()); // limpa injeções de uma reavaliação anterior
+  if (VIEW_MODE !== 'avaliacao') return;
+  const pqs = Array.isArray(ev.per_question) ? ev.per_question : [];
+  pqs.forEach(q => {
+    const turnEl = document.getElementById('turn-' + Number(q.turn_index));
+    if (!turnEl) return;
+    const div = document.createElement('div');
+    div.className = 'turn-eval';
+    div.innerHTML = `
+      <div class="turn-eval-head">
+        <span class="te-label">Avaliação deste turno</span>
+        <span class="pq-tag ${escapeHtml(q.answer_assessment ?? '')}">${escapeHtml(ASSESSMENT_LABEL[q.answer_assessment] ?? q.answer_assessment ?? '—')}</span>
+      </div>
+      <div class="eval-text">${escapeHtml(q.comment ?? '')}</div>
+      ${q.evidence ? `<div class="pq-evidence">Evidência: ${escapeHtml(q.evidence)}</div>` : ''}`;
+    turnEl.appendChild(div);
+  });
 }
 
 async function loadEvaluation() {
@@ -1117,10 +1152,14 @@ async function load() {
   const personaLine = persona
     ? `<div class="persona-line">Entrevistador: <strong>${escapeHtml(persona.name)}</strong>${persona.city ? ` (${escapeHtml(persona.city)})` : ''}</div>`
     : '';
+  const modeChip = VIEW_MODE === 'avaliacao'
+    ? ` <span class="badge badge-accent" title="Mostra a avaliação por turno, a devolutiva e a navegação lado a lado">avaliação</span>`
+    : ` <span class="badge" title="Mostra só a conversa, sem avaliação">conversa</span>`;
   document.getElementById('meta-line').innerHTML =
     `Aluno: <strong>${escapeHtml(j.submission?.student_label ?? '—')}</strong>` +
     ` · Token: <code class="token-chip">${escapeHtml(subToken)}</code>` +
     ` <span class="badge badge-${statusKey}">${statusLabel(statusKey)}</span>` +
+    modeChip +
     personaLine;
 
   const conv = j.conversation;
@@ -1216,8 +1255,9 @@ async function load() {
     turnsEl.innerHTML = turns.map(renderTurn).join('');
   }
 
-  // Avaliação e devolutiva: só fazem sentido com pelo menos uma resposta.
-  if (turns.some(t => typeof t.answer === 'string' && t.answer.trim())) {
+  // Avaliação e devolutiva: só no modo avaliação, e só com pelo menos uma resposta.
+  // No modo conversa, "Ver conversa" mostra só a conversa — sem avaliação.
+  if (VIEW_MODE === 'avaliacao' && turns.some(t => typeof t.answer === 'string' && t.answer.trim())) {
     document.getElementById('student-feedback-card').classList.remove('hidden');
     document.getElementById('evaluation').classList.remove('hidden');
     loadEvaluation();

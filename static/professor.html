@@ -290,6 +290,11 @@
         <strong>3</strong> publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.
       </p>
 
+      <div class="row" style="margin-bottom: var(--sp-3)">
+        <button id="open-cockpit" class="btn" type="button" title="Abre as avaliações com navegação lado a lado entre os alunos (cada turno com sua avaliação)">Abrir avaliações lado a lado ↗</button>
+        <span id="open-cockpit-msg" class="hint"></span>
+      </div>
+
       <label class="label" for="fb-guidelines">Diretrizes para a devolutiva (opcional) — tom, formato, o que destacar</label>
       <textarea id="fb-guidelines" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários e termine com um encorajamento."></textarea>
       <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
@@ -517,7 +522,7 @@ function renderSubmissionsTable() {
     const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token);
     const hasConv = s.status !== 'pending';
     const convCell = hasConv
-      ? `<a href="${convUrl}" target="_blank" title="Ver log da entrevista">Ver conversa ↗</a>`
+      ? `<a href="${convUrl}?view=conversa" target="_blank" title="Ver só a conversa (sem avaliação)">Ver conversa ↗</a>`
       : `<span class="muted">—</span>`;
     const feedbackBadge = s.evaluation_published_at
       ? ` <span class="badge badge-accent" title="Devolutiva visível para o aluno desde ${new Date(s.evaluation_published_at).toLocaleString()}">publicada</span>`
@@ -525,7 +530,7 @@ function renderSubmissionsTable() {
         ? ` <span class="badge badge-pending" title="Devolutiva gerada, aguardando revisão/publicação — o aluno ainda não vê">devolutiva pronta</span>`
         : '');
     const evalCell = s.has_evaluation
-      ? `<a href="${convUrl}" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir relatório"><span class="badge badge-completed">avaliada</span></a>${feedbackBadge}`
+      ? `<a href="${convUrl}?view=avaliacao" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir avaliação lado a lado"><span class="badge badge-completed">avaliada</span></a>${feedbackBadge}`
       : `<span class="muted">—</span>`;
     const blockedBadge = s.is_blocked ? `<span class="badge-blocked">bloqueada</span>` : '';
     const actionBtn = s.is_blocked
@@ -1079,6 +1084,14 @@ document.getElementById('sub-filter').addEventListener('change', renderSubmissio
 
 document.getElementById('download-csv').onclick = () => {
   window.location.href = `/w/${encodeURIComponent(workToken)}/submissions.csv`;
+};
+
+document.getElementById('open-cockpit').onclick = () => {
+  const msg = document.getElementById('open-cockpit-msg');
+  msg.textContent = '';
+  const first = (lastSubmissions || []).find(s => s.status !== 'pending');
+  if (!first) { msg.textContent = 'Nenhuma entrevista com conversa para avaliar ainda.'; return; }
+  window.open(`/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(first.submission_token)}?view=avaliacao`, '_blank');
 };
 
 // ---- Avaliação em lote das entrevistas ----
