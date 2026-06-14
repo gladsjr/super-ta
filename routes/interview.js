@@ -18,10 +18,10 @@ import multer from "multer";
 import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
-import { transcribeAudio, AudioCache } from "../lib/audio.js";
+import { transcribeAudio, synthesizeSpeech, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
-import { STT_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
+import { STT_MODEL, TTS_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
 import { classifyAudio } from "../lib/audioIntelligibility.js";
@@ -53,6 +53,7 @@ import {
 import { attachNarratorAudio } from "../lib/narrator.js";
 import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import log from "../lib/logger.js";
+import { generateStudentAnswer, STUDENT_PROFILES } from "../lib/studentSimulator.js";
 
 // Guardrails de turno do super-orquestrador. Antes fixos (30/5); agora derivam
 // do número de perguntas planejadas (works.question_count, materializado no
@@ -766,6 +767,68 @@ function recordTurnTimings(sess, m, kind) {
         total_ms: d(m.recv, m.done),
     });
 }
+
+// ============================================================================
+// POST /s/:submissionToken/suggest-answer
+// Sugere uma resposta de aluno (LLM) para o PROFESSOR em conversas de TESTE.
+// Gated server-side por sess.isTest (esconder o botão na UI não basta). NÃO onera
+// o orçamento (meterCtx null). Body: { profile, want_audio }. Resposta:
+// { text, audio_base64? }. Reusa lib/studentSimulator (mesmo gerador do harness).
+// ============================================================================
+router.post("/s/:submissionToken/suggest-answer", requireSubmissionToken, requireNotFinalized, async (req, res) => {
+    const token = req.submission.submission_token;
+    const sess = SESSIONS.get(token);
+    if (!sess) return res.status(400).json({ error: "call /start first" });
+    if (!sess.isTest) {
+        return res.status(403).json({ error: "not_a_test", message: "Sugestão de resposta disponível apenas em conversas de teste." });
+    }
+    const profileKey = String(req.body?.profile || "domina");
+    const profile = STUDENT_PROFILES[profileKey] || STUDENT_PROFILES.domina;
+    const wantAudio = req.body?.want_audio === true;
+
+    // A última fala do entrevistador é a pergunta a responder; o resto é histórico.
+    const chat = Array.isArray(sess.conv_chat) ? sess.conv_chat : [];
+    let qIdx = -1;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (chat[i].role === "assistant") { qIdx = i; break; }
+    }
+    if (qIdx < 0) {
+        return res.status(409).json({ error: "no_question", message: "Ainda não há pergunta do entrevistador para responder." });
+    }
+    const question = chat[qIdx].content;
+    const history = chat.slice(0, qIdx).map(m => ({
+        role: m.role === "assistant" ? "interviewer" : "aluno",
+        text: m.content,
+    }));
+
+    try {
+        const text = await generateStudentAnswer({
+            systemBehavior: profile.system,
+            history,
+            question,
+            // Ancora na análise prévia do trabalho (resumo estruturado já na sessão).
+            workContext: sess.workAnalysis ? JSON.stringify(sess.workAnalysis) : null,
+            meterCtx: null, // sugestão de teste: NÃO debita o orçamento do trabalho.
+        });
+        const payload = { text, profile: profileKey };
+        if (wantAudio && sess.interactionMode === "audio") {
+            // Voz de aluno diferente da do entrevistador, para não confundir.
+            const studentVoice = sess.voice === "verse" ? "alloy" : "verse";
+            try {
+                const buffer = await synthesizeSpeech(openai, TTS_MODEL, text, studentVoice);
+                payload.audio_base64 = buffer.toString("base64");
+            } catch (err) {
+                log.error("SUGGEST", `TTS falhou: ${err.message}`);
+                payload.audio_error = true;
+            }
+        }
+        log.info("SUGGEST", `profile=${profileKey} audio=${!!payload.audio_base64} ${log.preview(text, 80)}`);
+        return res.json(payload);
+    } catch (err) {
+        log.error("SUGGEST", `geração falhou: ${err.message}`);
+        return res.status(500).json({ error: "generation_failed", message: "Não consegui gerar uma sugestão agora." });
+    }
+});
 
 // ============================================================================
 // POST /s/:submissionToken/chat
