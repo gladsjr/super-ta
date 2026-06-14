@@ -1135,23 +1135,37 @@
       wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="audio-row"></div></div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
       const row = wrap.querySelector('.audio-row');
-      let doneCb = null, finished = false;
+      let doneCb = null, finished = false, lastAudio = null, sawLast = false;
       const fire = () => { if (!finished) { finished = true; if (doneCb) doneCb(); } };
+      const armDone = (a) => {
+        a.addEventListener('ended', fire, { once: true });
+        a.addEventListener('error', fire, { once: true });
+        if (a.ended) fire();
+      };
       return {
         wrap,
         addChunk(url, isLast) {
+          // audio_url nulo = sinal de fim do caso catastrófico do servidor (TTS
+          // impossível). Não há áudio para tocar; só libera a vez do aluno.
+          if (!url) { if (isLast) { sawLast = true; fire(); } return; }
           const a = document.createElement('audio');
           a.preload = 'auto';
           a.src = url;
           if (row.children.length === 0) a.setAttribute('controls', '');
           else a.style.display = 'none';
           row.appendChild(a);
+          lastAudio = a;
           playOrQueueAudio(a);
-          if (isLast) {
-            a.addEventListener('ended', fire, { once: true });
-            a.addEventListener('error', fire, { once: true });
-            if (a.ended) fire();
-          }
+          if (isLast) { sawLast = true; armDone(a); }
+        },
+        // Rede de segurança: o stream terminou (result recebido). Se nenhum pedaço
+        // veio marcado is_last (bug de servidor / falha de TTS no meio), prende o
+        // gatilho de fim ao último pedaço que chegou — assim a vez do aluno nunca
+        // trava. Sem pedaço algum, libera direto.
+        finalizeIfPending() {
+          if (finished || sawLast) return;
+          if (lastAudio) armDone(lastAudio);
+          else fire();
         },
         onDone(cb) { doneCb = cb; if (finished) cb(); },
       };
@@ -2021,6 +2035,9 @@
         syncTopbarActions();
         if (phase === 'finalizing') { enterReviewMode(); return; }
       }
+      // O stream terminou (result recebido). Garante que a vez do aluno será
+      // liberada mesmo que nenhum pedaço tenha vindo marcado is_last.
+      if (chunked) chunked.finalizeIfPending();
       handleTurn(j, wrap, chunked ? chunked.onDone : null);
     }
 
