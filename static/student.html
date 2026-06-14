@@ -2043,6 +2043,16 @@
       setRecordStatus('');
       const userPlaceholder = appendUser('🎙️ (mensagem de voz enviada)');
       const thinking = appendThinkingBubble({ studentAudioSec });
+      // A resposta já foi enviada — esconde os controles de gravação
+      // (gravar/enviar/cancelar) DESDE JÁ. Sem isto, os botões "enviar/cancelar"
+      // do estado 'sending' ficam visíveis enquanto o entrevistador já começou a
+      // falar (os 1ºs pedaços tocam antes do fim do stream). O painel de sugestão
+      // e o release da vez seguem com handleTurn ao fim da fala; nos caminhos de
+      // erro abaixo, setRecordingUI('idle') traz os botões de volta para retentar.
+      document.getElementById('record-btn').classList.add('hidden');
+      document.getElementById('stop-btn').classList.add('hidden');
+      document.getElementById('stop-send-btn').classList.add('hidden');
+      setRecordStatus('O entrevistador está respondendo…');
 
       const form = new FormData();
       // Campos de texto ANTES do arquivo (busboy/multer expõe em req.body).
