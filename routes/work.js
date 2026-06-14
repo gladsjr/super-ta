@@ -2,11 +2,13 @@
 // Inclui também as rotas de templates de entrevistador (compartilhadas) que
 // vivem fora do prefixo /w/* mas são consumidas no fluxo de configuração.
 
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import multer from "multer";
 import yaml from "js-yaml";
-import OpenAI from "openai";
-import { requireWorkToken, requireWithinBudget, sanitizeLabel } from "../lib/middleware.js";
+import { requireWorkToken, requireProfessorSubmission, requireWithinBudget, sanitizeLabel } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { pickRandomName } from "../lib/personas.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
@@ -20,6 +22,7 @@ import {
     isWorkBudgetExceeded,
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
+import { uploadPdf } from "../lib/openaiFiles.js";
 import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent, studentFeedbackAgent } from "../lib/agents.js";
 import { validateStudentFeedbackShape, findForbiddenLeaks } from "../agents/StudentFeedbackAgent.js";
 import { streamAudio } from "../lib/audioStore.js";
@@ -230,13 +233,10 @@ router.post("/w/:workToken/question-count", requireWorkToken, express.json({ lim
 // ============================================================================
 // Visualização da conversa pelo professor
 // ============================================================================
-router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const [text, runtime, finalization] = await Promise.all([
             db.getConversationJson(found.id),
             db.getSubmissionRuntimeState(found.id),
@@ -319,17 +319,14 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
 // Streama o áudio gravado do aluno. Acesso restrito ao professor do work
 // (requireWorkToken garante isso). Object Storage indisponível ou objeto
 // inexistente → 404.
-router.get("/w/:workToken/submissions/:subToken/audio/:audioIdx", requireWorkToken, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.get("/w/:workToken/submissions/:subToken/audio/:audioIdx", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     const audioIdx = Number.parseInt(req.params.audioIdx, 10);
     if (!Number.isFinite(audioIdx) || audioIdx < 0) {
         return res.status(400).json({ error: "audio_idx inválido" });
     }
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const artifact = await db.getStudentAudioArtifact({ submissionId: found.id, audioIdx });
         if (!artifact) return res.status(404).json({ error: "audio not found" });
         const stream = await streamAudio(artifact.object_key);
@@ -356,13 +353,10 @@ router.get("/w/:workToken/submissions/:subToken/audio/:audioIdx", requireWorkTok
 // Resultado é cacheado em submissions.evaluation_json; ?force=true regenera.
 // GET é leitura barata do cache (a página da conversa consulta no load).
 
-router.get("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.get("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const [cached, student] = await Promise.all([
             db.getEvaluationCache(found.id),
             db.getStudentEvaluation(found.id),
@@ -425,14 +419,8 @@ async function evaluateSubmissionNow(work, found, { force }) {
 
     log.info("EVALUATION", `start submission=${subToken} turns=${answeredTurns.length} audio=${audioArtifacts.length} force=${force}`);
     const [enunciadoUpload, studentUpload] = await Promise.all([
-        openai.files.create({
-            file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
-            purpose: "user_data",
-        }),
-        openai.files.create({
-            file: await OpenAI.toFile(studentBlob.pdf, studentBlob.filename || "trabalho.pdf"),
-            purpose: "user_data",
-        }),
+        uploadPdf(enunciadoBlob, "enunciado.pdf"),
+        uploadPdf(studentBlob, "trabalho.pdf"),
     ]);
     log.info("EVALUATION", `uploaded files enunciado=${enunciadoUpload.id} trabalho=${studentUpload.id}`);
 
@@ -450,14 +438,11 @@ async function evaluateSubmissionNow(work, found, { force }) {
     return { evaluation: report, evaluated_at: evaluatedAt, cached: false };
 }
 
-router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, requireWithinBudget, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, requireProfessorSubmission, requireWithinBudget, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const result = await evaluateSubmissionNow(req.work, found, { force });
         res.json(result);
     } catch (err) {
@@ -581,8 +566,9 @@ async function publishSubmissionNow(work, found) {
 // Gera a versão automática (prévia, sem publicar). ?force=true regenera.
 // Body opcional { guidelines }: diretriz AD-HOC desta geração (experimento
 // num aluno) — NÃO altera o padrão do trabalho. Ausente = usa o padrão.
-router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireProfessorSubmission, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
     const hasOverride = req.body && Object.prototype.hasOwnProperty.call(req.body, "guidelines");
     const rawOverride = req.body?.guidelines;
@@ -593,10 +579,6 @@ router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", re
         ? (typeof rawOverride === "string" && rawOverride.trim() ? rawOverride.trim() : null)
         : undefined;
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const result = await deriveStudentVersionNow(req.work, found, { force, guidelinesOverride });
         res.json(result);
     } catch (err) {
@@ -609,13 +591,10 @@ router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", re
 // Salva a versão EDITADA pelo professor. A automática fica preservada.
 // Edição é autoridade do professor: vocabulário interno não bloqueia, mas é
 // devolvido em `warnings` para a UI avisar.
-router.put("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, express.json({ limit: "256kb" }), async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.put("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireProfessorSubmission, express.json({ limit: "256kb" }), async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const report = req.body?.report;
         try { validateStudentFeedbackShape(report); }
         catch (err) { return res.status(400).json({ error: `devolutiva inválida: ${err.message}` }); }
@@ -634,13 +613,10 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/student-version", req
 });
 
 // Descarta a edição (a automática volta a ser a efetiva).
-router.delete("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.delete("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         await db.setStudentEvaluationEdited(found.id, null);
         const student = await db.getStudentEvaluation(found.id);
         log.info("PUBLISH", `edited discarded submission=${subToken}`);
@@ -655,8 +631,9 @@ router.delete("/w/:workToken/submissions/:subToken/evaluation/student-version", 
 // instantâneo, sem regerar). Body: subconjunto de SECTION_KEYS → boolean.
 // A opinião do entrevistador é uma dessas seções; o texto não é editável,
 // só a inclusão.
-router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireWorkToken, requireProfessorSubmission, express.json({ limit: "8kb" }), async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     const partial = {};
     for (const k of SECTION_KEYS) {
         if (typeof req.body?.[k] === "boolean") partial[k] = req.body[k];
@@ -665,10 +642,6 @@ router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireW
         return res.status(400).json({ error: `informe ao menos uma seção (${SECTION_KEYS.join(", ")}) como boolean` });
     }
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         await db.setSubmissionSections(found.id, partial);
         const student = await db.getStudentEvaluation(found.id);
         log.info("PUBLISH", `sections ${JSON.stringify(partial)} submission=${subToken}`);
@@ -679,13 +652,10 @@ router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireW
     }
 });
 
-router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const result = await publishSubmissionNow(req.work, found);
         res.json(result);
     } catch (err) {
@@ -696,13 +666,10 @@ router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWor
 });
 
 // Despublica (as versões ficam guardadas; republicar não regenera).
-router.delete("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.delete("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         await db.setEvaluationPublished(found.id, false);
         log.info("PUBLISH", `unpublished submission=${subToken}`);
         res.json({ ok: true, published_at: null });
@@ -735,80 +702,25 @@ function publicBatchState(state) {
     };
 }
 
-async function runBatchEvaluation(work, queue, state) {
-    log.info("EVALUATION", `batch start work=${work.work_token} total=${queue.length} force=${state.force}`);
-    for (const sub of queue) {
-        // Orçamento re-checado a cada item: o lote para no meio se esgotar.
-        try {
-            if (await isWorkBudgetExceeded(work.id)) {
-                state.stopped_reason = "budget_exhausted";
-                log.warn("EVALUATION", `batch interrompido por orçamento work=${work.work_token} done=${state.done}/${state.total}`);
-                break;
-            }
-            const found = await db.findSubmissionByToken(sub.submission_token);
-            if (!found || found.work_id !== work.id) { state.skipped++; continue; }
-            const r = await evaluateSubmissionNow(work, found, { force: state.force });
-            if (r.cached) state.skipped++;
-            else state.ok++;
-        } catch (err) {
-            if (err.notReady) {
-                state.skipped++;
-            } else {
-                state.failed.push({ submission_token: sub.submission_token, student_label: sub.student_label, error: err.message });
-                log.error("EVALUATION", `batch item failed submission=${sub.submission_token}: ${err.message}`);
-            }
-        } finally {
-            state.done++;
-        }
-    }
-    state.running = false;
-    state.finished_at = new Date().toISOString();
-    log.info("EVALUATION", `batch done work=${work.work_token} ok=${state.ok} skipped=${state.skipped} failed=${state.failed.length} stopped=${state.stopped_reason ?? "-"}`);
-}
-
-router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), async (req, res) => {
-    const force = req.body?.force === true;
-    try {
-        if (anyBatchRunning(req.work.id)) {
-            return res.status(409).json({ error: "já existe um lote em andamento para este trabalho" });
-        }
-        const subs = await db.listSubmissionsForWork(req.work.id);
-        // Candidatas: têm conversa (status derivado != pending). A elegibilidade
-        // fina (tem resposta? insumos presentes?) é decidida item a item no
-        // loop — itens não-prontos contam como "puladas", não como erro.
-        const queue = subs.filter(s => s.status !== "pending" && (force || !s.has_evaluation));
-        if (queue.length === 0) {
-            return res.status(400).json({
-                error: force
-                    ? "nenhuma entrevista com conversa para avaliar"
-                    : "nenhuma entrevista nova para avaliar — todas as elegíveis já têm avaliação",
-            });
-        }
-        const state = {
-            running: true,
-            force,
-            total: queue.length,
-            done: 0,
-            ok: 0,
-            skipped: 0,
-            failed: [],
-            stopped_reason: null,
-            started_at: new Date().toISOString(),
-            finished_at: null,
-        };
-        batchEvalRuns.set(req.work.id, state);
-        runBatchEvaluation(req.work, queue, state).catch(err => {
-            log.error("EVALUATION", `batch crashed work=${req.work.work_token}: ${err.message}`);
-            state.running = false;
-            state.finished_at = new Date().toISOString();
-            state.stopped_reason = "internal_error";
-        });
-        res.json({ started: true, total: queue.length, force });
-    } catch (err) {
-        log.error("EVALUATION", `batch start failed: ${err.message}`);
-        res.status(500).json({ error: "falha ao iniciar a avaliação em lote", detail: err.message });
-    }
-});
+// A rota de avaliação em lote usa o runner genérico `startBatchRoute` (definido
+// adiante). A avaliação custa LLM (checkBudget=true) e mapeia cache-hit ->
+// "pulada", igual aos lotes de devolutiva.
+router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchEvalRuns,
+    scope: "EVALUATION",
+    // Candidatas: têm conversa (status derivado != pending). A elegibilidade
+    // fina (tem resposta? insumos presentes?) é decidida item a item no runner
+    // — itens não-prontos contam como "puladas", não como erro.
+    queueFilter: (s, force) => s.status !== "pending" && (force || !s.has_evaluation),
+    emptyError: force => force
+        ? "nenhuma entrevista com conversa para avaliar"
+        : "nenhuma entrevista nova para avaliar — todas as elegíveis já têm avaliação",
+    itemFn: async (work, found, force) => {
+        const r = await evaluateSubmissionNow(work, found, { force });
+        return { skipped: r.cached };
+    },
+    checkBudget: true,
+}));
 
 // ---- Lotes de devolutiva: GERAR (prévias) e PUBLICAR — separados ----
 // Mesmo padrão do lote de avaliação: serial, em background, estado em memória.
@@ -1023,31 +935,13 @@ router.post("/w/:workToken/interviewer", requireWorkToken, express.json({ limit:
     }
 });
 
-const INTERVIEWER_ADAPT_INSTRUCTIONS = `Você adapta prompts de entrevistador acadêmico. Receberá:
-1) Um YAML com a definição genérica de um entrevistador (agente, cenário, conversa).
-2) O enunciado de um trabalho específico, em PDF anexado.
-
-Produza um NOVO YAML que preserve exatamente a mesma estrutura de chaves
-e hierarquia do genérico, mas com valores textuais especializados ao trabalho
-descrito no enunciado. Os valores passam a referenciar conceitos, termos,
-objetivos, métodos e entregáveis concretos do enunciado.
-
-Regras rígidas:
-- NÃO invente informações ausentes do enunciado.
-- NÃO adicione, remova ou renomeie chaves.
-- Mantenha o idioma do YAML genérico.
-- Listas mantêm aproximadamente o mesmo número de itens; reescreva cada
-  item para soar específico ao trabalho.
-- Onde o YAML genérico usar expressões abstratas ("o trabalho", "o aluno
-  deve"), substitua por formulações ancoradas no enunciado.
-- Campos inerentemente genéricos (ex.: interaction_style com item
-  "investigativo") podem ser mantidos se não houver base no enunciado para
-  especializá-los.
-- O campo scenario.case_context.summary deve descrever, em 1–2 frases, o
-  caso concreto entregue pelo aluno conforme o enunciado.
-
-Responda APENAS com o YAML adaptado. Nada antes, nada depois. Sem cercas
-de código markdown.`;
+// Instruções do adaptador de entrevistador. Prompt longo: vive em
+// config/interviewer_adapt_instructions.txt (ver "Mapa de prompts" no CLAUDE.md
+// e docs/architecture.md), carregado uma vez.
+const INTERVIEWER_ADAPT_INSTRUCTIONS = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "config", "interviewer_adapt_instructions.txt"),
+    "utf8"
+);
 
 function stripYamlFence(text) {
     const trimmed = String(text || "").trim();
@@ -1071,10 +965,7 @@ router.post("/w/:workToken/interviewer/adapt", requireWorkToken, requireWithinBu
 
     try {
         log.info("INTERVIEWER_ADAPT", `start work=${req.work.work_token} bytes=${genericYaml.length}`);
-        const fileUpload = await openai.files.create({
-            file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
-            purpose: "user_data",
-        });
+        const fileUpload = await uploadPdf(enunciadoBlob, "enunciado.pdf");
         log.info("INTERVIEWER_ADAPT", `uploaded enunciado file=${fileUpload.id}`);
 
         const response = await log.span("INTERVIEWER_ADAPT", "responses.create", () =>
@@ -1166,10 +1057,7 @@ router.post("/w/:workToken/enunciado/coherence", requireWorkToken, requireWithin
         }
 
         log.info("COHERENCE", `start work=${req.work.work_token} force=${force}`);
-        const fileUpload = await openai.files.create({
-            file: await OpenAI.toFile(enunciadoBlob.pdf, enunciadoBlob.filename || "enunciado.pdf"),
-            purpose: "user_data",
-        });
+        const fileUpload = await uploadPdf(enunciadoBlob, "enunciado.pdf");
         log.info("COHERENCE", `uploaded enunciado file=${fileUpload.id}`);
 
         const report = await enunciadoCoherenceAgent.evaluate({
@@ -1347,16 +1235,13 @@ router.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
 // Bloqueio/liberação da entrevista. A checagem efetiva acontece em
 // requireSubmissionToken (lib/middleware.js) — todos os endpoints /s/:t/*
 // passam por lá e devolvem 403 quando is_blocked=true.
-router.patch("/w/:workToken/submissions/:subToken", requireWorkToken, async (req, res) => {
-    const subToken = String(req.params.subToken || "").toLowerCase();
+router.patch("/w/:workToken/submissions/:subToken", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
     if (typeof req.body?.is_blocked !== "boolean") {
         return res.status(400).json({ error: "is_blocked (boolean) required" });
     }
     try {
-        const found = await db.findSubmissionByToken(subToken);
-        if (!found || found.work_id !== req.work.id) {
-            return res.status(404).json({ error: "submission not found" });
-        }
         const newValue = await db.setSubmissionBlocked(found.id, req.body.is_blocked);
         log.info("SUBMISSION", `${newValue ? "blocked" : "unblocked"} submission=${subToken} work=${req.work.work_token}`);
         res.json({ submission_token: subToken, is_blocked: newValue });
