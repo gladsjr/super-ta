@@ -1,15 +1,17 @@
-// Simulador de aluno. Fecha o loop dinâmico:
+// Simulador de aluno do harness E2E. Fecha o loop dinâmico:
 //   - dado o histórico + a ÚLTIMA pergunta do entrevistador (texto real,
 //     capturado da resposta do /chat), gera a próxima fala do aluno (LLM);
 //   - sintetiza essa fala em mp3 (TTS) -> base64, pronto pra ser "falado" no
 //     microfone falso da página (window.__superTASpeak).
 //
-// Reusa o client e os modelos do próprio projeto (lib/openaiClient + config),
-// então roda exatamente com os modelos que a conta já usa — sem adivinhar nomes.
+// A LÓGICA DE GERAÇÃO vive em lib/studentSimulator.js (compartilhada com a
+// sugestão de resposta do professor). Aqui ficam só as PERSONAS com voz/nome
+// (específicas do teste de áudio) e o TTS.
 
 import { openai } from "../../lib/openaiClient.js";
-import { FAST_MODEL, TTS_MODEL } from "../../lib/config.js";
+import { TTS_MODEL } from "../../lib/config.js";
 import { synthesizeSpeech } from "../../lib/audio.js";
+import { generateStudentAnswer } from "../../lib/studentSimulator.js";
 
 // Personas de aluno. Trocar a persona = trocar o comportamento testado.
 export const PERSONAS = {
@@ -52,38 +54,16 @@ export const PERSONAS = {
     },
 };
 
-// Gera a próxima fala do aluno em texto. `workText` (opcional): texto do trabalho
-// entregue, para o aluno responder ANCORADO no próprio relatório (teste fiel).
+// Gera a próxima fala do aluno em texto. Wrapper fino sobre o gerador
+// compartilhado: usa persona.system como comportamento e o texto cru do trabalho
+// (workText) como contexto. Sem billing (chamada fora do orçamento).
 export async function nextAnswer({ persona, history, question, workText = null }) {
-    const convo = history
-        .map(t => `${t.role === "interviewer" ? "Entrevistador" : "Aluno"}: ${t.text}`)
-        .join("\n");
-
-    const instructions =
-        persona.system +
-        "\n\nVoce esta numa entrevista oral sobre o seu trabalho. Responda APENAS com a sua " +
-        "proxima fala (sem aspas, sem rotulo de quem fala, sem narracao). Mantenha de 1 a 4 frases. " +
-        "Se o entrevistador pedir o seu nome, diga seu nome. Se pedir um 'ok' ou confirmacao pra " +
-        "comecar, confirme de forma curta e natural." +
-        (workText
-            ? "\n\nVoce CONHECE o trabalho a fundo. Responda com base no RELATORIO abaixo — cite " +
-              "numeros, premissas e seções dele quando o entrevistador perguntar. Se algo realmente " +
-              "nao estiver no relatorio, assuma de forma plausivel sem inventar dados precisos.\n\n" +
-              "=== RELATORIO ENTREGUE ===\n" + workText.slice(0, 120000) + "\n=== FIM DO RELATORIO ==="
-            : "");
-
-    const input =
-        (convo ? `Conversa ate agora:\n${convo}\n\n` : "") +
-        `Ultima fala do entrevistador (responda a isto):\n${question}`;
-
-    const res = await openai.responses.create({
-        model: FAST_MODEL,
-        instructions,
-        input,
+    return generateStudentAnswer({
+        systemBehavior: persona.system,
+        history,
+        question,
+        workContext: workText,
     });
-    const text = (res.output_text || "").trim();
-    if (!text) throw new Error("simulador de aluno devolveu fala vazia");
-    return text;
 }
 
 // Sintetiza a fala do aluno em mp3 (Buffer) e devolve base64 pra injetar.

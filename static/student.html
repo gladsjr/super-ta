@@ -216,6 +216,35 @@
       background: var(--bg-raised);
     }
 
+    /* Painel de sugestão de resposta — só em conversa de teste (professor). */
+    #test-suggest {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-5);
+      background: #fff7e6;
+      border-top: 1px solid #f0c36d;
+      font-size: var(--fs-sm);
+    }
+    #test-suggest.hidden { display: none; }
+    #test-suggest .ts-label { font-weight: 600; }
+    #test-suggest select {
+      padding: 0.3rem 0.4rem;
+      border: 1px solid var(--ink-200);
+      border-radius: var(--r-md);
+      font: inherit;
+    }
+    #test-suggest .ts-status { color: var(--ink-500, #777); }
+    #suggest-readtext {
+      padding: var(--sp-3) var(--sp-5);
+      background: #fff7e6;
+      border-top: 1px dashed #f0c36d;
+      font-size: var(--fs-md);
+      line-height: 1.5;
+    }
+    #suggest-readtext.hidden { display: none; }
+
     .input-area textarea {
       width: 100%;
       min-height: 5.5rem;
@@ -534,6 +563,21 @@
       <div id="chat-area">
         <div id="chat-card" class="card">
           <div id="chat"></div>
+          <!-- Painel só em conversa de TESTE (professor): sugere resposta de aluno. -->
+          <div id="test-suggest" class="hidden">
+            <span class="ts-label">🧪 Teste — sugerir resposta:</span>
+            <select id="suggest-profile">
+              <option value="domina">Domina o trabalho</option>
+              <option value="vago">Vago / enrola</option>
+              <option value="inseguro">Inseguro</option>
+              <option value="contradiz">Contradiz o trabalho</option>
+            </select>
+            <button id="suggest-fill" class="btn" type="button">Sugerir resposta</button>
+            <button id="suggest-audio-send" class="btn hidden" type="button">🔊 Gerar voz e enviar</button>
+            <button id="suggest-text-read" class="btn hidden" type="button">📖 Texto para eu ler</button>
+            <span id="suggest-status" class="ts-status"></span>
+          </div>
+          <div id="suggest-readtext" class="hidden"></div>
           <div class="input-area" id="input-text">
             <textarea id="msg" placeholder="Escreva sua resposta..."></textarea>
             <div class="input-footer">
@@ -653,6 +697,7 @@
     const submissionToken = location.pathname.split('/').filter(Boolean)[1];
     let phase = 'awaiting_upload';
     let interactionMode = 'text';
+    let isTestMode = false; // conversa de teste (professor): habilita a sugestão de resposta
     let expectSpontaneous = false;
     const chat = document.getElementById('chat');
 
@@ -1435,6 +1480,10 @@
       }
       syncTopbarActions();
 
+      // Conversa de TESTE (professor): habilita o painel de sugestão de resposta,
+      // com os controles certos por modo (texto preenche; áudio: ouvir/enviar ou ler).
+      if (j.session.isTest) setupTestSuggest(interactionMode);
+
       // Aplica modo na UI: texto ou áudio. Esconde a área de texto no modo
       // áudio. A área de gravação NÃO é revelada aqui — ela só aparece quando
       // de fato é a vez do aluno (via setStudentTurn), nunca na tela de upload.
@@ -1786,6 +1835,11 @@
         if (ta) ta.disabled = !enabled;
         if (send) send.disabled = !enabled;
       }
+      // Painel de sugestão (conversa de teste): visível só quando é a vez do aluno.
+      if (isTestMode) {
+        document.getElementById('test-suggest').classList.toggle('hidden', !enabled);
+        if (!enabled) document.getElementById('suggest-readtext').classList.add('hidden');
+      }
     }
 
     // Executa cb quando o áudio do entrevistador termina. Em modo texto (sem
@@ -1881,29 +1935,28 @@
       console.log(`[acoustic] SNR estimado = ${snrEstimate ?? "—"} dB (${frameDb.length} blocos)`);
       teardownRecording();
 
+      // Métricas desta gravação (acústica + espontaneidade), repassadas ao envio.
+      const timeToStartMs = (questionReadyAt && recordStartedAt && recordStartedAt >= questionReadyAt)
+        ? (recordStartedAt - questionReadyAt) : null;
+      const recordDurationMs = recordStartedAt ? (Date.now() - recordStartedAt) : null;
+      const studentAudioSecM = recordStartedAt ? (Date.now() - recordStartedAt) / 1000 : null;
+      await sendAudioBlob(blob, { snrEstimate, studentAudioSec: studentAudioSecM, timeToStartMs, recordDurationMs });
+    }
+
+    // Envia um blob de áudio do aluno pelo /chat e processa a resposta do
+    // entrevistador (SSE/chunks/turno). Reusado pela gravação real
+    // (stopRecordingAndSend) E pela sugestão "gerar voz e enviar" em conversa de
+    // teste (com métricas nulas).
+    async function sendAudioBlob(blob, { snrEstimate = null, studentAudioSec = null, timeToStartMs = null, recordDurationMs = null } = {}) {
       setRecordStatus('');
       const userPlaceholder = appendUser('🎙️ (mensagem de voz enviada)');
-      // Bolha do entrevistador "pensando" — preenche o vazio entre o envio do
-      // aluno e a chegada do áudio do entrevistador. Duração do estágio
-      // "ouvindo" é derivada do tempo de gravação do aluno (heurística:
-      // humano hipotético ouve em 2x). Removida em qualquer saída.
-      const studentAudioSec = recordStartedAt ? (Date.now() - recordStartedAt) / 1000 : null;
       const thinking = appendThinkingBubble({ studentAudioSec });
 
       const form = new FormData();
-      // Métrica acústica (camada de pré-gate) ANTES do arquivo — ordering seguro
-      // para o busboy/multer expor o campo em req.body. Ausente se Web Audio
-      // indisponível.
+      // Campos de texto ANTES do arquivo (busboy/multer expõe em req.body).
       if (snrEstimate != null) form.append('acoustic_snr', String(snrEstimate));
-      // Instrumentação de espontaneidade (Fase 2): tempo até começar a falar
-      // (da pergunta pronta ao apertar gravar) e duração da fala. Campos de
-      // texto ANTES do arquivo (mesma razão do acoustic_snr).
-      if (questionReadyAt && recordStartedAt && recordStartedAt >= questionReadyAt) {
-        form.append('client_time_to_start_ms', String(recordStartedAt - questionReadyAt));
-      }
-      if (recordStartedAt) {
-        form.append('client_record_duration_ms', String(Date.now() - recordStartedAt));
-      }
+      if (timeToStartMs != null) form.append('client_time_to_start_ms', String(timeToStartMs));
+      if (recordDurationMs != null) form.append('client_record_duration_ms', String(recordDurationMs));
       form.append('audio', blob, 'student.webm');
       let r, j;
       let chunked = null; // preenchido ao receber audio_chunk (fala fragmentada)
@@ -1984,6 +2037,79 @@
     document.getElementById('stop-send-btn').addEventListener('click', async () => {
       setRecordingUI('sending');
       await stopRecordingAndSend();
+    });
+
+    // ---- Sugestão de resposta do aluno (conversa de TESTE — professor) ----
+    function setupTestSuggest(mode) {
+      isTestMode = true;
+      // Configura os botões por modo; a VISIBILIDADE do painel acompanha a vez do
+      // aluno (setStudentTurn). Texto: um botão preenche o campo. Áudio:
+      // gerar-voz-e-enviar OU ler o texto.
+      document.getElementById('suggest-fill').classList.toggle('hidden', mode === 'audio');
+      document.getElementById('suggest-audio-send').classList.toggle('hidden', mode !== 'audio');
+      document.getElementById('suggest-text-read').classList.toggle('hidden', mode !== 'audio');
+    }
+
+    function base64ToBlob(b64, type) {
+      const bytes = atob(b64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      return new Blob([arr], { type });
+    }
+
+    async function fetchSuggestion(wantAudio) {
+      const profile = document.getElementById('suggest-profile').value;
+      const status = document.getElementById('suggest-status');
+      const buttons = document.querySelectorAll('#test-suggest button');
+      buttons.forEach(b => b.disabled = true);
+      status.textContent = 'Gerando…';
+      try {
+        const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/suggest-answer`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile, want_audio: !!wantAudio })
+        });
+        const j = await r.json();
+        if (!r.ok) { status.textContent = j.message || j.error || 'falhou'; return null; }
+        status.textContent = '';
+        return j;
+      } catch {
+        status.textContent = 'falha de comunicação';
+        return null;
+      } finally {
+        buttons.forEach(b => b.disabled = false);
+      }
+    }
+
+    // Texto: preenche o campo (o professor edita e envia normalmente).
+    document.getElementById('suggest-fill').addEventListener('click', async () => {
+      const j = await fetchSuggestion(false);
+      if (j) { const m = document.getElementById('msg'); m.value = j.text; m.focus(); }
+    });
+
+    // Áudio "gerar voz e enviar": sintetiza a fala do aluno, o professor OUVE
+    // (entra na fila antes da resposta do entrevistador) e ela é enviada como a
+    // resposta, reusando o caminho de áudio do /chat.
+    document.getElementById('suggest-audio-send').addEventListener('click', async () => {
+      const j = await fetchSuggestion(true);
+      if (!j) return;
+      if (!j.audio_base64) {
+        document.getElementById('suggest-status').textContent = 'sem áudio (TTS falhou)';
+        return;
+      }
+      document.getElementById('suggest-readtext').classList.add('hidden');
+      try { playOrQueueAudio(new Audio('data:audio/mpeg;base64,' + j.audio_base64)); } catch {}
+      setRecordingUI('sending');
+      await sendAudioBlob(base64ToBlob(j.audio_base64, 'audio/mpeg'));
+    });
+
+    // Áudio "texto para eu ler": mostra a fala como teleprompter; o professor
+    // grava a própria voz lendo (testa a cadeia de áudio com voz humana).
+    document.getElementById('suggest-text-read').addEventListener('click', async () => {
+      const j = await fetchSuggestion(false);
+      if (!j) return;
+      const tp = document.getElementById('suggest-readtext');
+      tp.textContent = '📖 Leia em voz alta: ' + j.text;
+      tp.classList.remove('hidden');
     });
 
     start();
