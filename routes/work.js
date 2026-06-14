@@ -2,6 +2,9 @@
 // Inclui também as rotas de templates de entrevistador (compartilhadas) que
 // vivem fora do prefixo /w/* mas são consumidas no fluxo de configuração.
 
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import multer from "multer";
 import yaml from "js-yaml";
@@ -932,31 +935,13 @@ router.post("/w/:workToken/interviewer", requireWorkToken, express.json({ limit:
     }
 });
 
-const INTERVIEWER_ADAPT_INSTRUCTIONS = `Você adapta prompts de entrevistador acadêmico. Receberá:
-1) Um YAML com a definição genérica de um entrevistador (agente, cenário, conversa).
-2) O enunciado de um trabalho específico, em PDF anexado.
-
-Produza um NOVO YAML que preserve exatamente a mesma estrutura de chaves
-e hierarquia do genérico, mas com valores textuais especializados ao trabalho
-descrito no enunciado. Os valores passam a referenciar conceitos, termos,
-objetivos, métodos e entregáveis concretos do enunciado.
-
-Regras rígidas:
-- NÃO invente informações ausentes do enunciado.
-- NÃO adicione, remova ou renomeie chaves.
-- Mantenha o idioma do YAML genérico.
-- Listas mantêm aproximadamente o mesmo número de itens; reescreva cada
-  item para soar específico ao trabalho.
-- Onde o YAML genérico usar expressões abstratas ("o trabalho", "o aluno
-  deve"), substitua por formulações ancoradas no enunciado.
-- Campos inerentemente genéricos (ex.: interaction_style com item
-  "investigativo") podem ser mantidos se não houver base no enunciado para
-  especializá-los.
-- O campo scenario.case_context.summary deve descrever, em 1–2 frases, o
-  caso concreto entregue pelo aluno conforme o enunciado.
-
-Responda APENAS com o YAML adaptado. Nada antes, nada depois. Sem cercas
-de código markdown.`;
+// Instruções do adaptador de entrevistador. Prompt longo: vive em
+// config/interviewer_adapt_instructions.txt (ver "Mapa de prompts" no CLAUDE.md
+// e docs/architecture.md), carregado uma vez.
+const INTERVIEWER_ADAPT_INSTRUCTIONS = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "config", "interviewer_adapt_instructions.txt"),
+    "utf8"
+);
 
 function stripYamlFence(text) {
     const trimmed = String(text || "").trim();
