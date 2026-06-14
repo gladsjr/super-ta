@@ -1,0 +1,33 @@
+Aqui está a pergunta pronta para você copiar e colar para o agente do Replit. Ela pede exatamente os dois conjuntos de informação que vão me permitir descobrir qual das três causas provocou o bug:
+
+---
+
+**Para colar no Replit:**
+
+> Preciso investigar um bug que ocorreu numa entrevista de áudio: o entrevistador entregou ao aluno só um comentário sobre a resposta anterior, **sem fazer a próxima pergunta**. Me ajude a coletar dois conjuntos de informação dos logs e do banco:
+>
+> **1. Logs do servidor** em torno do horário do bug. Procure e me cole as linhas que contiverem qualquer um destes marcadores:
+> - `TTS chunk` (ex.: "TTS chunk 1 failed")
+> - `streaming-parse divergiu`
+> - `reconstruindo ação`
+> - `JSON parse failed`
+> - `SUPER_ORQ`
+> - `AUDIO`
+>
+> Me diga também se **nenhuma** dessas linhas aparece no período — isso por si só já é um dado importante.
+>
+> **2. O texto completo da fala do entrevistador** naquele turno, como ficou registrado no banco. Na tabela `submissions`, no campo `conversation_json` (ou `conversation_log`) da submissão de teste em questão, pegue o **último turno** (`turns[]` mais recente) e me cole na íntegra:
+> - o campo `question` desse turno (a fala que o entrevistador gerou),
+> - e, se houver, o `action.message` bruto / o `rationale` associado.
+>
+> O que eu quero descobrir é: **a pergunta foi gerada pelo modelo e cortada na hora de virar áudio, ou ela nunca chegou a ser gerada?** Por isso preciso ver o texto registrado no banco (que é o que o modelo realmente produziu) e comparar com o que tocou no áudio.
+
+---
+
+Quando ele te devolver, é só me colar a resposta. A leitura é direta:
+
+- **Aparece `TTS chunk N failed`** → é o `break` na fragmentação (suspeito 1): a pergunta existe no banco mas o áudio parou no meio.
+- **Aparece `streaming-parse divergiu` / `reconstruindo ação` / `JSON parse failed`** → o parser incremental truncou numa aspa interna (suspeito 2): também existe no banco, mas o áudio adiantado saiu pela metade.
+- **Nenhum marcador, e o `question` no banco já vem só com o comentário (sem pergunta)** → é a reordenação do schema (suspeito 3): o modelo gerou comentário sem pergunta.
+
+Cada cenário tem correção diferente, então esse retorno é o que destrava o conserto.
