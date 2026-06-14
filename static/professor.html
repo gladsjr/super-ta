@@ -19,13 +19,18 @@
   .budget-bar.warn > span { background: #f59e0b; }
   .budget-bar.exhausted > span { background: #dc2626; }
 
-  .sub-mode-divider { margin: var(--sp-4) 0 var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3); color: var(--ink-500); font-size: var(--fs-sm); }
   .sub-bulk-ta { min-height: 8rem; font-family: var(--font-mono, monospace); font-size: var(--fs-sm); }
-  .sub-bulk-row { display: flex; gap: var(--sp-3); align-items: flex-start; }
-  .sub-bulk-row > div:first-child { flex: 1; }
   .table-toolbar { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-2); flex-wrap: wrap; }
   .table-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
   .table-toolbar .spacer { flex: 1; }
+
+  /* Criação de tokens: barra recolhível + painel compacto */
+  .create-bar { margin-bottom: var(--sp-3); }
+  .create-panel { border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); background: var(--bg-muted); }
+  .create-actions { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
+  .create-actions .spacer { flex: 1; }
+  .create-test { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700); }
+  .create-test .info-dot { color: var(--ink-400); cursor: help; }
 
   /* Abas das seções do trabalho (Cenário · Alunos · Avaliação) */
   .tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--ink-200); margin-bottom: var(--sp-4); flex-wrap: wrap; }
@@ -237,54 +242,66 @@
     <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
     <div class="card">
       <h3 class="card-title">Tokens de envio para alunos</h3>
-      <p class="card-sub">Gere tokens para cada aluno e compartilhe com eles. Cada token abre uma entrevista independente.</p>
-      <label class="row" style="align-items:flex-start; gap: var(--sp-2); margin: 0 0 var(--sp-3); cursor:pointer">
-        <input type="checkbox" id="sub-is-test" style="margin-top:3px"/>
-        <span class="card-sub" style="margin:0">Gerar como <strong>entrevista(s) de teste</strong> — só entrevistas de teste podem ser abertas por você para simular o aluno; as reais não expõem esse caminho (proteção). A marcação vale para o que você gerar agora e não muda depois.</span>
-      </label>
-      <div class="sub-form">
-        <div>
-          <label class="label" for="sub-label">Nome do aluno</label>
-          <input id="sub-label" class="input" placeholder="obrigatório"/>
-        </div>
-        <div>
-          <label class="label" for="sub-count">Quantidade</label>
-          <input id="sub-count" class="input" type="number" min="1" max="50" value="1"/>
-        </div>
-        <button id="create-subs" class="btn btn-primary">Gerar</button>
-      </div>
-      <div id="sub-msg" class="hint"></div>
+      <p class="card-sub">Gere tokens para cada aluno e compartilhe o link com eles. Cada token abre uma entrevista independente.</p>
 
-      <div class="sub-mode-divider">Ou cole uma lista de nomes (um por linha) para criar de uma vez:</div>
-      <div class="sub-bulk-row">
-        <div>
-          <label class="label" for="sub-bulk">Lista de nomes</label>
+      <div class="create-bar">
+        <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar tokens</button>
+      </div>
+
+      <div id="create-panel" class="create-panel hidden">
+        <div class="mode-switch" role="group" aria-label="Modo de criação de tokens">
+          <button type="button" id="cmode-single" class="mode-btn is-active" aria-pressed="true">Um aluno</button>
+          <button type="button" id="cmode-bulk" class="mode-btn" aria-pressed="false">Colar lista</button>
+        </div>
+
+        <div id="create-single" style="margin-top: var(--sp-3)">
+          <div class="sub-form">
+            <div>
+              <label class="label" for="sub-label">Nome do aluno</label>
+              <input id="sub-label" class="input" placeholder="obrigatório"/>
+            </div>
+            <div>
+              <label class="label" for="sub-count">Quantidade</label>
+              <input id="sub-count" class="input" type="number" min="1" max="50" value="1"/>
+            </div>
+          </div>
+          <div id="sub-msg" class="hint"></div>
+        </div>
+
+        <div id="create-bulk-mode" class="hidden" style="margin-top: var(--sp-3)">
+          <label class="label" for="sub-bulk">Lista de nomes (um por linha)</label>
           <textarea id="sub-bulk" class="textarea sub-bulk-ta" placeholder="Maria Souza&#10;João Pereira&#10;..." spellcheck="false"></textarea>
+          <div id="sub-bulk-msg" class="hint"></div>
         </div>
-        <button id="create-bulk" class="btn btn-primary" style="margin-top: 1.5rem">Gerar do lote</button>
-      </div>
-      <div id="sub-bulk-msg" class="hint"></div>
 
-      <div style="margin-top: var(--sp-4)">
-        <div class="table-toolbar">
-          <label class="filter-label" for="sub-filter">Mostrar:</label>
-          <select id="sub-filter" class="select">
-            <option value="all">Todas</option>
-            <option value="active" selected>Ativas</option>
-            <option value="blocked">Bloqueadas</option>
-            <option value="test">De teste</option>
-            <option value="real">Reais</option>
-          </select>
+        <div class="create-actions">
+          <label class="create-test" title="Só entrevistas de teste podem ser abertas por você para simular o aluno; as reais não expõem esse caminho (proteção). A marcação vale para o que você gerar agora e não muda depois.">
+            <input type="checkbox" id="sub-is-test"/>
+            <span>de teste <span class="info-dot" aria-hidden="true">ⓘ</span></span>
+          </label>
           <span class="spacer"></span>
-          <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
+          <button id="create-go" class="btn btn-primary" type="button">Gerar</button>
         </div>
-        <table id="sub-table" class="table hidden">
-          <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th><th>Avaliação</th><th>Ações</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
-        <div id="sub-filtered-empty" class="table-empty hidden">Nenhuma entrevista neste filtro.</div>
       </div>
+
+      <div class="table-toolbar">
+        <label class="filter-label" for="sub-filter">Mostrar:</label>
+        <select id="sub-filter" class="select">
+          <option value="all">Todas</option>
+          <option value="active" selected>Ativas</option>
+          <option value="blocked">Bloqueadas</option>
+          <option value="test">De teste</option>
+          <option value="real">Reais</option>
+        </select>
+        <span class="spacer"></span>
+        <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
+      </div>
+      <table id="sub-table" class="table hidden">
+        <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th><th>Avaliação</th><th>Ações</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
+      <div id="sub-filtered-empty" class="table-empty hidden">Nenhuma entrevista neste filtro.</div>
     </div>
     </div><!-- /tab-alunos -->
 
@@ -491,6 +508,10 @@ async function load() {
 
   lastSubmissions = j.submissions;
   renderSubmissionsTable();
+  // Default esperto: enquanto o professor não mexer, abre o painel de criação
+  // só quando ainda não há nenhum token (a primeira coisa a fazer); senão deixa
+  // recolhido, com a tabela em foco.
+  if (!createPanelTouched) setCreatePanel(lastSubmissions.length === 0);
 }
 
 let lastSubmissions = [];
@@ -1043,7 +1064,36 @@ document.getElementById('save-interviewer').onclick = async () => {
   await loadCurrentInterviewer();
 };
 
-document.getElementById('create-subs').onclick = async () => {
+// ---- Criação de tokens: painel recolhível + alternador um/lista ----
+let createMode = 'single';
+let createPanelTouched = false; // o professor abriu/fechou manualmente?
+
+function setCreatePanel(open) {
+  document.getElementById('create-panel').classList.toggle('hidden', !open);
+  const btn = document.getElementById('toggle-create');
+  btn.setAttribute('aria-expanded', String(open));
+  btn.textContent = open ? '− Fechar' : '+ Gerar tokens';
+}
+document.getElementById('toggle-create').onclick = () => {
+  const open = document.getElementById('create-panel').classList.contains('hidden');
+  createPanelTouched = true;
+  setCreatePanel(open);
+};
+
+function setCreateMode(mode) {
+  createMode = mode === 'bulk' ? 'bulk' : 'single';
+  const single = createMode === 'single';
+  document.getElementById('create-single').classList.toggle('hidden', !single);
+  document.getElementById('create-bulk-mode').classList.toggle('hidden', single);
+  document.getElementById('cmode-single').classList.toggle('is-active', single);
+  document.getElementById('cmode-bulk').classList.toggle('is-active', !single);
+  document.getElementById('cmode-single').setAttribute('aria-pressed', String(single));
+  document.getElementById('cmode-bulk').setAttribute('aria-pressed', String(!single));
+}
+document.getElementById('cmode-single').onclick = () => setCreateMode('single');
+document.getElementById('cmode-bulk').onclick = () => setCreateMode('bulk');
+
+async function createSingle() {
   const msg = document.getElementById('sub-msg');
   const label = document.getElementById('sub-label').value.trim();
   const count = Number(document.getElementById('sub-count').value) || 1;
@@ -1057,10 +1107,11 @@ document.getElementById('create-subs').onclick = async () => {
   const j = await r.json();
   if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
   msg.textContent = `${j.submissions.length} token(s) gerados.`;
+  document.getElementById('sub-label').value = '';
   load();
-};
+}
 
-document.getElementById('create-bulk').onclick = async () => {
+async function createBulk() {
   const msg = document.getElementById('sub-bulk-msg');
   const ta = document.getElementById('sub-bulk');
   const labels = ta.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -1068,21 +1119,26 @@ document.getElementById('create-bulk').onclick = async () => {
   if (labels.length === 0) { msg.textContent = 'Cole pelo menos um nome.'; return; }
   const dups = labels.filter((x, i) => labels.indexOf(x) !== i);
   if (dups.length > 0 && !confirm(`${dups.length} nome(s) repetido(s) na lista. Criar mesmo assim?`)) return;
-  const btn = document.getElementById('create-bulk');
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels, is_test: document.getElementById('sub-is-test').checked }),
+  });
+  const j = await r.json();
+  if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
+  msg.textContent = `${j.submissions.length} entrevista(s) criada(s).`;
+  ta.value = '';
+  load();
+}
+
+document.getElementById('create-go').onclick = async () => {
+  const btn = document.getElementById('create-go');
   btn.disabled = true;
   const prev = btn.textContent;
   btn.textContent = 'Gerando…';
   try {
-    const is_test = document.getElementById('sub-is-test').checked;
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labels, is_test }),
-    });
-    const j = await r.json();
-    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
-    msg.textContent = `${j.submissions.length} entrevista(s) criada(s).`;
-    ta.value = '';
-    load();
+    createPanelTouched = true; // criou: mantém o painel aberto, não auto-fecha
+    if (createMode === 'bulk') await createBulk();
+    else await createSingle();
   } finally {
     btn.disabled = false;
     btn.textContent = prev;
