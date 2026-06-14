@@ -785,8 +785,29 @@ router.post("/s/:submissionToken/suggest-answer", requireSubmissionToken, requir
     const profileKey = String(req.body?.profile || "domina");
     const profile = STUDENT_PROFILES[profileKey] || STUDENT_PROFILES.domina;
     const wantAudio = req.body?.want_audio === true;
+    const providedText = typeof req.body?.text === "string" ? req.body.text.trim() : "";
 
-    // A última fala do entrevistador é a pergunta a responder; o resto é histórico.
+    // Caminho B — síntese de voz de um texto JÁ gerado e (possivelmente) editado
+    // pelo professor. Separa "gerar resposta" (texto) de "enviar por voz" (TTS do
+    // texto vigente): o professor sempre vê/edita o texto antes. meterCtx null
+    // (não onera o orçamento). A voz do aluno é diferente da do entrevistador.
+    if (providedText && wantAudio) {
+        if (sess.interactionMode !== "audio") {
+            return res.status(400).json({ error: "not_audio", message: "Síntese de voz só em entrevista de áudio." });
+        }
+        const studentVoice = sess.voice === "verse" ? "alloy" : "verse";
+        try {
+            const buffer = await synthesizeSpeech(openai, TTS_MODEL, providedText, studentVoice);
+            log.info("SUGGEST", `tts-only chars=${providedText.length}`);
+            return res.json({ audio_base64: buffer.toString("base64") });
+        } catch (err) {
+            log.error("SUGGEST", `TTS falhou: ${err.message}`);
+            return res.status(500).json({ error: "tts_failed", message: "Não consegui sintetizar a voz agora." });
+        }
+    }
+
+    // Caminho A — gera a resposta em TEXTO. A última fala do entrevistador é a
+    // pergunta a responder; o resto é histórico.
     const chat = Array.isArray(sess.conv_chat) ? sess.conv_chat : [];
     let qIdx = -1;
     for (let i = chat.length - 1; i >= 0; i--) {

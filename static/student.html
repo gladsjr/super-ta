@@ -236,14 +236,22 @@
       font: inherit;
     }
     #test-suggest .ts-status { color: var(--ink-500, #777); }
-    #suggest-readtext {
-      padding: var(--sp-3) var(--sp-5);
-      background: #fff7e6;
-      border-top: 1px dashed #f0c36d;
+    #suggest-edit {
+      display: block;
+      box-sizing: border-box;
+      width: calc(100% - 2 * var(--sp-5));
+      margin: var(--sp-3) var(--sp-5);
+      min-height: 4.5rem;
+      resize: vertical;
+      padding: 0.6rem 0.8rem;
+      background: #fffdf7;
+      border: 1px solid #f0c36d;
+      border-radius: var(--r-md);
+      font-family: inherit;
       font-size: var(--fs-md);
       line-height: 1.5;
     }
-    #suggest-readtext.hidden { display: none; }
+    #suggest-edit.hidden { display: none; }
 
     .input-area textarea {
       width: 100%;
@@ -573,11 +581,15 @@
               <option value="contradiz">Contradiz o trabalho</option>
             </select>
             <button id="suggest-fill" class="btn" type="button">Sugerir resposta</button>
-            <button id="suggest-audio-send" class="btn hidden" type="button">🔊 Gerar voz e enviar</button>
-            <button id="suggest-text-read" class="btn hidden" type="button">📖 Texto para eu ler</button>
+            <button id="suggest-gen" class="btn hidden" type="button">Gerar resposta</button>
+            <button id="suggest-voice-send" class="btn hidden" type="button">🔊 Enviar por voz</button>
             <span id="suggest-status" class="ts-status"></span>
           </div>
-          <div id="suggest-readtext" class="hidden"></div>
+          <!-- Áudio: a resposta gerada aparece aqui, EDITÁVEL. O professor revisa,
+               e então "Enviar por voz" (TTS do texto vigente) — ou simplesmente lê
+               o texto em voz alta usando o botão normal de gravar. -->
+          <textarea id="suggest-edit" class="hidden" rows="3"
+                    placeholder="A resposta sugerida aparece aqui para você revisar antes de enviar por voz…"></textarea>
           <div class="input-area" id="input-text">
             <textarea id="msg" placeholder="Escreva sua resposta..."></textarea>
             <div class="input-footer">
@@ -1124,48 +1136,108 @@
       return wrap;
     }
     // Reprodução fragmentada da fala do entrevistador (modo áudio). Os pedaços
-    // chegam via SSE (event: audio_chunk) e tocam em série pela fila global
-    // (playOrQueueAudio); o 1º começa assim que chega — daí vem o ganho de
-    // latência percebida. onDone dispara quando o ÚLTIMO pedaço termina, para
-    // liberar a vez do aluno. O 1º <audio> fica visível (controle nativo); os
-    // demais ficam ocultos e tocam encadeados.
+    // chegam via SSE (event: audio_chunk); o 1º toca assim que chega — daí vem o
+    // ganho de latência percebida.
+    //
+    // UM ÚNICO <audio> visível representa a fala inteira. Durante a fala ao vivo,
+    // tocamos pedaço a pedaço trocando o `src` do mesmo elemento — o controle
+    // nativo fica em estado "playing" enquanto ele fala. Ao terminar, montamos um
+    // blob único com a fala COMPLETA e apontamos o player pra ele, de modo que o
+    // replay toque tudo (e não só a 1ª sentença, como na versão de N players
+    // separados). onDone dispara quando o último pedaço termina, liberando a vez
+    // do aluno. Cada pedaço é baixado já na chegada (bytes guardados p/ o blob
+    // final e p/ tocar, evitando corrida com o cache LRU do servidor).
     function createChunkedTA() {
       const wrap = document.createElement('div');
       wrap.className = 'msg ta';
       wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="audio-row"></div></div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
       const row = wrap.querySelector('.audio-row');
-      let doneCb = null, finished = false, lastAudio = null, sawLast = false;
+
+      const audio = document.createElement('audio');
+      audio.setAttribute('controls', '');
+      audio.preload = 'auto';
+      row.appendChild(audio);
+
+      let doneCb = null, finished = false;
       const fire = () => { if (!finished) { finished = true; if (doneCb) doneCb(); } };
-      const armDone = (a) => {
-        a.addEventListener('ended', fire, { once: true });
-        a.addEventListener('error', fire, { once: true });
-        if (a.ended) fire();
-      };
+
+      const buffers = [];     // ArrayBuffer por índice (para o blob final de replay)
+      const blobUrls = [];    // object URL por índice (para tocar ao vivo)
+      const status = [];      // 'pending' | 'ok' | 'fail' por índice
+      const attempted = [];   // já tentamos tocar este índice (evita re-atribuir src)
+      let nextToPlay = 0;
+      let livePlaying = false;
+      let replayReady = false;
+      let sawLast = false;
+      let lastPlayable = -1;  // maior índice que ainda terá áudio
+
+      // Fim da fala ao vivo: troca o player para o blob com a fala inteira (replay
+      // completo) e libera a vez do aluno.
+      function buildReplay() {
+        if (replayReady) return;
+        replayReady = true;
+        const ok = buffers.filter(Boolean);
+        if (ok.length) {
+          try { audio.src = URL.createObjectURL(new Blob(ok, { type: 'audio/mpeg' })); audio.load(); } catch {}
+        }
+        fire();
+      }
+
+      // Toca o próximo pedaço pronto trocando o src. Pedaços que falharam no fetch
+      // são pulados (sem travar). Quando o stream acabou e já passamos do último
+      // com áudio, monta o replay e encerra.
+      function pump() {
+        if (livePlaying || replayReady) return;
+        while (status[nextToPlay] === 'fail') nextToPlay++;
+        if (blobUrls[nextToPlay]) {
+          // Cada índice é tocado no máximo uma vez automaticamente. Se o autoplay
+          // for bloqueado, NÃO re-atribuímos o src a cada fetch (interromperia uma
+          // reprodução manual): o controle nativo fica disponível e o avanço
+          // retoma no 'ended' do pedaço que o professor tocar.
+          if (attempted[nextToPlay]) return;
+          attempted[nextToPlay] = true;
+          livePlaying = true;
+          audio.src = blobUrls[nextToPlay];
+          const p = audio.play();
+          if (p && p.catch) p.catch(() => { livePlaying = false; }); // autoplay bloqueado: aluno clica play
+          return;
+        }
+        if (sawLast && nextToPlay > lastPlayable) buildReplay();
+      }
+
+      audio.addEventListener('ended', () => {
+        if (replayReady) return;          // fim de um replay manual: não avança
+        livePlaying = false; nextToPlay++; pump();
+      });
+      audio.addEventListener('error', () => {
+        if (replayReady || !livePlaying) return;   // erro só importa durante a fala ao vivo
+        livePlaying = false; nextToPlay++; pump();
+      });
+
       return {
         wrap,
-        addChunk(url, isLast) {
+        addChunk(url, isLast, index) {
+          const i = typeof index === 'number' ? index : blobUrls.length;
+          if (isLast) { sawLast = true; lastPlayable = Math.max(lastPlayable, url ? i : i - 1); }
           // audio_url nulo = sinal de fim do caso catastrófico do servidor (TTS
-          // impossível). Não há áudio para tocar; só libera a vez do aluno.
-          if (!url) { if (isLast) { sawLast = true; fire(); } return; }
-          const a = document.createElement('audio');
-          a.preload = 'auto';
-          a.src = url;
-          if (row.children.length === 0) a.setAttribute('controls', '');
-          else a.style.display = 'none';
-          row.appendChild(a);
-          lastAudio = a;
-          playOrQueueAudio(a);
-          if (isLast) { sawLast = true; armDone(a); }
+          // impossível): não há bytes para tocar, só ajusta o término.
+          if (!url) { pump(); return; }
+          status[i] = 'pending';
+          fetch(url).then(r => r.arrayBuffer()).then(buf => {
+            buffers[i] = buf;
+            blobUrls[i] = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
+            status[i] = 'ok';
+            if (!sawLast) lastPlayable = Math.max(lastPlayable, i);
+            pump();
+          }).catch(() => { status[i] = 'fail'; pump(); });
         },
-        // Rede de segurança: o stream terminou (result recebido). Se nenhum pedaço
-        // veio marcado is_last (bug de servidor / falha de TTS no meio), prende o
-        // gatilho de fim ao último pedaço que chegou — assim a vez do aluno nunca
-        // trava. Sem pedaço algum, libera direto.
+        // Rede de segurança: o stream terminou (result recebido). Se o servidor
+        // nunca marcou is_last, considera o que veio como o fim — a vez do aluno
+        // nunca pode travar.
         finalizeIfPending() {
-          if (finished || sawLast) return;
-          if (lastAudio) armDone(lastAudio);
-          else fire();
+          if (!sawLast) { sawLast = true; lastPlayable = Math.max(lastPlayable, blobUrls.length - 1); }
+          pump();
         },
         onDone(cb) { doneCb = cb; if (finished) cb(); },
       };
@@ -1850,9 +1922,15 @@
         if (send) send.disabled = !enabled;
       }
       // Painel de sugestão (conversa de teste): visível só quando é a vez do aluno.
+      // Ao perder a vez, recolhe o editor e o botão de voz (reabrem ao gerar de novo).
       if (isTestMode) {
         document.getElementById('test-suggest').classList.toggle('hidden', !enabled);
-        if (!enabled) document.getElementById('suggest-readtext').classList.add('hidden');
+        if (!enabled) {
+          const ed = document.getElementById('suggest-edit');
+          if (ed) ed.classList.add('hidden');
+          const vs = document.getElementById('suggest-voice-send');
+          if (vs) vs.classList.add('hidden');
+        }
       }
     }
 
@@ -1971,7 +2049,12 @@
       if (snrEstimate != null) form.append('acoustic_snr', String(snrEstimate));
       if (timeToStartMs != null) form.append('client_time_to_start_ms', String(timeToStartMs));
       if (recordDurationMs != null) form.append('client_record_duration_ms', String(recordDurationMs));
-      form.append('audio', blob, 'student.webm');
+      // O nome do arquivo precisa bater com o formato real: o STT da OpenAI usa a
+      // EXTENSÃO para detectar o codec. A gravação do mic é webm/opus; a sugestão
+      // "enviar por voz" manda um mp3 (TTS) — nomeá-lo .webm fazia a transcrição
+      // falhar (era a causa de "gerar voz e enviar" não funcionar).
+      const ext = (blob.type || '').includes('mpeg') ? 'mp3' : 'webm';
+      form.append('audio', blob, `student.${ext}`);
       let r, j;
       let chunked = null; // preenchido ao receber audio_chunk (fala fragmentada)
       try {
@@ -1987,7 +2070,7 @@
           // antes do 'result', cortando a latência percebida.
           j = await consumeSSE(r, thinking, (chunk) => {
             if (!chunked) { thinking.remove(); chunked = createChunkedTA(); }
-            chunked.addChunk(chunk.audio_url, chunk.is_last);
+            chunked.addChunk(chunk.audio_url, chunk.is_last, chunk.index);
           });
         } else {
           j = await r.json();
@@ -2057,14 +2140,15 @@
     });
 
     // ---- Sugestão de resposta do aluno (conversa de TESTE — professor) ----
+    // Princípio: SEMPRE passa pelo texto antes de enviar. Texto: "Sugerir resposta"
+    // preenche o campo editável #msg. Áudio: "Gerar resposta" mostra o texto
+    // editável (#suggest-edit) e libera "Enviar por voz" (TTS do texto vigente).
     function setupTestSuggest(mode) {
       isTestMode = true;
-      // Configura os botões por modo; a VISIBILIDADE do painel acompanha a vez do
-      // aluno (setStudentTurn). Texto: um botão preenche o campo. Áudio:
-      // gerar-voz-e-enviar OU ler o texto.
-      document.getElementById('suggest-fill').classList.toggle('hidden', mode === 'audio');
-      document.getElementById('suggest-audio-send').classList.toggle('hidden', mode !== 'audio');
-      document.getElementById('suggest-text-read').classList.toggle('hidden', mode !== 'audio');
+      const isAudio = mode === 'audio';
+      document.getElementById('suggest-fill').classList.toggle('hidden', isAudio);
+      document.getElementById('suggest-gen').classList.toggle('hidden', !isAudio);
+      document.getElementById('suggest-voice-send').classList.add('hidden'); // só após gerar
     }
 
     function base64ToBlob(b64, type) {
@@ -2074,16 +2158,17 @@
       return new Blob([arr], { type });
     }
 
-    async function fetchSuggestion(wantAudio) {
-      const profile = document.getElementById('suggest-profile').value;
+    // Chama o /suggest-answer. Sem `text`: gera a resposta (texto). Com `text` +
+    // want_audio: sintetiza a voz do texto editado. Desabilita os botões enquanto roda.
+    async function callSuggest(body) {
       const status = document.getElementById('suggest-status');
       const buttons = document.querySelectorAll('#test-suggest button');
       buttons.forEach(b => b.disabled = true);
-      status.textContent = 'Gerando…';
+      status.textContent = body.want_audio ? 'Sintetizando voz…' : 'Gerando…';
       try {
         const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/suggest-answer`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profile, want_audio: !!wantAudio })
+          body: JSON.stringify(body)
         });
         const j = await r.json();
         if (!r.ok) { status.textContent = j.message || j.error || 'falhou'; return null; }
@@ -2097,36 +2182,41 @@
       }
     }
 
-    // Texto: preenche o campo (o professor edita e envia normalmente).
+    // Texto: preenche o campo editável; o professor edita e envia normalmente.
     document.getElementById('suggest-fill').addEventListener('click', async () => {
-      const j = await fetchSuggestion(false);
+      const profile = document.getElementById('suggest-profile').value;
+      const j = await callSuggest({ profile });
       if (j) { const m = document.getElementById('msg'); m.value = j.text; m.focus(); }
     });
 
-    // Áudio "gerar voz e enviar": sintetiza a fala do aluno, o professor OUVE
-    // (entra na fila antes da resposta do entrevistador) e ela é enviada como a
-    // resposta, reusando o caminho de áudio do /chat.
-    document.getElementById('suggest-audio-send').addEventListener('click', async () => {
-      const j = await fetchSuggestion(true);
+    // Áudio, passo 1 — "Gerar resposta": mostra o texto EDITÁVEL e libera "Enviar
+    // por voz". O professor também pode só ler esse texto em voz alta no botão
+    // normal de gravar (o texto serve de teleprompter).
+    document.getElementById('suggest-gen').addEventListener('click', async () => {
+      const profile = document.getElementById('suggest-profile').value;
+      const j = await callSuggest({ profile });
       if (!j) return;
-      if (!j.audio_base64) {
-        document.getElementById('suggest-status').textContent = 'sem áudio (TTS falhou)';
-        return;
-      }
-      document.getElementById('suggest-readtext').classList.add('hidden');
-      try { playOrQueueAudio(new Audio('data:audio/mpeg;base64,' + j.audio_base64)); } catch {}
-      setRecordingUI('sending');
-      await sendAudioBlob(base64ToBlob(j.audio_base64, 'audio/mpeg'));
+      const ed = document.getElementById('suggest-edit');
+      ed.value = j.text || '';
+      ed.classList.remove('hidden');
+      document.getElementById('suggest-voice-send').classList.remove('hidden');
+      ed.focus();
     });
 
-    // Áudio "texto para eu ler": mostra a fala como teleprompter; o professor
-    // grava a própria voz lendo (testa a cadeia de áudio com voz humana).
-    document.getElementById('suggest-text-read').addEventListener('click', async () => {
-      const j = await fetchSuggestion(false);
-      if (!j) return;
-      const tp = document.getElementById('suggest-readtext');
-      tp.textContent = '📖 Leia em voz alta: ' + j.text;
-      tp.classList.remove('hidden');
+    // Áudio, passo 2 — "Enviar por voz": sintetiza o texto VIGENTE (editado) e
+    // envia pelo /chat como a resposta do aluno. NÃO toca alto para o professor.
+    document.getElementById('suggest-voice-send').addEventListener('click', async () => {
+      const text = document.getElementById('suggest-edit').value.trim();
+      if (!text) { document.getElementById('suggest-status').textContent = 'gere ou escreva um texto primeiro'; return; }
+      const j = await callSuggest({ text, want_audio: true });
+      if (!j || !j.audio_base64) {
+        if (j) document.getElementById('suggest-status').textContent = 'sem áudio (TTS falhou)';
+        return;
+      }
+      document.getElementById('suggest-edit').classList.add('hidden');
+      document.getElementById('suggest-voice-send').classList.add('hidden');
+      setRecordingUI('sending');
+      await sendAudioBlob(base64ToBlob(j.audio_base64, 'audio/mpeg'));
     });
 
     start();

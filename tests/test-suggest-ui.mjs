@@ -1,7 +1,10 @@
 // Teste de fumaça da UI de sugestão (conversa de teste). Abre o student.html de
 // uma submissão is_test num Chrome, faz upload, e — quando é a vez do aluno —
-// verifica que o painel aparece, os botões certos por modo, e que "texto para eu
-// ler" gera e mostra o teleprompter. Modo áudio (do seed). Requer servidor no ar.
+// verifica: o painel aparece com os botões certos por modo; "Gerar resposta"
+// mostra o texto EDITÁVEL e libera "Enviar por voz"; e o "Enviar por voz" faz o
+// round-trip completo (TTS->STT->orquestrador->fala fragmentada), validando o fix
+// do nome do arquivo no STT E o player fragmentado (a vez do aluno tem de voltar,
+// provando que o player não travou). Modo áudio (do seed). Requer servidor no ar.
 // Uso: node tests/test-suggest-ui.mjs [--base http://127.0.0.1:5099] [--headed]
 import "dotenv/config";
 import fs from "node:fs";
@@ -66,18 +69,39 @@ async function main() {
         // Quando for a vez do aluno, o painel deve ficar visível.
         await page.waitForSelector("#test-suggest:not(.hidden)", { timeout: 90000 });
         ok(true, "painel visível na vez do aluno");
-        ok(await page.locator("#suggest-text-read").isVisible(), "botão 'texto para eu ler' visível (modo áudio)");
+        ok(await page.locator("#suggest-gen").isVisible(), "botão 'Gerar resposta' visível (modo áudio)");
         ok(!(await page.locator("#suggest-fill").isVisible()), "botão de texto oculto (modo áudio)");
+        ok(!(await page.locator("#suggest-voice-send").isVisible()), "'Enviar por voz' oculto antes de gerar");
 
-        // Gera uma sugestão para ler (perfil 'vago') e confere o teleprompter.
+        // Passo 1: "Gerar resposta" (perfil 'vago') -> texto EDITÁVEL + botão de voz.
         await page.locator("#suggest-profile").selectOption("vago");
-        await page.locator("#suggest-text-read").click();
+        await page.locator("#suggest-gen").click();
         await page.waitForFunction(() => {
-            const t = document.getElementById("suggest-readtext");
-            return t && !t.classList.contains("hidden") && (t.textContent || "").length > 15;
+            const t = document.getElementById("suggest-edit");
+            return t && !t.classList.contains("hidden") && (t.value || "").length > 15;
         }, null, { timeout: 60000 });
-        const tp = (await page.locator("#suggest-readtext").textContent()) || "";
-        ok(tp.length > 15, `teleprompter preenchido: "${tp.slice(0, 80)}"`);
+        const gen = await page.locator("#suggest-edit").inputValue();
+        ok(gen.length > 15, `texto gerado, editável: "${gen.slice(0, 80)}"`);
+        ok(await page.locator("#suggest-voice-send").isVisible(), "'Enviar por voz' liberado após gerar");
+
+        // Passo 2: "Enviar por voz" -> round-trip completo. Valida o fix do STT
+        // (mp3 nomeado .mp3) e o player fragmentado (a vez do aluno volta).
+        await page.locator("#suggest-voice-send").click();
+        await page.waitForFunction(
+            () => [...document.querySelectorAll(".msg.you")].some(e => /voz enviada/.test(e.textContent || "")),
+            null, { timeout: 20000 });
+        ok(true, "resposta por voz enviada (placeholder do aluno apareceu)");
+
+        // O entrevistador responde e a vez VOLTA para o aluno (player não travou).
+        await page.waitForSelector("#record-btn:not(.hidden)", { timeout: 180000 });
+        ok(true, "vez do aluno liberada após a fala do entrevistador (player não travou)");
+
+        // E o player do entrevistador consolidou a fala num único blob (replay
+        // completo): o src do <audio> da bolha do entrevistador vira blob:.
+        const replayOk = await page.waitForFunction(
+            () => [...document.querySelectorAll(".msg.ta audio")].some(a => (a.currentSrc || a.src || "").startsWith("blob:")),
+            null, { timeout: 20000 }).then(() => true).catch(() => false);
+        ok(replayOk, "player do entrevistador consolidou a fala num blob (replay completo)");
 
         ok(pageErrors.length === 0, `0 erros de página (got ${pageErrors.length}${pageErrors[0] ? ": " + pageErrors[0] : ""})`);
     } catch (err) {
