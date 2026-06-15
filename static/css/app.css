@@ -729,3 +729,28 @@ dialog.coherence-dialog { max-width: 640px; }
   font-size: var(--fs-sm);
 }
 .coherence-fix-list li { margin-bottom: var(--sp-1); }
+
+/* ====================================================================
+ * Ajuda contextual reutilizável (lib: static/js/ui-help.js)
+ * Um ponto "ⓘ" clicável ao lado de um rótulo abre um popover com a
+ * explicação longa. Clique (não hover) — funciona no touch/mobile.
+ * Autoria: basta um atributo data-help="texto" em qualquer elemento.
+ * ================================================================= */
+.help { position: relative; display: inline-block; }
+.help-dot {
+  border: none; background: none; cursor: pointer; padding: 0 0 0 2px;
+  color: var(--ink-400); font-size: 0.85em; line-height: 1; vertical-align: middle;
+}
+.help-dot:hover, .help-dot[aria-expanded="true"] { color: var(--accent-700); }
+.help-dot:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
+.help-pop {
+  position: absolute; z-index: 80; top: 100%; left: 0; margin-top: 4px;
+  width: max-content; max-width: 320px;
+  background: var(--bg-raised); color: var(--ink-700);
+  border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px);
+  box-shadow: var(--sh-lg); padding: var(--sp-3);
+  font-size: var(--fs-xs); font-weight: 400; line-height: 1.45;
+  white-space: normal; text-align: left; letter-spacing: normal; text-transform: none;
+}
+.help-pop[hidden] { display: none; }
+@media (max-width: 480px) { .help-pop { max-width: min(86vw, 320px); } }
