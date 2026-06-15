@@ -12,15 +12,19 @@ import { renderAgentPreamble } from "../lib/agentPreamble.js";
  * acusação e ensina a burlar a detecção.
  *
  * A versão do aluno é FORMATIVA: como foi a conversa, o que sustentou bem,
- * o que ficou devendo em cada pergunta e o que estudar. Sem nota, sem juízo
- * interno (defense_quality), sem autoria, sem forma/entrega, sem follow-ups
- * do professor.
+ * o que ficou devendo em cada pergunta e o que estudar. Sem nota e sem juízo
+ * interno cru (defense_quality/authorship_confidence). O professor é SOBERANO
+ * sobre o conteúdo: por default a devolutiva fica no conteúdo, mas se as
+ * diretrizes dele pedirem, ela comenta forma/entrega/espontaneidade — sempre
+ * como observação calibrada, nunca como acusação.
  *
- * SANITIZAÇÃO EM DUAS CAMADAS:
- *   1. O prompt proíbe o vocabulário forense/de autoria.
- *   2. O código varre o JSON gerado com FORBIDDEN_PATTERNS; se algo vazar,
- *      re-tenta uma vez (apontando o vazamento) e, persistindo, FALHA — é
- *      melhor não publicar do que publicar acusação.
+ * SANITIZAÇÃO:
+ *   1. O prompt fixa a REGRA INVIOLÁVEL: nunca imputar causa (trapaça/IA/
+ *      plágio/fraude); comentar a entrega só como observação, com gentileza e
+ *      cautela com falso-positivo.
+ *   2. O código varre o JSON gerado com FORBIDDEN_PATTERNS (vocabulário de
+ *      ACUSAÇÃO); se algo vazar, re-tenta uma vez apontando o vazamento e,
+ *      persistindo, FALHA — melhor não publicar do que publicar acusação crua.
  *
  * Output JSON contract (espelhado em STUDENT_FEEDBACK_SCHEMA):
  *   {
@@ -35,17 +39,16 @@ import { renderAgentPreamble } from "../lib/agentPreamble.js";
  *   }
  */
 
-// Vocabulário que NÃO pode aparecer na devolutiva do aluno. Dois conjuntos:
+// Vocabulário de ACUSAÇÃO que nunca pode aparecer cru na devolutiva do aluno.
 //
-// ALWAYS_FORBIDDEN — acusação ou imputação de CAUSA. Nunca vai ao aluno, nem
-// quando o trabalho exige espontaneidade: a devolutiva descreve a OBSERVAÇÃO
-// ("demorou, soou preparado"), nunca afirma trapaça/IA/plágio.
-//
-// SPONTANEITY_RELAXABLE — vocabulário legítimo de devolutiva sobre
-// espontaneidade (tempo, leitura, "de cabeça"). Bloqueado por DEFAULT (a
-// devolutiva não fala de forma), mas LIBERADO quando works.expect_spontaneous
-// está ligado E o professor pede nas diretrizes — aí é critério declarado.
-const ALWAYS_FORBIDDEN = [
+// A devolutiva é FORMATIVA e o professor é SOBERANO sobre o conteúdo: ela PODE
+// comentar forma/entrega/espontaneidade (tempo, "de cabeça", registro) quando
+// as diretrizes do professor pedem — isso é governado pelo prompt, não por
+// código. O que o código continua barrando é a imputação de CAUSA: trapaça,
+// IA, plágio, "colou", "suspeita", fraude. Ao comentar a entrega, a devolutiva
+// descreve a OBSERVAÇÃO ("demorou, soou preparado"), nunca acusa. Quem quiser
+// acusar formalmente faz isso fora desta devolutiva automática.
+export const FORBIDDEN_PATTERNS = [
     /autoria/i,
     /pl[áa]gio/i,
     /colagem|colou|colad[ao]/i,
@@ -56,24 +59,10 @@ const ALWAYS_FORBIDDEN = [
     /suspeit/i,
     /fraude/i,
 ];
-const SPONTANEITY_RELAXABLE = [
-    /lat[êe]ncia/i,
-    /texto pronto/i,
-    /decorad[ao]/i,
-    /lid[ao] em voz alta|leitura de texto/i,
-    /espont[âa]ne/i,
-    /disflu[êe]ncia/i,
-    /caracteres(\s+por\s+segundo|\/s)/i,
-    /palavras(\s+por\s+segundo|\/s)/i,
-    /registro escrito/i,
-];
-// Conjunto completo (default) — mantido exportado para compat.
-export const FORBIDDEN_PATTERNS = [...ALWAYS_FORBIDDEN, ...SPONTANEITY_RELAXABLE];
 
-export function findForbiddenLeaks(reportObject, { expectSpontaneous = false } = {}) {
-    const patterns = expectSpontaneous ? ALWAYS_FORBIDDEN : FORBIDDEN_PATTERNS;
+export function findForbiddenLeaks(reportObject) {
     const text = JSON.stringify(reportObject);
-    return patterns.filter(re => re.test(text)).map(re => String(re));
+    return FORBIDDEN_PATTERNS.filter(re => re.test(text)).map(re => String(re));
 }
 
 // Validação de FORMA da devolutiva (sem o vínculo com o relatório interno).
@@ -117,14 +106,16 @@ PROPÓSITO E ESTRUTURA — a devolutiva tem DUAS camadas com papéis distintos:
 
 2) Os blocos \`strengths\` / \`improvement_areas\` / \`study_suggestions\` são INCLUSÕES OPCIONAIS, exibidas ao leitor APENAS quando o professor liga o checkbox correspondente. São uma versão fiel e direta daquela parte da avaliação (listas curtas). Preencha a lista de uma seção SÓ quando ela for exibida (ver o bloco "SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR" adiante); quando não for exibida, devolva a lista VAZIA e leve o conteúdo para o summary. Nunca deixe a crítica "morar" só numa lista que não será mostrada.
 
-DIRETRIZES DO PROFESSOR (quando presentes no input): orientam tom, formato, extensão e ênfases do \`summary\` ("mais acolhedor", "texto corrido em dois parágrafos", "destaque as fraquezas", "evite citar perguntas específicas", "comentários qualitativos"). Siga-as fielmente — mandam em TODO o estilo, estrutura, extensão e ênfase do summary. A única coisa que diretriz nenhuma altera são as REGRAS DURAS DE CONTEÚDO abaixo.
+DIRETRIZES DO PROFESSOR (quando presentes no input): orientam tom, formato, extensão, ênfases E QUAIS ASPECTOS entram no \`summary\` ("mais acolhedor", "texto corrido em dois parágrafos", "destaque as fraquezas", "comente a espontaneidade/o tempo de resposta", "evite citar perguntas específicas"). Siga-as fielmente — o professor é SOBERANO sobre estilo, estrutura, extensão, ênfase E conteúdo do summary. A única coisa que diretriz nenhuma afrouxa é a REGRA INVIOLÁVEL de não imputar causa/acusar (abaixo).
 
 FORMATO:
 - summary: corpo principal autossuficiente; respeite a extensão/estilo que o professor pedir (de um parágrafo a alguns; texto corrido se pedido).
 - per_question é OPCIONAL: use só quando comentários pergunta a pergunta agregarem (ou o professor pedir esse formato); se ele pedir texto corrido/qualitativo sem citar perguntas, devolva per_question: []. turn_index, quando houver, corresponde ao turno do relatório interno.
 
-REGRAS DURAS DE CONTEÚDO (a parte mais importante da sua função):
-- NUNCA mencione, direta ou indiretamente: dúvidas de autoria, suspeita de ajuda externa, uso de ferramentas/assistentes, velocidade de digitação ou de fala, tempo de resposta, pausas, hesitação, fluência, "texto pronto", leitura, espontaneidade, naturalidade da entrega, ou qualquer análise da FORMA como a resposta foi produzida. Esses temas existem no relatório interno (campos authorship_*, delivery, sinais de forma) e DEVEM ser completamente omitidos — nem eco, nem eufemismo ("respostas muito bem preparadas" é eco; não use).
+REGRAS DE CONTEÚDO (a parte mais importante da sua função):
+- O professor é SOBERANO sobre QUE aspectos entram no summary. Por DEFAULT, sem pedido em contrário nas diretrizes, a devolutiva foca no CONTEÚDO (o que foi dito, o que sustentou, o que ficou devendo) e NÃO levanta por conta própria temas de forma/tempo/entrega/espontaneidade/autoria. MAS se as DIRETRIZES do professor pedirem para comentar um aspecto presente no relatório interno — espontaneidade, demora para responder, respostas que soaram preparadas/lidas, fluência, registro, ou qualquer dimensão de entrega —, você DEVE incluí-lo, resumindo fielmente o que o relatório interno traz sobre ele. Pedido do professor manda; não silencie um aspecto que ele pediu.
+- AO comentar forma/entrega/espontaneidade (quando pedido): enquadre como OBSERVAÇÃO ligada à conversa, em segunda pessoa, com respeito, e CALIBRANDO pelo falso-positivo (sinais de tempo/forma erram: áudio ruim, nervosismo, pensar devagar — prefira "pareceu/soou" a "você fez"; "nesta atividade espera-se resposta na hora, e algumas respostas demoraram a começar e soaram preparadas"). Se o relatório interno NÃO trouxer o sinal, não o invente.
+- REGRA INVIOLÁVEL (nenhuma diretriz a afrouxa): NUNCA impute a CAUSA nem acuse. Proibido afirmar trapaça, uso de IA, plágio, "colou", "suspeita" ou fraude. Descreva só o OBSERVADO, nunca a intenção ("as respostas demoraram e soaram preparadas", não "você usou IA"). Acusação formal, se o professor quiser, é decisão dele FORA desta devolutiva automática.
 - NUNCA atribua nota, conceito, aprovação ou juízo global de qualidade ("defesa fraca", "insuficiente"). Os campos internos defense_quality/authorship_confidence não existem para o leitor.
 - NUNCA copie as follow_up_suggestions do relatório interno (são o roteiro de investigação do operador).
 - Critique CONTEÚDO, sempre ancorado no que foi dito ou no que está na entrega: premissa não justificada, contradição com o documento, resposta que escapou da pergunta, conceito mal explicado. Isso PODE e DEVE ser dito, com gentileza e precisão.
@@ -152,13 +143,12 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
      * @param {object} p
      * @param {object} p.internalReport - relatório do InterviewEvaluatorAgent
      * @param {string|null} p.guidelines - diretrizes do professor (works.feedback_guidelines)
-     * @param {boolean} p.expectSpontaneous - o trabalho exige resposta "de cabeça" (critério declarado)
      * @param {object} p.visibleSections - quais seções o professor decidiu EXIBIR ao aluno
      *        { strengths, improvement_areas, study_suggestions } (booleans). As não
      *        exibidas devem ter sua substância dobrada no summary.
      * @param {object|null} p.meterCtx  - contexto de billing
      */
-    async derive({ internalReport, guidelines = null, expectSpontaneous = false, visibleSections = null, meterCtx = null }) {
+    async derive({ internalReport, guidelines = null, visibleSections = null, meterCtx = null }) {
         if (!internalReport) throw new Error("StudentFeedback: missing internalReport");
 
         // Diz ao agente quais blocos de seção serão EXIBIDOS ao leitor. As
@@ -179,23 +169,11 @@ REGRAS OBRIGATÓRIAS (sobrepõem-se ao formato default):
 - Para cada seção NÃO exibida: devolva a lista correspondente VAZIA ([]) e LEVE a substância dela para DENTRO do summary, reinterpretada conforme as diretrizes do professor. NÃO há outro lugar para esse conteúdo aparecer — se ficar só na lista vazia, ele SOME para o leitor.
 - Em especial: se "O que pode melhorar" NÃO será exibido, os pontos fracos/a melhorar TÊM de estar escritos no summary. Uma devolutiva só com elogios, havendo pontos a melhorar no relatório interno, é ERRO. O equilíbrio (o que foi bem E o que faltou) é inegociável, salvo se o professor pedir explicitamente o contrário.` : "";
 
-        // Exceção condicional às REGRAS DURAS: quando a espontaneidade é critério
-        // declarado, a devolutiva PODE comentar a forma/tempo — mas só se o
-        // professor pedir, e sempre como observação construtiva, nunca acusação.
-        const spontaneityException = expectSpontaneous ? `
-
-EXCEÇÃO PARA ESTE TRABALHO — ele exige RESPOSTA "DE CABEÇA" (critério declarado ao respondente na abertura):
-Aqui, e SÓ aqui, a regra dura que proíbe falar de tempos/forma é AFROUXADA — PORQUE espontaneidade é o que se está avaliando, e o respondente foi avisado disso. Então:
-- SE o professor pedir nas diretrizes (ex.: "aponte demoras e indícios de apoio em material externo"), você PODE e DEVE comentar, de forma construtiva, quando a entrega não correspondeu à expectativa: respostas que demoraram muito a começar, que soaram preparadas/lidas, ou que pareceram apoiadas em material externo, e o efeito disso ("isso enfraquece a demonstração de que você domina o assunto de cabeça").
-- ENQUADRE como observação ligada à expectativa declarada ("nesta atividade espera-se que você responda na hora, com suas palavras"), em segunda pessoa e com respeito.
-- NUNCA acuse nem nomeie a causa: proibido afirmar trapaça, uso de IA, plágio ou "suspeita". Use "as respostas demoraram e soaram preparadas", não "você usou IA". Descreva o observado, não a intenção.
-- CALIBRE pelo falso-positivo: sinais de tempo erram (áudio ruim, pensar devagar, nervosismo). Prefira "pareceu/soou" a "você fez". Se o relatório interno NÃO trouxer sinais de forma, ou se o professor NÃO pedir esse comentário, NÃO force o tema.` : "";
-
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_ui" })}
 
-${this.systemPromptBody}${sectionsBlock}${spontaneityException}`;
+${this.systemPromptBody}${sectionsBlock}`;
         const guidelinesBlock = typeof guidelines === "string" && guidelines.trim()
-            ? `DIRETRIZES DO PROFESSOR para esta devolutiva (siga em estilo/estrutura/ênfase; as regras duras de conteúdo prevalecem):
+            ? `DIRETRIZES DO PROFESSOR para esta devolutiva (siga em estilo/estrutura/ênfase E quais aspectos incluir; só a REGRA INVIOLÁVEL de não acusar prevalece):
 ${guidelines.trim()}
 
 `
@@ -242,13 +220,11 @@ ${JSON.stringify(internalReport, null, 2)}${hiddenReminder}`;
                 const parsed = JSON.parse(match[0]);
                 this._validateReport(parsed, internalReport);
 
-                const leaks = findForbiddenLeaks(parsed, { expectSpontaneous });
+                const leaks = findForbiddenLeaks(parsed);
                 if (leaks.length > 0) {
-                    const leakMsg = `vocabulário interno vazou na devolutiva: ${leaks.join(", ")}`;
+                    const leakMsg = `vocabulário de acusação vazou na devolutiva: ${leaks.join(", ")}`;
                     if (attempt < MAX_ATTEMPTS) {
-                        const guidance = expectSpontaneous
-                            ? `A devolutiva anterior usou vocabulário proibido (padrões: ${leaks.join(", ")}). Mesmo neste trabalho de resposta de cabeça, NUNCA acuse nem nomeie a causa (trapaça, IA, plágio, "suspeita", "colagem"). Reescreva descrevendo só o observado ("as respostas demoraram e soaram preparadas"), sem essas palavras.`
-                            : `A devolutiva anterior vazou vocabulário proibido (padrões: ${leaks.join(", ")}). Reescreva CUMPRINDO as regras duras: zero menção a autoria, forma de entrega, tempos, fluência ou juízo global.`;
+                        const guidance = `A devolutiva anterior usou vocabulário de ACUSAÇÃO (padrões: ${leaks.join(", ")}). Você PODE comentar forma/entrega/espontaneidade se o professor pediu, mas NUNCA imputando a causa: reescreva descrevendo só o observado ("as respostas demoraram e soaram preparadas"), sem afirmar trapaça, IA, plágio, "colou", "suspeita" ou fraude.`;
                         payload.input.push({ role: "user", content: [{ type: "input_text", text: guidance }] });
                     }
                     throw new Error(`StudentFeedback: ${leakMsg}`);

@@ -545,7 +545,6 @@ async function deriveStudentVersionNow(work, found, { force, guidelinesOverride 
     const report = await studentFeedbackAgent.derive({
         internalReport: internal.report,
         guidelines,
-        expectSpontaneous: work.expect_spontaneous === true,
         visibleSections,
         meterCtx: { workId: work.id },
     });
@@ -608,7 +607,7 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/student-version", req
         delete report.interviewer_opinion;
         await db.setStudentEvaluationEdited(found.id, report);
         const student = await db.getStudentEvaluation(found.id);
-        const warnings = findForbiddenLeaks(report, { expectSpontaneous: req.work.expect_spontaneous === true });
+        const warnings = findForbiddenLeaks(report);
         log.info("PUBLISH", `edited saved submission=${subToken} warnings=${warnings.length}`);
         res.json({ ...studentEvaluationPayload(student), warnings });
     } catch (err) {
