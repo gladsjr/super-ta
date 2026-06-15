@@ -168,8 +168,8 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">Modo de interação com o aluno</h3>
-      <p class="card-sub">Define como o aluno conversa com o entrevistador. Esta escolha vale para novas submissões — entrevistas já em andamento mantêm o modo com que começaram.</p>
+      <h3 class="card-title" data-help="Vale para novas submissões — entrevistas já em andamento mantêm o modo com que começaram.">Modo de interação com o aluno</h3>
+      <p class="card-sub">Define como o aluno conversa com o entrevistador.</p>
       <div class="row" style="gap: var(--sp-4); margin-bottom: var(--sp-3)">
         <label style="display:flex; align-items:center; gap: var(--sp-2)">
           <input type="radio" name="interaction-mode" value="text" id="mode-text" checked/>
@@ -188,7 +188,7 @@
       </div>
 
       <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
-        <p class="card-sub">Identidade do entrevistador (nome e gênero) — se deixar em branco, o sistema sorteia a cada upload do aluno.</p>
+        <p class="card-sub" data-help="Se deixar em branco, o sistema sorteia nome e gênero a cada upload do aluno.">Identidade do entrevistador (nome e gênero).</p>
         <div class="row" style="align-items: end; gap: var(--sp-3)">
           <div style="flex: 1; min-width: 220px">
             <label class="label" for="interviewer-name">Nome</label>
@@ -213,7 +213,7 @@
       <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
         <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
           <input type="checkbox" id="expect-spontaneous" style="margin-top: 3px"/>
-          <span class="card-sub" style="margin:0">Exigir <strong>resposta "de cabeça"</strong> (espontânea). O entrevistador combina isso na abertura — conversa ao vivo, pode pensar/pausar/se corrigir, mas responder com as próprias palavras, sem consultar IA, pesquisar ou ler texto pronto. Salva na hora.</span>
+          <span class="card-sub" style="margin:0" data-help="O entrevistador combina isso na abertura, como conversa ao vivo: o aluno pode pensar, pausar e se corrigir, mas deve responder com as próprias palavras, sem consultar IA, pesquisar ou ler texto pronto.">Exigir <strong>resposta espontânea</strong> (de cabeça). Salva na hora.</span>
         </label>
         <div id="spontaneous-msg" class="hint" style="margin-top: var(--sp-1)"></div>
       </div>
@@ -226,8 +226,8 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">Número de perguntas da entrevista</h3>
-      <p class="card-sub">Quantas perguntas planejadas o entrevistador fará (entre 3 e 20). Ele ainda pode aprofundar com follow-ups além desse número. Vale para novas submissões — entrevistas já em andamento mantêm o número com que começaram.</p>
+      <h3 class="card-title" data-help="O entrevistador ainda pode aprofundar com follow-ups além desse número. Vale para novas submissões — entrevistas já em andamento mantêm o número com que começaram.">Número de perguntas da entrevista</h3>
+      <p class="card-sub">Quantas perguntas planejadas o entrevistador fará (entre 3 e 20).</p>
       <div class="row" style="align-items: end; gap: var(--sp-3)">
         <div style="max-width: 140px">
           <label class="label" for="question-count">Perguntas</label>
@@ -307,13 +307,8 @@
 
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
     <div class="card">
-      <h3 class="card-title">Avaliações e devolutivas</h3>
-      <p class="card-sub">
-        O fluxo tem três passos, todos em lote:
-        <strong>1</strong> avaliar as entrevistas (relatório interno — só você vê) →
-        <strong>2</strong> gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa) →
-        <strong>3</strong> publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.
-      </p>
+      <h3 class="card-title" data-help="Três passos, todos em lote: 1) avaliar as entrevistas (relatório interno, só você vê); 2) gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa); 3) publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.">Avaliações e devolutivas</h3>
+      <p class="card-sub">Avalie as entrevistas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
 
       <div class="row" style="margin-bottom: var(--sp-3)">
         <button id="open-cockpit" class="btn" type="button" title="Abre as avaliações com navegação lado a lado entre os alunos (cada turno com sua avaliação)">Abrir avaliações lado a lado ↗</button>
@@ -324,11 +319,11 @@
       <textarea id="fb-guidelines" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários e termine com um encorajamento."></textarea>
       <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
         <input type="checkbox" id="fb-include-opinion" checked style="margin-top: 3px"/>
-        <span class="card-sub" style="margin:0">Incluir a <strong>opinião do entrevistador</strong> nas devolutivas (a impressão da persona, publicada como está, com ressalva de autoria — não editável). O lote aplica a escolha a todas as entrevistas; dá para ajustar aluno a aluno na página da conversa.</span>
+        <span class="card-sub" style="margin:0" data-help="A impressão da persona, publicada como está, com ressalva de autoria — não editável. O lote aplica a escolha a todas as entrevistas; dá para ajustar aluno a aluno na página da conversa.">Incluir a <strong>opinião do entrevistador</strong> nas devolutivas.</span>
       </label>
       <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
         <input type="checkbox" id="fb-include-grade" style="margin-top: 3px"/>
-        <span class="card-sub" style="margin:0">Incluir a <strong>nota</strong> (rubrica abaixo) nas devolutivas — nota final e a nota de cada critério, sem as justificativas. Desligado por padrão. Ajustável aluno a aluno na página da conversa.</span>
+        <span class="card-sub" style="margin:0" data-help="Mostra a nota final e a nota de cada critério, sem as justificativas. Desligado por padrão. Ajustável aluno a aluno na página da conversa.">Incluir a <strong>nota</strong> (rubrica abaixo) nas devolutivas.</span>
       </label>
       <div class="row" style="margin-top: var(--sp-3)">
         <button id="save-feedback-settings" class="btn" type="button">Salvar configurações</button>
@@ -346,10 +341,8 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">Rubrica de notas</h3>
-      <p class="card-sub">
-        Defina os critérios da nota. Cada critério tem um <strong>nome</strong>, um <strong>peso</strong> e um <strong>prompt</strong>, e o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A <strong>nota final</strong> é a média ponderada pelos pesos. Você calcula as notas no botão abaixo (ou aluno a aluno na página da conversa) e decide se a nota entra na devolutiva (acima).
-      </p>
+      <h3 class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. Você calcula as notas no botão abaixo (ou aluno a aluno na página da conversa) e decide se a nota entra na devolutiva.">Rubrica de notas</h3>
+      <p class="card-sub">Defina os critérios que compõem a nota.</p>
       <div id="rubric-items"></div>
       <div class="row" style="margin-top: var(--sp-2); gap: var(--sp-2); flex-wrap: wrap">
         <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
@@ -1824,5 +1817,6 @@ TAB_NAMES.forEach(t => {
   await loadCurrentInterviewer();  // marca a persona ativa e o status
 })();
 </script>
+<script src="/static/js/ui-help.js"></script>
 </body>
 </html>
