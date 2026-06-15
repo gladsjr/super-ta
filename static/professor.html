@@ -326,6 +326,10 @@
         <input type="checkbox" id="fb-include-opinion" checked style="margin-top: 3px"/>
         <span class="card-sub" style="margin:0">Incluir a <strong>opinião do entrevistador</strong> nas devolutivas (a impressão da persona, publicada como está, com ressalva de autoria — não editável). O lote aplica a escolha a todas as entrevistas; dá para ajustar aluno a aluno na página da conversa.</span>
       </label>
+      <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
+        <input type="checkbox" id="fb-include-grade" style="margin-top: 3px"/>
+        <span class="card-sub" style="margin:0">Incluir a <strong>nota</strong> (rubrica abaixo) nas devolutivas — nota final e a nota de cada critério, sem as justificativas. Desligado por padrão. Ajustável aluno a aluno na página da conversa.</span>
+      </label>
       <div class="row" style="margin-top: var(--sp-3)">
         <button id="save-feedback-settings" class="btn" type="button">Salvar configurações</button>
         <span id="feedback-settings-msg" class="hint"></span>
@@ -339,6 +343,25 @@
         <button id="eval-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regenera o relatório interno de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Rubrica de notas</h3>
+      <p class="card-sub">
+        Defina os critérios da nota. Cada critério tem um <strong>nome</strong>, um <strong>peso</strong> e um <strong>prompt</strong>, e o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A <strong>nota final</strong> é a média ponderada pelos pesos. Você calcula as notas no botão abaixo (ou aluno a aluno na página da conversa) e decide se a nota entra na devolutiva (acima).
+      </p>
+      <div id="rubric-items"></div>
+      <div class="row" style="margin-top: var(--sp-2); gap: var(--sp-2); flex-wrap: wrap">
+        <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
+        <span class="spacer"></span>
+        <button id="save-rubric-btn" class="btn" type="button">Salvar rubrica</button>
+        <span id="rubric-msg" class="hint"></span>
+      </div>
+      <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
+        <button id="grade-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das entrevistas já avaliadas que ainda não têm nota — usa a rubrica salva">Calcular notas</button>
+        <span class="spacer"></span>
+        <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
+      </div>
     </div>
     </div><!-- /tab-avaliacao -->
   </div>
@@ -476,7 +499,9 @@ async function load() {
   // Configurações de devolutiva do trabalho
   document.getElementById('fb-guidelines').value = j.work.feedback_guidelines ?? '';
   document.getElementById('fb-include-opinion').checked = j.work.include_interviewer_opinion !== false;
+  document.getElementById('fb-include-grade').checked = j.work.include_grade === true;
   document.getElementById('expect-spontaneous').checked = j.work.expect_spontaneous === true;
+  renderRubricEditor(j.work.grading_rubric || []);
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -1186,6 +1211,7 @@ function renderBatchStatus(j) {
     batchLine(j.batch, 'Avaliando entrevistas', 'avaliada'),
     batchLine(j.derive, 'Gerando devolutivas (prévias)', 'gerada'),
     batchLine(j.publish, 'Publicando devolutivas', 'publicada'),
+    batchLine(j.grade, 'Calculando notas', 'calculada'),
   ].filter(Boolean);
   if (lines.length === 0) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
@@ -1198,7 +1224,7 @@ async function pollBatchStatus() {
     if (!r.ok) return;
     const j = await r.json();
     renderBatchStatus(j);
-    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running;
+    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running || j.grade?.running;
     if (anyRunning) {
       evalWasRunning = true;
       setEvalButtonsDisabled(true);
@@ -1216,6 +1242,8 @@ function setEvalButtonsDisabled(disabled) {
   document.getElementById('eval-all-btn').disabled = disabled;
   document.getElementById('derive-all-btn').disabled = disabled;
   document.getElementById('publish-all-btn').disabled = disabled;
+  document.getElementById('grade-all-btn').disabled = disabled;
+  document.getElementById('grade-all-force-btn').disabled = disabled;
 }
 
 async function startBatch(path, body, confirmMsg) {
@@ -1251,6 +1279,7 @@ async function saveFeedbackSettings(showMsg) {
       body: JSON.stringify({
         feedback_guidelines: document.getElementById('fb-guidelines').value.trim() || null,
         include_interviewer_opinion: document.getElementById('fb-include-opinion').checked,
+        include_grade: document.getElementById('fb-include-grade').checked,
       }),
     });
     if (!r.ok) {
@@ -1267,6 +1296,73 @@ async function saveFeedbackSettings(showMsg) {
 }
 
 document.getElementById('save-feedback-settings').onclick = () => saveFeedbackSettings(true);
+
+// ---- Rubrica de notas ----
+function rubricRowHtml(c) {
+  c = c || {};
+  return `<div class="rubric-item" data-id="${escapeHtml(c.id || '')}" style="border:1px solid var(--ink-200); border-radius: 8px; padding: var(--sp-3); margin-bottom: var(--sp-2)">
+    <div class="row" style="gap: var(--sp-2); align-items:flex-end; flex-wrap:wrap">
+      <div style="flex:1; min-width:160px">
+        <label class="label">Nome do critério</label>
+        <input class="input rubric-name" value="${escapeHtml(c.name || '')}" placeholder="Ex.: Domínio do conteúdo"/>
+      </div>
+      <div style="width:88px">
+        <label class="label">Peso</label>
+        <input class="input rubric-weight" type="number" min="0.1" step="0.1" value="${c.weight != null ? escapeHtml(String(c.weight)) : '1'}"/>
+      </div>
+      <button class="btn btn-ghost btn-sm rubric-remove" type="button" title="Remover este critério">remover</button>
+    </div>
+    <label class="label" style="margin-top: var(--sp-2)">Prompt (aplicado sobre a avaliação interna)</label>
+    <textarea class="textarea rubric-prompt" rows="2" placeholder="Ex.: dê uma nota de 0 a 10 para o domínio demonstrado na conversa…">${escapeHtml(c.prompt || '')}</textarea>
+  </div>`;
+}
+
+function renderRubricEditor(criteria) {
+  const wrap = document.getElementById('rubric-items');
+  wrap.innerHTML = (criteria.length ? criteria : [{}]).map(rubricRowHtml).join('');
+}
+
+function collectRubric() {
+  return Array.from(document.querySelectorAll('#rubric-items .rubric-item')).map(el => ({
+    id: el.dataset.id || undefined,
+    name: el.querySelector('.rubric-name').value.trim(),
+    weight: parseFloat(el.querySelector('.rubric-weight').value),
+    prompt: el.querySelector('.rubric-prompt').value.trim(),
+  }));
+}
+
+document.getElementById('rubric-add-btn').onclick = () => {
+  document.getElementById('rubric-items').insertAdjacentHTML('beforeend', rubricRowHtml({}));
+};
+document.getElementById('rubric-items').addEventListener('click', (e) => {
+  const btn = e.target.closest('.rubric-remove');
+  if (!btn) return;
+  if (document.querySelectorAll('#rubric-items .rubric-item').length <= 1) {
+    alert('A rubrica precisa de ao menos um critério.'); return;
+  }
+  btn.closest('.rubric-item').remove();
+});
+document.getElementById('save-rubric-btn').onclick = async () => {
+  const msg = document.getElementById('rubric-msg');
+  const criteria = collectRubric();
+  if (criteria.some(c => !c.name || !c.prompt || !(c.weight > 0))) {
+    msg.textContent = 'Cada critério precisa de nome, peso > 0 e prompt.'; return;
+  }
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/grading-rubric`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ criteria }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = 'Falha ao salvar: ' + (j.error || r.status); return; }
+    renderRubricEditor(j.rubric || criteria); // re-render com ids estáveis do servidor
+    msg.textContent = 'Rubrica salva.'; setTimeout(() => { msg.textContent = ''; }, 3000);
+  } catch (err) { msg.textContent = 'Falha ao salvar: ' + err.message; }
+};
+document.getElementById('grade-all-btn').onclick = () =>
+  startBatch('evaluations/grades', { force: false }, 'Calcular as notas das entrevistas avaliadas que ainda não têm nota, usando a rubrica salva? Cada critério consome orçamento do trabalho.');
+document.getElementById('grade-all-force-btn').onclick = () =>
+  startBatch('evaluations/grades', { force: true }, 'Recalcular as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota? Cada critério consome orçamento do trabalho.');
 
 // Salva a expectativa de resposta de cabeça na hora (toggle).
 document.getElementById('expect-spontaneous').addEventListener('change', async (e) => {

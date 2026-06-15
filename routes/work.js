@@ -23,8 +23,9 @@ import {
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
 import { uploadPdf } from "../lib/openaiFiles.js";
-import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent, studentFeedbackAgent } from "../lib/agents.js";
+import { configAssistantAgent, enunciadoCoherenceAgent, interviewEvaluatorAgent, studentFeedbackAgent, gradingAgent } from "../lib/agents.js";
 import { validateStudentFeedbackShape, findForbiddenLeaks } from "../agents/StudentFeedbackAgent.js";
+import { validateRubricShape, weightedFinal, getEffectiveRubric } from "../lib/rubric.js";
 import { streamAudio } from "../lib/audioStore.js";
 import {
     PRINCIPAL_REASONING_MODEL,
@@ -70,6 +71,8 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 include_strengths: req.work.include_strengths,
                 include_improvement_areas: req.work.include_improvement_areas,
                 include_study_suggestions: req.work.include_study_suggestions,
+                include_grade: req.work.include_grade,
+                grading_rubric: getEffectiveRubric(req.work),   // rubrica efetiva (do trabalho ou DEFAULT_RUBRIC)
                 budget_usd: balance?.budget_usd ?? 0,
                 spent_usd: balance?.spent_usd ?? 0,
                 remaining_usd: balance?.remaining_usd ?? 0,
@@ -357,15 +360,18 @@ router.get("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, r
     const found = req.submission;
     const subToken = found.submission_token;
     try {
-        const [cached, student] = await Promise.all([
+        const [cached, student, grades] = await Promise.all([
             db.getEvaluationCache(found.id),
             db.getStudentEvaluation(found.id),
+            db.getSubmissionGrades(found.id),
         ]);
         res.set("Cache-Control", "no-store");
         res.json({
             evaluation: cached?.report ?? null,
             evaluated_at: cached?.evaluated_at ?? null,
             feedback_guidelines: req.work.feedback_guidelines,
+            rubric: getEffectiveRubric(req.work),   // critérios efetivos (do trabalho ou DEFAULT_RUBRIC)
+            grades: grades ?? null,                  // notas computadas (com justificativas — professor-only)
             ...studentEvaluationPayload(student),
         });
     } catch (err) {
@@ -452,8 +458,9 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
     }
 });
 
-// Chaves de seção aceitas nos PATCHes (espelha db.FEEDBACK_SECTIONS).
-const SECTION_KEYS = ["interviewer_opinion", "strengths", "improvement_areas", "study_suggestions"];
+// Chaves de seção aceitas nos PATCHes (espelha db.FEEDBACK_SECTIONS). "grade" é
+// a seção de nota da rubrica — ligável/desligável como as demais.
+const SECTION_KEYS = ["interviewer_opinion", "strengths", "improvement_areas", "study_suggestions", "grade"];
 
 // Configurações de devolutiva do TRABALHO: diretrizes de geração (tom,
 // formato, ênfases) e defaults de visibilidade das seções. Valem para os
@@ -485,6 +492,24 @@ router.patch("/w/:workToken/feedback-settings", requireWorkToken, express.json({
     }
 });
 
+// Rubrica de notas do TRABALHO: critérios (nome, peso, prompt) que o
+// GradingAgent aplica sobre a avaliação interna. Vale como padrão de todos os
+// alunos (ajuste ad-hoc por aluno vem na rota de notas). Substitui a rubrica
+// inteira (não é parcial).
+router.patch("/w/:workToken/grading-rubric", requireWorkToken, express.json({ limit: "64kb" }), async (req, res) => {
+    let criteria;
+    try { criteria = validateRubricShape(req.body?.criteria); }
+    catch (err) { return res.status(400).json({ error: `rubrica inválida: ${err.message}` }); }
+    try {
+        await db.setWorkRubric(req.work.id, criteria);
+        log.info("GRADING", `rubric saved work=${req.work.work_token} criteria=${criteria.length}`);
+        res.json({ ok: true, rubric: criteria });
+    } catch (err) {
+        log.error("GRADING", `rubric save failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar a rubrica" });
+    }
+});
+
 // ---- Devolutiva ao aluno: gerar (prévia) é SEPARADO de publicar ----
 // A avaliação interna NUNCA vai crua ao aluno. O fluxo é: gerar a versão
 // formativa (StudentFeedbackAgent) → professor revisa a prévia (e pode
@@ -498,6 +523,7 @@ function workSectionDefaults(work) {
         strengths: work.include_strengths !== false,
         improvement_areas: work.include_improvement_areas !== false,
         study_suggestions: work.include_study_suggestions !== false,
+        grade: work.include_grade === true, // default DESLIGADO
     };
 }
 
@@ -554,6 +580,47 @@ async function deriveStudentVersionNow(work, found, { force, guidelinesOverride 
 }
 
 // Publica a versão EFETIVA existente. Nunca gera.
+// Calcula as NOTAS de uma submissão (compartilhada entre a rota individual e o
+// lote). Uma chamada de LLM por critério (em paralelo); a nota final é a média
+// ponderada calculada em código. rubricOverride: undefined = rubrica do
+// trabalho (lote/padrão); array = rubrica AD-HOC deste aluno (experimento, não
+// muta o padrão). Sem avaliação interna, sai com notReady (o lote pula).
+async function gradeSubmissionNow(work, found, { force, rubricOverride }) {
+    const subToken = found.submission_token;
+    const internal = await db.getEvaluationCache(found.id);
+    if (!internal) {
+        throw Object.assign(
+            new Error("não há avaliação do entrevistador para esta submissão — avalie antes de calcular as notas"),
+            { notReady: true, httpStatus: 409 }
+        );
+    }
+    const existing = await db.getSubmissionGrades(found.id);
+    if (existing && !force && rubricOverride === undefined) {
+        return { grades: existing, generated: false };
+    }
+    const rubric = rubricOverride ?? getEffectiveRubric(work);
+    log.info("GRADING", `grade submission=${subToken} force=${force} criteria=${rubric.length}${rubricOverride !== undefined ? " (ad-hoc)" : ""}`);
+    const scored = await Promise.all(rubric.map(async (criterion) => {
+        const { score, justification } = await gradingAgent.grade({
+            internalReport: internal.report,
+            criterion,
+            meterCtx: { workId: work.id },
+        });
+        return { id: criterion.id, name: criterion.name, weight: criterion.weight, score, justification };
+    }));
+    const gradesObj = { criteria: scored, final: weightedFinal(scored), computed_at: new Date().toISOString() };
+    await db.setSubmissionGrades(found.id, gradesObj);
+    log.info("GRADING", `ok submission=${subToken} final=${gradesObj.final}`);
+    return { grades: gradesObj, generated: true };
+}
+
+// Saneia uma nota manual do professor: número em [0,10], 1 casa. null se inválida.
+function clampGrade(raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return Math.round(Math.min(10, Math.max(0, n)) * 10) / 10;
+}
+
 async function publishSubmissionNow(work, found) {
     const student = await db.getStudentEvaluation(found.id);
     if (!student) {
@@ -656,6 +723,60 @@ router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireW
     }
 });
 
+// Calcula as notas DESTE aluno. ?force=true recalcula. Body opcional
+// { rubricOverride: [...] }: rubrica AD-HOC só deste aluno (não muta o padrão
+// do trabalho) — espelha o override de diretrizes da devolutiva.
+router.post("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkToken, requireProfessorSubmission, requireWithinBudget, express.json({ limit: "64kb" }), async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
+    const force = String(req.query?.force ?? "").toLowerCase() === "true";
+    let rubricOverride;
+    if (req.body && Object.prototype.hasOwnProperty.call(req.body, "rubricOverride") && req.body.rubricOverride != null) {
+        try { rubricOverride = validateRubricShape(req.body.rubricOverride); }
+        catch (err) { return res.status(400).json({ error: `rubrica inválida: ${err.message}` }); }
+    }
+    try {
+        const result = await gradeSubmissionNow(req.work, found, { force, rubricOverride });
+        res.json(result);
+    } catch (err) {
+        if (err.notReady) return res.status(err.httpStatus ?? 409).json({ error: err.message });
+        log.error("GRADING", `failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao calcular as notas", detail: err.message });
+    }
+});
+
+// Override MANUAL das notas pelo professor (soberania): body { scores:
+// [{criterion_id, score}] }. Recalcula a nota final em código. Exige notas já
+// calculadas. Não custa LLM.
+router.put("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkToken, requireProfessorSubmission, express.json({ limit: "32kb" }), async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
+    const scores = req.body?.scores;
+    if (!Array.isArray(scores) || scores.length === 0) {
+        return res.status(400).json({ error: "scores deve ser um array de { criterion_id, score }" });
+    }
+    try {
+        const existing = await db.getSubmissionGrades(found.id);
+        if (!existing || !Array.isArray(existing.criteria)) {
+            return res.status(409).json({ error: "não há notas calculadas para editar — calcule primeiro" });
+        }
+        const byId = new Map(scores.map(s => [String(s.criterion_id), s.score]));
+        const criteria = existing.criteria.map(c => {
+            if (!byId.has(String(c.id))) return c;
+            const n = clampGrade(byId.get(String(c.id)));
+            return n == null ? c : { ...c, score: n, manual: true };
+        });
+        const gradesObj = { criteria, final: weightedFinal(criteria), computed_at: existing.computed_at ?? new Date().toISOString() };
+        await db.setSubmissionGrades(found.id, gradesObj);
+        const grades = await db.getSubmissionGrades(found.id);
+        log.info("GRADING", `manual scores saved submission=${subToken} final=${grades?.final}`);
+        res.json({ grades, generated: false });
+    } catch (err) {
+        log.error("GRADING", `manual save failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar as notas", detail: err.message });
+    }
+});
+
 router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
@@ -735,11 +856,13 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
 //   por orçamento.
 const batchDeriveRuns = new Map();  // work.id -> estado (gerar prévias)
 const batchPublishRuns = new Map(); // work.id -> estado (publicar)
+const batchGradeRuns = new Map();   // work.id -> estado (calcular notas)
 
 function anyBatchRunning(workId) {
     return batchEvalRuns.get(workId)?.running
         || batchDeriveRuns.get(workId)?.running
-        || batchPublishRuns.get(workId)?.running;
+        || batchPublishRuns.get(workId)?.running
+        || batchGradeRuns.get(workId)?.running;
 }
 
 function newBatchState(force, total) {
@@ -852,12 +975,29 @@ router.post("/w/:workToken/evaluations/publish", requireWorkToken, express.json(
     checkBudget: false,
 }));
 
+// Lote de NOTAS: submissões COM avaliação interna; sem force, pula as que já
+// têm nota. Custa LLM (uma chamada por critério × submissão).
+router.post("/w/:workToken/evaluations/grades", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchGradeRuns,
+    scope: "GRADING",
+    queueFilter: (s, force) => s.has_evaluation && (force || !s.has_grades),
+    emptyError: force => force
+        ? "nenhuma submissão com avaliação — avalie as entrevistas antes de calcular notas"
+        : "nenhuma nota nova para calcular — todas as avaliadas já têm nota",
+    itemFn: async (work, found, force) => {
+        const r = await gradeSubmissionNow(work, found, { force });
+        return { skipped: !r.generated };
+    },
+    checkBudget: true,
+}));
+
 router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
     res.set("Cache-Control", "no-store");
     res.json({
         batch: publicBatchState(batchEvalRuns.get(req.work.id)),
         derive: publicBatchState(batchDeriveRuns.get(req.work.id)),
         publish: publicBatchState(batchPublishRuns.get(req.work.id)),
+        grade: publicBatchState(batchGradeRuns.get(req.work.id)),
     });
 });
 
