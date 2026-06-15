@@ -95,16 +95,17 @@ export function renderTranscriptForEvaluation(conversation, audioArtifacts = [])
         const d = deliveryByTurn.get(t.index);
         if (d) {
             const parts = [`${d.words} palavras`];
-            if (d.latency_s != null) parts.push(`${d.latency_s}s entre a pergunta e a resposta final`);
+            if (d.latency_s != null) parts.push(`${d.latency_s}s de latência grossa do turno (inclui playback e follow-ups)`);
             if (d.cps != null) parts.push(`${d.cps} caracteres/s digitados`);
             if (d.recording) {
-                if (d.recording.duration_s != null) parts.push(`gravação de ${d.recording.duration_s}s`);
-                if (d.recording.time_to_start_s != null) {
-                    parts.push(d.recording.start_source === "client"
-                        ? `${d.recording.time_to_start_s}s até começar a falar (medido: da pergunta pronta ao iniciar a gravação)`
-                        : `~${d.recording.time_to_start_s}s entre a última fala do entrevistador e o início da resposta (aproximado, inclui a escuta da pergunta)`);
-                }
+                if (d.recording.duration_s != null) parts.push(`gravação final de ${d.recording.duration_s}s`);
                 if (d.recording.wps != null) parts.push(`${d.recording.wps} palavras/s ao falar`);
+            }
+            if (Array.isArray(d.think_pairs) && d.think_pairs.length > 0) {
+                const tp = d.think_pairs.map(p => p.source === "client"
+                    ? `${p.label} ${p.think_s}s até começar a falar (medido${p.words != null ? `, resposta de ${p.words} palavras` : ""})`
+                    : `${p.label} ~${p.think_s}s até começar (aproximado, inclui a escuta da pergunta)`);
+                parts.push(`tempo de pensamento por par: ${tp.join("; ")}`);
             }
             parts.push(`disfluências: ${d.disfluencies}`);
             parts.push(`registro escrito: ${d.written_register}`);
@@ -181,7 +182,7 @@ FORMA E ENTREGA (dimensão holística — campo "delivery"):
 Um entrevistador de verdade não ouve só o conteúdo: percebe ritmo, hesitação, cadência, registro de linguagem e tempo de reação. A transcrição traz, por turno, uma linha "FORMA DA RESPOSTA" (palavras, tempos, velocidade de fala/digitação, disfluências, registro escrito 0..1, polimento 0..1) e linhas "SINAL AUTOMÁTICO DE FORMA" quando alguma heurística disparou. Semântica dos principais:
 - "registro escrito" alto numa FALA = subordinação e vocabulário de prosa que quase ninguém improvisa oralmente; combinado com ZERO disfluências numa resposta longa, é compatível com leitura de texto pronto.
 - velocidade de digitação acima de ~22 caracteres/s em resposta longa = compatível com colagem.
-- "Ns até começar a falar (medido)" (modo voz) = tempo real entre a pergunta ficar pronta e o respondente iniciar a gravação. Pensar um pouco é normal; tempos muito longos antes de respostas longas e polidas podem indicar consulta. "~Ns ... (aproximado)" é a versão estimada por timestamps (inclui a escuta da pergunta) — mais ruidosa.
+- "tempo de pensamento por par" (modo voz) = o silêncio entre o áudio de CADA pergunta terminar de tocar e o respondente apertar gravar — medido por par (pergunta principal e cada follow-up), não só na resposta final. É o trecho que de fato representa "pensar antes de responder" (exclui o áudio da pergunta, rede, upload e transcrição). "(medido)" é preciso (instrumentado no navegador); "~Ns (aproximado)" é estimado por timestamps em entrevistas antigas e inclui a escuta da pergunta — mais ruidoso. Pensar um pouco é normal; um silêncio longo antes de uma resposta longa e polida — em qualquer par, inclusive follow-up — pode indicar consulta externa, e dispara um "SINAL AUTOMÁTICO DE FORMA" identificando o par. O número de "latência" da linha FORMA é o tempo GROSSO do turno inteiro (inclui playback/follow-ups) — informativo, não use como sinal de consulta.
 - "gravou Xs mas disse quase nada" = abriu o microfone e quase não falou — possível tentativa de "começar" só para ganhar tempo (anti-gaming do início rápido).
 - "mudança de registro" = resposta muito mais estruturada que a mediana do próprio respondente — sugere ajuda seletiva nas perguntas difíceis.
 Incorpore essas percepções na sua avaliação como a persona faria: comente-as em "delivery", deixe-as colorir o interviewer_impression e, quando convergirem com sinais de conteúdo, alimente os authorship_signals. São heurísticas com risco real de falso positivo (gente que digita rápido, fala formal por hábito, pensa devagar) — então NUNCA rebaixe o mérito de conteúdo de uma resposta (per_question) por sinal de forma, e NUNCA conclua autoria a partir de tempo isolado. Forma corrobora; conteúdo decide.
