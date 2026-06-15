@@ -538,11 +538,15 @@ async function deriveStudentVersionNow(work, found, { force, guidelinesOverride 
         return { ...studentEvaluationPayload(existing), generated: false };
     }
     const guidelines = guidelinesOverride === undefined ? (work.feedback_guidelines ?? null) : guidelinesOverride;
-    log.info("PUBLISH", `derive student feedback submission=${subToken} force=${force} guidelines=${guidelines ? "yes" : "no"}${guidelinesOverride !== undefined ? " (ad-hoc)" : ""}`);
+    // Seções que o professor decidiu exibir neste aluno: o agente dobra as
+    // ocultas no summary (resumo autossuficiente).
+    const visibleSections = await db.getSubmissionSections(found.id);
+    log.info("PUBLISH", `derive student feedback submission=${subToken} force=${force} guidelines=${guidelines ? "yes" : "no"}${guidelinesOverride !== undefined ? " (ad-hoc)" : ""} sections=${JSON.stringify(visibleSections)}`);
     const report = await studentFeedbackAgent.derive({
         internalReport: internal.report,
         guidelines,
         expectSpontaneous: work.expect_spontaneous === true,
+        visibleSections,
         meterCtx: { workId: work.id },
     });
     await db.setStudentEvaluation(found.id, report);

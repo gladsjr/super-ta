@@ -111,14 +111,17 @@ export class StudentFeedbackAgent {
         this.model = model;
         this.systemPromptBody = `Sua função específica: escrever a DEVOLUTIVA AO ENTREVISTADO a partir do relatório interno de avaliação de uma entrevista (JSON no input). O relatório interno foi escrito para o operador do sistema e NÃO pode ser mostrado cru; você produz a versão que a própria pessoa entrevistada vai ler.
 
-PROPÓSITO: devolutiva FORMATIVA (apresentada ao leitor como avaliação do professor). A pessoa deve terminar a leitura sabendo (i) como foi a conversa, (ii) o que ela sustentou bem, (iii) onde ficou devendo e (iv) o que vale estudar ou preparar melhor. Tom default: neutro, direto, respeitoso, construtivo. (A opinião do entrevistador-persona NÃO é gerada aqui — o sistema publica, à parte, a impressão registrada no próprio relatório interno.)
+PROPÓSITO E ESTRUTURA — a devolutiva tem DUAS camadas com papéis distintos:
 
-DIRETRIZES DO PROFESSOR (quando presentes no input): o professor pode orientar tom, formato, extensão e ênfases ("mais acolhedor", "texto corrido, sem itens", "destaque os conceitos de risco", "termine com um encorajamento"). Siga-as fielmente — elas mandam em TUDO que for estilo, estrutura e ênfase. A única coisa que diretriz nenhuma altera são as REGRAS DURAS DE CONTEÚDO abaixo: mesmo que pareça pedido, nunca inclua autoria, forma de entrega, tempos ou nota.
+1) O \`summary\` é o CORPO PRINCIPAL e AUTOSSUFICIENTE — é a comunicação do professor ao entrevistado, escrita conforme as DIRETRIZES dele, REINTERPRETANDO a avaliação INTEIRA (o que sustentou bem, o que ficou devendo, o que vale estudar). Ele tem de fazer sentido SOZINHO: NUNCA conte com os blocos de seção para comunicar algo essencial, porque o professor pode escolher não exibi-los. Se a crítica importa e o professor pede (ou o equilíbrio formativo exige), ela tem de estar AQUI, no summary — não terceirize as fraquezas para a seção "improvement_areas" achando que ela será mostrada.
 
-FORMATO — per_question é OPCIONAL:
-- summary é o corpo principal da devolutiva e pode ter de um a três parágrafos (texto corrido).
-- Use per_question apenas quando comentários pergunta a pergunta agregarem de verdade (ou quando o professor pedir esse formato); não precisa cobrir todas as perguntas — comente só as que merecem destaque. Se o professor pedir texto corrido, ou se a entrevista for curta, devolva per_question: [] e concentre tudo no summary e nas listas.
-- turn_index de cada item, quando houver, deve corresponder ao turno do relatório interno.
+2) Os blocos \`strengths\` / \`improvement_areas\` / \`study_suggestions\` são INCLUSÕES OPCIONAIS, exibidas ao leitor APENAS quando o professor liga o checkbox correspondente. São uma versão fiel e direta daquela parte da avaliação (listas curtas). Preencha a lista de uma seção SÓ quando ela for exibida (ver o bloco "SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR" adiante); quando não for exibida, devolva a lista VAZIA e leve o conteúdo para o summary. Nunca deixe a crítica "morar" só numa lista que não será mostrada.
+
+DIRETRIZES DO PROFESSOR (quando presentes no input): orientam tom, formato, extensão e ênfases do \`summary\` ("mais acolhedor", "texto corrido em dois parágrafos", "destaque as fraquezas", "evite citar perguntas específicas", "comentários qualitativos"). Siga-as fielmente — mandam em TODO o estilo, estrutura, extensão e ênfase do summary. A única coisa que diretriz nenhuma altera são as REGRAS DURAS DE CONTEÚDO abaixo.
+
+FORMATO:
+- summary: corpo principal autossuficiente; respeite a extensão/estilo que o professor pedir (de um parágrafo a alguns; texto corrido se pedido).
+- per_question é OPCIONAL: use só quando comentários pergunta a pergunta agregarem (ou o professor pedir esse formato); se ele pedir texto corrido/qualitativo sem citar perguntas, devolva per_question: []. turn_index, quando houver, corresponde ao turno do relatório interno.
 
 REGRAS DURAS DE CONTEÚDO (a parte mais importante da sua função):
 - NUNCA mencione, direta ou indiretamente: dúvidas de autoria, suspeita de ajuda externa, uso de ferramentas/assistentes, velocidade de digitação ou de fala, tempo de resposta, pausas, hesitação, fluência, "texto pronto", leitura, espontaneidade, naturalidade da entrega, ou qualquer análise da FORMA como a resposta foi produzida. Esses temas existem no relatório interno (campos authorship_*, delivery, sinais de forma) e DEVEM ser completamente omitidos — nem eco, nem eufemismo ("respostas muito bem preparadas" é eco; não use).
@@ -150,10 +153,31 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
      * @param {object} p.internalReport - relatório do InterviewEvaluatorAgent
      * @param {string|null} p.guidelines - diretrizes do professor (works.feedback_guidelines)
      * @param {boolean} p.expectSpontaneous - o trabalho exige resposta "de cabeça" (critério declarado)
+     * @param {object} p.visibleSections - quais seções o professor decidiu EXIBIR ao aluno
+     *        { strengths, improvement_areas, study_suggestions } (booleans). As não
+     *        exibidas devem ter sua substância dobrada no summary.
      * @param {object|null} p.meterCtx  - contexto de billing
      */
-    async derive({ internalReport, guidelines = null, expectSpontaneous = false, meterCtx = null }) {
+    async derive({ internalReport, guidelines = null, expectSpontaneous = false, visibleSections = null, meterCtx = null }) {
         if (!internalReport) throw new Error("StudentFeedback: missing internalReport");
+
+        // Diz ao agente quais blocos de seção serão EXIBIDOS ao leitor. As
+        // ocultas não aparecem — então sua substância relevante tem de ser
+        // dobrada no summary (que é autossuficiente). interviewer_opinion não é
+        // gerada aqui; só as três seções de conteúdo importam.
+        const vs = visibleSections || {};
+        const SECN = { strengths: "O que sustentou bem", improvement_areas: "O que pode melhorar", study_suggestions: "Sugestões de estudo" };
+        const shown = [], hidden = [];
+        for (const k of Object.keys(SECN)) (vs[k] === false ? hidden : shown).push(SECN[k]);
+        const sectionsBlock = visibleSections ? `
+
+SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR (decisão dele) — isto MUDA o que vai no summary e o que vai nas listas:
+- EXIBIDAS (vão como bloco fiel ao leitor): ${shown.length ? shown.join("; ") : "(nenhuma)"}.
+- NÃO exibidas (o leitor NÃO verá o bloco): ${hidden.length ? hidden.join("; ") : "(nenhuma)"}.
+REGRAS OBRIGATÓRIAS (sobrepõem-se ao formato default):
+- Para cada seção EXIBIDA: preencha a lista correspondente (strengths/improvement_areas/study_suggestions) com itens fiéis e curtos.
+- Para cada seção NÃO exibida: devolva a lista correspondente VAZIA ([]) e LEVE a substância dela para DENTRO do summary, reinterpretada conforme as diretrizes do professor. NÃO há outro lugar para esse conteúdo aparecer — se ficar só na lista vazia, ele SOME para o leitor.
+- Em especial: se "O que pode melhorar" NÃO será exibido, os pontos fracos/a melhorar TÊM de estar escritos no summary. Uma devolutiva só com elogios, havendo pontos a melhorar no relatório interno, é ERRO. O equilíbrio (o que foi bem E o que faltou) é inegociável, salvo se o professor pedir explicitamente o contrário.` : "";
 
         // Exceção condicional às REGRAS DURAS: quando a espontaneidade é critério
         // declarado, a devolutiva PODE comentar a forma/tempo — mas só se o
@@ -169,16 +193,20 @@ Aqui, e SÓ aqui, a regra dura que proíbe falar de tempos/forma é AFROUXADA �
 
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_ui" })}
 
-${this.systemPromptBody}${spontaneityException}`;
+${this.systemPromptBody}${sectionsBlock}${spontaneityException}`;
         const guidelinesBlock = typeof guidelines === "string" && guidelines.trim()
             ? `DIRETRIZES DO PROFESSOR para esta devolutiva (siga em estilo/estrutura/ênfase; as regras duras de conteúdo prevalecem):
 ${guidelines.trim()}
 
 `
             : "";
+        // Lembrete final (posição de maior peso) quando há seção de crítica oculta.
+        const hiddenReminder = (visibleSections && vs.improvement_areas === false)
+            ? `\n\nLEMBRETE FINAL: "O que pode melhorar" NÃO será exibido como bloco. Logo, os pontos fracos/a melhorar identificados no relatório interno TÊM de aparecer escritos no summary (e a lista improvement_areas vai vazia). Devolutiva só com elogios aqui é erro.`
+            : "";
         const userText = `${guidelinesBlock}RELATÓRIO INTERNO DA AVALIAÇÃO (não mostrar cru — derive a devolutiva conforme o contrato):
 
-${JSON.stringify(internalReport, null, 2)}`;
+${JSON.stringify(internalReport, null, 2)}${hiddenReminder}`;
 
         const payload = {
             model: this.model,
