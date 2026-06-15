@@ -1,0 +1,32 @@
+feat(devolutiva): resumo autossuficiente + seções como inclusão a-priori
+
+Problema (visto em produção): o professor desmarcou as seções de crítica e
+pediu no prompt "não deixe de apontar as fraquezas", mas a devolutiva saiu
+só com elogios. Causa: o agente gerava elogios no summary e jogava as
+fraquezas na lista improvement_areas — que estava OCULTA. Some para o aluno.
+
+Novo modelo (o que o professor pediu): o checkbox decide se a SEÇÃO entra
+como bloco fiel; o PROMPT roda com a avaliação INTEIRA como contexto e
+produz o summary, reinterpretando inclusive o que não vira bloco.
+
+Implementação:
+- StudentFeedbackAgent.derive recebe visibleSections. O summary é
+  AUTOSSUFICIENTE; para cada seção de conteúdo NÃO exibida, a lista vai
+  VAZIA e a substância é dobrada no summary (instrução forte no system +
+  lembrete final no user text quando "O que pode melhorar" está oculto).
+  Para as exibidas, a lista é preenchida (bloco fiel).
+- db.getSubmissionSections(submissionId): flags de seção da submissão.
+- routes/work.js passa visibleSections na geração.
+- Cockpit: os três toggles de conteúdo ficam SEMPRE visíveis (viraram
+  config de geração) e, ao mudar, aparece o aviso "regere para aplicar".
+
+Testado no banco isolado: com um relatório interno claramente negativo
+(defense weak) + seções de crítica ocultas + prompt "tom acolhedor, não
+deixe de apontar as fraquezas", o summary passou a dobrar as fraquezas
+(desalinhamentos com a entrega, recomendação incompatível, "enfraquece a
+defesa"), mantendo tom acolhedor, texto corrido e sem citar perguntas
+específicas; listas vieram vazias. (Em relatório "adequate" o summary fica
+naturalmente mais positivo — correto.) Cockpit: toggles sempre visíveis +
+aviso de regerar; sem erros de console.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

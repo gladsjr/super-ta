@@ -394,8 +394,10 @@
           <input type="checkbox" data-section="study_suggestions">
           <span><strong>Sugestões de estudo</strong></span>
         </label>
+        <p class="eval-publish-help" style="margin-top: var(--sp-2);">A opinião do entrevistador entra como bloco fiel. As demais: marcada = vira um bloco; <strong>desmarcada = o conteúdo é reinterpretado dentro do resumo</strong> pelo prompt. Mudou aqui? <strong>Regere a devolutiva</strong> para o resumo recalibrar.</p>
+        <div id="sections-regen-hint" class="notice hidden" style="background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700); margin-top: var(--sp-2);">Você mudou as seções incluídas — clique em <strong>"Regerar devolutiva (este aluno)"</strong> para aplicar (o resumo é recalibrado conforme o que entra ou não como bloco).</div>
         <div class="eval-sections-apply">
-          <button class="btn btn-ghost btn-sm" id="sections-apply-all-btn" title="Usa estas escolhas de seção como padrão do trabalho e aplica a todos os alunos (não regenera nada)">Aplicar estas seções a todos os alunos</button>
+          <button class="btn btn-ghost btn-sm" id="sections-apply-all-btn" title="Usa estas escolhas de seção como padrão do trabalho e aplica a todos os alunos">Aplicar estas seções a todos os alunos</button>
         </div>
       </div>
       <div class="notice notice-error eval-error hidden" id="eval-publish-error"></div>
@@ -922,17 +924,24 @@ function renderFeedbackCard(j) {
   show('eval-edit-btn', hasVersion);
   show('eval-discard-edit-btn', isEdited);
 
-  // Toggles de seção (só fazem sentido com versão gerada). Cada seção só
-  // aparece se tiver conteúdo (section_has); a opinião é uma seção também.
+  // Toggles de seção. A OPINIÃO só faz sentido se houver impressão registrada
+  // (toggle instantâneo, bloco verbatim). As três seções de CONTEÚDO são
+  // config de GERAÇÃO (marcada = bloco; desmarcada = dobrada no resumo) — ficam
+  // sempre visíveis para o professor decidir + regerar.
   const sections = j.sections || {};
   const sectionHas = j.section_has || {};
   show('eval-sections', hasVersion);
+  document.getElementById('sections-regen-hint').classList.add('hidden');
   for (const key of SECTION_KEYS) {
     const row = document.getElementById('sec-row-' + key);
     const cb = row.querySelector('input');
     const hasContent = !!sectionHas[key];
-    row.classList.toggle('hidden', !hasContent);
-    row.classList.toggle('empty', !hasContent);
+    if (key === 'interviewer_opinion') {
+      row.classList.toggle('hidden', !hasContent);
+    } else {
+      row.classList.remove('hidden');
+      row.classList.toggle('empty', !hasContent);
+    }
     cb.checked = sections[key] !== false;
   }
 
@@ -1046,8 +1055,14 @@ async function pollApplyAll() {
 document.getElementById('eval-publish-btn').addEventListener('click', () => pubRequest('POST', 'publish'));
 document.getElementById('eval-unpublish-btn').addEventListener('click', () => pubRequest('DELETE', 'publish'));
 document.querySelectorAll('#eval-sections input[data-section]').forEach(cb => {
-  cb.addEventListener('change', e =>
-    pubRequest('PATCH', 'sections', { [e.target.dataset.section]: e.target.checked }));
+  cb.addEventListener('change', async e => {
+    const key = e.target.dataset.section;
+    const contentSection = key !== 'interviewer_opinion';
+    await pubRequest('PATCH', 'sections', { [key]: e.target.checked });
+    // Seções de conteúdo entram na geração: mudar exige regerar para o resumo
+    // recalibrar (dobrar/soltar a substância). A opinião é verbatim — não.
+    if (contentSection) document.getElementById('sections-regen-hint').classList.remove('hidden');
+  });
 });
 document.getElementById('sections-apply-all-btn').addEventListener('click', async () => {
   const sections = pubState?.sections || {};
