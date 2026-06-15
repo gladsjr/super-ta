@@ -394,6 +394,10 @@
           <input type="checkbox" data-section="study_suggestions">
           <span><strong>Sugestões de estudo</strong></span>
         </label>
+        <label class="eval-section-toggle" id="sec-row-grade">
+          <input type="checkbox" data-section="grade">
+          <span><strong>Nota</strong> — a nota final e a de cada critério (sem as justificativas). Calcule no card “Notas” abaixo.</span>
+        </label>
         <p class="eval-publish-help" style="margin-top: var(--sp-2);">A opinião do entrevistador entra como bloco fiel. As demais: marcada = vira um bloco; <strong>desmarcada = o conteúdo é reinterpretado dentro do resumo</strong> pelo prompt. Mudou aqui? <strong>Regere a devolutiva</strong> para o resumo recalibrar.</p>
         <div id="sections-regen-hint" class="notice hidden" style="background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700); margin-top: var(--sp-2);">Você mudou as seções incluídas — clique em <strong>"Regerar devolutiva (este aluno)"</strong> para aplicar (o resumo é recalibrado conforme o que entra ou não como bloco).</div>
         <div class="eval-sections-apply">
@@ -443,6 +447,31 @@
     </div>
     <div class="notice notice-error eval-error hidden" id="eval-error"></div>
     <div id="eval-body"></div>
+  </section>
+
+  <!-- Notas por rubrica (interna; publicada opcionalmente pela seção "Nota" da devolutiva). -->
+  <section id="rubric-grades-card" class="evaluation-card hidden">
+    <div class="eval-header">
+      <h2>Notas <span style="font-weight: 400; color: var(--ink-500); font-size: var(--fs-sm);">(rubrica — interna; publique pela devolutiva)</span></h2>
+      <div>
+        <span class="eval-meta" id="grades-meta"></span>
+        <button class="btn btn-sm" id="grades-btn">Calcular notas</button>
+      </div>
+    </div>
+    <div class="eval-empty-note" id="grades-empty-note">
+      Notas por critério da rubrica, calculadas sobre a avaliação do entrevistador.
+      Defina a rubrica no painel do professor. A nota final é a média ponderada pelos pesos.
+    </div>
+    <div class="notice notice-error eval-error hidden" id="grades-error"></div>
+    <div id="grades-body"></div>
+    <details class="hidden" id="grades-adhoc" style="margin-top: var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-2);">
+      <summary>Ajustar a rubrica só para este aluno</summary>
+      <p class="eval-publish-help">Edita pesos e prompts apenas para recalcular ESTE aluno — não muda a rubrica do trabalho.</p>
+      <div id="grades-adhoc-items"></div>
+      <div class="eval-publish-row" style="margin-top: var(--sp-2);">
+        <button class="btn btn-sm" id="grades-adhoc-btn">Recalcular com esta rubrica</button>
+      </div>
+    </details>
   </section>
 
   <details class="intro hidden" id="intro">
@@ -835,8 +864,153 @@ async function loadEvaluation() {
     const j = await r.json();
     if (j.evaluation) renderEvaluation(j.evaluation, j.evaluated_at);
     renderFeedbackCard(j);
+    renderGrades(j);
   } catch { /* leitura do cache é best-effort; o botão continua funcional */ }
 }
+
+// ---- Notas por rubrica ----
+// Editor ad-hoc (recalcula SÓ este aluno, sem mudar a rubrica do trabalho).
+function adhocRubricRowHtml(c) {
+  c = c || {};
+  return `<div class="adhoc-item" data-id="${escapeHtml(c.id || '')}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0;">
+    <div class="row" style="gap: var(--sp-2); align-items:center; flex-wrap:wrap">
+      <strong style="flex:1; min-width:140px">${escapeHtml(c.name || '')}</strong>
+      <input class="input adhoc-weight" type="number" min="0.1" step="0.1" value="${escapeHtml(String(c.weight ?? 1))}" style="width:80px" title="peso"/>
+    </div>
+    <textarea class="editor-textarea adhoc-prompt" rows="2">${escapeHtml(c.prompt || '')}</textarea>
+  </div>`;
+}
+function renderAdhocRubric(rubric) {
+  const det = document.getElementById('grades-adhoc');
+  if (det.open) return; // não sobrescreve enquanto o professor edita
+  document.getElementById('grades-adhoc-items').innerHTML = (rubric || []).map(adhocRubricRowHtml).join('');
+}
+function collectAdhocRubric() {
+  return Array.from(document.querySelectorAll('#grades-adhoc-items .adhoc-item')).map(el => ({
+    id: el.dataset.id || undefined,
+    name: el.querySelector('strong').textContent,
+    weight: parseFloat(el.querySelector('.adhoc-weight').value),
+    prompt: el.querySelector('.adhoc-prompt').value.trim(),
+  }));
+}
+
+function gradesBodyHtml(grades) {
+  const crit = Array.isArray(grades.criteria) ? grades.criteria : [];
+  const rows = crit.map(c => `
+    <div class="grade-row" data-id="${escapeHtml(c.id || '')}" data-weight="${escapeHtml(String(c.weight ?? 1))}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0;">
+      <div class="row" style="gap: var(--sp-2); align-items:center; flex-wrap:wrap">
+        <strong style="flex:1; min-width:140px">${escapeHtml(c.name || '')}</strong>
+        <span class="eval-meta">peso ${escapeHtml(String(c.weight ?? 1))}</span>
+        <input class="input grade-score" type="number" min="0" max="10" step="0.1" value="${c.score != null ? escapeHtml(String(c.score)) : ''}" style="width:80px"/>
+        ${c.manual ? '<span class="badge badge-accent" title="Nota ajustada manualmente">manual</span>' : ''}
+      </div>
+      ${c.justification ? `<div class="sf-text" style="margin-top: var(--sp-1); color: var(--ink-600); font-size: var(--fs-sm);">${escapeHtml(c.justification)}</div>` : ''}
+    </div>`).join('');
+  const final = grades.final != null ? grades.final : '—';
+  return `${rows}
+    <div class="row" style="gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); border-top: 2px solid var(--ink-300); padding-top: var(--sp-2);">
+      <strong style="flex:1">Nota final (média ponderada)</strong>
+      <strong id="grade-final" style="font-size: var(--fs-lg)">${escapeHtml(String(final))}</strong>
+    </div>
+    <div class="eval-publish-row" style="margin-top: var(--sp-2);">
+      <button class="btn btn-primary btn-sm" id="grades-save-btn">Salvar notas</button>
+      <span class="hint">As notas só vão ao aluno se a seção “Nota” estiver ligada na devolutiva (acima).</span>
+    </div>`;
+}
+
+function recomputeFinalPreview() {
+  let num = 0, den = 0;
+  document.querySelectorAll('#grades-body .grade-row').forEach(row => {
+    const w = parseFloat(row.dataset.weight);
+    const s = parseFloat(row.querySelector('.grade-score').value);
+    if (w > 0 && Number.isFinite(s)) { num += s * w; den += w; }
+  });
+  const final = den ? Math.round((num / den) * 10) / 10 : '—';
+  const el = document.getElementById('grade-final'); if (el) el.textContent = String(final);
+}
+
+function renderGrades(j) {
+  const card = document.getElementById('rubric-grades-card');
+  if (VIEW_MODE !== 'avaliacao') { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const hasInternal = !!j.evaluation;
+  const btn = document.getElementById('grades-btn');
+  const meta = document.getElementById('grades-meta');
+  const empty = document.getElementById('grades-empty-note');
+  const body = document.getElementById('grades-body');
+  const grades = j.grades;
+  btn.disabled = !hasInternal;
+  btn.textContent = grades ? 'Recalcular notas' : 'Calcular notas';
+  if (!hasInternal) {
+    empty.textContent = 'Gere antes a Avaliação do entrevistador — a nota é calculada sobre ela.';
+    empty.classList.remove('hidden'); body.innerHTML = ''; meta.textContent = '';
+    document.getElementById('grades-adhoc').classList.add('hidden');
+    return;
+  }
+  renderAdhocRubric(j.rubric || []);
+  document.getElementById('grades-adhoc').classList.remove('hidden');
+  if (!grades || !Array.isArray(grades.criteria) || !grades.criteria.length) {
+    empty.classList.remove('hidden'); body.innerHTML = ''; meta.textContent = '';
+    return;
+  }
+  empty.classList.add('hidden');
+  meta.textContent = grades.computed_at ? `calculada ${fmtTime(grades.computed_at)}` : '';
+  body.innerHTML = gradesBodyHtml(grades);
+}
+
+async function gradesRequest(method, path, body) {
+  const errEl = document.getElementById('grades-error');
+  errEl.classList.add('hidden');
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation/${path}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    await loadEvaluation(); // refresca notas + prévia da devolutiva (a nota pode entrar nela)
+    return j;
+  } catch (err) {
+    errEl.textContent = `Falha: ${err.message}`;
+    errEl.classList.remove('hidden');
+    return null;
+  }
+}
+
+document.getElementById('grades-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('grades-btn');
+  const force = !!pubState?.grades;
+  const label = btn.textContent;
+  btn.textContent = 'Calculando…'; btn.disabled = true;
+  await gradesRequest('POST', `grades${force ? '?force=true' : ''}`);
+  btn.textContent = label; btn.disabled = false;
+});
+document.getElementById('grades-adhoc-btn').addEventListener('click', async () => {
+  const errEl = document.getElementById('grades-error');
+  const rubricOverride = collectAdhocRubric();
+  if (rubricOverride.some(c => !c.name || !c.prompt || !(c.weight > 0))) {
+    errEl.textContent = 'Cada critério precisa de nome, peso > 0 e prompt.'; errEl.classList.remove('hidden'); return;
+  }
+  const btn = document.getElementById('grades-adhoc-btn');
+  const label = btn.textContent;
+  btn.textContent = 'Calculando…'; btn.disabled = true;
+  await gradesRequest('POST', 'grades', { rubricOverride });
+  btn.textContent = label; btn.disabled = false;
+});
+document.getElementById('grades-body').addEventListener('input', e => {
+  if (e.target.classList.contains('grade-score')) recomputeFinalPreview();
+});
+document.getElementById('grades-body').addEventListener('click', async e => {
+  if (e.target.id !== 'grades-save-btn') return;
+  const scores = Array.from(document.querySelectorAll('#grades-body .grade-row')).map(row => ({
+    criterion_id: row.dataset.id,
+    score: parseFloat(row.querySelector('.grade-score').value),
+  })).filter(s => Number.isFinite(s.score));
+  if (!scores.length) return;
+  e.target.disabled = true; e.target.textContent = 'Salvando…';
+  await gradesRequest('PUT', 'grades', { scores });
+});
 
 // ---- Publicação da devolutiva ao aluno ----
 
@@ -852,6 +1026,13 @@ function renderStudentPreview(ev) {
     <div class="sf-text">${escapeHtml(ev.interviewer_opinion)}</div>` : '';
   const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
     <div class="sf-text" style="margin-top: var(--sp-2);"><strong>Pergunta ${Number(q.turn_index) + 1}</strong> — ${escapeHtml(q.question_gist ?? '')}<br>${escapeHtml(q.feedback ?? '')}</div>`).join('');
+  const gradeBlock = ev.grade ? `
+    <div class="sf-label">Nota</div>
+    <div class="sf-text"><strong>Nota final: ${escapeHtml(String(ev.grade.final))}</strong>${
+      (Array.isArray(ev.grade.criteria) ? ev.grade.criteria : []).length
+        ? '<br>' + ev.grade.criteria.map(c => `${escapeHtml(c.name ?? '')}: ${escapeHtml(String(c.score))} <span style="color:var(--ink-500)">(peso ${escapeHtml(String(c.weight))})</span>`).join('<br>')
+        : ''
+    }</div>` : '';
   return `
     ${opinionBlock}
     <div class="sf-label">Avaliação do professor — resumo</div>
@@ -859,14 +1040,18 @@ function renderStudentPreview(ev) {
     ${perQuestion ? `<div class="sf-label">Pergunta a pergunta</div>${perQuestion}` : ''}
     ${list('O que sustentou bem', ev.strengths)}
     ${list('O que pode melhorar', ev.improvement_areas)}
-    ${list('Sugestões de estudo', ev.study_suggestions)}`;
+    ${list('Sugestões de estudo', ev.study_suggestions)}
+    ${gradeBlock}`;
 }
 
 // Último estado conhecido da devolutiva (payload do servidor).
 let pubState = null;
 
 const PUB_BTN_IDS = ['fb-generate-btn', 'fb-apply-all-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'sections-apply-all-btn'];
-const SECTION_KEYS = ['interviewer_opinion', 'strengths', 'improvement_areas', 'study_suggestions'];
+const SECTION_KEYS = ['interviewer_opinion', 'strengths', 'improvement_areas', 'study_suggestions', 'grade'];
+// Seções compostas como bloco fiel (não passam pela geração do StudentFeedback):
+// a opinião do entrevistador e a nota. Toggle instantâneo, sem "regerar".
+const VERBATIM_SECTIONS = ['interviewer_opinion', 'grade'];
 
 function setPubButtonsDisabled(disabled) {
   PUB_BTN_IDS.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = disabled; });
@@ -936,7 +1121,8 @@ function renderFeedbackCard(j) {
     const row = document.getElementById('sec-row-' + key);
     const cb = row.querySelector('input');
     const hasContent = !!sectionHas[key];
-    if (key === 'interviewer_opinion') {
+    if (VERBATIM_SECTIONS.includes(key)) {
+      // Opinião e nota são blocos fiéis: a linha só aparece se houver conteúdo.
       row.classList.toggle('hidden', !hasContent);
     } else {
       row.classList.remove('hidden');
@@ -1057,7 +1243,7 @@ document.getElementById('eval-unpublish-btn').addEventListener('click', () => pu
 document.querySelectorAll('#eval-sections input[data-section]').forEach(cb => {
   cb.addEventListener('change', async e => {
     const key = e.target.dataset.section;
-    const contentSection = key !== 'interviewer_opinion';
+    const contentSection = !VERBATIM_SECTIONS.includes(key);
     await pubRequest('PATCH', 'sections', { [key]: e.target.checked });
     // Seções de conteúdo entram na geração: mudar exige regerar para o resumo
     // recalibrar (dobrar/soltar a substância). A opinião é verbatim — não.

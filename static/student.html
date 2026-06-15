@@ -815,6 +815,13 @@
       const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
         <div class="conv-line"><span class="who">pergunta ${Number(q.turn_index) + 1}:</span><span class="text">${escapeHtml(q.question_gist ?? '')}</span></div>
         <div class="conv-line"><span class="who">devolutiva:</span><span class="text">${escapeHtml(q.feedback ?? '')}</span></div>`).join('');
+      // Nota da rubrica, quando o professor decidiu incluí-la: nota final +
+      // nota de cada critério (sem justificativas).
+      const gradeCriteria = ev.grade && Array.isArray(ev.grade.criteria) ? ev.grade.criteria : [];
+      const gradeBlock = ev.grade ? `
+        <div class="conv-section-label">Nota</div>
+        <p style="margin: 0 0 var(--sp-2);"><strong>Nota final: ${escapeHtml(String(ev.grade.final))}</strong></p>
+        ${gradeCriteria.length ? `<ul style="margin: 0 0 var(--sp-3); padding-left: 1.2rem;">${gradeCriteria.map(c => `<li style="margin: var(--sp-1) 0;">${escapeHtml(c.name ?? '')}: <strong>${escapeHtml(String(c.score))}</strong> <span class="muted">(peso ${escapeHtml(String(c.weight))})</span></li>`).join('')}</ul>` : ''}` : '';
       return `
         ${opinionBlock}
         <div class="conv-section-label">Avaliação do professor</div>
@@ -822,7 +829,8 @@
         ${perQuestion ? `<div class="conv-section-label">Pergunta a pergunta</div>${perQuestion}` : ''}
         ${list('O que você sustentou bem', ev.strengths)}
         ${list('O que pode melhorar', ev.improvement_areas)}
-        ${list('Sugestões de estudo', ev.study_suggestions)}`;
+        ${list('Sugestões de estudo', ev.study_suggestions)}
+        ${gradeBlock}`;
     }
 
     // target: 'review' (seção dentro do review-card) ou 'feedback-card'
