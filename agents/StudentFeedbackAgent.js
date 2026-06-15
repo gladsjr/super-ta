@@ -35,13 +35,28 @@ import { renderAgentPreamble } from "../lib/agentPreamble.js";
  *   }
  */
 
-// Vocabulário que NÃO pode aparecer na devolutiva do aluno. Cada padrão é um
-// resíduo da camada interna (autoria, forense de forma, juízo interno).
-// Varre o JSON serializado inteiro — campo nenhum escapa.
-export const FORBIDDEN_PATTERNS = [
+// Vocabulário que NÃO pode aparecer na devolutiva do aluno. Dois conjuntos:
+//
+// ALWAYS_FORBIDDEN — acusação ou imputação de CAUSA. Nunca vai ao aluno, nem
+// quando o trabalho exige espontaneidade: a devolutiva descreve a OBSERVAÇÃO
+// ("demorou, soou preparado"), nunca afirma trapaça/IA/plágio.
+//
+// SPONTANEITY_RELAXABLE — vocabulário legítimo de devolutiva sobre
+// espontaneidade (tempo, leitura, "de cabeça"). Bloqueado por DEFAULT (a
+// devolutiva não fala de forma), mas LIBERADO quando works.expect_spontaneous
+// está ligado E o professor pede nas diretrizes — aí é critério declarado.
+const ALWAYS_FORBIDDEN = [
     /autoria/i,
     /pl[áa]gio/i,
     /colagem|colou|colad[ao]/i,
+    /intelig[êe]ncia artificial/i,
+    /\bIA\b/,
+    /chatgpt|gpt|llm/i,
+    /gerad[ao] (por|em) (ia|m[áa]quina|modelo)/i,
+    /suspeit/i,
+    /fraude/i,
+];
+const SPONTANEITY_RELAXABLE = [
     /lat[êe]ncia/i,
     /texto pronto/i,
     /decorad[ao]/i,
@@ -51,17 +66,14 @@ export const FORBIDDEN_PATTERNS = [
     /caracteres(\s+por\s+segundo|\/s)/i,
     /palavras(\s+por\s+segundo|\/s)/i,
     /registro escrito/i,
-    /intelig[êe]ncia artificial/i,
-    /\bIA\b/,
-    /chatgpt|gpt|llm/i,
-    /gerad[ao] (por|em) (ia|m[áa]quina|modelo)/i,
-    /suspeit/i,
-    /fraude/i,
 ];
+// Conjunto completo (default) — mantido exportado para compat.
+export const FORBIDDEN_PATTERNS = [...ALWAYS_FORBIDDEN, ...SPONTANEITY_RELAXABLE];
 
-export function findForbiddenLeaks(reportObject) {
+export function findForbiddenLeaks(reportObject, { expectSpontaneous = false } = {}) {
+    const patterns = expectSpontaneous ? ALWAYS_FORBIDDEN : FORBIDDEN_PATTERNS;
     const text = JSON.stringify(reportObject);
-    return FORBIDDEN_PATTERNS.filter(re => re.test(text)).map(re => String(re));
+    return patterns.filter(re => re.test(text)).map(re => String(re));
 }
 
 // Validação de FORMA da devolutiva (sem o vínculo com o relatório interno).
@@ -137,14 +149,27 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
      * @param {object} p
      * @param {object} p.internalReport - relatório do InterviewEvaluatorAgent
      * @param {string|null} p.guidelines - diretrizes do professor (works.feedback_guidelines)
+     * @param {boolean} p.expectSpontaneous - o trabalho exige resposta "de cabeça" (critério declarado)
      * @param {object|null} p.meterCtx  - contexto de billing
      */
-    async derive({ internalReport, guidelines = null, meterCtx = null }) {
+    async derive({ internalReport, guidelines = null, expectSpontaneous = false, meterCtx = null }) {
         if (!internalReport) throw new Error("StudentFeedback: missing internalReport");
+
+        // Exceção condicional às REGRAS DURAS: quando a espontaneidade é critério
+        // declarado, a devolutiva PODE comentar a forma/tempo — mas só se o
+        // professor pedir, e sempre como observação construtiva, nunca acusação.
+        const spontaneityException = expectSpontaneous ? `
+
+EXCEÇÃO PARA ESTE TRABALHO — ele exige RESPOSTA "DE CABEÇA" (critério declarado ao respondente na abertura):
+Aqui, e SÓ aqui, a regra dura que proíbe falar de tempos/forma é AFROUXADA — PORQUE espontaneidade é o que se está avaliando, e o respondente foi avisado disso. Então:
+- SE o professor pedir nas diretrizes (ex.: "aponte demoras e indícios de apoio em material externo"), você PODE e DEVE comentar, de forma construtiva, quando a entrega não correspondeu à expectativa: respostas que demoraram muito a começar, que soaram preparadas/lidas, ou que pareceram apoiadas em material externo, e o efeito disso ("isso enfraquece a demonstração de que você domina o assunto de cabeça").
+- ENQUADRE como observação ligada à expectativa declarada ("nesta atividade espera-se que você responda na hora, com suas palavras"), em segunda pessoa e com respeito.
+- NUNCA acuse nem nomeie a causa: proibido afirmar trapaça, uso de IA, plágio ou "suspeita". Use "as respostas demoraram e soaram preparadas", não "você usou IA". Descreva o observado, não a intenção.
+- CALIBRE pelo falso-positivo: sinais de tempo erram (áudio ruim, pensar devagar, nervosismo). Prefira "pareceu/soou" a "você fez". Se o relatório interno NÃO trouxer sinais de forma, ou se o professor NÃO pedir esse comentário, NÃO force o tema.` : "";
 
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_ui" })}
 
-${this.systemPromptBody}`;
+${this.systemPromptBody}${spontaneityException}`;
         const guidelinesBlock = typeof guidelines === "string" && guidelines.trim()
             ? `DIRETRIZES DO PROFESSOR para esta devolutiva (siga em estilo/estrutura/ênfase; as regras duras de conteúdo prevalecem):
 ${guidelines.trim()}
@@ -189,14 +214,14 @@ ${JSON.stringify(internalReport, null, 2)}`;
                 const parsed = JSON.parse(match[0]);
                 this._validateReport(parsed, internalReport);
 
-                const leaks = findForbiddenLeaks(parsed);
+                const leaks = findForbiddenLeaks(parsed, { expectSpontaneous });
                 if (leaks.length > 0) {
                     const leakMsg = `vocabulário interno vazou na devolutiva: ${leaks.join(", ")}`;
                     if (attempt < MAX_ATTEMPTS) {
-                        payload.input.push({
-                            role: "user",
-                            content: [{ type: "input_text", text: `A devolutiva anterior vazou vocabulário proibido (padrões: ${leaks.join(", ")}). Reescreva CUMPRINDO as regras duras: zero menção a autoria, forma de entrega, tempos, fluência ou juízo global.` }],
-                        });
+                        const guidance = expectSpontaneous
+                            ? `A devolutiva anterior usou vocabulário proibido (padrões: ${leaks.join(", ")}). Mesmo neste trabalho de resposta de cabeça, NUNCA acuse nem nomeie a causa (trapaça, IA, plágio, "suspeita", "colagem"). Reescreva descrevendo só o observado ("as respostas demoraram e soaram preparadas"), sem essas palavras.`
+                            : `A devolutiva anterior vazou vocabulário proibido (padrões: ${leaks.join(", ")}). Reescreva CUMPRINDO as regras duras: zero menção a autoria, forma de entrega, tempos, fluência ou juízo global.`;
+                        payload.input.push({ role: "user", content: [{ type: "input_text", text: guidance }] });
                     }
                     throw new Error(`StudentFeedback: ${leakMsg}`);
                 }
