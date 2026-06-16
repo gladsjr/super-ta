@@ -430,26 +430,8 @@
     </div>
   </section>
 
-  <!-- REFERÊNCIA: a avaliação interna do entrevistador (o aluno nunca vê). -->
-  <section id="evaluation" class="evaluation-card hidden">
-    <div class="eval-header">
-      <h2>Avaliação do entrevistador <span style="font-weight: 400; color: var(--ink-500); font-size: var(--fs-sm);">(interna — o aluno não vê)</span></h2>
-      <div>
-        <span class="eval-meta" id="eval-meta"></span>
-        <button class="btn btn-sm" id="eval-btn">Gerar avaliação</button>
-      </div>
-    </div>
-    <div class="eval-empty-note" id="eval-empty-note">
-      Relatório de como o aluno sustentou o trabalho nesta entrevista, sob a
-      perspectiva do entrevistador. Usa o enunciado, o trabalho enviado e a
-      transcrição completa. A geração leva por volta de um minuto. A devolutiva
-      ao aluno (acima) é derivada deste relatório.
-    </div>
-    <div class="notice notice-error eval-error hidden" id="eval-error"></div>
-    <div id="eval-body"></div>
-  </section>
-
-  <!-- Notas por rubrica (interna; publicada opcionalmente pela seção "Nota" da devolutiva). -->
+  <!-- Notas por rubrica (interna; publicada opcionalmente pela seção "Nota" da
+       devolutiva). Vem logo após a devolutiva para dar a perspectiva dos passos. -->
   <section id="rubric-grades-card" class="evaluation-card hidden">
     <div class="eval-header">
       <h2>Notas <span style="font-weight: 400; color: var(--ink-500); font-size: var(--fs-sm);">(rubrica — interna; publique pela devolutiva)</span></h2>
@@ -472,6 +454,25 @@
         <button class="btn btn-sm" id="grades-adhoc-btn">Recalcular com esta rubrica</button>
       </div>
     </details>
+  </section>
+
+  <!-- REFERÊNCIA: a avaliação interna do entrevistador (o aluno nunca vê). -->
+  <section id="evaluation" class="evaluation-card hidden">
+    <div class="eval-header">
+      <h2>Avaliação do entrevistador <span style="font-weight: 400; color: var(--ink-500); font-size: var(--fs-sm);">(interna — o aluno não vê)</span></h2>
+      <div>
+        <span class="eval-meta" id="eval-meta"></span>
+        <button class="btn btn-sm" id="eval-btn">Gerar avaliação</button>
+      </div>
+    </div>
+    <div class="eval-empty-note" id="eval-empty-note">
+      Relatório de como o aluno sustentou o trabalho nesta entrevista, sob a
+      perspectiva do entrevistador. Usa o enunciado, o trabalho enviado e a
+      transcrição completa. A geração leva por volta de um minuto. A devolutiva
+      ao aluno (acima) é derivada deste relatório.
+    </div>
+    <div class="notice notice-error eval-error hidden" id="eval-error"></div>
+    <div id="eval-body"></div>
   </section>
 
   <details class="intro hidden" id="intro">
@@ -918,6 +919,27 @@ function gradesBodyHtml(grades) {
     </div>`;
 }
 
+// Prévia DESABILITADA da rubrica (antes de calcular): mostra os critérios
+// (nome + peso) com nota "—", para o professor ver os passos que virão.
+function gradesPreviewHtml(rubric) {
+  const crit = Array.isArray(rubric) ? rubric : [];
+  if (!crit.length) return '<p class="eval-publish-help">Nenhum critério na rubrica. Defina a rubrica no painel do professor.</p>';
+  const rows = crit.map(c => `
+    <div class="grade-row" data-weight="${escapeHtml(String(c.weight ?? 1))}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0; opacity: 0.6;">
+      <div class="row" style="gap: var(--sp-2); align-items:center; flex-wrap:wrap">
+        <strong style="flex:1; min-width:140px">${escapeHtml(c.name || '')}</strong>
+        <span class="eval-meta">peso ${escapeHtml(String(c.weight ?? 1))}</span>
+        <input class="input" type="number" placeholder="—" disabled style="width:80px"/>
+      </div>
+    </div>`).join('');
+  return `${rows}
+    <div class="row" style="gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); border-top: 2px solid var(--ink-300); padding-top: var(--sp-2); opacity: 0.6;">
+      <strong style="flex:1">Nota final (média ponderada)</strong>
+      <strong style="font-size: var(--fs-lg)">—</strong>
+    </div>
+    <p class="eval-publish-help" style="margin-top: var(--sp-2);">Clique em <strong>Calcular notas</strong> para gerar a nota de cada critério sobre a avaliação do entrevistador.</p>`;
+}
+
 function recomputeFinalPreview() {
   let num = 0, den = 0;
   document.querySelectorAll('#grades-body .grade-row').forEach(row => {
@@ -941,21 +963,26 @@ function renderGrades(j) {
   const grades = j.grades;
   btn.disabled = !hasInternal;
   btn.textContent = grades ? 'Recalcular notas' : 'Calcular notas';
-  if (!hasInternal) {
-    empty.textContent = 'Gere antes a Avaliação do entrevistador — a nota é calculada sobre ela.';
-    empty.classList.remove('hidden'); body.innerHTML = ''; meta.textContent = '';
-    document.getElementById('grades-adhoc').classList.add('hidden');
-    return;
-  }
+  // Ajuste ad-hoc só faz sentido quando há avaliação para recalcular.
   renderAdhocRubric(j.rubric || []);
-  document.getElementById('grades-adhoc').classList.remove('hidden');
-  if (!grades || !Array.isArray(grades.criteria) || !grades.criteria.length) {
-    empty.classList.remove('hidden'); body.innerHTML = ''; meta.textContent = '';
+  document.getElementById('grades-adhoc').classList.toggle('hidden', !hasInternal);
+
+  if (grades && Array.isArray(grades.criteria) && grades.criteria.length) {
+    empty.classList.add('hidden');
+    meta.textContent = grades.computed_at ? `calculada ${fmtTime(grades.computed_at)}` : '';
+    body.innerHTML = gradesBodyHtml(grades);
     return;
   }
-  empty.classList.add('hidden');
-  meta.textContent = grades.computed_at ? `calculada ${fmtTime(grades.computed_at)}` : '';
-  body.innerHTML = gradesBodyHtml(grades);
+  // Ainda sem notas: prévia DESABILITADA dos critérios (perspectiva dos passos).
+  // Quando nem a avaliação interna existe, avisa que ela vem antes.
+  meta.textContent = '';
+  body.innerHTML = gradesPreviewHtml(j.rubric || []);
+  if (!hasInternal) {
+    empty.textContent = 'A nota é calculada sobre a Avaliação do entrevistador (abaixo) — gere-a primeiro.';
+    empty.classList.remove('hidden');
+  } else {
+    empty.classList.add('hidden');
+  }
 }
 
 async function gradesRequest(method, path, body) {
@@ -1042,6 +1069,18 @@ function renderStudentPreview(ev) {
     ${list('O que pode melhorar', ev.improvement_areas)}
     ${list('Sugestões de estudo', ev.study_suggestions)}
     ${gradeBlock}`;
+}
+
+// Esqueleto VAZIO da devolutiva (antes de gerar): mostra as subseções para dar
+// a perspectiva do que será produzido, com um marcador de "ainda não gerado".
+function renderStudentPreviewSkeleton() {
+  const persona = window.__personaName;
+  const ph = '<div class="sf-text" style="color: var(--ink-400); font-style: italic;">(será preenchido quando você gerar a devolutiva)</div>';
+  return `
+    <div class="sf-label">Opinião do entrevistador${persona ? ` (${escapeHtml(persona)})` : ''} — não editável</div>
+    ${ph}
+    <div class="sf-label">Avaliação do professor — resumo</div>
+    ${ph}`;
 }
 
 // Último estado conhecido da devolutiva (payload do servidor).
@@ -1131,15 +1170,17 @@ function renderFeedbackCard(j) {
     cb.checked = sections[key] !== false;
   }
 
+  // A prévia aparece SEMPRE (controls visíveis = já há avaliação interna). Sem
+  // devolutiva ainda, mostra o esqueleto vazio das subseções — assim o
+  // professor vê a estrutura do que será gerado antes de clicar em Gerar.
   const preview = document.getElementById('student-eval-preview');
-  if (hasVersion) {
-    document.getElementById('student-eval-preview-summary').textContent =
-      `Devolutiva (o que o aluno ${published ? 'vê' : 'verá quando publicada'})${isEdited ? ' — versão editada' : ''}`;
-    document.getElementById('student-eval-preview-body').innerHTML = renderStudentPreview(j.student_evaluation);
-    preview.classList.remove('hidden');
-  } else {
-    preview.classList.add('hidden');
-  }
+  document.getElementById('student-eval-preview-summary').textContent = hasVersion
+    ? `Devolutiva (o que o aluno ${published ? 'vê' : 'verá quando publicada'})${isEdited ? ' — versão editada' : ''}`
+    : 'Devolutiva (o que o aluno verá) — ainda não gerada';
+  document.getElementById('student-eval-preview-body').innerHTML = hasVersion
+    ? renderStudentPreview(j.student_evaluation)
+    : renderStudentPreviewSkeleton();
+  preview.classList.remove('hidden');
   document.getElementById('student-eval-editor').classList.add('hidden');
 }
 
