@@ -1123,40 +1123,82 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         const firstPlanQuestion = sess.interviewPlan.questions[0];
         const combined = `${begin.message}\n\n${firstPlanQuestion.question}`;
 
-        const audio = await attachAudio(sess, combined);
-        const transitionAudioSec = audio.audio_duration_seconds ?? null;
-
-        sess.introLog.push({
-            role: "assistant",
-            content: begin.message,
-            at: new Date().toISOString(),
-            audio_duration_seconds: transitionAudioSec,
-        });
-        sess.introTransitionedAt = new Date().toISOString();
-        const firstTurn = turnFromPlanQuestion(0, firstPlanQuestion);
-        firstTurn.question_audio_duration_seconds = transitionAudioSec;
-        sess.turnLog.push(firstTurn);
-        sess.questionIndex = 1;
-        sess.currentPhase = "interviewing";
-        sess.introStep = "done";
-
-        sess.conv_chat.push({ role: "assistant", content: combined });
-        sess.conv_eval.push({
-            role: "assistant",
-            content: combined,
-            metadata: { phase: "intro_to_interviewing", documentMap: sess.documentMap, interviewPlan: sess.interviewPlan, timestamp: Date.now() },
-        });
-        sess.history = sess.conv_chat;
-        try {
-            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: combined }] });
-            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: combined }] });
-        } catch (err) {
-            log.error("CHAT", `remote write (intro begin) failed: ${err.message}`);
+        // A 1ª pergunta (este beat) também é fragmentada no modo áudio: a abertura
+        // deixa de ser um blob único — que demorava a tocar e "liberava tudo de uma
+        // vez" — e passa a tocar pedaço a pedaço, como o resto da entrevista. Reusa
+        // a mesma máquina de SSE + audio_chunk da fase interviewing; o frontend já
+        // ramifica por content-type (sendAudioBlob), então nada muda lá. Em texto,
+        // segue blob/JSON.
+        const beginUseSSE = isAudioMode;
+        let beginHeartbeat = null;
+        const clearBeginHeartbeat = () => { if (beginHeartbeat) { clearInterval(beginHeartbeat); beginHeartbeat = null; } };
+        if (beginUseSSE) {
+            res.writeHead(200, {
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            });
+            res.write(`event: thinking\ndata: {}\n\n`);
+            res.write(`event: responding\ndata: {}\n\n`);
+            beginHeartbeat = setInterval(() => { try { res.write(`: ping\n\n`); } catch { clearBeginHeartbeat(); } }, 10000);
+            res.on("close", clearBeginHeartbeat);
         }
-        log.info("CHAT", `intro begin + first plan question ${log.preview(combined, 160)}`);
-        await logLastConvItem(sess.conversationId_chat, "CONV:chat");
-        persist();
-        return res.json({ channel: "chat", assistant: combined, phase: "interviewing", ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) });
+
+        try {
+            const audio = beginUseSSE
+                ? await attachAudioChunks(sess, combined, (chunk) => { res.write(`event: audio_chunk\ndata: ${JSON.stringify(chunk)}\n\n`); })
+                : await attachAudio(sess, combined);
+            const transitionAudioSec = audio.audio_duration_seconds ?? null;
+
+            sess.introLog.push({
+                role: "assistant",
+                content: begin.message,
+                at: new Date().toISOString(),
+                audio_duration_seconds: transitionAudioSec,
+            });
+            sess.introTransitionedAt = new Date().toISOString();
+            const firstTurn = turnFromPlanQuestion(0, firstPlanQuestion);
+            firstTurn.question_audio_duration_seconds = transitionAudioSec;
+            sess.turnLog.push(firstTurn);
+            sess.questionIndex = 1;
+            sess.currentPhase = "interviewing";
+            sess.introStep = "done";
+
+            sess.conv_chat.push({ role: "assistant", content: combined });
+            sess.conv_eval.push({
+                role: "assistant",
+                content: combined,
+                metadata: { phase: "intro_to_interviewing", documentMap: sess.documentMap, interviewPlan: sess.interviewPlan, timestamp: Date.now() },
+            });
+            sess.history = sess.conv_chat;
+            try {
+                await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: combined }] });
+                await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: combined }] });
+            } catch (err) {
+                log.error("CHAT", `remote write (intro begin) failed: ${err.message}`);
+            }
+            log.info("CHAT", `intro begin + first plan question ${log.preview(combined, 160)}`);
+            await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+            persist();
+
+            const payload = { channel: "chat", assistant: combined, phase: "interviewing", ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) };
+            if (beginUseSSE) {
+                clearBeginHeartbeat();
+                res.write(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
+                return res.end();
+            }
+            return res.json(payload);
+        } catch (err) {
+            log.error("INTRO", `begin tail failed: ${err.message}`);
+            if (beginUseSSE) {
+                clearBeginHeartbeat();
+                try { res.write(`event: error\ndata: ${JSON.stringify({ error: "Falha ao gerar a abertura. Tente novamente.", message: "Falha ao gerar a abertura. Tente novamente.", status: 500 })}\n\n`); } catch {}
+                try { res.end(); } catch {}
+                return;
+            }
+            return res.status(500).json({ error: "Falha ao gerar a abertura. Tente novamente." });
+        }
     }
 
     // ------------------------------------------------------------------
