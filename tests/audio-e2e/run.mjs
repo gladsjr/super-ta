@@ -192,8 +192,20 @@ async function main() {
             "--no-default-browser-check",
         ];
         const launchOpts = { headless: !ARGS.headed, args: launchArgs };
+        // Em ambientes sem Google Chrome instalado (ex.: NixOS/Replit), aponte
+        // PLAYWRIGHT_CHROME_PATH para um Chromium compatível. Sem a variável, o
+        // comportamento original (channel:"chrome") é preservado.
+        const envExe = process.env.PLAYWRIGHT_CHROME_PATH;
         try {
-            browser = await chromium.launch({ channel: "chrome", ...launchOpts });
+            if (envExe) {
+                browser = await chromium.launch({
+                    executablePath: envExe,
+                    ...launchOpts,
+                    args: [...launchArgs, "--no-sandbox", "--disable-setuid-sandbox"],
+                });
+            } else {
+                browser = await chromium.launch({ channel: "chrome", ...launchOpts });
+            }
         } catch (e) {
             // Fallback: caminhos comuns do Chrome no Windows.
             const candidates = [

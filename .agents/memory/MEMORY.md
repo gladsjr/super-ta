@@ -2,3 +2,5 @@
 - [Dev funciona / prod não = red herring](dev-vs-prod-red-herring.md) — antes de culpar cache/deploy/migrations, verifique banco→API→md5→SW→console; a causa pode ser data-dependent (runtime throw).
 - [Replit publish vs boot migrations](replit-publish-vs-boot-migrations.md) — prod crasha no boot ("column already exists") porque o publish-diff adiciona colunas sem atualizar schema_migrations; fix = sincronizar o ledger, não tornar migrations idempotentes.
 - [Object Storage bucket binding](object-storage-bucket-binding.md) — @replit/object-storage não lê DEFAULT_OBJECT_STORAGE_BUCKET_ID sozinha; passe new Client({ bucketId }). no-op best-effort mascarava a falta de bucket.
+- [Processos longos no Replit](long-running-process-replit.md) — tarefas >120s morrem em bash background (reaped); rode como workflow e faça polling entre tool calls.
+- [Harness áudio E2E no Replit](audio-e2e-harness-replit.md) — precisa pkgs.chromium + PLAYWRIGHT_CHROME_PATH; creds do seed não existem no dev DB → use modo remoto contra trabalho configurado.
