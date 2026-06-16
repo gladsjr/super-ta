@@ -410,7 +410,7 @@
     .msg.ta .speaking {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
       font-style: italic;
       color: var(--ink-500);
     }
@@ -419,6 +419,23 @@
       min-width: 1.6em;
       text-align: left;
     }
+    .msg.ta .speaking-pause {
+      border: 1px solid var(--ink-300);
+      background: var(--bg-raised, #fff);
+      color: var(--ink-700);
+      border-radius: 999px;
+      width: 28px;
+      height: 28px;
+      line-height: 1;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+      font-style: normal;
+    }
+    .msg.ta .speaking-pause:hover { border-color: var(--accent-700); color: var(--accent-700); }
 
     /* Consent dialog (Pacote A do plano de conformidade MEC/LGPD). */
     #consent-dialog {
@@ -1192,11 +1209,12 @@
     function createChunkedTA() {
       const wrap = document.createElement('div');
       wrap.className = 'msg ta';
-      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="speaking"><span class="speaking-label">🔊 falando</span><span class="speaking-dots"></span></div><div class="audio-row" hidden></div></div>`;
+      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="speaking"><button type="button" class="speaking-pause" aria-label="Pausar">⏸</button><span class="speaking-label">falando</span><span class="speaking-dots"></span></div><div class="audio-row" hidden></div></div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
       const speaking = wrap.querySelector('.speaking');
       const row = wrap.querySelector('.audio-row');
       const speakingDots = wrap.querySelector('.speaking-dots');
+      const pauseBtn = wrap.querySelector('.speaking-pause');
 
       let dotsCount = 0;
       const dotsTimer = setInterval(() => { dotsCount = (dotsCount + 1) % 4; speakingDots.textContent = '.'.repeat(dotsCount); }, 350);
@@ -1215,6 +1233,22 @@
       let sawLast = false;
       let lastPlayable = -1;  // maior índice que ainda terá áudio
       let replayDone = false;
+      let lastNode = null;    // último BufferSource agendado (p/ detectar o fim via onended)
+
+      // Pausar/continuar a fala ao vivo suspendendo o AudioContext (congela o
+      // tempo do ctx, então o agendamento gapless segue coerente ao retomar).
+      // Sem Web Audio não há fila para pausar — esconde o botão.
+      if (!useWebAudio && pauseBtn) {
+        pauseBtn.style.display = 'none';
+      } else if (pauseBtn) {
+        pauseBtn.onclick = () => {
+          if (ctx.state === 'running') {
+            ctx.suspend().then(() => { pauseBtn.textContent = '▶'; pauseBtn.setAttribute('aria-label', 'Continuar'); }).catch(() => {});
+          } else {
+            ctx.resume().then(() => { pauseBtn.textContent = '⏸'; pauseBtn.setAttribute('aria-label', 'Pausar'); }).catch(() => {});
+          }
+        };
+      }
 
       // Agenda um AudioBuffer logo após o anterior (gapless). Se já passamos do
       // tempo (chegou atrasado), toca imediatamente — um pequeno gap, sem travar.
@@ -1226,6 +1260,7 @@
         node.connect(ctx.destination);
         try { node.start(startAt); } catch {}
         scheduledUntil = startAt + buf.duration;
+        lastNode = node;
       }
 
       // Avança na ORDEM dos índices: agenda todos os prontos consecutivos; ao
@@ -1245,13 +1280,19 @@
         if (sawLast && nextToPlay > lastPlayable) finishLive();
       }
 
-      // Fala terminou (ao vivo, agendou tudo). Espera o áudio realmente acabar
-      // (scheduledUntil) e então monta o player de replay e libera a vez.
+      // Fala terminou (agendou tudo). Espera o áudio REALMENTE acabar para montar
+      // o replay e liberar a vez. Usa o onended do último trecho — assim respeita
+      // o pause (um ctx suspenso não dispara onended): nunca solta a vez com a
+      // fala pausada. Sem Web Audio (ou sem trechos), encerra na hora.
       function finishLive() {
         if (finishing) return;
         finishing = true;
-        const remainingMs = useWebAudio ? Math.max(0, (scheduledUntil - ctx.currentTime) * 1000) : 0;
-        setTimeout(buildReplay, remainingMs + 40);
+        if (useWebAudio && lastNode) {
+          lastNode.onended = buildReplay;
+          if (ctx.currentTime >= scheduledUntil) buildReplay(); // já terminou: garante o replay
+        } else {
+          buildReplay();
+        }
       }
 
       function buildReplay() {
