@@ -214,14 +214,13 @@
       <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
         <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
           <input type="checkbox" id="expect-spontaneous" style="margin-top: 3px"/>
-          <span class="card-sub" style="margin:0" data-help="O entrevistador combina isso na abertura, como conversa ao vivo: o aluno pode pensar, pausar e se corrigir, mas deve responder com as próprias palavras, sem consultar IA, pesquisar ou ler texto pronto.">Exigir <strong>resposta espontânea</strong> (de cabeça). Salva na hora.</span>
+          <span class="card-sub" style="margin:0" data-help="O entrevistador combina isso na abertura, como conversa ao vivo: o aluno pode pensar, pausar e se corrigir, mas deve responder com as próprias palavras, sem consultar IA, pesquisar ou ler texto pronto.">Exigir <strong>resposta espontânea</strong> (de cabeça).</span>
         </label>
         <div id="spontaneous-msg" class="hint" style="margin-top: var(--sp-1)"></div>
       </div>
 
       <div class="row" style="margin-top: var(--sp-3)">
-        <button id="save-interaction" class="btn btn-primary">Salvar modo e identidade</button>
-        <button id="clear-identity" class="btn" type="button" title="Volta ao sorteio aleatório a cada upload">Limpar identidade</button>
+        <button id="clear-identity" class="btn btn-sm" type="button" title="Esvazia os campos; ao salvar, o nome e o gênero voltam a ser sorteados a cada upload">Limpar identidade</button>
         <span id="interaction-msg" class="hint"></span>
       </div>
     </div>
@@ -234,9 +233,16 @@
           <label class="label" for="question-count">Perguntas</label>
           <input id="question-count" class="input" type="number" min="3" max="20" step="1" value="6"/>
         </div>
-        <button id="save-question-count" class="btn btn-primary">Salvar</button>
         <span id="question-count-msg" class="hint"></span>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="align-items: center; gap: var(--sp-3)">
+        <button id="save-cenario" class="btn btn-primary">Salvar configurações</button>
+        <span id="cenario-save-msg" class="hint"></span>
+      </div>
+      <p class="card-sub" style="margin-top: var(--sp-2)">Salva de uma vez o modo de interação, a voz, a identidade, o nº de perguntas e a espontaneidade. O <strong>entrevistador</strong> (galeria ou avançado) e o <strong>enunciado</strong> são salvos à parte, nos próprios cards.</p>
     </div>
     </div><!-- /tab-cenario -->
 
@@ -933,19 +939,24 @@ function applyInteractionStateToUI(mode, voice) {
 // usa o que está no banco. Senão, sorteia uma sugestão default coerente com o
 // gênero da voz (quando em modo áudio) ou aleatório (modo texto). A sugestão
 // fica nos campos como "rascunho" — só persiste se o professor clicar Salvar.
+// true = identidade DEFINIDA pelo professor (persiste no salvar); false = só o
+// rascunho sugerido (o salvar mantém aleatório por upload, não fixa a sugestão).
+let identityExplicit = false;
 async function applyIdentityStateToUI(name, gender) {
   const nameEl = document.getElementById('interviewer-name');
   if (name && (gender === 'f' || gender === 'm')) {
     nameEl.value = name;
     document.querySelector(`input[name="interviewer-gender"][value="${gender}"]`).checked = true;
+    identityExplicit = true;
   } else {
     // Sem identidade salva: sugere default sorteado para o gênero da voz atual,
-    // ou aleatório em modo texto.
+    // ou aleatório em modo texto. É só rascunho — não persiste ao salvar.
     const voiceId = document.getElementById('voice-select').value;
     const voiceGender = guessVoiceGender(voiceId);
     const suggestion = await fetchNameSuggestion(voiceGender);
     nameEl.value = suggestion.name;
     document.querySelector(`input[name="interviewer-gender"][value="${suggestion.gender}"]`).checked = true;
+    identityExplicit = false;
   }
   checkIdentityVoiceCoherence();
 }
@@ -989,8 +1000,10 @@ document.querySelectorAll('input[name="interaction-mode"]').forEach(el => {
 });
 document.getElementById('voice-select').addEventListener('change', checkIdentityVoiceCoherence);
 document.querySelectorAll('input[name="interviewer-gender"]').forEach(el => {
-  el.addEventListener('change', checkIdentityVoiceCoherence);
+  el.addEventListener('change', () => { identityExplicit = true; checkIdentityVoiceCoherence(); });
 });
+// Digitar/editar o nome = definir identidade explicitamente.
+document.getElementById('interviewer-name').addEventListener('input', () => { identityExplicit = true; });
 document.getElementById('random-name').onclick = async () => {
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
   const sug = await fetchNameSuggestion(gender);
@@ -998,23 +1011,17 @@ document.getElementById('random-name').onclick = async () => {
   if (!gender) {
     document.querySelector(`input[name="interviewer-gender"][value="${sug.gender}"]`).checked = true;
   }
+  identityExplicit = true; // sortear pelo botão = definir
   checkIdentityVoiceCoherence();
 };
-document.getElementById('clear-identity').onclick = async () => {
-  if (!confirm('Limpar identidade do entrevistador? A partir do próximo upload do aluno, o sistema voltará a sortear nome e gênero aleatoriamente.')) return;
-  const msg = document.getElementById('interaction-msg');
-  msg.textContent = '';
-  const r = await fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: null, gender: null }),
-  });
-  if (!r.ok) {
-    const j = await r.json().catch(() => ({}));
-    msg.textContent = 'Erro: ' + (j.error || 'falha ao limpar identidade');
-    return;
-  }
-  msg.textContent = 'Identidade limpa. Os campos mostram uma sugestão sorteada (não salva).';
-  await applyIdentityStateToUI(null, null);
+// Limpa os campos (sem salvar na hora): ao clicar em "Salvar configurações",
+// nome e gênero voltam a ser sorteados a cada upload (identityExplicit=false).
+document.getElementById('clear-identity').onclick = () => {
+  document.getElementById('interviewer-name').value = '';
+  document.querySelectorAll('input[name="interviewer-gender"]').forEach(el => { el.checked = false; });
+  identityExplicit = false;
+  document.getElementById('interaction-msg').textContent = 'Identidade esvaziada — ao salvar, nome e gênero voltam a ser sorteados a cada upload.';
+  checkIdentityVoiceCoherence();
 };
 
 document.getElementById('voice-preview').onclick = async () => {
@@ -1047,60 +1054,50 @@ document.getElementById('voice-preview').onclick = async () => {
   }
 };
 
-document.getElementById('save-interaction').onclick = async () => {
-  const msg = document.getElementById('interaction-msg');
+// Salvar ÚNICO da aba Cenário: modo+voz, identidade, nº de perguntas e
+// espontaneidade de uma vez. O entrevistador (galeria/avançado) e o enunciado
+// têm seus próprios saves (não são "config escalar").
+document.getElementById('save-cenario').onclick = async () => {
+  const msg = document.getElementById('cenario-save-msg');
   msg.textContent = '';
   const mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
   const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
-  if (mode === 'audio' && !voice) { msg.textContent = 'Escolha uma voz.'; return; }
-
+  if (mode === 'audio' && !voice) { msg.textContent = 'Escolha uma voz para o modo áudio.'; return; }
   const name = document.getElementById('interviewer-name').value.trim();
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
-  // XOR ilegal: se o professor preencheu um, exige o outro (ou clicar em Limpar).
-  if ((name && !gender) || (!name && gender)) {
-    msg.textContent = 'Preencha nome e gênero (ou clique em Limpar identidade).';
+  // Identidade só persiste se foi DEFINIDA pelo professor; o rascunho sugerido
+  // mantém o sorteio por upload (envia nulls). XOR só vale se explícita.
+  if (identityExplicit && ((name && !gender) || (!name && gender))) {
+    msg.textContent = 'Identidade: preencha nome e gênero (ou clique em Limpar identidade).';
     return;
   }
-
-  // Salva mode + identidade em paralelo. Ambos são pequenos e independentes.
-  const [rMode, rId] = await Promise.all([
-    fetch(`/w/${encodeURIComponent(workToken)}/interaction`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, voice }),
-    }),
-    fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(name ? { name, gender } : { name: null, gender: null }),
-    }),
-  ]);
-  if (!rMode.ok) { msg.textContent = 'Erro ao salvar modo.'; return; }
-  if (!rId.ok) {
-    const j = await rId.json().catch(() => ({}));
-    msg.textContent = 'Erro ao salvar identidade: ' + (j.error || 'falha');
-    return;
-  }
-  msg.textContent = name ? 'Modo e identidade salvos.' : 'Modo salvo. Identidade ficará aleatória.';
-};
-
-document.getElementById('save-question-count').onclick = async () => {
-  const msg = document.getElementById('question-count-msg');
-  msg.textContent = '';
+  const setIdentity = identityExplicit && name && (gender === 'f' || gender === 'm');
   const count = parseInt(document.getElementById('question-count').value, 10);
   if (!Number.isInteger(count) || count < 3 || count > 20) {
-    msg.textContent = 'Informe um inteiro entre 3 e 20.';
+    msg.textContent = 'Nº de perguntas: informe um inteiro entre 3 e 20.';
     return;
   }
-  const r = await fetch(`/w/${encodeURIComponent(workToken)}/question-count`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question_count: count }),
-  });
-  if (!r.ok) {
-    const j = await r.json().catch(() => ({}));
-    msg.textContent = 'Erro ao salvar: ' + (j.error || 'falha');
-    return;
+  const expect = document.getElementById('expect-spontaneous').checked;
+  const btn = document.getElementById('save-cenario');
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Salvando…';
+  try {
+    const reqs = await Promise.all([
+      fetch(`/w/${encodeURIComponent(workToken)}/interaction`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, voice }) }),
+      fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(setIdentity ? { name, gender } : { name: null, gender: null }) }),
+      fetch(`/w/${encodeURIComponent(workToken)}/question-count`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_count: count }) }),
+      fetch(`/w/${encodeURIComponent(workToken)}/expect-spontaneous`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expect_spontaneous: expect }) }),
+    ]);
+    const bad = reqs.find(r => !r.ok);
+    if (bad) { const j = await bad.json().catch(() => ({})); msg.textContent = 'Erro ao salvar: ' + (j.error || bad.status); }
+    else { msg.textContent = 'Configurações salvas.'; setTimeout(() => { msg.textContent = ''; }, 3000); }
+  } catch (err) {
+    msg.textContent = 'Falha ao salvar: ' + err.message;
+  } finally {
+    btn.disabled = false; btn.textContent = label;
   }
-  msg.textContent = 'Número de perguntas salvo.';
 };
+
 
 document.getElementById('save-interviewer').onclick = async () => {
   const msg = document.getElementById('interviewer-msg');
@@ -1406,23 +1403,8 @@ document.getElementById('grade-publish-all-btn').onclick = () =>
 document.getElementById('grade-unpublish-all-btn').onclick = () =>
   startBatch('evaluations/grade-unpublish', { force: false }, 'Despublicar as notas de TODOS os alunos? Elas deixam de aparecer na página de cada aluno (mas ficam guardadas para republicar depois).');
 
-// Salva a expectativa de resposta de cabeça na hora (toggle).
-document.getElementById('expect-spontaneous').addEventListener('change', async (e) => {
-  const msg = document.getElementById('spontaneous-msg');
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/expect-spontaneous`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expect_spontaneous: e.target.checked }),
-    });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.status); }
-    msg.textContent = e.target.checked ? 'Ativado: o entrevistador vai combinar isso na abertura.' : 'Desativado.';
-    setTimeout(() => { msg.textContent = ''; }, 3000);
-  } catch (err) {
-    msg.textContent = 'Falha ao salvar: ' + err.message;
-    e.target.checked = !e.target.checked; // reverte visualmente
-  }
-});
+// Espontaneidade não salva mais sozinha — vai junto no "Salvar configurações"
+// da aba Cenário (saveCenarioConfig).
 
 document.getElementById('eval-new-btn').onclick = () =>
   startBatch('evaluations', { force: false }, null);
