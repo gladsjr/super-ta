@@ -404,6 +404,22 @@
       text-align: left;
     }
 
+    /* Indicador "falando…" enquanto a fala fragmentada toca ao vivo (sem expor
+       o controle nativo, que zeraria a cada sentença). O player só aparece no
+       fim, com a fala completa, para replay. */
+    .msg.ta .speaking {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-style: italic;
+      color: var(--ink-500);
+    }
+    .msg.ta .speaking-dots {
+      display: inline-block;
+      min-width: 1.6em;
+      text-align: left;
+    }
+
     /* Consent dialog (Pacote A do plano de conformidade MEC/LGPD). */
     #consent-dialog {
       max-width: 640px;
@@ -1143,108 +1159,159 @@
       if (a) playOrQueueAudio(a);
       return wrap;
     }
-    // Reprodução fragmentada da fala do entrevistador (modo áudio). Os pedaços
-    // chegam via SSE (event: audio_chunk); o 1º toca assim que chega — daí vem o
-    // ganho de latência percebida.
+    // Contexto de áudio dedicado à REPRODUÇÃO da fala do entrevistador
+    // (separado do audioCtx do microfone, que é criado/fechado a cada gravação).
+    // Persistente: criado uma vez, "esquentado" (resume) no gesto de gravar para
+    // já estar 'running' quando o 1º pedaço de fala chegar.
+    let playbackCtx = null;
+    let playbackCtxBroken = false;
+    function getPlaybackCtx() {
+      if (playbackCtxBroken) return null;
+      if (!playbackCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) { playbackCtxBroken = true; return null; }
+        try { playbackCtx = new Ctx(); } catch { playbackCtxBroken = true; return null; }
+      }
+      if (playbackCtx.state === 'suspended') playbackCtx.resume().catch(() => {});
+      return playbackCtx;
+    }
+
+    // Reprodução fragmentada da fala do entrevistador (modo áudio).
     //
-    // UM ÚNICO <audio> visível representa a fala inteira. Durante a fala ao vivo,
-    // tocamos pedaço a pedaço trocando o `src` do mesmo elemento — o controle
-    // nativo fica em estado "playing" enquanto ele fala. Ao terminar, montamos um
-    // blob único com a fala COMPLETA e apontamos o player pra ele, de modo que o
-    // replay toque tudo (e não só a 1ª sentença, como na versão de N players
-    // separados). onDone dispara quando o último pedaço termina, liberando a vez
-    // do aluno. Cada pedaço é baixado já na chegada (bytes guardados p/ o blob
-    // final e p/ tocar, evitando corrida com o cache LRU do servidor).
+    // Durante a fala AO VIVO não mostramos o controle nativo (ele mentiria: a
+    // timeline seria de uma sentença por vez, "zerando" a cada pedaço). Em vez
+    // disso, um indicador "falando…". Por baixo, cada pedaço é decodificado e
+    // AGENDADO back-to-back num AudioContext (Web Audio) — costura sem emendas e
+    // sem travar em atrasos de rede (o indicador só continua). Quando a fala
+    // termina, aí sim aparece UM <audio controls> com o blob COMPLETO, para
+    // replay. onDone dispara quando a fala termina (libera a vez do aluno).
+    //
+    // Sem Web Audio (navegador muito antigo): cai para um modo simples — acumula
+    // os pedaços e, ao final, mostra o player com a fala inteira (sem tocar ao
+    // vivo). Mais lento para começar, mas sem confusão.
     function createChunkedTA() {
       const wrap = document.createElement('div');
       wrap.className = 'msg ta';
-      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="audio-row"></div></div>`;
+      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="speaking"><span class="speaking-label">🔊 falando</span><span class="speaking-dots"></span></div><div class="audio-row" hidden></div></div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
+      const speaking = wrap.querySelector('.speaking');
       const row = wrap.querySelector('.audio-row');
+      const speakingDots = wrap.querySelector('.speaking-dots');
 
-      const audio = document.createElement('audio');
-      audio.setAttribute('controls', '');
-      audio.preload = 'auto';
-      row.appendChild(audio);
+      let dotsCount = 0;
+      const dotsTimer = setInterval(() => { dotsCount = (dotsCount + 1) % 4; speakingDots.textContent = '.'.repeat(dotsCount); }, 350);
 
-      let doneCb = null, finished = false;
+      let doneCb = null, finished = false, finishing = false;
       const fire = () => { if (!finished) { finished = true; if (doneCb) doneCb(); } };
 
-      const buffers = [];     // ArrayBuffer por índice (para o blob final de replay)
-      const blobUrls = [];    // object URL por índice (para tocar ao vivo)
-      const status = [];      // 'pending' | 'ok' | 'fail' por índice
-      const attempted = [];   // já tentamos tocar este índice (evita re-atribuir src)
+      const ctx = getPlaybackCtx();
+      const useWebAudio = !!ctx;
+
+      const buffers = [];   // ArrayBuffer por índice (blob final p/ replay)
+      const decoded = [];   // AudioBuffer por índice (Web Audio)
+      const status = [];    // 'pending' | 'ok' | 'fail' por índice
       let nextToPlay = 0;
-      let livePlaying = false;
-      let replayReady = false;
+      let scheduledUntil = 0; // tempo do ctx em que a última sentença agendada termina
       let sawLast = false;
       let lastPlayable = -1;  // maior índice que ainda terá áudio
+      let replayDone = false;
 
-      // Fim da fala ao vivo: troca o player para o blob com a fala inteira (replay
-      // completo) e libera a vez do aluno.
+      // Agenda um AudioBuffer logo após o anterior (gapless). Se já passamos do
+      // tempo (chegou atrasado), toca imediatamente — um pequeno gap, sem travar.
+      function scheduleDecoded(i) {
+        const buf = decoded[i];
+        const startAt = Math.max(ctx.currentTime, scheduledUntil);
+        const node = ctx.createBufferSource();
+        node.buffer = buf;
+        node.connect(ctx.destination);
+        try { node.start(startAt); } catch {}
+        scheduledUntil = startAt + buf.duration;
+      }
+
+      // Avança na ORDEM dos índices: agenda todos os prontos consecutivos; ao
+      // achar um pendente, espera o decode dele chamar pump de novo.
+      function pump() {
+        if (replayDone) return;
+        if (useWebAudio) {
+          while (true) {
+            if (status[nextToPlay] === 'fail') { nextToPlay++; continue; }
+            if (decoded[nextToPlay]) { scheduleDecoded(nextToPlay); nextToPlay++; continue; }
+            break;
+          }
+        } else {
+          // Modo simples: nada toca ao vivo; só conta o que falhou para o término.
+          while (status[nextToPlay] === 'fail') nextToPlay++;
+        }
+        if (sawLast && nextToPlay > lastPlayable) finishLive();
+      }
+
+      // Fala terminou (ao vivo, agendou tudo). Espera o áudio realmente acabar
+      // (scheduledUntil) e então monta o player de replay e libera a vez.
+      function finishLive() {
+        if (finishing) return;
+        finishing = true;
+        const remainingMs = useWebAudio ? Math.max(0, (scheduledUntil - ctx.currentTime) * 1000) : 0;
+        setTimeout(buildReplay, remainingMs + 40);
+      }
+
       function buildReplay() {
-        if (replayReady) return;
-        replayReady = true;
+        if (replayDone) return;
+        replayDone = true;
+        clearInterval(dotsTimer);
+        speaking.hidden = true;
         const ok = buffers.filter(Boolean);
         if (ok.length) {
-          try { audio.src = URL.createObjectURL(new Blob(ok, { type: 'audio/mpeg' })); audio.load(); } catch {}
+          const audio = document.createElement('audio');
+          audio.setAttribute('controls', '');
+          audio.preload = 'auto';
+          try { audio.src = URL.createObjectURL(new Blob(ok, { type: 'audio/mpeg' })); } catch {}
+          row.appendChild(audio);
+          row.hidden = false;
+        } else {
+          // Sem nenhum áudio (TTS impossível neste turno): evita balão vazio.
+          const note = document.createElement('span');
+          note.style.color = 'var(--ink-500)';
+          note.style.fontStyle = 'italic';
+          note.textContent = 'Áudio do entrevistador indisponível desta vez.';
+          row.appendChild(note);
+          row.hidden = false;
         }
         fire();
       }
 
-      // Toca o próximo pedaço pronto trocando o src. Pedaços que falharam no fetch
-      // são pulados (sem travar). Quando o stream acabou e já passamos do último
-      // com áudio, monta o replay e encerra.
-      function pump() {
-        if (livePlaying || replayReady) return;
-        while (status[nextToPlay] === 'fail') nextToPlay++;
-        if (blobUrls[nextToPlay]) {
-          // Cada índice é tocado no máximo uma vez automaticamente. Se o autoplay
-          // for bloqueado, NÃO re-atribuímos o src a cada fetch (interromperia uma
-          // reprodução manual): o controle nativo fica disponível e o avanço
-          // retoma no 'ended' do pedaço que o professor tocar.
-          if (attempted[nextToPlay]) return;
-          attempted[nextToPlay] = true;
-          livePlaying = true;
-          audio.src = blobUrls[nextToPlay];
-          const p = audio.play();
-          if (p && p.catch) p.catch(() => { livePlaying = false; }); // autoplay bloqueado: aluno clica play
-          return;
-        }
-        if (sawLast && nextToPlay > lastPlayable) buildReplay();
-      }
-
-      audio.addEventListener('ended', () => {
-        if (replayReady) return;          // fim de um replay manual: não avança
-        livePlaying = false; nextToPlay++; pump();
-      });
-      audio.addEventListener('error', () => {
-        if (replayReady || !livePlaying) return;   // erro só importa durante a fala ao vivo
-        livePlaying = false; nextToPlay++; pump();
-      });
-
       return {
         wrap,
         addChunk(url, isLast, index) {
-          const i = typeof index === 'number' ? index : blobUrls.length;
+          const i = typeof index === 'number' ? index : buffers.length;
           if (isLast) { sawLast = true; lastPlayable = Math.max(lastPlayable, url ? i : i - 1); }
-          // audio_url nulo = sinal de fim do caso catastrófico do servidor (TTS
-          // impossível): não há bytes para tocar, só ajusta o término.
+          // audio_url nulo = fim do caso catastrófico do servidor (TTS impossível):
+          // sem bytes para tocar, só ajusta o término.
           if (!url) { pump(); return; }
           status[i] = 'pending';
           fetch(url).then(r => r.arrayBuffer()).then(buf => {
             buffers[i] = buf;
-            blobUrls[i] = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
-            status[i] = 'ok';
             if (!sawLast) lastPlayable = Math.max(lastPlayable, i);
-            pump();
+            if (useWebAudio) {
+              // decodeAudioData destaca o ArrayBuffer em alguns navegadores —
+              // decodifica uma CÓPIA, preservando `buf` para o blob de replay.
+              let dp;
+              try { dp = ctx.decodeAudioData(buf.slice(0)); } catch { dp = null; }
+              if (dp && dp.then) {
+                dp.then(audioBuf => { decoded[i] = audioBuf; status[i] = 'ok'; pump(); })
+                  .catch(() => { status[i] = 'fail'; pump(); });
+              } else {
+                status[i] = 'fail'; pump();
+              }
+            } else {
+              status[i] = 'ok'; pump();
+            }
           }).catch(() => { status[i] = 'fail'; pump(); });
         },
         // Rede de segurança: o stream terminou (result recebido). Se o servidor
         // nunca marcou is_last, considera o que veio como o fim — a vez do aluno
         // nunca pode travar.
         finalizeIfPending() {
-          if (!sawLast) { sawLast = true; lastPlayable = Math.max(lastPlayable, blobUrls.length - 1); }
+          if (!sawLast) { sawLast = true; lastPlayable = Math.max(lastPlayable, buffers.length - 1); }
           pump();
         },
         onDone(cb) { doneCb = cb; if (finished) cb(); },
@@ -2143,6 +2210,7 @@
     }
 
     document.getElementById('record-btn').addEventListener('click', async () => {
+      getPlaybackCtx(); // esquenta o contexto de playback neste gesto: já 'running' quando a fala chegar
       const ok = await startRecording();
       if (!ok) return;
       setRecordingUI('recording');
