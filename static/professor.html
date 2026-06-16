@@ -110,6 +110,7 @@
       <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Cenário</button>
       <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
       <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; devolutivas</button>
+      <button class="tab-btn" type="button" id="tab-btn-notas" data-tab="notas" role="tab" aria-selected="false">Notas</button>
     </nav>
 
     <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
@@ -336,9 +337,12 @@
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
 
+    </div><!-- /tab-avaliacao -->
+
+    <div class="tab-panel hidden" id="tab-notas" role="tabpanel" aria-labelledby="tab-btn-notas">
     <div class="card">
       <h3 class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</h3>
-      <p class="card-sub">Defina os critérios que compõem a nota. A nota é publicada à parte da devolutiva.</p>
+      <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
       <div id="rubric-items"></div>
       <div class="row" style="margin-top: var(--sp-2); gap: var(--sp-2); flex-wrap: wrap">
         <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
@@ -352,8 +356,15 @@
         <span class="spacer"></span>
         <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
       </div>
+      <div id="eval-batch-status-notas" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
-    </div><!-- /tab-avaliacao -->
+
+    <div class="card">
+      <h3 class="card-title">Notas dos alunos</h3>
+      <p class="card-sub">Nota final de cada aluno. Clique no aluno para ver o detalhamento e publicar individualmente.</p>
+      <div id="grades-table"></div>
+    </div>
+    </div><!-- /tab-notas -->
   </div>
 
 </main>
@@ -522,6 +533,7 @@ async function load() {
 
   lastSubmissions = j.submissions;
   renderSubmissionsTable();
+  renderGradesTable();
   // Default esperto: enquanto o professor não mexer, abre o painel de criação
   // só quando ainda não há nenhum token (a primeira coisa a fazer); senão deixa
   // recolhido, com a tabela em foco.
@@ -529,6 +541,33 @@ async function load() {
 }
 
 let lastSubmissions = [];
+
+// Tabela de notas (aba Notas): aluno → nota final + status de publicação, com
+// link para o cockpit. Só alunos com entrevista (status != pending).
+function renderGradesTable() {
+  const el = document.getElementById('grades-table');
+  if (!el) return;
+  const rows = (lastSubmissions || []).filter(s => s.status !== 'pending');
+  if (rows.length === 0) {
+    el.innerHTML = '<p class="muted">Nenhuma entrevista ainda.</p>';
+    return;
+  }
+  const body = rows.map(s => {
+    const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token) + '?view=avaliacao';
+    const nota = (s.grade_final != null) ? String(s.grade_final) : '—';
+    let status;
+    if (s.grade_published_at) status = `<span class="badge badge-accent" title="Visível ao aluno desde ${new Date(s.grade_published_at).toLocaleString()}">publicada</span>`;
+    else if (s.has_grades) status = `<span class="badge badge-pending" title="Nota calculada, ainda não publicada — o aluno não vê">calculada</span>`;
+    else if (s.has_evaluation) status = `<span class="muted">sem nota</span>`;
+    else status = `<span class="muted">sem avaliação</span>`;
+    return `<tr>
+      <td><a href="${convUrl}" target="_blank" title="Abrir o detalhamento da nota deste aluno">${escapeHtml(s.student_label || '—')} ↗</a></td>
+      <td style="text-align:right; font-weight:600">${escapeHtml(nota)}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th style="text-align:right">Nota final</th><th>Status</th></tr></thead><tbody>${body}</tbody></table>`;
+}
 
 function renderSubmissionsTable() {
   const tbody = document.querySelector('#sub-table tbody');
@@ -1195,17 +1234,23 @@ function batchLine(batch, verbing, doneNoun) {
 }
 
 function renderBatchStatus(j) {
-  const el = document.getElementById('eval-batch-status');
-  const lines = [
+  // Avaliação/devolutiva → status na aba Avaliação; notas → status na aba Notas.
+  const fill = (id, lines) => {
+    const el = document.getElementById(id);
+    const ls = lines.filter(Boolean);
+    if (ls.length === 0) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.innerHTML = ls.join('<br>');
+  };
+  fill('eval-batch-status', [
     batchLine(j.batch, 'Avaliando entrevistas', 'avaliada'),
     batchLine(j.derive, 'Gerando devolutivas (prévias)', 'gerada'),
     batchLine(j.publish, 'Publicando devolutivas', 'publicada'),
+  ]);
+  fill('eval-batch-status-notas', [
     batchLine(j.grade, 'Calculando notas', 'calculada'),
     batchLine(j.grade_publish, 'Publicando notas', 'publicada'),
-  ].filter(Boolean);
-  if (lines.length === 0) { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
-  el.innerHTML = lines.join('<br>');
+  ]);
 }
 
 async function pollBatchStatus() {
@@ -1778,7 +1823,7 @@ async function copyToken(btn, token) {
 
 // Abas das seções (Cenário · Alunos · Avaliação). Estado persistido por
 // localStorage e deep-linkável por hash (#alunos, #avaliacao).
-const TAB_NAMES = ['cenario', 'alunos', 'avaliacao'];
+const TAB_NAMES = ['cenario', 'alunos', 'avaliacao', 'notas'];
 function setTab(name) {
   if (!TAB_NAMES.includes(name)) name = 'cenario';
   TAB_NAMES.forEach(t => {
