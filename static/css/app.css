@@ -4,6 +4,8 @@
  * Palette derived from the brand mark: navy (main), gold + teal (accents).
  */
 
+@import url('https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+
 :root {
   /* Color — slate ink + ORATIA navy. */
   --ink-900: #0f1b2d;
@@ -51,17 +53,18 @@
   --danger-50:   #fce9e9;
 
   /* Typography */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Spectral", Georgia, "Times New Roman", serif;
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --fs-xs:   0.78rem;
   --fs-sm:   0.875rem;
   --fs-md:   1rem;
   --fs-lg:   1.125rem;
   --fs-xl:   1.375rem;
-  --fs-2xl:  1.75rem;
-  --fs-3xl:  2.125rem;
+  --fs-2xl:  1.875rem;
+  --fs-3xl:  2.375rem;
   --lh-body: 1.55;
-  --lh-tight: 1.25;
+  --lh-tight: 1.2;
 
   /* Spacing (4px base) */
   --sp-1: 0.25rem;
@@ -754,3 +757,53 @@ dialog.coherence-dialog { max-width: 640px; }
 }
 .help-pop[hidden] { display: none; }
 @media (max-width: 480px) { .help-pop { max-width: min(86vw, 320px); } }
+
+/* ====================================================================
+ * Camada de identidade de marca — consolidação
+ * Tipografia de marca (Spectral display + Hanken Grotesk corpo) e acentos
+ * gold/teal. Este bloco carrega por último: vence empates de especificidade
+ * sobre os primitivos acima sem precisar editá-los.
+ * ================================================================= */
+
+/* Títulos em serifa de display; corpo segue em --font-sans (Hanken). */
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.015em; }
+h1 { font-size: var(--fs-3xl); }
+h2 { font-size: var(--fs-2xl); }
+
+/* Wordmark no topbar em serifa, espaçada como na logo. */
+.brand { font-family: var(--font-display); font-weight: 600; letter-spacing: 0.14em; }
+
+/* Um degrau a mais de elevação nos cards (corrige o "tudo num plano só"). */
+.card { box-shadow: var(--sh-md); }
+
+/* Eyebrow: rótulo curto acima de títulos. Teal = sinal de IA / contexto.
+   Uso: <div class="eyebrow">Arguição oral</div> antes do <h1>. */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--teal-700);
+  margin: 0 0 var(--sp-2);
+}
+
+/* Régua curta dourada para sublinhar títulos de seção (alternativa ao "—"). */
+.rule-accent {
+  width: 34px;
+  height: 2px;
+  background: var(--gold-500);
+  border-radius: 2px;
+  margin: var(--sp-2) 0 var(--sp-4);
+}
+
+/* Ponto de status opcional dentro de .badge — acessibilidade: forma + cor,
+   não só cor. Uso: <span class="badge badge-completed badge-dot">…</span> */
+.badge-dot::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 0.45em;
+  flex: 0 0 auto;
+}

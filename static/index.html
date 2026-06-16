@@ -39,6 +39,23 @@
   .entry-card h3 { margin: 0 0 var(--sp-2) 0; }
   .entry-card p { color: var(--ink-500); font-size: var(--fs-sm); margin: 0 0 var(--sp-4) 0; flex: 1; }
   .entry-link { color: var(--accent-600); font-weight: 500; font-size: var(--fs-sm); }
+
+  /* Diferenciação por papel: navy = estrutura · gold = professor · teal = aluno.
+     Borda-topo, chip do ícone (tint) e CTA na cor do papel. */
+  .entry-card.role-admin { border-top: 3px solid var(--accent-700); }
+  .entry-card.role-admin .entry-icon { background: var(--accent-50); color: var(--accent-700); }
+  .entry-card.role-admin .entry-link { color: var(--accent-700); }
+
+  .entry-card.role-prof { border-top: 3px solid var(--gold-700); }
+  .entry-card.role-prof .entry-icon { background: var(--gold-50); color: var(--gold-700); }
+  .entry-card.role-prof .entry-link { color: var(--gold-700); }
+
+  .entry-card.role-aluno { border-top: 3px solid var(--teal-700); }
+  .entry-card.role-aluno .entry-icon { background: var(--teal-50); color: var(--teal-700); }
+  .entry-card.role-aluno .entry-link { color: var(--teal-700); }
+
+  /* Linha de valor sob a logo (Spectral itálico). */
+  .hero-value { font-family: var(--font-display); font-style: italic; font-size: var(--fs-lg); color: var(--ink-600); margin-top: var(--sp-3); }
 </style>
 </head>
 <body>
@@ -52,11 +69,13 @@
 
 <main class="page">
   <section class="hero">
+    <div class="eyebrow">Avaliação oral conduzida por IA</div>
     <img class="hero-logo" src="/static/branding/oratia-primary.png" alt="ORATIA — AI Role-Playing Oral Assessment. Advanced Learning."/>
+    <div class="hero-value">Defenda o que você escreveu.</div>
   </section>
 
   <section class="grid-3">
-    <a class="entry-card" href="/admin">
+    <a class="entry-card role-admin" href="/admin">
       <span class="entry-icon" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
@@ -68,7 +87,7 @@
       <span class="entry-link">Ir para o painel →</span>
     </a>
 
-    <a class="entry-card" href="/trabalho">
+    <a class="entry-card role-prof" href="/trabalho">
       <span class="entry-icon" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
@@ -80,7 +99,7 @@
       <span class="entry-link">Acessar trabalho →</span>
     </a>
 
-    <a class="entry-card" href="/envio">
+    <a class="entry-card role-aluno" href="/envio">
       <span class="entry-icon" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>

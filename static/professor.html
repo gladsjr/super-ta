@@ -40,7 +40,7 @@
     color: var(--ink-500); border-bottom: 2px solid transparent; margin-bottom: -1px;
   }
   .tab-btn:hover { color: var(--ink-900); }
-  .tab-btn.is-active { color: var(--accent-700); border-bottom-color: var(--accent-700); }
+  .tab-btn.is-active { color: var(--ink-900); border-bottom-color: var(--gold-500); font-weight: 700; }
 
   .badge-blocked {
     background: #fde2e2;
@@ -597,7 +597,7 @@ function renderSubmissionsTable() {
         </div>
       </td>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
-      <td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span>${blockedBadge}</td>
+      <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge}</td>
       <td>${convCell}</td>
       <td>${evalCell}</td>
       <td>${actionBtn}</td>

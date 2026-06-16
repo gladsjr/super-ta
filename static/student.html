@@ -67,6 +67,10 @@
       border-top-left-radius: 4px;
     }
 
+    /* Entrevistador marcado como IA: rótulo teal + filete teal no balão. */
+    .msg.ta .who { color: var(--teal-700); }
+    .msg.ta .bubble { border-left: 3px solid var(--teal-300); }
+
     .msg.you .bubble {
       background: var(--accent-50);
       border-color: var(--accent-50);
@@ -578,6 +582,7 @@
 
     <div id="main" class="hidden">
       <div class="page-header">
+        <div class="eyebrow">Arguição oral</div>
         <h1 id="work-name">—</h1>
         <div class="subtitle" id="meta">Responda com clareza e profundidade. Você pode editar sua resposta antes de
           enviar.</div>
@@ -1196,7 +1201,7 @@
       } else {
         bubbleInner = renderMessage(text);
       }
-      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${bubbleInner}</div>`;
+      wrap.innerHTML = `<span class="who">Entrevistador · IA</span><div class="bubble">${bubbleInner}</div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
 
       // Encaminha para a fila — se nada estiver tocando, dispara já; senão,
@@ -1239,7 +1244,7 @@
     function createChunkedTA() {
       const wrap = document.createElement('div');
       wrap.className = 'msg ta';
-      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><div class="speaking"><button type="button" class="speaking-pause" aria-label="Pausar">⏸</button><span class="speaking-label">falando</span><span class="speaking-dots"></span></div><div class="audio-row" hidden></div></div>`;
+      wrap.innerHTML = `<span class="who">Entrevistador · IA</span><div class="bubble"><div class="speaking"><button type="button" class="speaking-pause" aria-label="Pausar">⏸</button><span class="speaking-label">falando</span><span class="speaking-dots"></span></div><div class="audio-row" hidden></div></div>`;
       chat.appendChild(wrap); chat.scrollTop = chat.scrollHeight;
       const speaking = wrap.querySelector('.speaking');
       const row = wrap.querySelector('.audio-row');
@@ -1464,7 +1469,7 @@
     function appendThinkingBubble({ studentAudioSec = null } = {}) {
       const wrap = document.createElement('div');
       wrap.className = 'msg ta thinking';
-      wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble"><span class="stage-label">ouvindo</span><span class="stage-dots"></span></div>`;
+      wrap.innerHTML = `<span class="who">Entrevistador · IA</span><div class="bubble"><span class="stage-label">ouvindo</span><span class="stage-dots"></span></div>`;
       chat.appendChild(wrap);
       chat.scrollTop = chat.scrollHeight;
 
@@ -1767,7 +1772,7 @@
           if (m.role === 'assistant') {
             const wrap = document.createElement('div');
             wrap.className = 'msg ta';
-            wrap.innerHTML = `<span class="who">Entrevistador</span><div class="bubble">${renderMessage(m.content)}</div>`;
+            wrap.innerHTML = `<span class="who">Entrevistador · IA</span><div class="bubble">${renderMessage(m.content)}</div>`;
             chat.appendChild(wrap);
           } else appendUser(m.content);
         }
