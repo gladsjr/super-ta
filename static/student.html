@@ -907,6 +907,36 @@
       await enterReviewMode();
     }
 
+    // Fim NATURAL da entrevista: a fala de despedida do entrevistador já está na
+    // tela (balão + áudio, ainda tocando). Em vez de pular direto para a tela de
+    // encerramento/revisão, deixamos o aluno ler/ouvir a despedida e clicar num
+    // botão para prosseguir. Sem isto, em áudio a página trocava de tela antes de
+    // a entrevistadora terminar de falar.
+    function enterClosing() {
+      if (interactionMode === 'audio') {
+        setStudentTurn(false, 'Entrevista encerrada.'); // esconde gravação + painel de sugestão
+      } else {
+        const ta = document.getElementById('msg');
+        const send = document.getElementById('send');
+        if (ta) ta.disabled = true;
+        if (send) send.disabled = true;
+        if (isTestMode) document.getElementById('test-suggest')?.classList.add('hidden');
+      }
+      if (document.getElementById('closing-btn')) return; // idempotente
+      const div = document.createElement('div');
+      div.className = 'sys-line';
+      div.style.textAlign = 'center';
+      div.style.margin = 'var(--sp-3) 0';
+      const btn = document.createElement('button');
+      btn.id = 'closing-btn';
+      btn.className = 'btn btn-primary';
+      btn.textContent = 'Ver encerramento da entrevista →';
+      btn.addEventListener('click', () => enterReviewMode());
+      div.appendChild(btn);
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
     // Carrega /review e renderiza a tela de revisão. Chamada após
     // finalizeAndEnterReview ou no caminho de re-entry (entrevista já
     // finalizada em outra aba ou sessão anterior).
@@ -1853,8 +1883,9 @@
         phase = j.phase;
         syncTopbarActions();
         if (phase === 'finalizing') {
-          // Fim natural — entra direto no modo revisão (server já finalizou).
-          enterReviewMode();
+          // Fim natural — mostra a despedida + botão para ir ao encerramento
+          // (o aluno lê a despedida antes de a tela trocar).
+          enterClosing();
           return;
         }
       }
@@ -2165,15 +2196,22 @@
       setRecordStatus('');
       const userPlaceholder = appendUser('🎙️ (mensagem de voz enviada)');
       const thinking = appendThinkingBubble({ studentAudioSec });
-      // A resposta já foi enviada — esconde os controles de gravação
-      // (gravar/enviar/cancelar) DESDE JÁ. Sem isto, os botões "enviar/cancelar"
-      // do estado 'sending' ficam visíveis enquanto o entrevistador já começou a
-      // falar (os 1ºs pedaços tocam antes do fim do stream). O painel de sugestão
-      // e o release da vez seguem com handleTurn ao fim da fala; nos caminhos de
+      // A resposta já foi enviada — não é mais a vez do aluno enquanto o
+      // entrevistador responde. Esconde os controles de gravação
+      // (gravar/enviar/cancelar) E o painel de sugestão (conversa de teste)
+      // DESDE JÁ. Sem isto, os botões do estado 'sending' e o painel de
+      // sugestão ficam visíveis enquanto o entrevistador já começou a falar (os
+      // 1ºs pedaços tocam antes do fim do stream). O release da vez e a
+      // reabertura do painel vêm com handleTurn ao fim da fala; nos caminhos de
       // erro abaixo, setRecordingUI('idle') traz os botões de volta para retentar.
       document.getElementById('record-btn').classList.add('hidden');
       document.getElementById('stop-btn').classList.add('hidden');
       document.getElementById('stop-send-btn').classList.add('hidden');
+      if (isTestMode) {
+        document.getElementById('test-suggest').classList.add('hidden');
+        document.getElementById('suggest-edit')?.classList.add('hidden');
+        document.getElementById('suggest-voice-send')?.classList.add('hidden');
+      }
       setRecordStatus('O entrevistador está respondendo…');
 
       const form = new FormData();
@@ -2248,7 +2286,13 @@
       if (j.phase && j.phase !== phase) {
         phase = j.phase;
         syncTopbarActions();
-        if (phase === 'finalizing') { enterReviewMode(); return; }
+        if (phase === 'finalizing') {
+          // Deixa a despedida (balão + áudio, possivelmente fragmentado)
+          // terminar de chegar e mostra o botão para ir ao encerramento.
+          if (chunked) chunked.finalizeIfPending();
+          enterClosing();
+          return;
+        }
       }
       // O stream terminou (result recebido). Garante que a vez do aluno será
       // liberada mesmo que nenhum pedaço tenha vindo marcado is_last.
