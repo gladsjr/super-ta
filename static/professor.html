@@ -354,6 +354,7 @@
         <button id="grade-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das entrevistas já avaliadas que ainda não têm nota — usa a rubrica salva">Calcular notas</button>
         <button id="grade-publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as notas já calculadas que ainda não foram publicadas">Publicar notas</button>
         <span class="spacer"></span>
+        <button id="grade-unpublish-all-btn" class="btn btn-ghost btn-sm" type="button" title="Retira da página de cada aluno todas as notas publicadas (as notas ficam guardadas)">Despublicar notas</button>
         <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
       </div>
       <div id="eval-batch-status-notas" class="hint hidden" style="margin-top: var(--sp-2)"></div>
@@ -1250,6 +1251,7 @@ function renderBatchStatus(j) {
   fill('eval-batch-status-notas', [
     batchLine(j.grade, 'Calculando notas', 'calculada'),
     batchLine(j.grade_publish, 'Publicando notas', 'publicada'),
+    batchLine(j.grade_unpublish, 'Despublicando notas', 'despublicada'),
   ]);
 }
 
@@ -1259,7 +1261,7 @@ async function pollBatchStatus() {
     if (!r.ok) return;
     const j = await r.json();
     renderBatchStatus(j);
-    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running || j.grade?.running || j.grade_publish?.running;
+    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running || j.grade?.running || j.grade_publish?.running || j.grade_unpublish?.running;
     if (anyRunning) {
       evalWasRunning = true;
       setEvalButtonsDisabled(true);
@@ -1279,6 +1281,7 @@ function setEvalButtonsDisabled(disabled) {
   document.getElementById('publish-all-btn').disabled = disabled;
   document.getElementById('grade-all-btn').disabled = disabled;
   document.getElementById('grade-publish-all-btn').disabled = disabled;
+  document.getElementById('grade-unpublish-all-btn').disabled = disabled;
   document.getElementById('grade-all-force-btn').disabled = disabled;
 }
 
@@ -1400,6 +1403,8 @@ document.getElementById('grade-all-force-btn').onclick = () =>
   startBatch('evaluations/grades', { force: true }, 'Recalcular as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota? Cada critério consome orçamento do trabalho.');
 document.getElementById('grade-publish-all-btn').onclick = () =>
   startBatch('evaluations/grade-publish', { force: false }, 'Publicar as notas já calculadas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Não recalcula nada nem custa orçamento.');
+document.getElementById('grade-unpublish-all-btn').onclick = () =>
+  startBatch('evaluations/grade-unpublish', { force: false }, 'Despublicar as notas de TODOS os alunos? Elas deixam de aparecer na página de cada aluno (mas ficam guardadas para republicar depois).');
 
 // Salva a expectativa de resposta de cabeça na hora (toggle).
 document.getElementById('expect-spontaneous').addEventListener('change', async (e) => {

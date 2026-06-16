@@ -887,14 +887,16 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
 const batchDeriveRuns = new Map();       // work.id -> estado (gerar prévias)
 const batchPublishRuns = new Map();      // work.id -> estado (publicar devolutivas)
 const batchGradeRuns = new Map();        // work.id -> estado (calcular notas)
-const batchGradePublishRuns = new Map(); // work.id -> estado (publicar notas)
+const batchGradePublishRuns = new Map();   // work.id -> estado (publicar notas)
+const batchGradeUnpublishRuns = new Map(); // work.id -> estado (despublicar notas)
 
 function anyBatchRunning(workId) {
     return batchEvalRuns.get(workId)?.running
         || batchDeriveRuns.get(workId)?.running
         || batchPublishRuns.get(workId)?.running
         || batchGradeRuns.get(workId)?.running
-        || batchGradePublishRuns.get(workId)?.running;
+        || batchGradePublishRuns.get(workId)?.running
+        || batchGradeUnpublishRuns.get(workId)?.running;
 }
 
 function newBatchState(force, total) {
@@ -1039,6 +1041,20 @@ router.post("/w/:workToken/evaluations/grade-publish", requireWorkToken, express
     checkBudget: false,
 }));
 
+// Lote de DESPUBLICAR NOTAS: submissões com nota PUBLICADA. Sem force, pula as
+// que já estão despublicadas. Não custa LLM. Inverso do grade-publish.
+router.post("/w/:workToken/evaluations/grade-unpublish", requireWorkToken, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchGradeUnpublishRuns,
+    scope: "PUBLISH",
+    queueFilter: (s, force) => s.has_grades && (force || !!s.grade_published_at),
+    emptyError: () => "nenhuma nota publicada para despublicar",
+    itemFn: async (work, found) => {
+        await db.setGradePublished(found.id, false);
+        return { skipped: false };
+    },
+    checkBudget: false,
+}));
+
 router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
     res.set("Cache-Control", "no-store");
     res.json({
@@ -1047,6 +1063,7 @@ router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
         publish: publicBatchState(batchPublishRuns.get(req.work.id)),
         grade: publicBatchState(batchGradeRuns.get(req.work.id)),
         grade_publish: publicBatchState(batchGradePublishRuns.get(req.work.id)),
+        grade_unpublish: publicBatchState(batchGradeUnpublishRuns.get(req.work.id)),
     });
 });
 
