@@ -1704,7 +1704,13 @@
       const pendingAudio = j.session.pending_question_audio;
       const chatItems = j.session.chat || [];
 
-      if (interactionMode === 'audio') {
+      if (interactionMode === 'audio' && phase !== 'intro' && phase !== 'interviewing') {
+        // awaiting_upload (ou qualquer fase pré-entrevista): NADA do
+        // entrevistador pode tocar — o upload do PDF e o consentimento vêm
+        // primeiro. Defesa contra um pending_question_audio que tenha vazado do
+        // servidor (ex.: saudação pré-gerada). O fluxo de upload cuida da
+        // saudação no momento certo, atrás do checkbox Ciente.
+      } else if (interactionMode === 'audio') {
         // Áudio: sem histórico. Só o último áudio do entrevistador.
         if (pendingAudio && pendingAudio.audio_url) {
           // appendTA já renderiza player + transcrição oculta + autoplay.
