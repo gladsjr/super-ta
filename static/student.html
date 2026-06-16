@@ -1258,7 +1258,7 @@
         if (replayDone) return;
         replayDone = true;
         clearInterval(dotsTimer);
-        speaking.hidden = true;
+        speaking.remove(); // remove de vez: `hidden` não basta (a regra .speaking{display:flex} o venceria)
         const ok = buffers.filter(Boolean);
         if (ok.length) {
           const audio = document.createElement('audio');
