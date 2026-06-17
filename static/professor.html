@@ -110,6 +110,7 @@
       <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Cenário</button>
       <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
       <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; devolutivas</button>
+      <button class="tab-btn" type="button" id="tab-btn-notas" data-tab="notas" role="tab" aria-selected="false">Notas</button>
     </nav>
 
     <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
@@ -321,10 +322,6 @@
         <input type="checkbox" id="fb-include-opinion" checked style="margin-top: 3px"/>
         <span class="card-sub" style="margin:0" data-help="A impressão da persona, publicada como está, com ressalva de autoria — não editável. O lote aplica a escolha a todas as entrevistas; dá para ajustar aluno a aluno na página da conversa.">Incluir a <strong>opinião do entrevistador</strong> nas devolutivas.</span>
       </label>
-      <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
-        <input type="checkbox" id="fb-include-grade" style="margin-top: 3px"/>
-        <span class="card-sub" style="margin:0" data-help="Mostra a nota final e a nota de cada critério, sem as justificativas. Desligado por padrão. Ajustável aluno a aluno na página da conversa.">Incluir a <strong>nota</strong> (rubrica abaixo) nas devolutivas.</span>
-      </label>
       <div class="row" style="margin-top: var(--sp-3)">
         <button id="save-feedback-settings" class="btn" type="button">Salvar configurações</button>
         <span id="feedback-settings-msg" class="hint"></span>
@@ -340,9 +337,12 @@
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
 
+    </div><!-- /tab-avaliacao -->
+
+    <div class="tab-panel hidden" id="tab-notas" role="tabpanel" aria-labelledby="tab-btn-notas">
     <div class="card">
-      <h3 class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. Você calcula as notas no botão abaixo (ou aluno a aluno na página da conversa) e decide se a nota entra na devolutiva.">Rubrica de notas</h3>
-      <p class="card-sub">Defina os critérios que compõem a nota.</p>
+      <h3 class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</h3>
+      <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
       <div id="rubric-items"></div>
       <div class="row" style="margin-top: var(--sp-2); gap: var(--sp-2); flex-wrap: wrap">
         <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
@@ -352,11 +352,20 @@
       </div>
       <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
         <button id="grade-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das entrevistas já avaliadas que ainda não têm nota — usa a rubrica salva">Calcular notas</button>
+        <button id="grade-publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as notas já calculadas que ainda não foram publicadas">Publicar notas</button>
         <span class="spacer"></span>
+        <button id="grade-unpublish-all-btn" class="btn btn-ghost btn-sm" type="button" title="Retira da página de cada aluno todas as notas publicadas (as notas ficam guardadas)">Despublicar notas</button>
         <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
       </div>
+      <div id="eval-batch-status-notas" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
-    </div><!-- /tab-avaliacao -->
+
+    <div class="card">
+      <h3 class="card-title">Notas dos alunos</h3>
+      <p class="card-sub">Nota final de cada aluno. Clique no aluno para ver o detalhamento e publicar individualmente.</p>
+      <div id="grades-table"></div>
+    </div>
+    </div><!-- /tab-notas -->
   </div>
 
 </main>
@@ -492,7 +501,6 @@ async function load() {
   // Configurações de devolutiva do trabalho
   document.getElementById('fb-guidelines').value = j.work.feedback_guidelines ?? '';
   document.getElementById('fb-include-opinion').checked = j.work.include_interviewer_opinion !== false;
-  document.getElementById('fb-include-grade').checked = j.work.include_grade === true;
   document.getElementById('expect-spontaneous').checked = j.work.expect_spontaneous === true;
   renderRubricEditor(j.work.grading_rubric || []);
 
@@ -526,6 +534,7 @@ async function load() {
 
   lastSubmissions = j.submissions;
   renderSubmissionsTable();
+  renderGradesTable();
   // Default esperto: enquanto o professor não mexer, abre o painel de criação
   // só quando ainda não há nenhum token (a primeira coisa a fazer); senão deixa
   // recolhido, com a tabela em foco.
@@ -533,6 +542,33 @@ async function load() {
 }
 
 let lastSubmissions = [];
+
+// Tabela de notas (aba Notas): aluno → nota final + status de publicação, com
+// link para o cockpit. Só alunos com entrevista (status != pending).
+function renderGradesTable() {
+  const el = document.getElementById('grades-table');
+  if (!el) return;
+  const rows = (lastSubmissions || []).filter(s => s.status !== 'pending');
+  if (rows.length === 0) {
+    el.innerHTML = '<p class="muted">Nenhuma entrevista ainda.</p>';
+    return;
+  }
+  const body = rows.map(s => {
+    const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token) + '?view=avaliacao';
+    const nota = (s.grade_final != null) ? String(s.grade_final) : '—';
+    let status;
+    if (s.grade_published_at) status = `<span class="badge badge-accent" title="Visível ao aluno desde ${new Date(s.grade_published_at).toLocaleString()}">publicada</span>`;
+    else if (s.has_grades) status = `<span class="badge badge-pending" title="Nota calculada, ainda não publicada — o aluno não vê">calculada</span>`;
+    else if (s.has_evaluation) status = `<span class="muted">sem nota</span>`;
+    else status = `<span class="muted">sem avaliação</span>`;
+    return `<tr>
+      <td><a href="${convUrl}" target="_blank" title="Abrir o detalhamento da nota deste aluno">${escapeHtml(s.student_label || '—')} ↗</a></td>
+      <td style="text-align:right; font-weight:600">${escapeHtml(nota)}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th style="text-align:right">Nota final</th><th>Status</th></tr></thead><tbody>${body}</tbody></table>`;
+}
 
 function renderSubmissionsTable() {
   const tbody = document.querySelector('#sub-table tbody');
@@ -1199,16 +1235,24 @@ function batchLine(batch, verbing, doneNoun) {
 }
 
 function renderBatchStatus(j) {
-  const el = document.getElementById('eval-batch-status');
-  const lines = [
+  // Avaliação/devolutiva → status na aba Avaliação; notas → status na aba Notas.
+  const fill = (id, lines) => {
+    const el = document.getElementById(id);
+    const ls = lines.filter(Boolean);
+    if (ls.length === 0) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.innerHTML = ls.join('<br>');
+  };
+  fill('eval-batch-status', [
     batchLine(j.batch, 'Avaliando entrevistas', 'avaliada'),
     batchLine(j.derive, 'Gerando devolutivas (prévias)', 'gerada'),
     batchLine(j.publish, 'Publicando devolutivas', 'publicada'),
+  ]);
+  fill('eval-batch-status-notas', [
     batchLine(j.grade, 'Calculando notas', 'calculada'),
-  ].filter(Boolean);
-  if (lines.length === 0) { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
-  el.innerHTML = lines.join('<br>');
+    batchLine(j.grade_publish, 'Publicando notas', 'publicada'),
+    batchLine(j.grade_unpublish, 'Despublicando notas', 'despublicada'),
+  ]);
 }
 
 async function pollBatchStatus() {
@@ -1217,7 +1261,7 @@ async function pollBatchStatus() {
     if (!r.ok) return;
     const j = await r.json();
     renderBatchStatus(j);
-    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running || j.grade?.running;
+    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running || j.grade?.running || j.grade_publish?.running || j.grade_unpublish?.running;
     if (anyRunning) {
       evalWasRunning = true;
       setEvalButtonsDisabled(true);
@@ -1236,6 +1280,8 @@ function setEvalButtonsDisabled(disabled) {
   document.getElementById('derive-all-btn').disabled = disabled;
   document.getElementById('publish-all-btn').disabled = disabled;
   document.getElementById('grade-all-btn').disabled = disabled;
+  document.getElementById('grade-publish-all-btn').disabled = disabled;
+  document.getElementById('grade-unpublish-all-btn').disabled = disabled;
   document.getElementById('grade-all-force-btn').disabled = disabled;
 }
 
@@ -1272,7 +1318,6 @@ async function saveFeedbackSettings(showMsg) {
       body: JSON.stringify({
         feedback_guidelines: document.getElementById('fb-guidelines').value.trim() || null,
         include_interviewer_opinion: document.getElementById('fb-include-opinion').checked,
-        include_grade: document.getElementById('fb-include-grade').checked,
       }),
     });
     if (!r.ok) {
@@ -1356,6 +1401,10 @@ document.getElementById('grade-all-btn').onclick = () =>
   startBatch('evaluations/grades', { force: false }, 'Calcular as notas das entrevistas avaliadas que ainda não têm nota, usando a rubrica salva? Cada critério consome orçamento do trabalho.');
 document.getElementById('grade-all-force-btn').onclick = () =>
   startBatch('evaluations/grades', { force: true }, 'Recalcular as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota? Cada critério consome orçamento do trabalho.');
+document.getElementById('grade-publish-all-btn').onclick = () =>
+  startBatch('evaluations/grade-publish', { force: false }, 'Publicar as notas já calculadas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Não recalcula nada nem custa orçamento.');
+document.getElementById('grade-unpublish-all-btn').onclick = () =>
+  startBatch('evaluations/grade-unpublish', { force: false }, 'Despublicar as notas de TODOS os alunos? Elas deixam de aparecer na página de cada aluno (mas ficam guardadas para republicar depois).');
 
 // Salva a expectativa de resposta de cabeça na hora (toggle).
 document.getElementById('expect-spontaneous').addEventListener('change', async (e) => {
@@ -1779,7 +1828,7 @@ async function copyToken(btn, token) {
 
 // Abas das seções (Cenário · Alunos · Avaliação). Estado persistido por
 // localStorage e deep-linkável por hash (#alunos, #avaliacao).
-const TAB_NAMES = ['cenario', 'alunos', 'avaliacao'];
+const TAB_NAMES = ['cenario', 'alunos', 'avaliacao', 'notas'];
 function setTab(name) {
   if (!TAB_NAMES.includes(name)) name = 'cenario';
   TAB_NAMES.forEach(t => {

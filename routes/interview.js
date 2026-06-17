@@ -1750,15 +1750,21 @@ router.get("/s/:submissionToken/student-audio/:audioIdx", requireSubmissionToken
 router.get("/s/:submissionToken/evaluation", requireSubmissionToken, async (req, res) => {
     if (!req.submission.completion_reason) return res.status(409).json({ error: "not_finalized" });
     try {
-        const student = await db.getStudentEvaluation(req.submission.id);
+        // Devolutiva (subjetiva) e nota (objetiva) são publicações INDEPENDENTES:
+        // o aluno pode ver uma, outra, as duas ou nenhuma, em momentos diferentes.
+        const [student, gradeInfo] = await Promise.all([
+            db.getStudentEvaluation(req.submission.id),
+            db.getPublishedStudentGrade(req.submission.id),
+        ]);
         res.set("Cache-Control", "no-store");
-        if (!student?.published_at) {
-            return res.json({ published: false, evaluation: null });
-        }
+        const devolutivaPublished = !!student?.published_at;
         res.json({
-            published: true,
-            published_at: student.published_at,
-            evaluation: student.report,
+            published: devolutivaPublished,                          // compat: devolutiva
+            published_at: student?.published_at ?? null,
+            evaluation: devolutivaPublished ? student.report : null,
+            grade_published: !!gradeInfo,
+            grade_published_at: gradeInfo?.published_at ?? null,
+            grade: gradeInfo?.grade ?? null,
         });
     } catch (err) {
         log.error("REVIEW", `evaluation fetch failed token=${req.submission.submission_token}: ${err.message}`);

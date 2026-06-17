@@ -71,7 +71,6 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 include_strengths: req.work.include_strengths,
                 include_improvement_areas: req.work.include_improvement_areas,
                 include_study_suggestions: req.work.include_study_suggestions,
-                include_grade: req.work.include_grade,
                 grading_rubric: getEffectiveRubric(req.work),   // rubrica efetiva (do trabalho ou DEFAULT_RUBRIC)
                 budget_usd: balance?.budget_usd ?? 0,
                 spent_usd: balance?.spent_usd ?? 0,
@@ -458,9 +457,9 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
     }
 });
 
-// Chaves de seção aceitas nos PATCHes (espelha db.FEEDBACK_SECTIONS). "grade" é
-// a seção de nota da rubrica — ligável/desligável como as demais.
-const SECTION_KEYS = ["interviewer_opinion", "strengths", "improvement_areas", "study_suggestions", "grade"];
+// Chaves de seção aceitas nos PATCHes (espelha db.FEEDBACK_SECTIONS). A nota
+// NÃO é seção: é publicação própria (grade_published_at), ver rotas grade-publish.
+const SECTION_KEYS = ["interviewer_opinion", "strengths", "improvement_areas", "study_suggestions"];
 
 // Configurações de devolutiva do TRABALHO: diretrizes de geração (tom,
 // formato, ênfases) e defaults de visibilidade das seções. Valem para os
@@ -523,7 +522,6 @@ function workSectionDefaults(work) {
         strengths: work.include_strengths !== false,
         improvement_areas: work.include_improvement_areas !== false,
         study_suggestions: work.include_study_suggestions !== false,
-        grade: work.include_grade === true, // default DESLIGADO
     };
 }
 
@@ -777,6 +775,38 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkT
     }
 });
 
+// Publica a NOTA ao aluno (independente da devolutiva). Exige nota calculada.
+router.post("/w/:workToken/submissions/:subToken/evaluation/grade-publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
+    try {
+        const existing = await db.getSubmissionGrades(found.id);
+        if (!existing) return res.status(409).json({ error: "não há nota calculada para publicar — calcule primeiro" });
+        await db.setGradePublished(found.id, true);
+        const grades = await db.getSubmissionGrades(found.id);
+        log.info("PUBLISH", `grade published submission=${subToken}`);
+        res.json({ grades });
+    } catch (err) {
+        log.error("PUBLISH", `grade publish failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao publicar a nota", detail: err.message });
+    }
+});
+
+// Despublica a nota (a nota fica guardada; republicar não recalcula).
+router.delete("/w/:workToken/submissions/:subToken/evaluation/grade-publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    const subToken = found.submission_token;
+    try {
+        await db.setGradePublished(found.id, false);
+        const grades = await db.getSubmissionGrades(found.id);
+        log.info("PUBLISH", `grade unpublished submission=${subToken}`);
+        res.json({ grades });
+    } catch (err) {
+        log.error("PUBLISH", `grade unpublish failed submission=${subToken}: ${err.message}`);
+        res.status(500).json({ error: "falha ao despublicar a nota" });
+    }
+});
+
 router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
@@ -854,15 +884,19 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
 // Publicar: submissões COM versão gerada; sem force, pula as já publicadas.
 //   Não custa LLM (só marca a visibilidade) — por isso não derruba o lote
 //   por orçamento.
-const batchDeriveRuns = new Map();  // work.id -> estado (gerar prévias)
-const batchPublishRuns = new Map(); // work.id -> estado (publicar)
-const batchGradeRuns = new Map();   // work.id -> estado (calcular notas)
+const batchDeriveRuns = new Map();       // work.id -> estado (gerar prévias)
+const batchPublishRuns = new Map();      // work.id -> estado (publicar devolutivas)
+const batchGradeRuns = new Map();        // work.id -> estado (calcular notas)
+const batchGradePublishRuns = new Map();   // work.id -> estado (publicar notas)
+const batchGradeUnpublishRuns = new Map(); // work.id -> estado (despublicar notas)
 
 function anyBatchRunning(workId) {
     return batchEvalRuns.get(workId)?.running
         || batchDeriveRuns.get(workId)?.running
         || batchPublishRuns.get(workId)?.running
-        || batchGradeRuns.get(workId)?.running;
+        || batchGradeRuns.get(workId)?.running
+        || batchGradePublishRuns.get(workId)?.running
+        || batchGradeUnpublishRuns.get(workId)?.running;
 }
 
 function newBatchState(force, total) {
@@ -991,6 +1025,36 @@ router.post("/w/:workToken/evaluations/grades", requireWorkToken, requireWithinB
     checkBudget: true,
 }));
 
+// Lote de PUBLICAR NOTAS: submissões COM nota calculada; sem force, pula as já
+// publicadas. Não custa LLM (só marca grade_published_at).
+router.post("/w/:workToken/evaluations/grade-publish", requireWorkToken, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchGradePublishRuns,
+    scope: "PUBLISH",
+    queueFilter: (s, force) => s.has_grades && (force || !s.grade_published_at),
+    emptyError: force => force
+        ? "nenhuma nota calculada para publicar — calcule as notas antes"
+        : "nenhuma nota nova para publicar — todas as calculadas já estão publicadas",
+    itemFn: async (work, found) => {
+        await db.setGradePublished(found.id, true);
+        return { skipped: false };
+    },
+    checkBudget: false,
+}));
+
+// Lote de DESPUBLICAR NOTAS: submissões com nota PUBLICADA. Sem force, pula as
+// que já estão despublicadas. Não custa LLM. Inverso do grade-publish.
+router.post("/w/:workToken/evaluations/grade-unpublish", requireWorkToken, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchGradeUnpublishRuns,
+    scope: "PUBLISH",
+    queueFilter: (s, force) => s.has_grades && (force || !!s.grade_published_at),
+    emptyError: () => "nenhuma nota publicada para despublicar",
+    itemFn: async (work, found) => {
+        await db.setGradePublished(found.id, false);
+        return { skipped: false };
+    },
+    checkBudget: false,
+}));
+
 router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
     res.set("Cache-Control", "no-store");
     res.json({
@@ -998,6 +1062,8 @@ router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
         derive: publicBatchState(batchDeriveRuns.get(req.work.id)),
         publish: publicBatchState(batchPublishRuns.get(req.work.id)),
         grade: publicBatchState(batchGradeRuns.get(req.work.id)),
+        grade_publish: publicBatchState(batchGradePublishRuns.get(req.work.id)),
+        grade_unpublish: publicBatchState(batchGradeUnpublishRuns.get(req.work.id)),
     });
 });
 
