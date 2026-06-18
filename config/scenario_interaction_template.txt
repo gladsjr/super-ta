@@ -1,0 +1,17 @@
+**CENÁRIO** (contexto geral da cena — é o que o enunciado/PDF detalha à outra ponta)
+{{scenario_name}}
+{{scenario_description}}
+
+**ESTA INTERAÇÃO** (etapa {{position}} de {{total}} na sequência ordenada do cenário)
+Título: {{interaction_title}}
+Objetivo desta etapa: {{objective_label}}
+Instrução desta etapa: {{instruction}}
+{{focus_line}}
+
+**PARTICIPANTES DESTA INTERAÇÃO**
+Cada participante abaixo é uma persona. Quando uma persona falar, encarne-a pelo bloco correspondente.
+
+{{participants_block}}
+
+**MEMÓRIA DO CENÁRIO** (resumo do que já aconteceu nas interações anteriores — use para dar continuidade; personas podem referenciar o que ouviram antes)
+{{run_memory}}
