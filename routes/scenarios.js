@@ -1,157 +1,238 @@
 // API do sistema de CENÁRIOS MULTIAGENTE (fase mock).
 //
-// Duas superfícies de definição (personas e cenários) + execução mock. NÃO usa
-// LLM nem Postgres (store em JSON). Sem auth nesta fase — é um protótipo para
-// validar o desenho; antes de produção, gatear atrás do login do professor
-// (requireAdmin) e migrar o store para o banco.
+// Duas camadas de definição, claramente distintas:
+//   TEMPLATE   — persona reutilizável (biblioteca), definição completa, com voz
+//                e gênero. Não é referenciada direto pelas interações.
+//   CENÁRIO    — explicação geral + PDF + PERSONAS escolhidas (cópias editáveis
+//                de templates ou criadas do zero) + sequência ORDENADA de
+//                interações que apontam para essas personas.
+//   INTERAÇÃO  — aluno↔persona(s) ou persona↔persona.
+//
+// Sem LLM nem Postgres (store JSON). Sem auth nesta fase — protótipo; antes de
+// produção, gatear (requireAdmin) e migrar para o banco.
 
 import express from "express";
+import { randomUUID } from "crypto";
 import * as store from "../lib/scenarios/store.js";
+import { VOICES } from "../config/voices.js";
 import {
-    openingTurns, respond, OBJECTIVE_TYPES, PARTICIPANT_ROLES, INTERACTION_MODES, objectiveLabel, ROLE_LABEL,
+    scenarioFrame, interactionStart, respond, evaluatePdfMock,
+    OBJECTIVE_TYPES, PARTICIPANT_ROLES, INTERACTION_KINDS, objectiveLabel, ROLE_LABEL,
 } from "../lib/scenarios/mockEngine.js";
 
 const router = express.Router();
 const json = express.json({ limit: "256kb" });
-
 const bad = (res, msg) => res.status(400).json({ error: msg });
+const str = x => (typeof x === "string" ? x.trim() : "");
+const lines = x => Array.isArray(x) ? x.map(s => String(s).trim()).filter(Boolean) : [];
+
+const GENDERS = ["masculino", "feminino", "neutro"];
+const VOICE_IDS = new Set(VOICES.map(v => v.id));
+const cpId = () => `cp_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
 
 // ---- Meta (enums para a UI) ----
 router.get("/scenarios/api/meta", (_req, res) => {
     res.json({
         objective_types: OBJECTIVE_TYPES.map(v => ({ value: v, label: objectiveLabel(v) })),
         participant_roles: PARTICIPANT_ROLES.map(v => ({ value: v, label: ROLE_LABEL[v] || v })),
-        interaction_modes: INTERACTION_MODES.map(v => ({ value: v, label: v === "sincrono" ? "Síncrono (ao vivo)" : "Assíncrono (responde quando puder)" })),
+        interaction_kinds: INTERACTION_KINDS.map(v => ({ value: v, label: v === "student" ? "Aluno ↔ persona(s)" : "Persona ↔ persona" })),
+        genders: GENDERS.map(v => ({ value: v, label: v[0].toUpperCase() + v.slice(1) })),
+        voices: VOICES.map(v => ({ value: v.id, label: v.label, gender: v.gender })),
     });
 });
 
-// ---- Personas ----
+// ---- Persona (definição rica; serve a template e a persona-do-cenário) ----
 function validatePersona(b) {
     if (!b || typeof b !== "object") return "persona inválida";
-    if (typeof b.name !== "string" || !b.name.trim()) return "nome da persona é obrigatório";
-    if (typeof b.role !== "string" || !b.role.trim()) return "papel da persona é obrigatório";
+    if (!str(b.name)) return "nome é obrigatório";
+    if (!str(b.role)) return "papel é obrigatório";
     return null;
 }
-function cleanPersona(b) {
-    const arr = (x) => Array.isArray(x) ? x.map(s => String(s).trim()).filter(Boolean) : [];
+function cleanPersona(b, { keepId = true } = {}) {
+    const k = b.knowledge && typeof b.knowledge === "object" ? b.knowledge : {};
     return {
-        ...(b.id ? { id: b.id } : {}),
-        name: b.name.trim(),
-        icon: typeof b.icon === "string" && b.icon.trim() ? b.icon.trim() : "🧑",
-        role: b.role.trim(),
-        tone: typeof b.tone === "string" ? b.tone.trim() : "",
-        objectives: arr(b.objectives),
-        concerns: arr(b.concerns),
-        knowledge: typeof b.knowledge === "string" ? b.knowledge.trim() : "",
+        ...(keepId && b.id ? { id: b.id } : {}),
+        ...(b.template_id ? { template_id: b.template_id } : {}),
+        name: str(b.name),
+        icon: str(b.icon) || "🧑",
+        role: str(b.role),
+        gender: GENDERS.includes(b.gender) ? b.gender : "",
+        voice: VOICE_IDS.has(b.voice) ? b.voice : "",
+        description: str(b.description), authority: str(b.authority), tone: str(b.tone),
+        objectives: lines(b.objectives), concerns: lines(b.concerns),
+        decision_criteria: lines(b.decision_criteria), constraints: lines(b.constraints),
+        information_needs: lines(b.information_needs), evaluation_mode: lines(b.evaluation_mode),
+        knowledge: {
+            scope: lines(k.scope),
+            assets: Array.isArray(k.assets) ? k.assets.filter(a => a && a.label).map(a => ({ type: str(a.type) || "document", label: str(a.label) })) : [],
+            level: str(k.level),
+        },
+        example_questions: lines(b.example_questions),
     };
 }
 
-router.get("/scenarios/api/personas", async (_req, res) => {
-    res.json({ personas: await store.listPersonas() });
-});
-router.post("/scenarios/api/personas", json, async (req, res) => {
+// ---- Templates (biblioteca) ----
+router.get("/scenarios/api/templates", async (_req, res) => res.json({ templates: await store.listTemplates() }));
+router.post("/scenarios/api/templates", json, async (req, res) => {
     const err = validatePersona(req.body);
     if (err) return bad(res, err);
-    try { res.json({ persona: await store.savePersona(cleanPersona(req.body)) }); }
+    try { res.json({ template: await store.saveTemplate(cleanPersona(req.body)) }); }
     catch (e) { res.status(e.code === "NOT_FOUND" ? 404 : 500).json({ error: e.message }); }
 });
-router.delete("/scenarios/api/personas/:id", async (req, res) => {
-    // Bloqueia apagar persona referenciada por algum cenário.
-    const scenarios = await store.listScenarios();
-    const used = scenarios.filter(s => (s.participants || []).some(p => p.persona_id === req.params.id));
-    if (used.length) return bad(res, `persona em uso por: ${used.map(s => s.name).join(", ")}`);
-    await store.deletePersona(req.params.id);
-    res.json({ ok: true });
-});
+// Templates podem ser excluídos livremente: as personas do cenário são CÓPIAS,
+// então apagar um template não quebra cenário algum.
+router.delete("/scenarios/api/templates/:id", async (req, res) => { await store.deleteTemplate(req.params.id); res.json({ ok: true }); });
 
-// ---- Cenários ----
-async function validateScenario(b) {
+// ---- Cenário (personas escolhidas + interações ordenadas) ----
+function validateScenario(b) {
     if (!b || typeof b !== "object") return "cenário inválido";
-    if (typeof b.name !== "string" || !b.name.trim()) return "nome do cenário é obrigatório";
-    if (!OBJECTIVE_TYPES.includes(b.objective_type)) return "objetivo inválido";
-    if (!INTERACTION_MODES.includes(b.interaction_mode)) return "modo de interação inválido";
-    const parts = Array.isArray(b.participants) ? b.participants : [];
-    if (parts.length === 0) return "inclua ao menos uma persona";
-    const personas = await store.listPersonas();
-    const ids = new Set(personas.map(p => p.id));
-    for (const p of parts) {
-        if (!ids.has(p.persona_id)) return "participante referencia persona inexistente";
-        if (!PARTICIPANT_ROLES.includes(p.role)) return "papel de participante inválido";
+    if (!str(b.name)) return "nome do cenário é obrigatório";
+    const personas = Array.isArray(b.personas) ? b.personas : [];
+    for (const p of personas) {
+        const e = validatePersona(p);
+        if (e) return `persona do cenário: ${e}`;
+    }
+    const ids = new Set(personas.map(p => p.id).filter(Boolean));
+    const its = Array.isArray(b.interactions) ? b.interactions : [];
+    if (its.length === 0) return "inclua ao menos uma interação";
+    for (const it of its) {
+        if (!str(it.title)) return "toda interação precisa de um título";
+        if (!INTERACTION_KINDS.includes(it.kind)) return "tipo de interação inválido";
+        if (!OBJECTIVE_TYPES.includes(it.objective_type)) return `objetivo inválido na interação "${it.title}"`;
+        const parts = Array.isArray(it.participants) ? it.participants : [];
+        if (it.kind === "persona_exchange") {
+            if (parts.length !== 2) return `"${it.title}": persona↔persona precisa de exatamente 2 personas`;
+            if (parts[0].persona_id === parts[1].persona_id) return `"${it.title}": as duas personas devem ser diferentes`;
+        } else {
+            if (parts.length === 0) return `"${it.title}": inclua ao menos uma persona`;
+        }
+        for (const p of parts) {
+            if (!ids.has(p.persona_id)) return `"${it.title}": escolha personas do cenário`;
+            if (it.kind === "student" && !PARTICIPANT_ROLES.includes(p.role)) return `"${it.title}": papel inválido`;
+        }
     }
     return null;
 }
+function cleanInteraction(it, i) {
+    const parts = (it.participants || []).map(p => ({ persona_id: p.persona_id, role: PARTICIPANT_ROLES.includes(p.role) ? p.role : "questionamento" }));
+    return {
+        id: str(it.id) || `i_${i}_${randomUUID().slice(0, 6)}`,
+        title: str(it.title),
+        kind: it.kind,
+        objective_type: it.objective_type,
+        participants: parts,
+        opener_persona_id: it.opener_persona_id || parts[0]?.persona_id || null,
+        focus: it.kind === "persona_exchange" ? str(it.focus) : "",
+        instruction: str(it.instruction),
+        example_questions: lines(it.example_questions),
+    };
+}
 function cleanScenario(b) {
+    // pdf/coherence NÃO entram aqui — o merge no store preserva o que os
+    // endpoints de PDF gravaram.
+    const personas = (Array.isArray(b.personas) ? b.personas : []).map(p => {
+        const c = cleanPersona(p);
+        if (!c.id) c.id = cpId();
+        return c;
+    });
     return {
         ...(b.id ? { id: b.id } : {}),
-        name: b.name.trim(),
-        objective_type: b.objective_type,
-        context: typeof b.context === "string" ? b.context.trim() : "",
-        student_task: typeof b.student_task === "string" ? b.student_task.trim() : "",
-        interaction_mode: b.interaction_mode,
-        participants: b.participants.map(p => ({ persona_id: p.persona_id, role: p.role })),
-        persona_exchange: !!b.persona_exchange,
-        opener_persona_id: b.opener_persona_id || b.participants[0]?.persona_id || null,
+        name: str(b.name),
+        description: str(b.description),
+        personas,
+        interactions: (Array.isArray(b.interactions) ? b.interactions : []).map(cleanInteraction),
+    };
+}
+function personasById(scenario) {
+    const byId = {};
+    for (const p of scenario.personas || []) byId[p.id] = p;
+    return byId;
+}
+function enrich(scenario) {
+    const byId = personasById(scenario);
+    return {
+        ...scenario,
+        interactions: (scenario.interactions || []).map(it => ({
+            ...it,
+            participant_personas: (it.participants || []).map(p => ({ ...p, persona: byId[p.persona_id] || null })),
+        })),
     };
 }
 
 router.get("/scenarios/api/scenarios", async (_req, res) => {
-    const [scenarios, personas] = await Promise.all([store.listScenarios(), store.listPersonas()]);
-    const byId = new Map(personas.map(p => [p.id, p]));
-    // Enriquecimento para a UI: nomes/ícones das personas referenciadas.
-    const enriched = scenarios.map(s => ({
-        ...s,
-        participant_personas: (s.participants || []).map(p => ({ ...p, persona: byId.get(p.persona_id) || null })),
-    }));
-    res.json({ scenarios: enriched });
+    const scenarios = await store.listScenarios();
+    res.json({ scenarios: scenarios.map(enrich) });
 });
 router.post("/scenarios/api/scenarios", json, async (req, res) => {
-    const err = await validateScenario(req.body);
+    const err = validateScenario(req.body);
     if (err) return bad(res, err);
-    try { res.json({ scenario: await store.saveScenario(cleanScenario(req.body)) }); }
+    try { res.json({ scenario: enrich(await store.saveScenario(cleanScenario(req.body))) }); }
     catch (e) { res.status(e.code === "NOT_FOUND" ? 404 : 500).json({ error: e.message }); }
 });
-router.delete("/scenarios/api/scenarios/:id", async (req, res) => {
-    await store.deleteScenario(req.params.id);
-    res.json({ ok: true });
+router.delete("/scenarios/api/scenarios/:id", async (req, res) => { await store.deleteScenario(req.params.id); res.json({ ok: true }); });
+
+// ---- PDF (a posteriori) + avaliação de coerência (mock) ----
+router.post("/scenarios/api/scenarios/:id/pdf", json, async (req, res) => {
+    const s = await store.getScenario(req.params.id);
+    if (!s) return res.status(404).json({ error: "cenário não encontrado" });
+    const filename = str(req.body?.filename) || "enunciado.pdf";
+    const saved = await store.saveScenario({ id: s.id, pdf: { filename, uploaded_at: new Date().toISOString() }, coherence: null });
+    res.json({ scenario: enrich(saved) });
+});
+router.post("/scenarios/api/scenarios/:id/pdf/evaluate", async (req, res) => {
+    const s = await store.getScenario(req.params.id);
+    if (!s) return res.status(404).json({ error: "cenário não encontrado" });
+    if (!s.pdf) return bad(res, "anexe um PDF antes de avaliar");
+    const coherence = { ...evaluatePdfMock(s), evaluated_at: new Date().toISOString() };
+    const saved = await store.saveScenario({ id: s.id, coherence });
+    res.json({ scenario: enrich(saved), coherence });
 });
 
-// ---- Execução MOCK ----
-async function personasByIdFor(scenario) {
-    const personas = await store.listPersonas();
-    const byId = {};
-    for (const p of scenario.participants || []) {
-        const persona = personas.find(x => x.id === p.persona_id);
-        if (persona) byId[persona.id] = persona;
-    }
-    return byId;
-}
-
-// Inicia uma execução: cria o run e devolve os turnos de abertura.
+// ---- Execução MOCK (percorre as interações em ordem) ----
 router.post("/scenarios/api/run/:scenarioId/start", async (req, res) => {
     const scenario = await store.getScenario(req.params.scenarioId);
     if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
-    const byId = await personasByIdFor(scenario);
+    if (!(scenario.interactions || []).length) return bad(res, "cenário sem interações");
+    const byId = personasById(scenario);
     const run = await store.createRun(scenario.id);
-    run.transcript = openingTurns(scenario, byId);
+    run.interaction_index = 0;
+    run.transcript = [scenarioFrame(scenario), ...interactionStart(scenario.interactions[0], byId, 0, scenario.interactions.length)];
     await store.saveRun(run);
-    res.json({ run, scenario });
+    res.json({ run, scenario: enrich(scenario) });
 });
-
-// Turno do aluno → próximos turnos das personas (mock).
 router.post("/scenarios/api/run/:runId/turn", json, async (req, res) => {
     const run = await store.getRun(req.params.runId);
     if (!run) return res.status(404).json({ error: "execução não encontrada" });
-    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    const text = str(req.body?.text);
     if (!text) return bad(res, "mensagem vazia");
     const scenario = await store.getScenario(run.scenario_id);
     if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
-    const byId = await personasByIdFor(scenario);
+    const it = scenario.interactions[run.interaction_index];
+    if (!it || it.kind !== "student") return bad(res, "esta etapa não aceita resposta do aluno — avance");
+    const byId = personasById(scenario);
     run.transcript.push({ speaker: "student", kind: "student", text });
-    const replies = respond(scenario, byId, run.transcript, text);
-    run.transcript.push(...replies);
-    run.turn = (run.turn || 0) + 1;
+    run.transcript.push(...respond(it, byId, run.transcript, text));
     await store.saveRun(run);
-    res.json({ replies, run });
+    res.json({ run });
+});
+router.post("/scenarios/api/run/:runId/advance", async (req, res) => {
+    const run = await store.getRun(req.params.runId);
+    if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    const scenario = await store.getScenario(run.scenario_id);
+    if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
+    const total = scenario.interactions.length;
+    const next = (run.interaction_index ?? 0) + 1;
+    if (next >= total) {
+        run.transcript.push({ speaker: "system", kind: "scenario", text: "✓ Fim do cenário — todas as interações foram percorridas." });
+        run.interaction_index = total;
+        await store.saveRun(run);
+        return res.json({ run, done: true });
+    }
+    const byId = personasById(scenario);
+    run.interaction_index = next;
+    run.transcript.push(...interactionStart(scenario.interactions[next], byId, next, total));
+    await store.saveRun(run);
+    res.json({ run, done: false });
 });
 
 export default router;

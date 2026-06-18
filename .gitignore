@@ -9,3 +9,5 @@ data/works/
 tests/runs-text/
 commit-msg.txt
 data/scenarios/
+scenarios-dev.mjs
+.claude/launch.json

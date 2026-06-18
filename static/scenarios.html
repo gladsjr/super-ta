@@ -6,78 +6,109 @@
 <title>ORATIA — Estúdio de cenários</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
 <style>
-  .wrap { max-width: 980px; margin: 0 auto; padding: var(--sp-4); }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: var(--sp-4); }
   .head-row { display:flex; align-items:baseline; gap: var(--sp-3); flex-wrap:wrap; }
   .mock-tag { font-size: var(--fs-xs); color: var(--gold-700, #8a6d1a); background: var(--gold-100, #fbf1d6); border:1px solid var(--gold-300,#e6cf94); padding: 2px 8px; border-radius: 999px; }
-  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); }
-  .pcard, .scard { border:1px solid var(--ink-200); border-radius: var(--r-md,8px); padding: var(--sp-3); background: var(--bg-raised,#fff); display:flex; flex-direction:column; gap: var(--sp-2); }
-  .pcard .pc-head { display:flex; align-items:center; gap: var(--sp-2); }
-  .pc-icon { font-size: 1.6rem; }
-  .pc-name { font-weight:600; }
-  .pc-role { color: var(--ink-500); font-size: var(--fs-sm); }
-  .chips { display:flex; flex-wrap:wrap; gap: 4px; }
-  .chip { font-size: var(--fs-xs); background: var(--bg-muted,#f3f1ea); color: var(--ink-600); border-radius: 999px; padding: 2px 8px; }
-  .card-actions { display:flex; gap: var(--sp-2); margin-top:auto; }
-  .scard .s-parts { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-  .s-avatar { font-size:1.2rem; }
+  .seg { display:inline-flex; gap:4px; padding:4px; background: var(--bg-muted,#f1efe8); border:1px solid var(--ink-200,#d3d1c7); border-radius:999px; margin: var(--sp-3) 0 var(--sp-4); }
+  .seg-btn { border:none; background:transparent; padding:9px 20px; border-radius:999px; font-weight:600; font-size: var(--fs-md,15px); color: var(--ink-600,#5f5e5a); cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition: background .12s, color .12s; }
+  .seg-btn:hover { color: var(--ink-900,#1c1a17); }
+  .seg-btn.is-active { background: var(--ink-900,#1c1a17); color:#fff; }
+  .seg-count { font-size: var(--fs-xs); opacity:.7; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--sp-3); }
+  .pcard { border:1px solid var(--ink-200); border-radius: var(--r-md,8px); padding: var(--sp-3); background: var(--bg-raised,#fff); display:flex; flex-direction:column; gap: var(--sp-2); }
+  .pc-head { display:flex; align-items:center; gap: var(--sp-2); }
+  .pc-icon { font-size: 1.6rem; } .pc-name { font-weight:600; } .pc-role { color: var(--ink-500); font-size: var(--fs-sm); }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; } .chip { font-size: var(--fs-xs); background: var(--bg-muted,#f3f1ea); color: var(--ink-600); border-radius:999px; padding:2px 8px; }
+  .chip.voice { background: var(--accent-100,#d8efe9); color: var(--ink-700); }
+  .card-actions { display:flex; gap: var(--sp-2); margin-top:auto; flex-wrap:wrap; }
   .overlay { position:fixed; inset:0; background:rgba(20,18,12,.45); display:flex; align-items:flex-start; justify-content:center; padding: var(--sp-4); overflow:auto; z-index:50; }
   .overlay.hidden { display:none; }
-  .modal { background: var(--bg-raised,#fff); border-radius: var(--r-md,10px); max-width: 720px; width:100%; padding: var(--sp-4); margin-top: var(--sp-4); }
+  .modal { background: var(--bg-raised,#fff); border-radius: var(--r-md,10px); max-width: 760px; width:100%; padding: var(--sp-4); margin: var(--sp-4) 0; }
   .modal h3 { margin: 0 0 var(--sp-3); }
-  .field { margin-bottom: var(--sp-3); }
-  .field > label { display:block; font-weight:600; font-size: var(--fs-sm); margin-bottom: 4px; }
-  .field .hint { font-weight:400; color: var(--ink-500); }
-  .part-row { display:flex; gap: var(--sp-2); align-items:center; margin-bottom: var(--sp-2); flex-wrap:wrap; }
-  .part-row select { flex:1; min-width:140px; }
-  /* Runner */
-  .transcript { display:flex; flex-direction:column; gap: var(--sp-2); max-height: 52vh; overflow:auto; padding: var(--sp-2); background: var(--bg-muted,#f7f5ef); border-radius: var(--r-sm,6px); }
-  .t-frame { font-size: var(--fs-sm); color: var(--ink-600); background: var(--bg-raised,#fff); border:1px dashed var(--ink-300); border-radius: var(--r-sm,6px); padding: var(--sp-2); white-space: pre-wrap; }
-  .bubble { padding: var(--sp-2) var(--sp-3); border-radius: 12px; max-width: 85%; }
+  .field { margin-bottom: var(--sp-3); } .field > label { display:block; font-weight:600; font-size: var(--fs-sm); margin-bottom:4px; } .field .hint { font-weight:400; color: var(--ink-500); }
+  .row2 { display:flex; gap: var(--sp-3); flex-wrap:wrap; }
+  .advanced.hidden { display:none; }
+  #studio-pane { border:1px solid var(--ink-200); border-radius: var(--r-md,8px); padding: var(--sp-4); background: var(--bg-raised,#fff); }
+  .section-title { font-weight:700; font-size: var(--fs-md); margin: var(--sp-4) 0 var(--sp-2); padding-top: var(--sp-3); border-top:1px solid var(--ink-100,#eee); }
+  .section-title:first-child { border-top:none; padding-top:0; margin-top:0; }
+  /* personas do cenário */
+  .cp-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: var(--sp-2); margin-bottom: var(--sp-2); }
+  .cp-card { border:1px solid var(--ink-200); border-radius: var(--r-sm,6px); padding: var(--sp-2) var(--sp-3); background: var(--bg-muted,#faf8f2); display:flex; flex-direction:column; gap:4px; }
+  .cp-card .pc-name { font-size: var(--fs-sm); } .cp-card .cp-actions { display:flex; gap:6px; margin-top:4px; }
+  .cp-empty { color: var(--ink-500); font-size: var(--fs-sm); padding: var(--sp-2) 0; }
+  /* interações colapsáveis */
+  .it-card { border:1px solid var(--ink-200); border-left:3px solid var(--ink-900,#1c1a17); border-radius: var(--r-sm,6px); padding: var(--sp-2) var(--sp-3) var(--sp-3); margin-bottom: var(--sp-2); background: var(--bg-muted,#faf8f2); }
+  .it-card.ex { border-left-color: var(--gold-500,#caa64a); }
+  .it-head { display:flex; gap: var(--sp-2); align-items:center; }
+  .it-head .it-n { font-weight:700; color: var(--ink-500); min-width:18px; }
+  .it-collapse { border:none; background:transparent; cursor:pointer; font-size: 1rem; color: var(--ink-500); padding:2px 6px; }
+  .it-summary { font-size: var(--fs-xs); color: var(--ink-500); margin-top:4px; display:none; }
+  .it-card.collapsed .it-body { display:none; }
+  .it-card.collapsed .it-summary { display:block; }
+  .it-body { margin-top: var(--sp-2); }
+  .part-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+  .part-row select { flex:1; min-width:120px; }
+  .icon-btn { border:1px solid var(--ink-200); background:var(--bg-raised,#fff); border-radius:6px; padding:2px 8px; cursor:pointer; font-size: var(--fs-sm); line-height:1.6; }
+  .it-add-part { margin-top:4px; white-space:nowrap; }
+  .pdf-box { border:1px dashed var(--ink-300); border-radius: var(--r-sm,6px); padding: var(--sp-3); background: var(--bg-muted,#faf8f2); }
+  /* assistente (stub) */
+  .assist-stub { border:1px dashed var(--accent-300,#9ed8cc); border-radius: var(--r-md,8px); padding: var(--sp-3); background: var(--accent-50,#eef8f5); }
+  .assist-head { font-weight:600; display:flex; gap: var(--sp-2); align-items:center; margin-bottom:4px; }
+  .assist-fake { display:flex; gap: var(--sp-2); margin-top: var(--sp-2); } .assist-fake input { flex:1; }
+  /* barra de ação global */
+  #studio-actions { position: sticky; bottom: 0; background: var(--bg-raised,#fff); border-top:1px solid var(--ink-100,#eee); padding: var(--sp-3) 0; display:flex; gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); }
+  /* runner como página do aluno */
+  #scenario-runner { border:1px solid var(--ink-200); border-radius: var(--r-md,8px); padding: var(--sp-4); background: var(--bg-raised,#fff); }
+  .runner-top { display:flex; align-items:center; gap: var(--sp-3); flex-wrap:wrap; margin-bottom: var(--sp-3); }
+  .runner-top .who { color: var(--ink-500); font-size: var(--fs-sm); }
+  .rn-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom: var(--sp-3); }
+  .rn-tab { font-size: var(--fs-xs); padding:6px 12px; border-radius:999px; border:1px solid var(--ink-200); color: var(--ink-600); background: var(--bg-raised,#fff); cursor:pointer; }
+  .rn-tab.active { background: var(--ink-900,#1c1a17); color:#fff; border-color: var(--ink-900,#1c1a17); }
+  .rn-tab.done { color: var(--ink-700); border-color: var(--accent-300,#9ed8cc); }
+  .rn-tab.locked { color: var(--ink-300,#bbb); cursor:not-allowed; background: var(--bg-muted,#f4f2ec); }
+  .transcript { display:flex; flex-direction:column; gap: var(--sp-2); padding: var(--sp-2); background: var(--bg-muted,#f7f5ef); border-radius: var(--r-sm,6px); }
+  .t-scenario { font-weight:600; background: var(--bg-raised,#fff); border:1px solid var(--ink-200); border-radius: var(--r-sm,6px); padding: var(--sp-2); white-space:pre-wrap; }
+  .t-interaction { font-size: var(--fs-sm); color: var(--ink-700); background: var(--gold-50,#fdf8ec); border:1px solid var(--gold-300,#e6cf94); border-radius: var(--r-sm,6px); padding: var(--sp-2); }
+  .t-interaction .meta { color: var(--ink-500); font-size: var(--fs-xs); margin-top:2px; }
+  .bubble { padding: var(--sp-2) var(--sp-3); border-radius:12px; max-width:85%; } .b-name { font-size: var(--fs-xs); color: var(--ink-500); margin-bottom:2px; }
   .b-persona { background: var(--bg-raised,#fff); border:1px solid var(--ink-200); align-self:flex-start; }
   .b-student { background: var(--accent-100, #d8efe9); align-self:flex-end; }
-  .b-aside { align-self:center; max-width: 92%; font-size: var(--fs-sm); font-style: italic; color: var(--ink-600); background: var(--gold-50,#fdf8ec); border:1px dashed var(--gold-300,#e6cf94); border-radius: 10px; }
-  .b-name { font-size: var(--fs-xs); color: var(--ink-500); margin-bottom: 2px; }
-  .runner-input { display:flex; gap: var(--sp-2); margin-top: var(--sp-3); }
-  .runner-input textarea { flex:1; }
+  .b-aside { align-self:center; max-width:92%; font-size: var(--fs-sm); font-style:italic; color: var(--ink-600); background: var(--gold-50,#fdf8ec); border:1px dashed var(--gold-300,#e6cf94); border-radius:10px; }
+  .runner-input { display:flex; gap: var(--sp-2); margin-top: var(--sp-3); } .runner-input textarea { flex:1; }
+  .rn-controls { display:flex; gap: var(--sp-2); margin-top: var(--sp-2); align-items:center; flex-wrap:wrap; }
+  .prof-ctl { background: var(--gold-50,#fdf8ec); border:1px dashed var(--gold-300,#e6cf94); border-radius: var(--r-sm,6px); padding:6px 10px; font-size: var(--fs-sm); }
   .empty { color: var(--ink-500); padding: var(--sp-4); text-align:center; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="head-row">
-    <h1 style="margin:0">Estúdio de cenários</h1>
-    <span class="mock-tag">protótipo · mock (sem custo)</span>
-  </div>
-  <p class="card-sub">Defina <strong>personas</strong> (personagens reutilizáveis) e monte <strong>cenários</strong> que as combinam — com objetivo, papéis, interação síncrona ou assíncrona e até personas conversando entre si. Teste tudo aqui mesmo, sem gastar tokens.</p>
+  <div class="head-row"><h1 style="margin:0">Estúdio de cenários</h1><span class="mock-tag">protótipo · mock (sem custo)</span></div>
+  <p class="card-sub">Três passos, na ordem natural: <strong>Cenário</strong> (explicação geral + PDF) → <strong>Personas</strong> (biblioteca de templates e as personas escolhidas) → <strong>Interações</strong> (a sequência ordenada que o aluno percorre, referenciando as personas). Tudo em mock, sem gastar tokens.</p>
 
-  <div class="tabs" role="tablist">
-    <button class="tab-btn is-active" data-tab="scenarios" role="tab">Cenários</button>
-    <button class="tab-btn" data-tab="personas" role="tab">Personas</button>
+  <div class="seg" id="studio-seg" role="tablist">
+    <button class="seg-btn is-active" data-tab="cenario" role="tab">🎬 Cenário</button>
+    <button class="seg-btn" data-tab="personas" role="tab">🎭 Personas <span class="seg-count" id="seg-count-personas"></span></button>
+    <button class="seg-btn" data-tab="interacoes" role="tab">↔️ Interações <span class="seg-count" id="seg-count-interacoes"></span></button>
   </div>
 
-  <section id="tab-scenarios">
-    <div class="row" style="margin-bottom: var(--sp-3)">
-      <button class="btn btn-primary" id="new-scenario">+ Novo cenário</button>
-    </div>
-    <div class="grid" id="scenarios-grid"></div>
-  </section>
+  <div id="studio-pane"></div>
+  <div id="studio-actions">
+    <button class="btn btn-primary" id="st-save">Salvar cenário</button>
+    <button class="btn" id="st-test">▶ Testar (mock)</button>
+    <span class="hint" id="st-msg"></span>
+  </div>
 
-  <section id="tab-personas" class="hidden">
-    <div class="row" style="margin-bottom: var(--sp-3)">
-      <button class="btn btn-primary" id="new-persona">+ Nova persona</button>
-    </div>
-    <div class="grid" id="personas-grid"></div>
-  </section>
+  <div id="scenario-runner" class="hidden"></div>
 </div>
 
 <div class="overlay hidden" id="persona-modal"><div class="modal" id="persona-modal-body"></div></div>
-<div class="overlay hidden" id="scenario-modal"><div class="modal" id="scenario-modal-body"></div></div>
-<div class="overlay hidden" id="runner-modal"><div class="modal" id="runner-modal-body" style="max-width:640px"></div></div>
 
 <script>
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let META = { objective_types: [], participant_roles: [], interaction_modes: [] };
-let PERSONAS = [], SCENARIOS = [];
+const val = id => document.getElementById(id).value.trim();
+const show = (id, on) => document.getElementById(id).classList.toggle('hidden', !on);
+let META = { objective_types:[], participant_roles:[], interaction_kinds:[], genders:[], voices:[] };
+let TEMPLATES = [], SCENARIO = null, CURRENT_TAB = 'cenario';
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -85,197 +116,399 @@ async function api(method, path, body) {
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 }
-const objLabel = v => (META.objective_types.find(o => o.value === v)?.label) || v;
-const roleLabel = v => (META.participant_roles.find(o => o.value === v)?.label) || v;
-const personaById = id => PERSONAS.find(p => p.id === id);
+const objLabel = v => META.objective_types.find(o=>o.value===v)?.label || v;
+const kindLabel = v => META.interaction_kinds.find(o=>o.value===v)?.label || v;
+const voiceLabel = v => META.voices.find(o=>o.value===v)?.label || v;
+const templateById = id => TEMPLATES.find(t => t.id === id);
 
 async function loadAll() {
-  META = await api('GET', '/scenarios/api/meta');
-  PERSONAS = (await api('GET', '/scenarios/api/personas')).personas;
-  SCENARIOS = (await api('GET', '/scenarios/api/scenarios')).scenarios;
-  renderPersonas(); renderScenarios();
+  META = await api('GET','/scenarios/api/meta');
+  TEMPLATES = (await api('GET','/scenarios/api/templates')).templates;
+  SCENARIO = (await api('GET','/scenarios/api/scenarios')).scenarios[0] || { name:'', description:'', personas:[], interactions:[] };
+  renderTab('cenario'); updateCounts();
+}
+function updateCounts() {
+  const np = SCENARIO?.personas?.length || 0, ni = SCENARIO?.interactions?.length || 0;
+  document.getElementById('seg-count-personas').textContent = np ? `· ${np}` : '';
+  document.getElementById('seg-count-interacoes').textContent = ni ? `· ${ni}` : '';
 }
 
-// ---- Tabs ----
-document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => {
-  document.querySelectorAll('.tab-btn').forEach(x => x.classList.toggle('is-active', x === b));
-  document.getElementById('tab-scenarios').classList.toggle('hidden', b.dataset.tab !== 'scenarios');
-  document.getElementById('tab-personas').classList.toggle('hidden', b.dataset.tab !== 'personas');
-});
+// ===== navegação por abas (mantém SCENARIO em memória; salva edições do DOM ao trocar) =====
+function harvestCurrent() {
+  if (document.getElementById('sf-name')) { SCENARIO.name = val('sf-name'); SCENARIO.description = val('sf-description'); }
+  if (document.getElementById('sf-interactions')) { SCENARIO.interactions = harvestInteractions(); }
+}
+function renderTab(name) {
+  harvestCurrent();
+  CURRENT_TAB = name;
+  document.querySelectorAll('#studio-seg .seg-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab===name));
+  if (name==='personas') renderPersonasPane();
+  else if (name==='interacoes') renderInteracoesPane();
+  else renderCenarioPane();
+}
+function renderCurrent() {
+  if (CURRENT_TAB==='personas') renderPersonasPane();
+  else if (CURRENT_TAB==='interacoes') renderInteracoesPane();
+  else renderCenarioPane();
+}
+document.querySelectorAll('#studio-seg .seg-btn').forEach(b => b.onclick = () => renderTab(b.dataset.tab));
 
-// ---- Personas ----
-function renderPersonas() {
-  const el = document.getElementById('personas-grid');
-  if (!PERSONAS.length) { el.innerHTML = '<div class="empty">Nenhuma persona ainda. Crie a primeira.</div>'; return; }
-  el.innerHTML = PERSONAS.map(p => `
-    <div class="pcard">
-      <div class="pc-head"><span class="pc-icon">${esc(p.icon)}</span><div><div class="pc-name">${esc(p.name)}</div><div class="pc-role">${esc(p.role)}</div></div></div>
-      ${p.tone ? `<div class="pc-role">${esc(p.tone)}</div>` : ''}
-      ${(p.objectives||[]).length ? `<div class="chips">${p.objectives.slice(0,3).map(o => `<span class="chip">${esc(o)}</span>`).join('')}</div>` : ''}
-      <div class="card-actions"><button class="btn btn-sm" data-edit="${p.id}">Editar</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Excluir</button></div>
-    </div>`).join('');
-  el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPersonaForm(personaById(b.dataset.edit)));
-  el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delPersona(b.dataset.del));
-}
-function linesField(label, hint, val) {
-  return `<div class="field"><label>${label} <span class="hint">${hint}</span></label><textarea class="textarea" rows="3" data-lines>${esc((val||[]).join('\n'))}</textarea></div>`;
-}
-function openPersonaForm(p) {
-  p = p || {};
-  document.getElementById('persona-modal-body').innerHTML = `
-    <h3>${p.id ? 'Editar persona' : 'Nova persona'}</h3>
-    <div class="row" style="gap:var(--sp-3)">
-      <div class="field" style="width:90px"><label>Ícone</label><input class="input" id="pf-icon" value="${esc(p.icon||'🧑')}" maxlength="4"/></div>
-      <div class="field" style="flex:1"><label>Nome</label><input class="input" id="pf-name" value="${esc(p.name||'')}" placeholder="Ex.: Dra. Helena"/></div>
-    </div>
-    <div class="field"><label>Papel <span class="hint">quem é, de uma frase</span></label><input class="input" id="pf-role" value="${esc(p.role||'')}" placeholder="Ex.: investidor anjo cético"/></div>
-    <div class="field"><label>Tom / estilo <span class="hint">como fala</span></label><input class="input" id="pf-tone" value="${esc(p.tone||'')}" placeholder="Ex.: direto, foca em números e risco"/></div>
-    <div id="pf-objectives">${linesField('Objetivos', 'um por linha — o que a persona quer descobrir', p.objectives)}</div>
-    <div id="pf-concerns">${linesField('Preocupações', 'um por linha — o que a deixa desconfiada', p.concerns)}</div>
-    <div class="field"><label>O que ela sabe <span class="hint">contexto/material a que tem acesso</span></label><textarea class="textarea" rows="2" id="pf-knowledge">${esc(p.knowledge||'')}</textarea></div>
-    <div class="row"><button class="btn btn-primary" id="pf-save">Salvar persona</button><button class="btn" id="pf-cancel">Cancelar</button><span class="hint" id="pf-msg"></span></div>`;
-  show('persona-modal', true);
-  document.getElementById('pf-cancel').onclick = () => show('persona-modal', false);
-  document.getElementById('pf-save').onclick = async () => {
-    const lines = sel => document.querySelector(`#${sel} [data-lines]`).value.split('\n').map(s=>s.trim()).filter(Boolean);
-    const body = {
-      ...(p.id ? { id: p.id } : {}),
-      icon: val('pf-icon'), name: val('pf-name'), role: val('pf-role'), tone: val('pf-tone'),
-      objectives: lines('pf-objectives'), concerns: lines('pf-concerns'), knowledge: val('pf-knowledge'),
-    };
-    try { await api('POST', '/scenarios/api/personas', body); show('persona-modal', false); await loadAll(); }
-    catch (e) { document.getElementById('pf-msg').textContent = e.message; }
-  };
-}
-async function delPersona(id) {
-  if (!confirm('Excluir esta persona?')) return;
-  try { await api('DELETE', '/scenarios/api/personas/' + id); await loadAll(); }
-  catch (e) { alert(e.message); }
+// ===== option helpers =====
+const objOpts = sel => META.objective_types.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
+const roleOpts = sel => META.participant_roles.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
+const kindOpts = sel => META.interaction_kinds.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
+const genderOpts = sel => `<option value="">—</option>` + META.genders.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
+const voiceOpts = sel => `<option value="">— sem voz —</option>` + META.voices.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
+const scenPersonaOpts = sel => (SCENARIO.personas||[]).map(p => `<option value="${p.id}" ${sel===p.id?'selected':''}>${esc(p.icon)} ${esc(p.name)}</option>`).join('');
+function linesArea(id, label, hint, v) {
+  return `<div class="field"><label>${label} <span class="hint">${hint}</span></label><textarea class="textarea" rows="2" id="${id}">${esc((v||[]).join('\n'))}</textarea></div>`;
 }
 
-// ---- Cenários ----
-function renderScenarios() {
-  const el = document.getElementById('scenarios-grid');
-  if (!SCENARIOS.length) { el.innerHTML = '<div class="empty">Nenhum cenário ainda. Crie o primeiro.</div>'; return; }
-  el.innerHTML = SCENARIOS.map(s => {
-    const avatars = (s.participant_personas||[]).map(pp => `<span class="s-avatar" title="${esc(pp.persona?.name||'')} — ${esc(roleLabel(pp.role))}">${esc(pp.persona?.icon||'❓')}</span>`).join('');
-    return `<div class="scard">
-      <div class="row" style="justify-content:space-between"><span class="pc-name">${esc(s.name)}</span><span class="badge badge-accent">${esc(objLabel(s.objective_type))}</span></div>
-      <div class="s-parts">${avatars}<span class="chip">${s.interaction_mode === 'sincrono' ? 'síncrono' : 'assíncrono'}</span>${s.persona_exchange ? '<span class="chip">personas conversam</span>' : ''}</div>
-      ${s.context ? `<div class="pc-role" style="white-space:normal">${esc(s.context.slice(0,120))}${s.context.length>120?'…':''}</div>` : ''}
-      <div class="card-actions"><button class="btn btn-primary btn-sm" data-run="${s.id}">Testar (mock)</button><button class="btn btn-sm" data-edit="${s.id}">Editar</button><button class="btn btn-ghost btn-sm" data-del="${s.id}">Excluir</button></div>
+// ============ ABA 1 — CENÁRIO (descrição geral + PDF + assistente) ============
+function renderCenarioPane() {
+  const s = SCENARIO; const editing = !!s.id;
+  document.getElementById('studio-pane').innerHTML = `
+    <div class="section-title">Cenário</div>
+    <div class="field"><label>Nome do cenário</label><input class="input" id="sf-name" value="${esc(s.name||'')}" placeholder="Ex.: Banca de investidores"/></div>
+    <div class="field"><label>Explicação geral <span class="hint">o que o cenário representa — é o que o enunciado (PDF) detalha ao aluno</span></label><textarea class="textarea" id="sf-description" rows="4">${esc(s.description||'')}</textarea></div>
+
+    <div class="section-title">Enunciado (PDF)</div>
+    <div class="pdf-box" id="sf-pdf-box">${editing ? pdfBoxHtml(s) : '<span class="hint">Salve o cenário (barra abaixo) para anexar e avaliar o PDF.</span>'}</div>
+
+    <div class="section-title">Assistente de configuração</div>
+    <div class="assist-stub">
+      <div class="assist-head">🤖 Assistente do professor <span class="mock-tag">em breve</span></div>
+      <p class="hint" style="margin:0">Aqui o professor poderá conversar com o assistente para montar cenário, personas e interações em linguagem natural.</p>
+      <div class="assist-fake"><input class="input" placeholder="Ex.: crie uma banca com dois investidores céticos…" disabled/><button class="btn btn-sm" disabled>Enviar</button></div>
     </div>`;
-  }).join('');
-  el.querySelectorAll('[data-run]').forEach(b => b.onclick = () => openRunner(b.dataset.run));
-  el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openScenarioForm(SCENARIOS.find(s=>s.id===b.dataset.edit)));
-  el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delScenario(b.dataset.del));
-}
-function partRow(part) {
-  const opts = PERSONAS.map(p => `<option value="${p.id}" ${part && part.persona_id===p.id?'selected':''}>${esc(p.icon)} ${esc(p.name)}</option>`).join('');
-  const roles = META.participant_roles.map(r => `<option value="${r.value}" ${part && part.role===r.value?'selected':''}>${esc(r.label)}</option>`).join('');
-  return `<div class="part-row"><select class="select pr-persona">${opts}</select><select class="select pr-role">${roles}</select><button class="btn btn-ghost btn-sm pr-del" type="button">remover</button></div>`;
-}
-function openScenarioForm(s) {
-  s = s || {};
-  if (!PERSONAS.length) { alert('Crie ao menos uma persona antes de montar um cenário.'); return; }
-  const objOpts = META.objective_types.map(o => `<option value="${o.value}" ${s.objective_type===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
-  const modeRadios = META.interaction_modes.map(m => `<label style="display:inline-flex;gap:6px;align-items:center;margin-right:var(--sp-3)"><input type="radio" name="sf-mode" value="${m.value}" ${(s.interaction_mode||'sincrono')===m.value?'checked':''}/> ${esc(m.label)}</label>`).join('');
-  const parts = (s.participants && s.participants.length) ? s.participants : [{ persona_id: PERSONAS[0].id, role: 'questionamento' }];
-  document.getElementById('scenario-modal-body').innerHTML = `
-    <h3>${s.id ? 'Editar cenário' : 'Novo cenário'}</h3>
-    <div class="field"><label>Nome</label><input class="input" id="sf-name" value="${esc(s.name||'')}" placeholder="Ex.: Pitch para investidores"/></div>
-    <div class="field"><label>Objetivo</label><select class="select" id="sf-objective">${objOpts}</select></div>
-    <div class="field"><label>Modo de interação</label><div>${modeRadios}</div></div>
-    <div class="field"><label>Contexto <span class="hint">a situação do encontro</span></label><textarea class="textarea" rows="2" id="sf-context">${esc(s.context||'')}</textarea></div>
-    <div class="field"><label>Tarefa do aluno <span class="hint">o que ele deve fazer</span></label><textarea class="textarea" rows="2" id="sf-task">${esc(s.student_task||'')}</textarea></div>
-    <div class="field"><label>Participantes <span class="hint">personas e seus papéis neste cenário</span></label>
-      <div id="sf-parts">${parts.map(partRow).join('')}</div>
-      <button class="btn btn-sm" id="sf-add-part" type="button">+ adicionar participante</button>
-    </div>
-    <div class="field"><label>Quem abre</label><select class="select" id="sf-opener"></select></div>
-    <label class="create-test" style="margin-bottom:var(--sp-3)"><input type="checkbox" id="sf-exchange" ${s.persona_exchange?'checked':''}/> Permitir que as personas <strong>conversem entre si</strong> sobre o aluno (precisa de 2+ personas)</label>
-    <div class="row"><button class="btn btn-primary" id="sf-save">Salvar cenário</button><button class="btn" id="sf-cancel">Cancelar</button><span class="hint" id="sf-msg"></span></div>`;
-  show('scenario-modal', true);
-  const partsEl = document.getElementById('sf-parts');
-  const refreshOpener = () => {
-    const sel = document.getElementById('sf-opener');
-    const chosen = [...partsEl.querySelectorAll('.pr-persona')].map(x => x.value);
-    sel.innerHTML = chosen.map(id => { const p = personaById(id); return `<option value="${id}">${esc(p?.icon||'')} ${esc(p?.name||id)}</option>`; }).join('');
-    if (s.opener_persona_id && chosen.includes(s.opener_persona_id)) sel.value = s.opener_persona_id;
-  };
-  partsEl.addEventListener('change', refreshOpener);
-  partsEl.addEventListener('click', e => { if (e.target.classList.contains('pr-del')) { if (partsEl.children.length>1) e.target.closest('.part-row').remove(); refreshOpener(); } });
-  document.getElementById('sf-add-part').onclick = () => { partsEl.insertAdjacentHTML('beforeend', partRow(null)); refreshOpener(); };
-  document.getElementById('sf-cancel').onclick = () => show('scenario-modal', false);
-  refreshOpener();
-  document.getElementById('sf-save').onclick = async () => {
-    const participants = [...partsEl.querySelectorAll('.part-row')].map(r => ({ persona_id: r.querySelector('.pr-persona').value, role: r.querySelector('.pr-role').value }));
-    const body = {
-      ...(s.id ? { id: s.id } : {}),
-      name: val('sf-name'), objective_type: document.getElementById('sf-objective').value,
-      interaction_mode: document.querySelector('input[name="sf-mode"]:checked')?.value || 'sincrono',
-      context: val('sf-context'), student_task: val('sf-task'),
-      participants, persona_exchange: document.getElementById('sf-exchange').checked,
-      opener_persona_id: document.getElementById('sf-opener').value,
-    };
-    try { await api('POST', '/scenarios/api/scenarios', body); show('scenario-modal', false); await loadAll(); }
-    catch (e) { document.getElementById('sf-msg').textContent = e.message; }
-  };
-}
-async function delScenario(id) {
-  if (!confirm('Excluir este cenário?')) return;
-  try { await api('DELETE', '/scenarios/api/scenarios/' + id); await loadAll(); }
-  catch (e) { alert(e.message); }
+  if (editing) wirePdfBox(s);
 }
 
-// ---- Runner (mock) ----
-let RUN = null, RUN_ASYNC = false;
-async function openRunner(scenarioId) {
-  document.getElementById('runner-modal-body').innerHTML = `<h3>Testar cenário <span class="mock-tag">mock</span></h3><div class="transcript" id="rn-transcript"></div>
-    <div class="runner-input"><textarea class="textarea" id="rn-input" rows="2" placeholder="Responda como o aluno…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
-    <div class="row" style="margin-top:var(--sp-2)"><button class="btn btn-ghost btn-sm" id="rn-close">Fechar</button><span class="hint" id="rn-hint"></span></div>`;
-  show('runner-modal', true);
-  document.getElementById('rn-close').onclick = () => show('runner-modal', false);
-  document.getElementById('rn-send').onclick = sendTurn;
-  document.getElementById('rn-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); } });
+// ============ ABA 2 — PERSONAS (escolhidas no topo + biblioteca de templates) ============
+function cpCardHtml(p, i) {
+  return `<div class="cp-card">
+    <div class="pc-head"><span>${esc(p.icon)}</span><div><div class="pc-name">${esc(p.name)}</div><div class="pc-role">${esc(p.role)}</div></div></div>
+    <div class="chips">${p.voice?`<span class="chip voice">🔊 ${esc((voiceLabel(p.voice)||'').split(' —')[0])}</span>`:''}${p.template_id?`<span class="chip">de template</span>`:''}</div>
+    <div class="cp-actions"><button class="btn btn-sm" data-cpedit="${i}">Editar</button><button class="btn btn-ghost btn-sm" data-cpdel="${i}">Remover</button></div>
+  </div>`;
+}
+function templateCardHtml(p) {
+  return `<div class="pcard">
+    <div class="pc-head"><span class="pc-icon">${esc(p.icon)}</span><div><div class="pc-name">${esc(p.name)}</div><div class="pc-role">${esc(p.role)}</div></div></div>
+    <div class="chips">${p.gender?`<span class="chip">${esc(p.gender)}</span>`:''}${p.voice?`<span class="chip voice">🔊 ${esc((voiceLabel(p.voice)||'').split(' —')[0])}</span>`:''}</div>
+    ${(p.objectives||[]).length?`<div class="chips">${p.objectives.slice(0,2).map(o=>`<span class="chip">${esc(o)}</span>`).join('')}</div>`:''}
+    <div class="card-actions"><button class="btn btn-primary btn-sm" data-use="${p.id}">+ Usar no cenário</button><button class="btn btn-sm" data-edit="${p.id}">Editar</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Excluir</button></div>
+  </div>`;
+}
+function renderPersonasPane() {
+  const sel = SCENARIO?.personas || [];
+  const selHtml = sel.length
+    ? `<div class="cp-grid">${sel.map(cpCardHtml).join('')}</div>`
+    : `<div class="cp-empty">Nenhuma persona no cenário ainda. Use um template abaixo (“+ Usar no cenário”) ou crie em branco.</div>`;
+  document.getElementById('studio-pane').innerHTML = `
+    <div class="section-title">Personas do cenário <span class="hint" style="font-weight:400">cópias editáveis — as interações escolhem entre estas</span></div>
+    ${selHtml}
+    <div class="row" style="margin-top:var(--sp-2)"><button class="btn btn-sm" id="pp-add-blank" type="button">+ persona em branco</button></div>
+
+    <div class="section-title">Templates (biblioteca) <span class="hint" style="font-weight:400">reutilizáveis, com voz e gênero (vão para o YAML) — copie ao cenário</span></div>
+    <div class="row" style="margin-bottom:var(--sp-2)"><button class="btn btn-sm" id="pp-new-template" type="button">+ Novo template</button></div>
+    <div class="grid" id="pp-templates">${TEMPLATES.length ? TEMPLATES.map(templateCardHtml).join('') : '<div class="empty">Nenhum template ainda.</div>'}</div>`;
+  const pane = document.getElementById('studio-pane');
+  pane.querySelectorAll('[data-cpedit]').forEach(b=>b.onclick=()=>openPersonaEditor(SCENARIO.personas[+b.dataset.cpedit], 'scenario', +b.dataset.cpedit));
+  pane.querySelectorAll('[data-cpdel]').forEach(b=>b.onclick=()=>removeScenarioPersona(+b.dataset.cpdel));
+  document.getElementById('pp-add-blank').onclick = () => openPersonaEditor(null, 'scenario', null);
+  document.getElementById('pp-new-template').onclick = () => openPersonaEditor(null, 'template');
+  pane.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>useTemplate(b.dataset.use));
+  pane.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openPersonaEditor(templateById(b.dataset.edit), 'template'));
+  pane.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delTemplate(b.dataset.del));
+}
+function useTemplate(id) {
+  const t = templateById(id); if (!t) return;
+  SCENARIO.personas = SCENARIO.personas || [];
+  SCENARIO.personas.push({ ...t, id:'cp_local_'+Math.abs(Date.now()%1e7), template_id:t.id });
+  updateCounts(); renderPersonasPane();
+}
+function removeScenarioPersona(i) {
+  const pid = SCENARIO.personas[i]?.id;
+  const used = (SCENARIO.interactions||[]).filter(it => (it.participants||[]).some(p=>p.persona_id===pid)).map(it=>it.title||'(sem título)');
+  if (used.length) { alert('Esta persona é usada por: '+used.join(', ')+'. Remova-a dessas interações primeiro (aba Interações).'); return; }
+  SCENARIO.personas.splice(i,1); updateCounts(); renderPersonasPane();
+}
+async function delTemplate(id){ if(!confirm('Excluir este template da biblioteca? (As personas já copiadas em cenários não são afetadas.)'))return; try{await api('DELETE','/scenarios/api/templates/'+id); TEMPLATES=(await api('GET','/scenarios/api/templates')).templates; renderPersonasPane();}catch(e){alert(e.message);} }
+
+// ============ EDITOR DE PERSONA (template OU persona-do-cenário) ============
+function openPersonaEditor(persona, target, index) {
+  const editing = !!(persona && (persona.id || index!=null));
+  const isTemplate = target === 'template';
+  persona = persona || {};
+  const k = persona.knowledge || {};
+  const newTemplate = isTemplate && !persona.id;
+  const tmplPicker = newTemplate ? `<div class="field"><label>Começar de outro template <span class="hint">(opcional — copia os campos)</span></label>
+     <select class="select" id="pf-template"><option value="">— em branco —</option>${TEMPLATES.map(x=>`<option value="${x.id}">${esc(x.icon)} ${esc(x.name)}</option>`).join('')}</select></div>` : '';
+  const title = isTemplate ? (editing?'Editar template':'Novo template') : (editing?'Editar persona do cenário':'Nova persona do cenário');
+  document.getElementById('persona-modal-body').innerHTML = `
+    <h3>${title}</h3>
+    ${!isTemplate ? '<p class="hint">Esta é uma cópia no cenário — editá-la não altera o template de origem.</p>' : ''}
+    ${tmplPicker}
+    <div class="row2"><div class="field" style="width:90px"><label>Ícone</label><input class="input" id="pf-icon" value="${esc(persona.icon||'🧑')}" maxlength="4"/></div>
+      <div class="field" style="flex:1"><label>Nome</label><input class="input" id="pf-name" value="${esc(persona.name||'')}" placeholder="Ex.: Dra. Helena"/></div></div>
+    <div class="field"><label>Papel <span class="hint">quem é, de uma frase</span></label><input class="input" id="pf-role" value="${esc(persona.role||'')}" placeholder="Ex.: investidor anjo cético"/></div>
+    <div class="row2">
+      <div class="field" style="flex:1"><label>Gênero</label><select class="select" id="pf-gender">${genderOpts(persona.gender)}</select></div>
+      <div class="field" style="flex:2"><label>Voz <span class="hint">para o modo áudio</span></label><select class="select" id="pf-voice">${voiceOpts(persona.voice)}</select></div>
+    </div>
+    <div class="field"><label>Tom / estilo</label><input class="input" id="pf-tone" value="${esc(persona.tone||'')}" placeholder="Ex.: direto, foca em números"/></div>
+    ${linesArea('pf-objectives','Objetivos','um por linha', persona.objectives)}
+    ${linesArea('pf-concerns','Preocupações','um por linha', persona.concerns)}
+    ${linesArea('pf-knowscope','O que ela sabe','um por linha', k.scope)}
+    ${linesArea('pf-questions','Perguntas de exemplo','intrínsecas — um por linha', persona.example_questions)}
+    <div class="row" style="margin:var(--sp-2) 0"><button class="btn btn-sm" type="button" id="pf-adv-toggle">▸ Avançado</button></div>
+    <div class="advanced hidden" id="pf-advanced">
+      <div class="field"><label>Descrição</label><textarea class="textarea" rows="2" id="pf-description">${esc(persona.description||'')}</textarea></div>
+      <div class="field"><label>Autoridade <span class="hint">o que pode decidir/fazer</span></label><input class="input" id="pf-authority" value="${esc(persona.authority||'')}"/></div>
+      ${linesArea('pf-decision','Critérios de decisão','um por linha', persona.decision_criteria)}
+      ${linesArea('pf-constraints','Restrições','um por linha', persona.constraints)}
+      ${linesArea('pf-infoneeds','O que precisa saber','um por linha', persona.information_needs)}
+      ${linesArea('pf-evalmode','Modo de avaliação','um por linha', persona.evaluation_mode)}
+      <div class="field"><label>Nível de conhecimento</label><input class="input" id="pf-level" value="${esc(k.level||'')}" placeholder="alto / médio / baixo"/></div>
+    </div>
+    <div class="row"><button class="btn btn-primary" id="pf-save">Salvar</button><button class="btn" id="pf-cancel">Cancelar</button><span class="hint" id="pf-msg"></span></div>`;
+  show('persona-modal', true);
+  document.getElementById('pf-adv-toggle').onclick = (e) => { const a=document.getElementById('pf-advanced'); a.classList.toggle('hidden'); e.target.textContent=(a.classList.contains('hidden')?'▸':'▾')+' Avançado'; };
+  document.getElementById('pf-cancel').onclick = () => show('persona-modal', false);
+  if (newTemplate) document.getElementById('pf-template').onchange = (e) => { const src=templateById(e.target.value); if (src) openPersonaEditor({ ...src, id:undefined, name: src.name+' (cópia)' }, 'template'); };
+  document.getElementById('pf-save').onclick = () => {
+    const arr = id => val(id).split('\n').map(s=>s.trim()).filter(Boolean);
+    const body = {
+      ...(persona.id?{id:persona.id}:{}), ...(persona.template_id?{template_id:persona.template_id}:{}),
+      icon:val('pf-icon'), name:val('pf-name'), role:val('pf-role'),
+      gender:document.getElementById('pf-gender').value, voice:document.getElementById('pf-voice').value, tone:val('pf-tone'),
+      objectives:arr('pf-objectives'), concerns:arr('pf-concerns'), example_questions:arr('pf-questions'),
+      description:val('pf-description'), authority:val('pf-authority'),
+      decision_criteria:arr('pf-decision'), constraints:arr('pf-constraints'), information_needs:arr('pf-infoneeds'), evaluation_mode:arr('pf-evalmode'),
+      knowledge:{ scope:arr('pf-knowscope'), level:val('pf-level'), assets:(persona.knowledge?.assets||[]) } };
+    if (!body.name || !body.role) { document.getElementById('pf-msg').textContent = 'Nome e papel são obrigatórios.'; return; }
+    if (isTemplate) {
+      api('POST','/scenarios/api/templates', body)
+        .then(async ()=>{ show('persona-modal', false); TEMPLATES=(await api('GET','/scenarios/api/templates')).templates; renderCurrent(); })
+        .catch(e=>document.getElementById('pf-msg').textContent=e.message);
+    } else {
+      if (index!=null && SCENARIO.personas[index]) SCENARIO.personas[index] = { ...SCENARIO.personas[index], ...body };
+      else { body.id = body.id || ('cp_local_'+Math.abs(Date.now()%1e7)); SCENARIO.personas.push(body); }
+      show('persona-modal', false); updateCounts(); renderCurrent();
+    }
+  };
+}
+
+// ============ ABA 3 — INTERAÇÕES (sequência ordenada) ============
+function partRowHtml(part, kind) {
+  return `<div class="part-row"><select class="select pr-persona">${scenPersonaOpts(part?.persona_id)}</select>
+    <select class="select pr-role" ${kind==='persona_exchange'?'style="display:none"':''}>${roleOpts(part?.role)}</select>
+    <button class="icon-btn pr-del" type="button" title="remover">✕</button></div>`;
+}
+function interactionCardHtml(it) {
+  it = it || { kind:'student', objective_type:META.objective_types[0]?.value, participants:[], title:'', focus:'', instruction:'', example_questions:[] };
+  const isEx = it.kind==='persona_exchange';
+  return `<div class="it-card ${isEx?'ex':''}" data-id="${esc(it.id||'')}">
+    <div class="it-head"><span class="it-n">#</span>
+      <input class="input it-title" value="${esc(it.title||'')}" placeholder="Título da interação" style="flex:1"/>
+      <button class="icon-btn it-up" type="button" title="subir">↑</button><button class="icon-btn it-down" type="button" title="descer">↓</button>
+      <button class="icon-btn it-del" type="button" title="remover">✕</button>
+      <button class="it-collapse" type="button" title="recolher/expandir">▾</button></div>
+    <div class="it-summary"></div>
+    <div class="it-body">
+      <div class="row2">
+        <div class="field" style="flex:1"><label>Tipo</label><select class="select it-kind">${kindOpts(it.kind)}</select></div>
+        <div class="field" style="flex:1"><label>Objetivo</label><select class="select it-objective">${objOpts(it.objective_type)}</select></div>
+      </div>
+      <div class="field"><label>Participantes <span class="hint it-student-only">personas do cenário + papéis</span><span class="hint it-exchange-only">exatamente 2 personas que conversam</span></label>
+        <div class="it-parts">${(it.participants||[]).map(p=>partRowHtml(p, it.kind)).join('') || partRowHtml(null, it.kind)}</div>
+        <button class="btn btn-sm it-add-part" type="button">+ participante</button></div>
+      <div class="field it-exchange-only"><label>Foco da conversa <span class="hint">o que as duas personas discutem</span></label><input class="input it-focus" value="${esc(it.focus||'')}" placeholder="Ex.: vale investir? maior risco?"/></div>
+      <div class="field it-student-only"><label>Instrução ao aluno</label><input class="input it-instruction" value="${esc(it.instruction||'')}" placeholder="O que o aluno deve fazer nesta etapa"/></div>
+      <div class="field"><label>Perguntas de exemplo <span class="hint">desta interação — um por linha</span></label><textarea class="textarea it-questions" rows="2">${esc((it.example_questions||[]).join('\n'))}</textarea></div>
+    </div>
+  </div>`;
+}
+function syncInteractionCard(card) {
+  const kind = card.querySelector('.it-kind').value;
+  const isEx = kind==='persona_exchange';
+  card.classList.toggle('ex', isEx);
+  card.querySelectorAll('.it-student-only').forEach(e=>e.style.display = isEx?'none':'');
+  card.querySelectorAll('.it-exchange-only').forEach(e=>e.style.display = isEx?'':'none');
+  card.querySelectorAll('.pr-role').forEach(e=>e.style.display = isEx?'none':'');
+  updateSummary(card);
+}
+function updateSummary(card) {
+  const kind = card.querySelector('.it-kind').value;
+  const nParts = card.querySelectorAll('.part-row').length;
+  card.querySelector('.it-summary').textContent = `${kindLabel(kind)} · ${nParts} participante(s)`;
+}
+function renumberInteractions() { document.querySelectorAll('#sf-interactions .it-card .it-n').forEach((n,i)=>n.textContent = (i+1)+'.'); }
+function harvestInteractions() {
+  return [...document.querySelectorAll('#sf-interactions .it-card')].map(card => ({
+    id: card.dataset.id || undefined,
+    title: card.querySelector('.it-title').value.trim(),
+    kind: card.querySelector('.it-kind').value,
+    objective_type: card.querySelector('.it-objective').value,
+    participants: [...card.querySelectorAll('.part-row')].map(r=>({ persona_id:r.querySelector('.pr-persona').value, role:r.querySelector('.pr-role').value })),
+    focus: card.querySelector('.it-focus').value.trim(),
+    instruction: card.querySelector('.it-instruction').value.trim(),
+    example_questions: card.querySelector('.it-questions').value.split('\n').map(x=>x.trim()).filter(Boolean),
+  }));
+}
+function renderInteracoesPane() {
+  const s = SCENARIO;
+  const noPersonas = !(s.personas||[]).length;
+  document.getElementById('studio-pane').innerHTML = `
+    <div class="section-title">Interações <span class="hint" style="font-weight:400">a ordem importa — o aluno passa por elas em sequência</span></div>
+    ${noPersonas ? `<p class="hint">Adicione personas na aba <strong>🎭 Personas</strong> para poder escolhê-las nas interações.</p>` : ''}
+    <div id="sf-interactions">${(s.interactions&&s.interactions.length?s.interactions:[null]).map(interactionCardHtml).join('')}</div>
+    <button class="btn btn-sm" id="sf-add-interaction" type="button">+ adicionar interação</button>`;
+  const itsEl = document.getElementById('sf-interactions');
+  itsEl.querySelectorAll('.it-card').forEach(syncInteractionCard); renumberInteractions();
+  document.getElementById('sf-add-interaction').onclick = () => { itsEl.insertAdjacentHTML('beforeend', interactionCardHtml(null)); const c=itsEl.lastElementChild; syncInteractionCard(c); renumberInteractions(); };
+  itsEl.addEventListener('change', e => { if (e.target.classList.contains('it-kind')) syncInteractionCard(e.target.closest('.it-card')); });
+  itsEl.addEventListener('input', e => { if (e.target.classList.contains('it-title')) updateSummary(e.target.closest('.it-card')); });
+  itsEl.addEventListener('click', e => {
+    const card = e.target.closest('.it-card'); if (!card) return;
+    if (e.target.classList.contains('it-collapse')) { card.classList.toggle('collapsed'); e.target.textContent = card.classList.contains('collapsed')?'▸':'▾'; updateSummary(card); }
+    else if (e.target.classList.contains('it-del')) { if (itsEl.children.length>1) card.remove(); renumberInteractions(); }
+    else if (e.target.classList.contains('it-up') && card.previousElementSibling) { card.parentNode.insertBefore(card, card.previousElementSibling); renumberInteractions(); }
+    else if (e.target.classList.contains('it-down') && card.nextElementSibling) { card.parentNode.insertBefore(card.nextElementSibling, card); renumberInteractions(); }
+    else if (e.target.classList.contains('it-add-part')) { card.querySelector('.it-parts').insertAdjacentHTML('beforeend', partRowHtml(null, card.querySelector('.it-kind').value)); updateSummary(card); }
+    else if (e.target.classList.contains('pr-del')) { const parts=card.querySelector('.it-parts'); if (parts.children.length>1) e.target.closest('.part-row').remove(); updateSummary(card); }
+  });
+}
+
+// ============ PDF ============
+function pdfBoxHtml(s) {
+  if (!s.pdf) return `<span class="hint">Nenhum PDF anexado.</span><div style="margin-top:var(--sp-2)"><button class="btn btn-sm" id="pdf-attach">Anexar PDF (mock)</button></div>`;
+  const coh = s.coherence;
+  return `<div>📄 <strong>${esc(s.pdf.filename)}</strong></div>
+    <div class="row" style="margin-top:var(--sp-2)"><button class="btn btn-sm" id="pdf-evaluate">Avaliar coerência vs. cenário</button><button class="btn btn-ghost btn-sm" id="pdf-attach">Trocar PDF</button></div>
+    ${coh?`<div style="margin-top:var(--sp-2)" class="hint"><strong>${esc(coh.verdict)}</strong> · ${coh.notes.map(esc).join(' ')}</div>`:''}`;
+}
+function wirePdfBox(s) {
+  const box = document.getElementById('sf-pdf-box');
+  box.onclick = async (e) => {
+    if (e.target.id === 'pdf-attach') { const fn = prompt('Nome do arquivo PDF (mock):', 'enunciado.pdf'); if (!fn) return; const j = await api('POST',`/scenarios/api/scenarios/${s.id}/pdf`,{filename:fn}); SCENARIO = j.scenario; box.innerHTML = pdfBoxHtml(j.scenario); }
+    else if (e.target.id === 'pdf-evaluate') { e.target.textContent='Avaliando…'; const j = await api('POST',`/scenarios/api/scenarios/${s.id}/pdf/evaluate`); SCENARIO = j.scenario; box.innerHTML = pdfBoxHtml(j.scenario); }
+  };
+}
+
+// ============ SALVAR / TESTAR (barra global) ============
+function setSaveMsg(t){ document.getElementById('st-msg').textContent = t; }
+async function saveScenario() {
+  harvestCurrent();
+  const body = { ...(SCENARIO.id?{id:SCENARIO.id}:{}), name:SCENARIO.name, description:SCENARIO.description, personas:SCENARIO.personas, interactions:SCENARIO.interactions };
+  try { const j = await api('POST','/scenarios/api/scenarios', body); SCENARIO = j.scenario; updateCounts(); renderCurrent(); setSaveMsg('Salvo ✓'); return true; }
+  catch (e) { setSaveMsg(e.message); return false; }
+}
+async function testRun() { if (await saveScenario()) startRunner(); }
+document.getElementById('st-save').onclick = saveScenario;
+document.getElementById('st-test').onclick = testRun;
+
+// ============ RUNNER (página do aluno: abas por interação, liberação sequencial) ============
+let RUN = null, RUN_SCEN = null, SELTAB = 0;
+const MOCK_ANSWERS = [
+  "Resolvemos a gestão de validade de estoque para pequenas farmácias — hoje elas perdem cerca de 8% em produtos vencidos.",
+  "Nosso mercado endereçável é de R$2,4 bi; chegamos a ele via integração direta com os distribuidores.",
+  "A retenção em 3 meses está em 87% e o CAC se paga em 4 meses.",
+  "O risco maior é a dependência de poucos fornecedores; já estamos diversificando a base.",
+  "Pedimos R$1,5 mi para 18 meses de operação, com foco em time comercial e produto.",
+];
+function runPersonaById(id){ return (RUN_SCEN?.personas||[]).find(p=>p.id===id); }
+function studioVisible(on){ show('studio-seg', on); show('studio-pane', on); show('studio-actions', on); show('scenario-runner', !on); }
+async function startRunner() {
+  studioVisible(false);
+  const el = document.getElementById('scenario-runner');
+  el.innerHTML = `<div class="empty">Iniciando…</div>`;
   try {
-    const j = await api('POST', `/scenarios/api/run/${scenarioId}/start`);
-    RUN = j.run; RUN_ASYNC = j.scenario.interaction_mode === 'assincrono';
-    document.getElementById('rn-hint').textContent = RUN_ASYNC ? 'Assíncrono: as personas “deixam” mensagens; responda quando quiser.' : 'Síncrono: conversa ao vivo.';
-    renderTranscript(RUN.transcript);
-  } catch (e) { document.getElementById('rn-transcript').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    const j = await api('POST',`/scenarios/api/run/${SCENARIO.id}/start`);
+    RUN = j.run; RUN_SCEN = j.scenario; SELTAB = RUN.interaction_index ?? 0;
+    renderRunner();
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)} <button class="btn btn-sm" onclick="backToEditor()">voltar</button></div>`; }
+}
+function backToEditor(){ RUN=null; studioVisible(true); renderTab(CURRENT_TAB); }
+function transcriptSegments() {
+  const intro = []; const segs = []; let cur = null;
+  for (const e of (RUN.transcript||[])) {
+    if (e.kind === 'interaction') { cur = { header:e, entries:[] }; segs.push(cur); }
+    else if (!cur) intro.push(e);
+    else cur.entries.push(e);
+  }
+  return { intro, segs };
 }
 function bubbleHtml(t) {
-  if (t.kind === 'frame') return `<div class="t-frame">${esc(t.text)}</div>`;
-  if (t.kind === 'student') return `<div class="bubble b-student">${esc(t.text)}</div>`;
-  if (t.kind === 'aside') return `<div class="bubble b-aside"><div class="b-name">${esc(t.name)} → ${esc(personaById(t.to)?.name || 'persona')} (aparte)</div>${esc(t.text)}</div>`;
+  if (t.kind==='scenario') return `<div class="t-scenario">${esc(t.text)}</div>`;
+  if (t.kind==='interaction') return `<div class="t-interaction"><strong>${esc(t.text)}</strong>${t.meta?`<div class="meta">${esc(t.meta)}</div>`:''}</div>`;
+  if (t.kind==='student') return `<div class="bubble b-student">${esc(t.text)}</div>`;
+  if (t.kind==='aside') return `<div class="bubble b-aside"><div class="b-name">${esc(t.name)} → ${esc(runPersonaById(t.to)?.name||'persona')} (entre personas)</div>${esc(t.text)}</div>`;
   return `<div class="bubble b-persona"><div class="b-name">${esc(t.icon||'')} ${esc(t.name)}</div>${esc(t.text)}</div>`;
 }
-function renderTranscript(transcript) {
-  const el = document.getElementById('rn-transcript');
-  el.innerHTML = transcript.map(bubbleHtml).join('');
-  el.scrollTop = el.scrollHeight;
+function renderRunner() {
+  const total = (RUN_SCEN.interactions||[]).length;
+  const cur = RUN.interaction_index ?? 0;
+  const done = cur >= total;
+  const el = document.getElementById('scenario-runner');
+  const tabs = (RUN_SCEN.interactions||[]).map((it,i)=>{
+    const locked = i > cur;
+    const cls = i===SELTAB ? 'active' : (i<cur ? 'done' : (locked?'locked':''));
+    const mark = i<cur ? '✓ ' : (locked ? '🔒 ' : '');
+    return `<button class="rn-tab ${cls}" data-tab="${i}" ${locked?'disabled':''}>${mark}${i+1}. ${esc(it.title)}</button>`;
+  }).join('');
+
+  const { intro, segs } = transcriptSegments();
+  const seg = segs[SELTAB];
+  const entries = (SELTAB===0 ? intro : []).concat(seg ? [seg.header, ...seg.entries] : []);
+  const itAtSel = RUN_SCEN.interactions[SELTAB];
+  const isStudentStep = !done && SELTAB===cur && itAtSel && itAtSel.kind==='student';
+  const isExchangeStep = !done && SELTAB===cur && itAtSel && itAtSel.kind==='persona_exchange';
+  const viewingPast = SELTAB < cur;
+
+  el.innerHTML = `
+    <div class="runner-top">
+      <button class="btn btn-sm" id="rn-back">← Voltar ao editor</button>
+      <span class="who">Como o <strong>aluno</strong> vê (abas liberam em sequência) — com controles do professor <span class="mock-tag">mock</span></span>
+    </div>
+    <div class="rn-tabs">${tabs}</div>
+    <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || '<div class="empty">—</div>'}</div>
+    ${isStudentStep ? `
+      <div class="runner-input"><textarea class="textarea" id="rn-input" rows="2" placeholder="Responda como o aluno…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
+      <div class="rn-controls">
+        <span class="prof-ctl">👩‍🏫 Professor: <button class="btn btn-sm" id="rn-autogen">⚙ Gerar resposta do aluno (mock)</button></span>
+        <button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button>
+      </div>` : ''}
+    ${isExchangeStep ? `
+      <div class="rn-controls"><span class="hint">Esta etapa é entre as personas — o aluno lê e avança.</span>
+        <button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
+    ${viewingPast ? `<div class="rn-controls"><span class="hint">Interação concluída (somente leitura). Volte à aba atual para continuar.</span></div>` : ''}
+    ${done ? `<div class="rn-controls"><span class="hint">✓ Cenário concluído.</span></div>` : ''}`;
+
+  document.getElementById('rn-back').onclick = backToEditor;
+  el.querySelectorAll('.rn-tab').forEach(b => { if (!b.disabled) b.onclick = () => { SELTAB = +b.dataset.tab; renderRunner(); }; });
+  const adv = document.getElementById('rn-advance'); if (adv) adv.onclick = advance;
+  const send = document.getElementById('rn-send'); if (send) send.onclick = sendTurn;
+  const inp = document.getElementById('rn-input'); if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendTurn();} });
+  const ag = document.getElementById('rn-autogen'); if (ag) ag.onclick = autogen;
 }
-async function sendTurn() {
-  const inp = document.getElementById('rn-input');
-  const text = inp.value.trim();
-  if (!text || !RUN) return;
-  inp.value = '';
-  RUN.transcript.push({ kind: 'student', text });
-  renderTranscript(RUN.transcript);
-  try {
-    const j = await api('POST', `/scenarios/api/run/${RUN.id}/turn`, { text });
-    RUN = j.run; renderTranscript(RUN.transcript);
-  } catch (e) { document.getElementById('rn-hint').textContent = e.message; }
+function studentTurnsInCurrent() {
+  let n=0; for (let i=RUN.transcript.length-1;i>=0;i--){ if(RUN.transcript[i].kind==='interaction')break; if(RUN.transcript[i].kind==='student')n++; } return n;
+}
+async function postTurn(text) {
+  try { const j = await api('POST',`/scenarios/api/run/${RUN.id}/turn`,{text}); RUN=j.run; SELTAB = RUN.interaction_index ?? SELTAB; renderRunner(); }
+  catch (e) { const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
+}
+async function sendTurn() { const inp = document.getElementById('rn-input'); const text = inp?.value.trim(); if (!text||!RUN) return; await postTurn(text); }
+async function autogen() { if (!RUN) return; await postTurn(MOCK_ANSWERS[studentTurnsInCurrent() % MOCK_ANSWERS.length]); }
+async function advance() {
+  if (!RUN) return;
+  try { const j = await api('POST',`/scenarios/api/run/${RUN.id}/advance`); RUN=j.run; SELTAB = RUN.interaction_index ?? SELTAB; renderRunner(); }
+  catch (e) { const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 
-// ---- helpers ----
-function val(id) { return document.getElementById(id).value.trim(); }
-function show(id, on) { document.getElementById(id).classList.toggle('hidden', !on); }
-document.getElementById('new-persona').onclick = () => openPersonaForm(null);
-document.getElementById('new-scenario').onclick = () => openScenarioForm(null);
-[ 'persona-modal','scenario-modal','runner-modal' ].forEach(id => document.getElementById(id).addEventListener('click', e => { if (e.target.id === id) show(id, false); }));
-
+document.getElementById('persona-modal').addEventListener('click', e => { if (e.target.id==='persona-modal') show('persona-modal',false); });
 loadAll().catch(e => { document.querySelector('.wrap').insertAdjacentHTML('beforeend', `<div class="empty">Falha ao carregar: ${esc(e.message)}</div>`); });
 </script>
 </body>
