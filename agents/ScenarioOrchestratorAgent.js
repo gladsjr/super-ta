@@ -7,6 +7,22 @@ import {
     validateScenarioTurn, validatePersonaExchange, extractJsonObject,
 } from "../lib/scenarios/scenarioActionSchema.js";
 
+// Normaliza o speaker devolvido pelo LLM: aceita id; remapeia nome→id; cai num
+// participante razoável se vier vazio/desconhecido (o modelo às vezes devolve o
+// NOME em vez do id, ou omite). Garante um id válido para o engine não quebrar.
+function resolveSpeaker(raw, allowedIds, personasById, interaction) {
+    if (allowedIds.includes(raw)) return raw;
+    const n = String(raw || "").trim().toLowerCase();
+    if (n) {
+        for (const id of allowedIds) {
+            const nm = (personasById[id]?.name || "").toLowerCase();
+            if (nm && (nm === n || n.includes(nm) || nm.includes(n))) return id;
+        }
+    }
+    const opener = interaction?.opener_persona_id;
+    return allowedIds.includes(opener) ? opener : allowedIds[0];
+}
+
 /**
  * ScenarioOrchestratorAgent — orquestrador do sistema MULTIAGENTE.
  *
@@ -134,11 +150,13 @@ ${memoryBlock}
 ${isOpening ? "(ainda não há fala — esta é a abertura)" : (studentMessage || "")}
 """
 
+IDS VÁLIDOS para speaker_persona_id (use o ID exatamente, NÃO o nome): ${allowedIds.join(", ")}
 Escolha quem fala e a próxima ação. Retorne SOMENTE o JSON do schema.`;
 
         const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId, label: "AGENT:ScenarioOrchestrator" });
         const parsed = extractJsonObject(text);
         if (!parsed) throw new Error("ScenarioOrchestratorAgent.studentTurn: no JSON in response");
+        parsed.speaker_persona_id = resolveSpeaker(parsed.speaker_persona_id, allowedIds, personasById, interaction);
         const v = validateScenarioTurn(parsed, allowedIds);
         if (!v.valid) throw new Error(`ScenarioOrchestratorAgent.studentTurn: schema invalid (${v.errors.join("; ")})`);
         log.info("AGENT:ScenarioOrchestrator", `kind=${parsed.action.kind} speaker=${parsed.speaker_persona_id} msg=${log.preview(parsed.action.message, 80)}`);
@@ -160,10 +178,12 @@ ${this.exchangeSystemBody}`;
         const briefing = renderInteractionBriefing({ scenario, interaction, personasById, position, total, runMemory });
         const userContent = `${briefing}
 
+IDS VÁLIDOS para speaker_persona_id (use o ID exatamente, NÃO o nome): ${allowedIds.join(", ")}
 Gere a troca entre as duas personas sobre o foco. Retorne SOMENTE o JSON do schema.`;
         const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId: null, label: "AGENT:ScenarioOrchestrator:exchange" });
         const parsed = extractJsonObject(text);
         if (!parsed) throw new Error("ScenarioOrchestratorAgent.personaExchange: no JSON in response");
+        if (Array.isArray(parsed.lines)) parsed.lines.forEach((l, i) => { if (l) l.speaker_persona_id = resolveSpeaker(l.speaker_persona_id, allowedIds, personasById, interaction) || allowedIds[i % allowedIds.length]; });
         const v = validatePersonaExchange(parsed, allowedIds);
         if (!v.valid) throw new Error(`ScenarioOrchestratorAgent.personaExchange: schema invalid (${v.errors.join("; ")})`);
         log.info("AGENT:ScenarioOrchestrator", `exchange lines=${parsed.lines.length}`);

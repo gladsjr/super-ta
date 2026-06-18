@@ -143,6 +143,21 @@ async function runScenario(scenario) {
     return { transcript, verdict };
 }
 
+// ---- transcript legível (.txt) ----
+function renderTranscriptTxt(r) {
+    const L = [`CENÁRIO: ${r.name}  —  juiz: geral ${r.verdict?.overall ?? "?"}/5`];
+    for (const e of r.transcript || []) {
+        if (e.kind === "scenario") L.push(`\n[CENÁRIO] ${e.text}`);
+        else if (e.kind === "interaction") L.push(`\n——— ${e.text}${e.meta ? ` · ${e.meta}` : ""} ———`);
+        else if (e.kind === "student") L.push(`  ALUNO: ${e.text}`);
+        else if (e.kind === "aside") L.push(`  ${e.name} → (entre personas): ${e.text}`);
+        else L.push(`  ${e.name}: ${e.text}`);
+    }
+    if (r.verdict?.notes) L.push(`\nJUIZ: ${r.verdict.notes}`);
+    if (r.verdict?.flags?.length) L.push(`FLAGS: ${r.verdict.flags.join("; ")}`);
+    return L.join("\n");
+}
+
 // ---- estimativa de custo (impressa no dry) ----
 function estimateUsd() {
     // grosseiro: orquestrador ~$0,024/turno (gpt-5.5), aluno ~$0,003 (mini), juiz ~$0,06.
@@ -164,7 +179,7 @@ function estimateUsd() {
         process.stdout.write(`▶ ${s.id} (${s.name})… `);
         try {
             const { transcript, verdict } = await runScenario(s);
-            results.push({ id: s.id, name: s.name, verdict, turns: transcript.length });
+            results.push({ id: s.id, name: s.name, verdict, turns: transcript.length, transcript });
             console.log(`ok — geral ${verdict.overall ?? "?"}/5${DRY ? "" : ` | acumulado $${tally.spent.toFixed(2)}`}`);
         } catch (e) {
             results.push({ id: s.id, name: s.name, error: e.message });
@@ -185,9 +200,13 @@ function estimateUsd() {
         console.log(`\nCUSTO TOTAL: $${tally.spent.toFixed(2)} em ${tally.calls} chamadas (${Object.entries(tally.byModel).map(([m, c]) => `${m}: $${c.toFixed(2)}`).join(", ")})`);
         const outDir = path.join(DIR, "runs-text");
         fs.mkdirSync(outDir, { recursive: true });
-        const outPath = path.join(outDir, `scenario-eval-${Date.now()}.json`);
-        fs.writeFileSync(outPath, JSON.stringify({ when: new Date().toISOString(), tally, results: results.map((r, i) => ({ ...r })) }, null, 2));
-        console.log(`relatório completo: ${path.relative(path.join(DIR, ".."), outPath)}`);
+        const stamp = Date.now();
+        const outPath = path.join(outDir, `scenario-eval-${stamp}.json`);
+        fs.writeFileSync(outPath, JSON.stringify({ when: new Date().toISOString(), tally, results }, null, 2));
+        const txtPath = path.join(outDir, `scenario-eval-${stamp}.txt`);
+        fs.writeFileSync(txtPath, results.filter(r => r.transcript).map(renderTranscriptTxt).join("\n\n" + "=".repeat(72) + "\n\n"));
+        console.log(`relatório: ${path.relative(path.join(DIR, ".."), outPath)}`);
+        console.log(`transcripts: ${path.relative(path.join(DIR, ".."), txtPath)}`);
     } else {
         console.log(`\n(dry) pipeline validado. Para rodar de verdade: node tests/scenario-eval.mjs --max-usd ${MAX_USD}`);
     }
