@@ -56,6 +56,9 @@ Devolutiva flow: generate preview → professor reviews/edits → publish (`eval
 ### Orchestration Model
 The state machine is in `routes/interview.js`. Code owns phase transitions and guardrails; inside `interviewing` the super-orchestrator decides everything else. The action JSON is the contract; the dispatcher only does I/O.
 
+### Multi-agent scenarios (MOCK — experimental, in validation)
+A separate, self-contained subsystem at `/scenarios` (page `static/scenarios.html`, router `routes/scenarios.js`, logic in `lib/scenarios/`). It splits the definition language into **personas** (reusable characters: role, tone, objectives, concerns, knowledge) and **scenarios** (which REFERENCE personas and add an objective type — diagnóstico/negociação/apresentação/feedback/avaliação/discussão —, per-participant roles — entrevista/discussão/questionamento —, synchronous/asynchronous mode, and an optional persona↔persona exchange where two personas comment on the student to each other). Supports student↔1 persona, student↔N personas, and persona↔persona asides. The professor uses a form-based "studio" (no YAML) with persona/scenario editors and an inline mock runner. **Mock phase**: `lib/scenarios/mockEngine.js` produces all turns by SCRIPTED templates (zero LLM, zero tokens); persistence is JSON under `data/scenarios/` (gitignored, DB-free) — both deliberate so the design can be validated cheaply before wiring the real orchestrator and a Postgres schema. `mockEngine.js` (interface `openingTurns`/`respond`) is the single swap point for real LLM generation post-validation; no prompt-map entry yet because there are no real prompts.
+
 ## External Dependencies
 
 ### OpenAI Integration
