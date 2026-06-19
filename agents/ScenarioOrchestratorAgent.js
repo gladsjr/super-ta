@@ -10,7 +10,7 @@ import {
 // Normaliza o speaker devolvido pelo LLM: aceita id; remapeia nome→id; cai num
 // participante razoável se vier vazio/desconhecido (o modelo às vezes devolve o
 // NOME em vez do id, ou omite). Garante um id válido para o engine não quebrar.
-function resolveSpeaker(raw, allowedIds, personasById, interaction) {
+export function resolveSpeaker(raw, allowedIds, personasById, interaction) {
     if (allowedIds.includes(raw)) return raw;
     const n = String(raw || "").trim().toLowerCase();
     if (n) {
@@ -58,6 +58,11 @@ QUANDO USAR CADA action.kind:
 - "speak": a persona escolhida reage à última fala da outra ponta e/ou avança a agenda dela (pergunta, sondagem, provocação no registro da persona). action.message OBRIGATÓRIA.
 - "advance": o OBJETIVO desta interação já foi suficientemente coberto — sinalize para passar à próxima etapa do cenário. message pode ser uma fala curta de transição ("acho que por aqui já entendi o suficiente") ou vazia.
 - "finalize": a outra ponta sinalizou que quer encerrar / desengajou. message curto de fechamento, em personagem.
+
+RITMO E ENCERRAMENTO (importante — o objetivo é uma etapa que FECHA bem, não que se arrasta):
+- NÃO esgote o assunto. Quando os pontos centrais do objetivo desta etapa já foram tocados — tipicamente após 2 a 4 trocas — PREFIRA "advance" com uma fala CURTA de fechamento em action.message (ex.: "ok, por aqui já tenho o que precisava, vamos seguir"), em vez de abrir mais uma pergunta nova.
+- NÃO encerre no meio de uma pergunta sua: se no ÚLTIMO turno VOCÊ fez uma pergunta e a outra ponta ainda não respondeu, NÃO use advance — dê a ela a chance de responder primeiro.
+- Em etapas de objetivo "feedback" ou "apresentação", o fechamento costuma vir mais cedo; em "negociação"/"avaliação"/"discussão" você pode pressionar um pouco mais, mas ainda assim FECHE com uma fala de transição em vez de cortar seco.
 
 ${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
 
@@ -153,12 +158,19 @@ ${isOpening ? "(ainda não há fala — esta é a abertura)" : (studentMessage |
 IDS VÁLIDOS para speaker_persona_id (use o ID exatamente, NÃO o nome): ${allowedIds.join(", ")}
 Escolha quem fala e a próxima ação. Retorne SOMENTE o JSON do schema.`;
 
-        const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId, label: "AGENT:ScenarioOrchestrator" });
-        const parsed = extractJsonObject(text);
-        if (!parsed) throw new Error("ScenarioOrchestratorAgent.studentTurn: no JSON in response");
-        parsed.speaker_persona_id = resolveSpeaker(parsed.speaker_persona_id, allowedIds, personasById, interaction);
-        const v = validateScenarioTurn(parsed, allowedIds);
-        if (!v.valid) throw new Error(`ScenarioOrchestratorAgent.studentTurn: schema invalid (${v.errors.join("; ")})`);
+        // Retry (2x) em no-JSON / schema-inválido: o gpt-5.5 às vezes devolve
+        // prosa ou um shape levemente fora. Custa só quando falha (raro).
+        let parsed = null, lastErr = "";
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId, label: "AGENT:ScenarioOrchestrator" });
+            const p = extractJsonObject(text);
+            if (!p) { lastErr = "no JSON in response"; continue; }
+            p.speaker_persona_id = resolveSpeaker(p.speaker_persona_id, allowedIds, personasById, interaction);
+            const v = validateScenarioTurn(p, allowedIds);
+            if (!v.valid) { lastErr = `schema invalid (${v.errors.join("; ")})`; continue; }
+            parsed = p; break;
+        }
+        if (!parsed) throw new Error(`ScenarioOrchestratorAgent.studentTurn: ${lastErr}`);
         log.info("AGENT:ScenarioOrchestrator", `kind=${parsed.action.kind} speaker=${parsed.speaker_persona_id} msg=${log.preview(parsed.action.message, 80)}`);
         return parsed;
     }
@@ -180,12 +192,17 @@ ${this.exchangeSystemBody}`;
 
 IDS VÁLIDOS para speaker_persona_id (use o ID exatamente, NÃO o nome): ${allowedIds.join(", ")}
 Gere a troca entre as duas personas sobre o foco. Retorne SOMENTE o JSON do schema.`;
-        const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId: null, label: "AGENT:ScenarioOrchestrator:exchange" });
-        const parsed = extractJsonObject(text);
-        if (!parsed) throw new Error("ScenarioOrchestratorAgent.personaExchange: no JSON in response");
-        if (Array.isArray(parsed.lines)) parsed.lines.forEach((l, i) => { if (l) l.speaker_persona_id = resolveSpeaker(l.speaker_persona_id, allowedIds, personasById, interaction) || allowedIds[i % allowedIds.length]; });
-        const v = validatePersonaExchange(parsed, allowedIds);
-        if (!v.valid) throw new Error(`ScenarioOrchestratorAgent.personaExchange: schema invalid (${v.errors.join("; ")})`);
+        let parsed = null, lastErr = "";
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId: null, label: "AGENT:ScenarioOrchestrator:exchange" });
+            const p = extractJsonObject(text);
+            if (!p) { lastErr = "no JSON in response"; continue; }
+            if (Array.isArray(p.lines)) p.lines.forEach((l, i) => { if (l) l.speaker_persona_id = resolveSpeaker(l.speaker_persona_id, allowedIds, personasById, interaction) || allowedIds[i % allowedIds.length]; });
+            const v = validatePersonaExchange(p, allowedIds);
+            if (!v.valid) { lastErr = `schema invalid (${v.errors.join("; ")})`; continue; }
+            parsed = p; break;
+        }
+        if (!parsed) throw new Error(`ScenarioOrchestratorAgent.personaExchange: ${lastErr}`);
         log.info("AGENT:ScenarioOrchestrator", `exchange lines=${parsed.lines.length}`);
         return parsed;
     }

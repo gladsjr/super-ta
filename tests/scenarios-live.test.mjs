@@ -12,6 +12,7 @@ import {
     MAX_STUDENT_TURNS_PER_INTERACTION,
 } from "../lib/scenarios/liveEngine.js";
 import { interactionStart as mockStart, respond as mockRespond, interactionHeader, scenarioFrame } from "../lib/scenarios/mockEngine.js";
+import { resolveSpeaker } from "../agents/ScenarioOrchestratorAgent.js";
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) pass++; else { fail++; console.log("  ✗ FAIL:", msg); } };
@@ -115,6 +116,28 @@ ok(ms[0].kind === "interaction" && ms[0].it_kind === "student", "mock: cabeçalh
 ok(ms[1].kind === "persona", "mock: abertura é fala de persona");
 const mr = mockRespond(iArguicao, personasById, [interactionHeader(iArguicao, personasById, 1, 4), { kind: "student", text: "oi" }], "oi");
 ok(mr.length === 1 && mr[0].kind === "persona", "mock: respond devolve fala de persona");
+
+// ---- 5. Fronteiras estruturais (sem token) ----
+section("resolveSpeaker (normalização nome→id, fallback)");
+const trio = { cp_marcos: marcos, cp_ana: ana, cp_bia: { id: "cp_bia", name: "Bia", icon: "📰", role: "repórter", objectives: [], concerns: [], knowledge: {} } };
+const allow3 = ["cp_marcos", "cp_ana", "cp_bia"];
+const it3 = { id: "x", title: "Trio", kind: "student", objective_type: "discussao", participants: allow3.map((id, i) => ({ persona_id: id, role: ["questionamento", "discussao", "questionamento"][i] })), opener_persona_id: "cp_marcos", focus: "" };
+ok(resolveSpeaker("cp_ana", allow3, trio, it3) === "cp_ana", "id exato passa");
+ok(resolveSpeaker("Ana", allow3, trio, it3) === "cp_ana", "nome→id");
+ok(resolveSpeaker("Bia", allow3, trio, it3) === "cp_bia", "nome→id (3º participante)");
+ok(resolveSpeaker("ninguém", allow3, trio, it3) === "cp_marcos", "desconhecido cai no opener");
+ok(resolveSpeaker("", allow3, trio, it3) === "cp_marcos", "vazio cai no opener");
+ok(resolveSpeaker(null, allow3, trio, it3) === "cp_marcos", "null cai no opener");
+
+section("briefing com 3 participantes (aluno↔N)");
+const b3 = renderInteractionBriefing({ scenario: { name: "Mesa", description: "" }, interaction: it3, personasById: trio, position: 1, total: 1 });
+ok(b3.includes("Marcos") && b3.includes("Ana") && b3.includes("Bia"), "briefing lista as 3 personas");
+ok((b3.match(/id: `cp_/g) || []).length === 3, "briefing mostra os 3 ids");
+
+section("persona_exchange como 1ª interação (memória de run vazia)");
+ok(buildRunMemory(scenario, [scenarioFrame(scenario)], 0) === "", "buildRunMemory vazio antes da 1ª interação");
+const bx = renderInteractionBriefing({ scenario, interaction: iDelib, personasById, position: 1, total: 1, runMemory: "" });
+ok(bx.includes("primeira interação"), "briefing trata memória vazia");
 
 // ---- resumo ----
 console.log(`\n${fail === 0 ? "✓" : "✗"} Fase 0: ${pass} passaram, ${fail} falharam`);
