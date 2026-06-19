@@ -16,6 +16,8 @@ import multer from "multer";
 import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import * as store from "../lib/scenarios/store.js";
+import * as db from "../lib/db.js";
+import { requireAdmin } from "../lib/middleware.js";
 import { VOICES } from "../config/voices.js";
 import {
     scenarioFrame, interactionStart, respond, evaluatePdfMock,
@@ -190,6 +192,36 @@ router.post("/scenarios/api/scenarios", json, async (req, res) => {
     catch (e) { res.status(e.code === "NOT_FOUND" ? 404 : 500).json({ error: e.message }); }
 });
 router.delete("/scenarios/api/scenarios/:id", async (req, res) => { await store.deleteScenario(req.params.id); res.json({ ok: true }); });
+
+// ---- Estúdio ESCOPADO A UM TRABALHO (coexistência) ----
+// O estúdio global edita scenarios[0]; estas rotas o amarram a um trabalho
+// específico (work_id), para o painel do professor de um trabalho multi-interação.
+// requireAdmin: config do professor (o admin está logado ao configurar). O
+// cenário de um trabalho 'scenario' é criado na criação do trabalho (admin.js);
+// aqui fazemos get-or-create defensivo e sempre reamarramos ao work no save.
+router.get("/w/:workToken/scenario", requireAdmin, async (req, res) => {
+    const work = await db.getWorkByToken(String(req.params.workToken || "").toLowerCase());
+    if (!work) return res.status(404).json({ error: "trabalho não encontrado" });
+    let scenario = await store.getScenarioByWork(work.id);
+    if (!scenario) {
+        if (work.kind !== "scenario") return bad(res, "este trabalho é de entrevista (uni-interação) — não tem cenário");
+        scenario = await store.saveScenario({ name: work.name, description: "", personas: [], interactions: [], work_id: work.id });
+    }
+    res.json({ work: { token: work.work_token, name: work.name, kind: work.kind }, scenario: enrich(scenario) });
+});
+router.post("/w/:workToken/scenario", requireAdmin, json, async (req, res) => {
+    const work = await db.getWorkByToken(String(req.params.workToken || "").toLowerCase());
+    if (!work) return res.status(404).json({ error: "trabalho não encontrado" });
+    if (work.kind !== "scenario") return bad(res, "este trabalho é de entrevista — não aceita cenário");
+    const err = validateScenario(req.body);
+    if (err) return bad(res, err);
+    try {
+        const existing = await store.getScenarioByWork(work.id);
+        // Sempre amarra ao work e usa o id do cenário do work (ignora id do cliente).
+        const saved = await store.saveScenario({ ...cleanScenario(req.body), id: existing?.id, work_id: work.id });
+        res.json({ scenario: enrich(saved) });
+    } catch (e) { res.status(e.code === "NOT_FOUND" ? 404 : 500).json({ error: e.message }); }
+});
 
 // ---- PDF (a posteriori) + avaliação de coerência (mock) ----
 router.post("/scenarios/api/scenarios/:id/pdf", json, async (req, res) => {

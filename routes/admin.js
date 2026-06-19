@@ -6,6 +6,7 @@ import express from "express";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
 import * as db from "../lib/db.js";
+import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
 import log from "../lib/logger.js";
 
@@ -34,9 +35,19 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
         }
         budget = parsed;
     }
+    // Tipo do trabalho: 'scenario' (multi-interação) é o default dos trabalhos
+    // novos; 'interview' (entrevista legada) fica disponível para testes
+    // comparativos. Coexistência — ver migration 022.
+    const kind = req.body?.kind === "interview" ? "interview" : "scenario";
     try {
-        const work = await db.createWork(name, budget);
-        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
+        const work = await db.createWork(name, budget, kind);
+        // Trabalho multi-interação nasce com um cenário vazio vinculado (work_id),
+        // que o roteamento do aluno usa para servir a tela multi-interação e o
+        // estúdio escopado ao trabalho preenche.
+        if (kind === "scenario") {
+            await scenarioStore.saveScenario({ name: work.name, description: "", personas: [], interactions: [], work_id: work.id });
+        }
+        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" kind=${kind} budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
         res.json({ work });
     } catch (err) {
         log.error("ADMIN", `create work failed: ${err.message}`);

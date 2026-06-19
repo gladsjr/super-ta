@@ -84,9 +84,13 @@
       <div class="row">
         <input id="new-work-name" class="input" placeholder="Nome do trabalho (ex.: Prova 1)" style="flex:1; min-width: 260px"/>
         <input id="new-work-budget" class="input" type="number" min="0" step="0.5" placeholder="Orçamento USD" style="width: 160px" title="Orçamento total deste trabalho em dólares — limite de gasto com o modelo, somando criação + entrevistas dos alunos."/>
+        <select id="new-work-kind" class="select" style="width: 220px" title="Multi-interação: cenário com etapas ordenadas (novo, default). Entrevista: fluxo legado de uma única interação, para testes comparativos.">
+          <option value="scenario" selected>Multi-interação (cenário)</option>
+          <option value="interview">Entrevista (legado)</option>
+        </select>
         <button id="create-work" class="btn btn-primary">Criar</button>
       </div>
-      <div class="hint">Orçamento default cobre ~3 entrevistas. Pode ser ajustado depois pelo botão "Editar orçamento" do trabalho.</div>
+      <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho.</div>
       <div id="create-msg" class="hint"></div>
     </div>
 
@@ -210,6 +214,7 @@ document.getElementById('create-work').onclick = async () => {
     if (!Number.isFinite(n) || n < 0) { msg.textContent = 'Orçamento inválido'; return; }
     body.budget_usd = n;
   }
+  body.kind = document.getElementById('new-work-kind').value === 'interview' ? 'interview' : 'scenario';
   try {
     const r = await fetch('/admin/works', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -264,6 +269,9 @@ function renderWorks() {
     const enunBadge = w.assignment_pdf
       ? '<span class="badge badge-accent">enunciado ✓</span>'
       : '<span class="badge">sem enunciado</span>';
+    const kindBadge = w.kind === 'scenario'
+      ? '<span class="badge badge-accent" title="Trabalho multi-interação (cenário)">multi-interação</span>'
+      : '<span class="badge" title="Trabalho de entrevista única (legado)">entrevista</span>';
     const inactive = w.is_active === false;
     const inactiveBadge = inactive ? '<span class="badge-inactive">desativado</span>' : '';
     const budget = Number(w.budget_usd || 0);
@@ -287,6 +295,7 @@ function renderWorks() {
             <span class="badge badge-in_progress">${inprog} em andamento</span>
             <span class="badge badge-completed">${completed} finalizada${completed === 1 ? '' : 's'}</span>
             ${gaveUp > 0 ? `<span class="badge badge-gave_up">${gaveUp} desisti${gaveUp === 1 ? 'u' : 'ram'}</span>` : ''}
+            ${kindBadge}
             ${enunBadge}
           </div>
           <div class="budget-block">

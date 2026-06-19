@@ -19,6 +19,9 @@ router.get("/admin", (_req, res) => res.sendFile(path.join(STATIC_DIR, "admin.ht
 router.get("/trabalho", (_req, res) => res.sendFile(path.join(STATIC_DIR, "trabalho.html")));
 router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.html")));
 router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "professor.html")));
+// Estúdio de cenários escopado a um trabalho multi-interação (a página lê o
+// token da URL e usa as rotas /w/:token/scenario). Mesma página do estúdio global.
+router.get("/w/:workToken/studio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "scenarios.html")));
 router.get("/w/:workToken/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "conversation.html")));
 // Entrada do aluno: se o trabalho tem cenário, serve a página multi-interação;
 // senão, a entrevista única de sempre. (Decisão no servidor — sem flash.)

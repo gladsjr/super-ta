@@ -114,6 +114,14 @@
     </nav>
 
     <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
+    <!-- Trabalho MULTI-INTERAÇÃO (kind=scenario): a configuração vai para o estúdio. -->
+    <div class="card hidden" id="cenario-scenario-panel">
+      <h3 class="card-title">Interações (cenário multi-interação)</h3>
+      <p class="card-sub">Este é um trabalho <strong>multi-interação</strong>. As personas, a sequência de interações e o PDF são configurados no estúdio de cenários deste trabalho. A gestão de alunos e a avaliação seguem nas abas ao lado.</p>
+      <a id="cenario-studio-link" class="btn btn-primary" href="#" target="_blank">Configurar interações →</a>
+    </div>
+    <!-- Config da ENTREVISTA legada (kind=interview). Ocultada em trabalhos scenario. -->
+    <div id="cenario-interview-config">
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
       <p class="card-sub" id="enunciado-status">—</p>
@@ -244,6 +252,7 @@
       </div>
       <p class="card-sub" style="margin-top: var(--sp-2)">Salva de uma vez o modo de interação, a voz, a identidade, o nº de perguntas e a espontaneidade. O <strong>entrevistador</strong> (galeria ou avançado) e o <strong>enunciado</strong> são salvos à parte, nos próprios cards.</p>
     </div>
+    </div><!-- /cenario-interview-config -->
     </div><!-- /tab-cenario -->
 
     <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
@@ -468,6 +477,17 @@ async function load() {
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('work-name').textContent = j.work.name;
   document.getElementById('tb-context').textContent = j.work.name;
+
+  // Trabalho multi-interação (coexistência): a aba "Cenário" vira "Interações" e
+  // aponta para o estúdio escopado ao trabalho; a config de entrevista some.
+  // Alunos/Avaliação/Notas seguem reusadas. A config de entrevista (oculta) ainda
+  // é populada abaixo sem efeito visível.
+  if (j.work.kind === 'scenario') {
+    document.getElementById('tab-btn-cenario').textContent = 'Interações';
+    document.getElementById('cenario-interview-config').classList.add('hidden');
+    document.getElementById('cenario-scenario-panel').classList.remove('hidden');
+    document.getElementById('cenario-studio-link').href = `/w/${encodeURIComponent(workToken)}/studio`;
+  }
 
   const enunciadoUrl = `/w/${encodeURIComponent(workToken)}/enunciado`;
   document.getElementById('enunciado-status').innerHTML = j.work.has_enunciado

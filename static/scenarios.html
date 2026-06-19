@@ -113,6 +113,9 @@ const val = id => document.getElementById(id).value.trim();
 const show = (id, on) => document.getElementById(id).classList.toggle('hidden', !on);
 let META = { objective_types:[], participant_roles:[], interaction_kinds:[], genders:[], voices:[] };
 let TEMPLATES = [], SCENARIO = null, CURRENT_TAB = 'cenario';
+// Quando servido em /w/:token/studio, o estúdio é ESCOPADO àquele trabalho
+// (carrega/salva o cenário por work_id). Sem token = estúdio global (legado).
+const WORK_TOKEN = (location.pathname.match(/^\/w\/([0-9a-f]{12})\/studio/i) || [])[1] || null;
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -128,7 +131,11 @@ const templateById = id => TEMPLATES.find(t => t.id === id);
 async function loadAll() {
   META = await api('GET','/scenarios/api/meta');
   TEMPLATES = (await api('GET','/scenarios/api/templates')).templates;
-  SCENARIO = (await api('GET','/scenarios/api/scenarios')).scenarios[0] || { name:'', description:'', personas:[], interactions:[] };
+  if (WORK_TOKEN) {
+    SCENARIO = (await api('GET',`/w/${WORK_TOKEN}/scenario`)).scenario;
+  } else {
+    SCENARIO = (await api('GET','/scenarios/api/scenarios')).scenarios[0] || { name:'', description:'', personas:[], interactions:[] };
+  }
   renderTab('cenario'); updateCounts();
 }
 function updateCounts() {
@@ -458,7 +465,8 @@ function setSaveMsg(t){ document.getElementById('st-msg').textContent = t; }
 async function saveScenario() {
   harvestCurrent();
   const body = { ...(SCENARIO.id?{id:SCENARIO.id}:{}), name:SCENARIO.name, description:SCENARIO.description, personas:SCENARIO.personas, interactions:SCENARIO.interactions };
-  try { const j = await api('POST','/scenarios/api/scenarios', body); SCENARIO = j.scenario; updateCounts(); renderCurrent(); setSaveMsg('Salvo ✓'); return true; }
+  const saveUrl = WORK_TOKEN ? `/w/${WORK_TOKEN}/scenario` : '/scenarios/api/scenarios';
+  try { const j = await api('POST', saveUrl, body); SCENARIO = j.scenario; updateCounts(); renderCurrent(); setSaveMsg('Salvo ✓'); return true; }
   catch (e) { setSaveMsg(e.message); return false; }
 }
 async function testRun() { if (await saveScenario()) startRunner(document.getElementById('st-live')?.checked); }
