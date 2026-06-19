@@ -30,6 +30,7 @@ const args = process.argv.slice(2);
 const has = f => args.includes(f);
 const valOf = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const DRY = has("--dry");
+const EVALUATE = has("--evaluate");
 const MAX_USD = parseFloat(valOf("--max-usd", "60"));
 const WARN_USD = parseFloat(valOf("--warn-usd", String(Math.min(40, MAX_USD * 0.66))));
 const ONLY = (valOf("--only", "") || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -51,7 +52,7 @@ function maybeWarn() {
 }
 
 // ---- modos: stubs (dry) ou agentes reais ----
-let agent, askStudent, askJudge, PRINCIPAL, FAST;
+let agent, askStudent, askJudge, PRINCIPAL, FAST, evaluator = null;
 
 if (DRY) {
     PRINCIPAL = "(dry)"; FAST = "(dry)";
@@ -90,6 +91,7 @@ if (DRY) {
     };
 
     agent = new ScenarioOrchestratorAgent(client, PRINCIPAL);
+    if (EVALUATE) { const { ScenarioEvaluatorAgent } = await import("../agents/ScenarioEvaluatorAgent.js"); evaluator = new ScenarioEvaluatorAgent(client, PRINCIPAL); }
 
     // Aluno simulado (modelo barato). Texto puro. Cego ao framing de "avaliação".
     askStudent = async ({ scenario, interaction, personaLine, history }) => {
@@ -140,7 +142,9 @@ async function runScenario(scenario) {
         }
     }
     const verdict = await askJudge({ scenario, transcript });
-    return { transcript, verdict };
+    let evaluation = null;
+    if (evaluator) { try { evaluation = await evaluator.evaluate({ scenario, transcript, meterCtx: {} }); } catch (e) { evaluation = { error: e.message }; } }
+    return { transcript, verdict, evaluation };
 }
 
 // ---- transcript legível (.txt) ----
@@ -155,6 +159,14 @@ function renderTranscriptTxt(r) {
     }
     if (r.verdict?.notes) L.push(`\nJUIZ: ${r.verdict.notes}`);
     if (r.verdict?.flags?.length) L.push(`FLAGS: ${r.verdict.flags.join("; ")}`);
+    if (r.evaluation && !r.evaluation.error) {
+        L.push(`\n— AVALIAÇÃO INTERNA (ScenarioEvaluator, professor-only) —`);
+        (r.evaluation.per_interaction || []).forEach(pi => L.push(`  • ${pi.title} [${pi.objective}] — objetivo: ${pi.met} — ${pi.assessment}`));
+        L.push(`  Consolidado: ${r.evaluation.overall?.summary || ""}`);
+        if (r.evaluation.overall?.strengths?.length) L.push(`  Fortes: ${r.evaluation.overall.strengths.join("; ")}`);
+        if (r.evaluation.overall?.improvements?.length) L.push(`  Melhorar: ${r.evaluation.overall.improvements.join("; ")}`);
+        if (r.evaluation.delivery_authorship_note) L.push(`  Forma/autoria: ${r.evaluation.delivery_authorship_note}`);
+    }
     return L.join("\n");
 }
 
@@ -178,8 +190,8 @@ function estimateUsd() {
     for (const s of scenarios) {
         process.stdout.write(`▶ ${s.id} (${s.name})… `);
         try {
-            const { transcript, verdict } = await runScenario(s);
-            results.push({ id: s.id, name: s.name, verdict, turns: transcript.length, transcript });
+            const { transcript, verdict, evaluation } = await runScenario(s);
+            results.push({ id: s.id, name: s.name, verdict, turns: transcript.length, transcript, evaluation });
             console.log(`ok — geral ${verdict.overall ?? "?"}/5${DRY ? "" : ` | acumulado $${tally.spent.toFixed(2)}`}`);
         } catch (e) {
             results.push({ id: s.id, name: s.name, error: e.message });
