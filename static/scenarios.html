@@ -429,17 +429,27 @@ function renderInteracoesPane() {
 
 // ============ PDF ============
 function pdfBoxHtml(s) {
-  if (!s.pdf) return `<span class="hint">Nenhum PDF anexado.</span><div style="margin-top:var(--sp-2)"><button class="btn btn-sm" id="pdf-attach">Anexar PDF (mock)</button></div>`;
-  const coh = s.coherence;
-  return `<div>📄 <strong>${esc(s.pdf.filename)}</strong></div>
-    <div class="row" style="margin-top:var(--sp-2)"><button class="btn btn-sm" id="pdf-evaluate">Avaliar coerência vs. cenário</button><button class="btn btn-ghost btn-sm" id="pdf-attach">Trocar PDF</button></div>
+  const has = !!s.pdf; const coh = s.coherence;
+  return `${has ? `<div>📄 <strong>${esc(s.pdf.filename)}</strong>${s.pdf.vector_store_id?' <span class="chip voice">indexado (file_search)</span>':''}</div>` : '<span class="hint">Nenhum enunciado anexado. As personas podem citar o caso quando você anexa o PDF.</span>'}
+    <input type="file" id="pdf-file" accept=".pdf,.txt,.md" style="display:none"/>
+    <div class="row" style="margin-top:var(--sp-2)">
+      <button class="btn btn-sm" id="pdf-pick">${has?'Trocar enunciado':'Anexar enunciado (PDF)'}</button>
+      ${has?'<button class="btn btn-sm" id="pdf-evaluate">Avaliar coerência vs. cenário</button>':''}
+      <span class="hint" id="pdf-msg"></span></div>
     ${coh?`<div style="margin-top:var(--sp-2)" class="hint"><strong>${esc(coh.verdict)}</strong> · ${coh.notes.map(esc).join(' ')}</div>`:''}`;
 }
 function wirePdfBox(s) {
   const box = document.getElementById('sf-pdf-box');
   box.onclick = async (e) => {
-    if (e.target.id === 'pdf-attach') { const fn = prompt('Nome do arquivo PDF (mock):', 'enunciado.pdf'); if (!fn) return; const j = await api('POST',`/scenarios/api/scenarios/${s.id}/pdf`,{filename:fn}); SCENARIO = j.scenario; box.innerHTML = pdfBoxHtml(j.scenario); }
-    else if (e.target.id === 'pdf-evaluate') { e.target.textContent='Avaliando…'; const j = await api('POST',`/scenarios/api/scenarios/${s.id}/pdf/evaluate`); SCENARIO = j.scenario; box.innerHTML = pdfBoxHtml(j.scenario); }
+    if (e.target.id === 'pdf-pick') document.getElementById('pdf-file').click();
+    else if (e.target.id === 'pdf-evaluate') { e.target.textContent='Avaliando…'; try { const j = await api('POST',`/scenarios/api/scenarios/${s.id}/pdf/evaluate`); SCENARIO = j.scenario; box.innerHTML = pdfBoxHtml(j.scenario); } catch (err) { const m=document.getElementById('pdf-msg'); if(m) m.textContent=err.message; } }
+  };
+  box.onchange = async (e) => {
+    if (e.target.id !== 'pdf-file' || !e.target.files[0]) return;
+    const m = document.getElementById('pdf-msg'); if (m) m.textContent = 'enviando e indexando…';
+    const fd = new FormData(); fd.append('file', e.target.files[0]);
+    try { const r = await fetch(`/scenarios/api/scenarios/${s.id}/pdf-file`, { method:'POST', body: fd }); const j = await r.json(); if (!r.ok) throw new Error(j.error || 'falha'); SCENARIO = j.scenario; box.innerHTML = pdfBoxHtml(j.scenario); }
+    catch (err) { if (m) m.textContent = err.message; }
   };
 }
 

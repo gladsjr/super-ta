@@ -52,7 +52,7 @@ router.post("/s/:submissionToken/scenario/start", requireSubmissionToken, async 
     try {
         run.transcript = [live.scenarioFrame(scenario), ...(await live.interactionStartLive(agent, {
             scenario, interaction: scenario.interactions[0], personasById: byId, idx: 0,
-            total: scenario.interactions.length, runMemory: "", interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
+            total: scenario.interactions.length, runMemory: "", interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null,
         }))];
     } catch (e) { return res.status(500).json({ error: `falha ao iniciar: ${e.message}` }); }
     await store.saveRun(run);
@@ -72,7 +72,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     const byId = personasById(scenario);
     const { agent, live } = await liveDeps();
     run.transcript.push({ speaker: "student", kind: "student", text });
-    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id } };
+    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null };
 
     // STREAM (mantém o esquema de otimização do /chat): sinaliza "respondendo" no
     // 1º token e entrega a fala da persona assim que pronta, antes de fechar o run.
@@ -118,7 +118,7 @@ router.post("/s/:submissionToken/scenario/advance", requireSubmissionToken, asyn
     run.interaction_index = next; run.memory = null;
     try {
         const runMemory = live.buildRunMemory(scenario, run.transcript, next);
-        run.transcript.push(...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[next], personasById: byId, idx: next, total, runMemory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id } })));
+        run.transcript.push(...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[next], personasById: byId, idx: next, total, runMemory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null })));
     } catch (e) { return res.status(500).json({ error: `falha ao avançar: ${e.message}` }); }
     await store.saveRun(run);
     res.json({ run: runView(run), done: false });

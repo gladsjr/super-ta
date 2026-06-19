@@ -12,6 +12,8 @@
 // produção, gatear (requireAdmin) e migrar para o banco.
 
 import express from "express";
+import multer from "multer";
+import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import * as store from "../lib/scenarios/store.js";
 import { VOICES } from "../config/voices.js";
@@ -205,6 +207,23 @@ router.post("/scenarios/api/scenarios/:id/pdf/evaluate", async (req, res) => {
     const saved = await store.saveScenario({ id: s.id, coherence });
     res.json({ scenario: enrich(saved), coherence });
 });
+// Upload REAL do enunciado: arquivo → OpenAI Files → vector store (file_search),
+// para as personas citarem o caso. Guarda {filename, file_id, vector_store_id}.
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+router.post("/scenarios/api/scenarios/:id/pdf-file", pdfUpload.single("file"), async (req, res) => {
+    const s = await store.getScenario(req.params.id);
+    if (!s) return res.status(404).json({ error: "cenário não encontrado" });
+    if (!req.file) return bad(res, "envie um arquivo no campo 'file'");
+    try {
+        const { openai } = await import("../lib/openaiClient.js");
+        const { createVectorStoreWithFiles } = await import("../lib/sessionLifecycle.js");
+        const name = req.file.originalname || "enunciado.pdf";
+        const uploaded = await openai.files.create({ file: await OpenAI.toFile(req.file.buffer, name), purpose: "user_data" });
+        const vectorStoreId = await createVectorStoreWithFiles([uploaded.id], s.id);
+        const saved = await store.saveScenario({ id: s.id, pdf: { filename: name, file_id: uploaded.id, vector_store_id: vectorStoreId, uploaded_at: new Date().toISOString() }, coherence: null });
+        res.json({ scenario: enrich(saved) });
+    } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
+});
 
 // ---- Execução: MOCK (roteirizado, zero token) ou LIVE (ScenarioOrchestrator) ----
 // O modo é escolhido por ?mode=live. O agente e o liveEngine são importados sob
@@ -232,7 +251,7 @@ router.post("/scenarios/api/run/:scenarioId/start", async (req, res) => {
     try {
         if (run.mode === "live") {
             const { agent, live } = await liveDeps();
-            run.transcript = [live.scenarioFrame(scenario), ...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[0], personasById: byId, idx: 0, total, runMemory: "", meterCtx: {} }))];
+            run.transcript = [live.scenarioFrame(scenario), ...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[0], personasById: byId, idx: 0, total, runMemory: "", meterCtx: {}, vectorStoreId: scenario.pdf?.vector_store_id || null }))];
         } else {
             run.transcript = [scenarioFrame(scenario), ...interactionStart(scenario.interactions[0], byId, 0, total)];
         }
@@ -254,7 +273,7 @@ router.post("/scenarios/api/run/:runId/turn", json, async (req, res) => {
     try {
         if (run.mode === "live") {
             const { agent, live } = await liveDeps();
-            const r = await live.respondLive(agent, { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, meterCtx: {} });
+            const r = await live.respondLive(agent, { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, meterCtx: {}, vectorStoreId: scenario.pdf?.vector_store_id || null });
             run.memory = r.memory ?? run.memory;
             run.transcript.push(...r.entries);
             run.last_action = r.action?.kind || "speak";
@@ -286,7 +305,7 @@ router.post("/scenarios/api/run/:runId/advance", async (req, res) => {
         if (run.mode === "live") {
             const { agent, live } = await liveDeps();
             const runMemory = live.buildRunMemory(scenario, run.transcript, next);
-            run.transcript.push(...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[next], personasById: byId, idx: next, total, runMemory, meterCtx: {} })));
+            run.transcript.push(...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[next], personasById: byId, idx: next, total, runMemory, meterCtx: {}, vectorStoreId: scenario.pdf?.vector_store_id || null })));
         } else {
             run.transcript.push(...interactionStart(scenario.interactions[next], byId, next, total));
         }
