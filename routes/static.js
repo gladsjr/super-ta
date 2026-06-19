@@ -19,6 +19,7 @@ router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.ht
 router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "professor.html")));
 router.get("/w/:workToken/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "conversation.html")));
 router.get("/s/:submissionToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "student.html")));
+router.get("/s/:submissionToken/scenario", (_req, res) => res.sendFile(path.join(STATIC_DIR, "scenario-student.html")));
 router.get("/scenarios", (_req, res) => res.sendFile(path.join(STATIC_DIR, "scenarios.html")));
 
 // Termo de consentimento (texto + versão). Servido como JSON para o

@@ -29,6 +29,7 @@ import adminRoutes from "./routes/admin.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
+import scenarioStudentRoutes from "./routes/scenarioStudent.js";
 import diagRoutes from "./routes/diag.js";
 import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
@@ -55,7 +56,9 @@ app.use(staticRoutes);
 app.use(adminRoutes);
 app.use(workRoutes);
 app.use(interviewRoutes);
-app.use(requireAdmin, scenarioRoutes); // /scenarios/api/* gateado (config do professor). Página /scenarios é servida por staticRoutes (pública, como /admin); a API exige sessão. O dev server scenarios-dev.mjs monta sem gate (local).
+app.use("/scenarios/api", requireAdmin); // gate de sessão SÓ na API de config do professor (path-scoped; não afeta o fluxo do aluno nem a página pública /scenarios).
+app.use(scenarioRoutes); // /scenarios/api/* (gateado acima). O dev server scenarios-dev.mjs monta sem gate (local).
+app.use(scenarioStudentRoutes); // /s/:submissionToken/scenario/* — fluxo do aluno (auth por token de submissão).
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 
 app.listen(PORT, "0.0.0.0", async () => {
