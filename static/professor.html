@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>ORATIA — Professor</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
+<link rel="stylesheet" href="/static/css/studio.css"/>
 <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
 <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
 <style>
@@ -117,8 +118,8 @@
     <!-- Trabalho MULTI-INTERAÇÃO (kind=scenario): a configuração vai para o estúdio. -->
     <div class="card hidden" id="cenario-scenario-panel">
       <h3 class="card-title">Interações (cenário multi-interação)</h3>
-      <p class="card-sub">Este é um trabalho <strong>multi-interação</strong>. As personas, a sequência de interações e o PDF são configurados no estúdio de cenários deste trabalho. A gestão de alunos e a avaliação seguem nas abas ao lado.</p>
-      <a id="cenario-studio-link" class="btn btn-primary" href="#" target="_blank">Configurar interações →</a>
+      <p class="card-sub">Este é um trabalho <strong>multi-interação</strong>. Configure aqui as personas, a sequência de interações e o PDF. A gestão de alunos e a avaliação seguem nas abas ao lado.</p>
+      <div id="studio-mount"></div>
     </div>
     <!-- Config da ENTREVISTA legada (kind=interview). Ocultada em trabalhos scenario. -->
     <div id="cenario-interview-config">
@@ -458,6 +459,7 @@
   </div>
 </dialog>
 
+<script src="/static/js/studio.js"></script>
 <script>
 const workToken = location.pathname.split('/').filter(Boolean)[1];
 
@@ -486,7 +488,10 @@ async function load() {
     document.getElementById('tab-btn-cenario').textContent = 'Interações';
     document.getElementById('cenario-interview-config').classList.add('hidden');
     document.getElementById('cenario-scenario-panel').classList.remove('hidden');
-    document.getElementById('cenario-studio-link').href = `/w/${encodeURIComponent(workToken)}/studio`;
+    if (window.mountStudio && !window.__studioMounted) {
+      window.__studioMounted = true;
+      window.mountStudio({ root: document.getElementById('studio-mount'), workToken });
+    }
   }
 
   const enunciadoUrl = `/w/${encodeURIComponent(workToken)}/enunciado`;
