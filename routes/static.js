@@ -3,6 +3,8 @@
 import path from "path";
 import express from "express";
 import { PROJECT_ROOT } from "../lib/config.js";
+import * as db from "../lib/db.js";
+import * as scenarioStore from "../lib/scenarios/store.js";
 import {
     CONSENT_VERSION,
     CONSENT_TEXT_HTML,
@@ -18,7 +20,17 @@ router.get("/trabalho", (_req, res) => res.sendFile(path.join(STATIC_DIR, "traba
 router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.html")));
 router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "professor.html")));
 router.get("/w/:workToken/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "conversation.html")));
-router.get("/s/:submissionToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "student.html")));
+// Entrada do aluno: se o trabalho tem cenário, serve a página multi-interação;
+// senão, a entrevista única de sempre. (Decisão no servidor — sem flash.)
+router.get("/s/:submissionToken", async (req, res) => {
+    try {
+        const sub = await db.findSubmissionByToken(String(req.params.submissionToken || "").toLowerCase());
+        if (sub && await scenarioStore.getScenarioByWork(sub.work_id)) {
+            return res.sendFile(path.join(STATIC_DIR, "scenario-student.html"));
+        }
+    } catch (e) { /* na dúvida, cai na entrevista padrão */ }
+    res.sendFile(path.join(STATIC_DIR, "student.html"));
+});
 router.get("/s/:submissionToken/scenario", (_req, res) => res.sendFile(path.join(STATIC_DIR, "scenario-student.html")));
 router.get("/scenarios", (_req, res) => res.sendFile(path.join(STATIC_DIR, "scenarios.html")));
 
