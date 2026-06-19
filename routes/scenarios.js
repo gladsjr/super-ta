@@ -41,6 +41,24 @@ router.get("/scenarios/api/meta", (_req, res) => {
     });
 });
 
+// ---- Assistente do professor (propõe; não salva) ----
+router.post("/scenarios/api/assistant", json, async (req, res) => {
+    const message = str(req.body?.message);
+    if (!message) return bad(res, "mensagem vazia");
+    try {
+        const { scenarioAssistantAgent } = await import("../lib/agents.js");
+        const templates = (await store.listTemplates()).map(t => ({ name: t.name, role: t.role }));
+        const out = await scenarioAssistantAgent.chat({
+            scenario: req.body?.scenario || {},
+            templates,
+            history: Array.isArray(req.body?.history) ? req.body.history : [],
+            message,
+            meterCtx: {},
+        });
+        res.json(out);
+    } catch (e) { res.status(500).json({ error: `assistente indisponível: ${e.message}` }); }
+});
+
 // ---- Persona (definição rica; serve a template e a persona-do-cenário) ----
 function validatePersona(b) {
     if (!b || typeof b !== "object") return "persona inválida";

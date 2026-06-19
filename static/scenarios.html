@@ -55,6 +55,9 @@
   .assist-stub { border:1px dashed var(--accent-300,#9ed8cc); border-radius: var(--r-md,8px); padding: var(--sp-3); background: var(--accent-50,#eef8f5); }
   .assist-head { font-weight:600; display:flex; gap: var(--sp-2); align-items:center; margin-bottom:4px; }
   .assist-fake { display:flex; gap: var(--sp-2); margin-top: var(--sp-2); } .assist-fake input { flex:1; }
+  .assist-log { max-height: 220px; overflow:auto; display:flex; flex-direction:column; gap:6px; font-size: var(--fs-sm); }
+  .assist-msg-user { align-self:flex-end; background: var(--accent-100,#d8efe9); border-radius:10px; padding:5px 10px; max-width:90%; }
+  .assist-msg-assistant { align-self:flex-start; background: var(--bg-raised,#fff); border:1px solid var(--ink-200); border-radius:10px; padding:5px 10px; max-width:92%; white-space:pre-wrap; }
   /* barra de ação global */
   #studio-actions { position: sticky; bottom: 0; background: var(--bg-raised,#fff); border-top:1px solid var(--ink-100,#eee); padding: var(--sp-3) 0; display:flex; gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); }
   /* runner como página do aluno */
@@ -176,13 +179,55 @@ function renderCenarioPane() {
     <div class="section-title">Enunciado (PDF)</div>
     <div class="pdf-box" id="sf-pdf-box">${editing ? pdfBoxHtml(s) : '<span class="hint">Salve o cenário (barra abaixo) para anexar e avaliar o PDF.</span>'}</div>
 
-    <div class="section-title">Assistente de configuração</div>
+    <div class="section-title">Assistente do professor <span class="hint" style="font-weight:400">descreva a cena — ele propõe; você revisa nas abas e salva</span></div>
     <div class="assist-stub">
-      <div class="assist-head">🤖 Assistente do professor <span class="mock-tag">em breve</span></div>
-      <p class="hint" style="margin:0">Aqui o professor poderá conversar com o assistente para montar cenário, personas e interações em linguagem natural.</p>
-      <div class="assist-fake"><input class="input" placeholder="Ex.: crie uma banca com dois investidores céticos…" disabled/><button class="btn btn-sm" disabled>Enviar</button></div>
+      <div id="assist-log" class="assist-log"></div>
+      <div class="assist-fake"><input class="input" id="assist-input" placeholder="Ex.: crie uma banca com 2 investidores céticos sobre um pitch de SaaS — pitch, arguição e deliberação"/><button class="btn btn-sm" id="assist-send">Enviar</button></div>
+      <div class="hint" id="assist-msg"></div>
     </div>`;
   if (editing) wirePdfBox(s);
+  document.getElementById('assist-log').innerHTML = renderAssistLog();
+  document.getElementById('assist-send').onclick = sendAssist;
+  document.getElementById('assist-input').addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); sendAssist(); } });
+}
+
+// Assistente do professor (chat): propõe; o professor aplica e salva.
+let ASSIST_HISTORY = [];
+function renderAssistLog() {
+  if (!ASSIST_HISTORY.length) return '<div class="hint">Converse para montar cenário, personas e interações em linguagem natural. O assistente propõe; você revisa nas abas e salva.</div>';
+  return ASSIST_HISTORY.map(m => `<div class="assist-msg-${m.role==='assistant'?'assistant':'user'}"><strong>${m.role==='assistant'?'🤖':'você'}:</strong> ${esc(m.content)}</div>`).join('');
+}
+async function sendAssist() {
+  const inp = document.getElementById('assist-input'); const text = inp.value.trim(); if (!text) return;
+  harvestCurrent();
+  inp.value=''; ASSIST_HISTORY.push({ role:'user', content:text });
+  document.getElementById('assist-log').innerHTML = renderAssistLog() + '<div class="hint">⏳ pensando…</div>';
+  try {
+    const out = await api('POST','/scenarios/api/assistant', { message:text, history: ASSIST_HISTORY.slice(0,-1),
+      scenario: { name:SCENARIO.name, description:SCENARIO.description, personas:(SCENARIO.personas||[]).map(p=>({name:p.name,role:p.role})), interactions:(SCENARIO.interactions||[]).map(it=>({title:it.title,kind:it.kind,objective_type:it.objective_type})) } });
+    const summary = applyAssistProposals(out);
+    ASSIST_HISTORY.push({ role:'assistant', content: out.reply + (summary?`\n→ ${summary}`:'') });
+    updateCounts(); renderCenarioPane();
+  } catch (e) { ASSIST_HISTORY.push({ role:'assistant', content:'(erro: '+e.message+')' }); renderCenarioPane(); }
+}
+function applyAssistProposals(out) {
+  const parts = [];
+  if (out.scenario_patch) { if (out.scenario_patch.name) SCENARIO.name = out.scenario_patch.name; if (out.scenario_patch.description) SCENARIO.description = out.scenario_patch.description; parts.push('cenário'); }
+  SCENARIO.personas = SCENARIO.personas || [];
+  const byName = {}; SCENARIO.personas.forEach(p => byName[(p.name||'').toLowerCase()] = p.id);
+  (out.new_personas||[]).forEach(np => {
+    const id = 'cp_local_' + Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9);
+    SCENARIO.personas.push({ id, name:np.name, icon:'🧑', role:np.role, tone:np.tone||'', description:np.description||'', objectives:np.objectives||[], concerns:np.concerns||[], decision_criteria:[], constraints:[], information_needs:[], evaluation_mode:[], knowledge:{ scope:np.knowledge_scope||[], assets:[], level:'' }, example_questions:[] });
+    byName[(np.name||'').toLowerCase()] = id;
+  });
+  if ((out.new_personas||[]).length) parts.push((out.new_personas.length)+' persona(s)');
+  SCENARIO.interactions = SCENARIO.interactions || [];
+  (out.new_interactions||[]).forEach(ni => {
+    const participants = (ni.participants||[]).map(p => ({ persona_id: byName[(p.persona_name||'').toLowerCase()], role:p.role })).filter(p => p.persona_id);
+    SCENARIO.interactions.push({ id:'i_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9), title:ni.title, kind:ni.kind, objective_type:ni.objective_type, participants, opener_persona_id: participants[0]?.persona_id||null, focus:ni.focus||'', instruction:ni.instruction||'', example_questions:[] });
+  });
+  if ((out.new_interactions||[]).length) parts.push((out.new_interactions.length)+' interação(ões)');
+  return parts.length ? 'apliquei '+parts.join(', ')+' — revise nas abas 🎭/↔️ e salve' : '';
 }
 
 // ============ ABA 2 — PERSONAS (escolhidas no topo + biblioteca de templates) ============

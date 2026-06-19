@@ -201,18 +201,21 @@ flowchart LR
   ScenOrq --> TurnOut>"speak | advance | finalize<br/>(scenarioActionSchema)"]
   ScenOrq --> ExchangeOut>"persona↔persona: 2–4 falas"]
   Live -. mock .-> Mock["mockEngine<br/>(turnos roteirizados, zero token)"]
+  Studio(["estúdio (POST /assistant)"]) --> Assist["ScenarioAssistantAgent<br/>(fast_model: propõe<br/>cenário/personas/interações)"]
+  Assist --> Proposals>"reply + propostas<br/>(UI aplica; professor salva)"]
 
   classDef agent fill:#eaf0f7,stroke:#1e3a5f,color:#0f1b2d;
   classDef out   fill:#e7f4eb,stroke:#1f6c3b,color:#0f1b2d;
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
-  class Live,Brief,ScenOrq,Mock agent
-  class TurnOut,ExchangeOut out
-  class RunStart entry
+  class Live,Brief,ScenOrq,Mock,Assist agent
+  class TurnOut,ExchangeOut,Proposals out
+  class RunStart,Studio entry
 
   click ScenOrq "vscode://file/c:/Users/glads/src/super-ta/agents/ScenarioOrchestratorAgent.js:32" "turnSystemBody (turno) — exchangeSystemBody em :56"
   click Brief "vscode://file/c:/Users/glads/src/super-ta/lib/scenarios/agenda.js" "renderInteractionBriefing / renderPersonaAgenda"
   click TurnOut "vscode://file/c:/Users/glads/src/super-ta/lib/scenarios/scenarioActionSchema.js" "schema da ação do cenário"
   click Mock "vscode://file/c:/Users/glads/src/super-ta/lib/scenarios/mockEngine.js" "mockEngine (roteirizado)"
+  click Assist "vscode://file/c:/Users/glads/src/super-ta/agents/ScenarioAssistantAgent.js:26" "systemPromptBody do ScenarioAssistantAgent"
 ```
 
 > Fase mock: o `ScenarioOrchestratorAgent` ainda NÃO está ligado às rotas do aluno (integração em M3). Antes de produção: gatear `/scenarios` com auth e migrar o store JSON para Postgres.
@@ -238,6 +241,7 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`. Pré-gate de áudio: o algoritmo em [lib/audioIntelligibility.js](../lib/audioIntelligibility.js) decide se vai gateiar (sobre logprobs do STT); o agente apenas fraseia o pedido de repetição ou a fala de give_up.
    - [SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice`. **UMA chamada por turno** na fase `interviewing`. Devolve uma `action` no schema definido em [lib/superOrchestrator/actionSchema.js](../lib/superOrchestrator/actionSchema.js). Mantém estado entre turnos via `memory` em `runtime_state.super_orchestrator.memory`. Em modo áudio, roda com `stream: true` para sinalizar `responding` ao frontend via SSE no primeiro token de texto.
    - [ScenarioOrchestratorAgent.js](../agents/ScenarioOrchestratorAgent.js#L32) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice`. Sistema MULTIAGENTE (cenários), fase MOCK/validação. **UMA chamada por turno**: recebe o briefing da interação (cenário + objetivo + personas participantes com agenda + memória de run via [lib/scenarios/agenda.js](../lib/scenarios/agenda.js)) e decide QUAL persona fala e a fala dela (`turnSystemBody`, schema speak/advance/finalize em [lib/scenarios/scenarioActionSchema.js](../lib/scenarios/scenarioActionSchema.js)); ou gera a troca persona↔persona (`exchangeSystemBody` em :56). Injeta `EXTEMPORANEOUS_ANSWER_PRINCIPLE`. Guardrails (falante válido, teto de turnos) e navegação entre interações ficam em [lib/scenarios/liveEngine.js](../lib/scenarios/liveEngine.js), não no LLM. Ainda não ligado às rotas do aluno (M3).
+   - [ScenarioAssistantAgent.js](../agents/ScenarioAssistantAgent.js#L26) — modelo: `fast_model`, audience: `professor_via_ui`. Assistente do professor no estúdio de cenários (`POST /scenarios/api/assistant`). Recebe o estado do cenário em edição + templates disponíveis + a mensagem; devolve `{reply, scenario_patch, new_personas, new_interactions}` (participantes por NOME; enums validados no agente). NUNCA salva — a UI aplica as propostas ao cenário em memória; o professor revisa nas abas e salva. Análogo ao `ConfigAssistantAgent` (entrevista single).
    - [ConfigAssistantAgent.js](../agents/ConfigAssistantAgent.js) — modelo: `fast_model`, audience: `professor_via_ui` (chat do assistente de configuração na página do professor). Cinco frentes: explicar metodologia/conceito de persona (sintaxe YAML só sob demanda), avaliar adequação do enunciado, explicar o entrevistador já configurado (recebe a agenda renderizada no state block), escolher/adaptar persona, e CONSTRUIR uma persona "de cabeça" por entrevista guiada — mantém um `draft` parcial carregado entre turnos (efêmero, no cliente) e só materializa em `propose_interviewer_yaml` quando o professor pede. Recebe `INTERVIEWER_YAML_SKELETON` como contrato de chaves. Nunca salva — propõe.
    - [EnunciadoCoherenceAgent.js](../agents/EnunciadoCoherenceAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui` (avalia adequação do enunciado, recebe PDF via `input_file`).
    - [InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Avalia a entrevista realizada sob a perspectiva do entrevistador (rota `/w/:workToken/submissions/:subToken/evaluation`, botão na página da conversa). Recebe os dois PDFs via `input_file`, a agenda renderizada e a transcrição serializada em texto com métricas de FORMA/ENTREGA por turno (latência, tempo até começar a falar, palavras/s, caracteres/s, disfluências, registro escrito, polimento — [lib/deliverySignals.js](../lib/deliverySignals.js), mesma fonte de heurísticas do forense `scripts/detect-ai-answers.mjs`; nunca os bytes de áudio); injeta o `EXTEMPORANEOUS_ANSWER_PRINCIPLE` para não punir respostas de direção+mecanismo+ordem de grandeza. Avaliação holística: conteúdo decide o mérito por pergunta; forma alimenta o campo `delivery` e corrobora sinais de autoria. Resultado cacheado em `submissions.evaluation_json` — NUNCA exposto ao aluno.
