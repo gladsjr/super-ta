@@ -72,8 +72,26 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     const byId = personasById(scenario);
     const { agent, live } = await liveDeps();
     run.transcript.push({ speaker: "student", kind: "student", text });
+    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id } };
+
+    // STREAM (mantém o esquema de otimização do /chat): sinaliza "respondendo" no
+    // 1º token e entrega a fala da persona assim que pronta, antes de fechar o run.
+    if (req.query.stream === "1") {
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+        const send = (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data || {})}\n\n`);
+        send("thinking");
+        try {
+            const r = await live.respondLive(agent, { ...ctx, onFirstDelta: () => send("responding"), onMessageReady: (msg) => send("message", { text: msg }) });
+            run.memory = r.memory ?? run.memory;
+            run.transcript.push(...r.entries);
+            await store.saveRun(run);
+            send("done", { run: runView(run), action: r.action || null });
+        } catch (e) { send("error", { error: e.message }); }
+        return res.end();
+    }
+
     try {
-        const r = await live.respondLive(agent, { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id } });
+        const r = await live.respondLive(agent, ctx);
         run.memory = r.memory ?? run.memory;
         run.transcript.push(...r.entries);
         await store.saveRun(run);

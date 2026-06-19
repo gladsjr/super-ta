@@ -6,6 +6,7 @@ import {
     SCENARIO_TURN_SCHEMA_DESCRIPTION, PERSONA_EXCHANGE_SCHEMA_DESCRIPTION,
     validateScenarioTurn, validatePersonaExchange, extractJsonObject,
 } from "../lib/scenarios/scenarioActionSchema.js";
+import { extractJsonStringValue } from "../lib/superOrchestrator/actionSchema.js";
 
 // Normaliza o speaker devolvido pelo LLM: aceita id; remapeia nome→id; cai num
 // participante razoável se vier vazio/desconhecido (o modelo às vezes devolve o
@@ -88,8 +89,10 @@ SCHEMA DE SAÍDA (RETORNAR APENAS JSON):
 ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
     }
 
-    // ---- chamada base (blocking; sem streaming — o harness de teste é texto) ----
-    async _call(systemPrompt, userContent, { meterCtx, vectorStoreId, label }) {
+    // ---- chamada base. Blocking por padrão; com onFirstDelta vira STREAM
+    // (sinaliza "respondendo" no 1º token e a fala da persona assim que a string
+    // de action.message fecha — mesmo esquema do SuperOrchestrator). ----
+    async _call(systemPrompt, userContent, { meterCtx, vectorStoreId, label, onFirstDelta = null, onMessageReady = null }) {
         const payload = {
             model: this.model,
             instructions: systemPrompt,
@@ -97,20 +100,39 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
             truncation: "auto",
         };
         if (vectorStoreId) payload.tools = [{ type: "file_search", vector_store_ids: [vectorStoreId] }];
-        log.prompt(label, `system+user (${systemPrompt.length + userContent.length} chars)`);
+        const wantStream = typeof onFirstDelta === "function";
+        log.prompt(label, `system+user (${systemPrompt.length + userContent.length} chars)${wantStream ? " [stream]" : ""}`);
         const MAX = 2;
-        let text, apiErr = null;
+        let text, apiErr = null, firstDeltaFired = false;
         for (let attempt = 1; attempt <= MAX; attempt++) {
             try {
-                const response = await log.span(label, `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
-                    meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => this.client.responses.create(payload)));
-                text = response.output_text || "";
+                if (wantStream) {
+                    payload.stream = true;
+                    const stream = await log.span(label, `responses.create[stream]${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
+                        meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => this.client.responses.create(payload)));
+                    const collected = []; let finalResponse = null, messageSignaled = false;
+                    for await (const event of stream) {
+                        if (event?.type === "response.output_text.delta") {
+                            if (!firstDeltaFired) { firstDeltaFired = true; try { onFirstDelta(); } catch (e) { log.error(label, `onFirstDelta: ${e.message}`); } }
+                            if (typeof event.delta === "string") collected.push(event.delta);
+                            if (!messageSignaled && typeof onMessageReady === "function") {
+                                const m = extractJsonStringValue(collected.join(""), "message");
+                                if (m && m.complete && m.value.trim()) { messageSignaled = true; try { onMessageReady(m.value); } catch (e) { log.error(label, `onMessageReady: ${e.message}`); } }
+                            }
+                        } else if (event?.type === "response.completed") { finalResponse = event.response ?? null; }
+                    }
+                    text = finalResponse?.output_text ?? collected.join("") ?? "";
+                } else {
+                    const response = await log.span(label, `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
+                        meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => this.client.responses.create(payload)));
+                    text = response.output_text || "";
+                }
                 apiErr = null;
                 break;
             } catch (err) {
                 apiErr = err;
                 log.error(label, `chamada falhou (${attempt}/${MAX}): ${err.message}`);
-                if (attempt >= MAX) break;
+                if (firstDeltaFired || attempt >= MAX) break;
                 await new Promise(r => setTimeout(r, 600 * attempt));
             }
         }
@@ -127,6 +149,7 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
         interactionTranscript = [], memory = null, studentMessage,
         isOpening = false, vectorStoreId = null, interactionMode = "text",
         studentName = null, studentGenderHint = null, meterCtx = null,
+        onFirstDelta = null, onMessageReady = null,
     }) {
         const allowedIds = (interaction.participants || []).map(p => p.persona_id);
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
@@ -162,7 +185,7 @@ Escolha quem fala e a próxima ação. Retorne SOMENTE o JSON do schema.`;
         // prosa ou um shape levemente fora. Custa só quando falha (raro).
         let parsed = null, lastErr = "";
         for (let attempt = 1; attempt <= 2; attempt++) {
-            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId, label: "AGENT:ScenarioOrchestrator" });
+            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId, label: "AGENT:ScenarioOrchestrator", onFirstDelta: attempt === 1 ? onFirstDelta : null, onMessageReady: attempt === 1 ? onMessageReady : null });
             const p = extractJsonObject(text);
             if (!p) { lastErr = "no JSON in response"; continue; }
             p.speaker_persona_id = resolveSpeaker(p.speaker_persona_id, allowedIds, personasById, interaction);
