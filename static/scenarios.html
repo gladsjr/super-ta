@@ -94,7 +94,8 @@
   <div id="studio-pane"></div>
   <div id="studio-actions">
     <button class="btn btn-primary" id="st-save">Salvar cenário</button>
-    <button class="btn" id="st-test">▶ Testar (mock)</button>
+    <button class="btn" id="st-test">▶ Testar</button>
+    <label class="hint" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="st-live"/> IA real (gpt-5.5 · custa tokens)</label>
     <span class="hint" id="st-msg"></span>
   </div>
 
@@ -405,12 +406,12 @@ async function saveScenario() {
   try { const j = await api('POST','/scenarios/api/scenarios', body); SCENARIO = j.scenario; updateCounts(); renderCurrent(); setSaveMsg('Salvo ✓'); return true; }
   catch (e) { setSaveMsg(e.message); return false; }
 }
-async function testRun() { if (await saveScenario()) startRunner(); }
+async function testRun() { if (await saveScenario()) startRunner(document.getElementById('st-live')?.checked); }
 document.getElementById('st-save').onclick = saveScenario;
 document.getElementById('st-test').onclick = testRun;
 
 // ============ RUNNER (página do aluno: abas por interação, liberação sequencial) ============
-let RUN = null, RUN_SCEN = null, SELTAB = 0;
+let RUN = null, RUN_SCEN = null, SELTAB = 0, RUN_LIVE = false;
 const MOCK_ANSWERS = [
   "Resolvemos a gestão de validade de estoque para pequenas farmácias — hoje elas perdem cerca de 8% em produtos vencidos.",
   "Nosso mercado endereçável é de R$2,4 bi; chegamos a ele via integração direta com os distribuidores.",
@@ -420,12 +421,12 @@ const MOCK_ANSWERS = [
 ];
 function runPersonaById(id){ return (RUN_SCEN?.personas||[]).find(p=>p.id===id); }
 function studioVisible(on){ show('studio-seg', on); show('studio-pane', on); show('studio-actions', on); show('scenario-runner', !on); }
-async function startRunner() {
-  studioVisible(false);
+async function startRunner(live=false) {
+  RUN_LIVE = !!live; studioVisible(false);
   const el = document.getElementById('scenario-runner');
-  el.innerHTML = `<div class="empty">Iniciando…</div>`;
+  el.innerHTML = `<div class="empty">${RUN_LIVE ? '🤖 As personas estão entrando em cena… (IA real — pode levar alguns segundos)' : 'Iniciando…'}</div>`;
   try {
-    const j = await api('POST',`/scenarios/api/run/${SCENARIO.id}/start`);
+    const j = await api('POST',`/scenarios/api/run/${SCENARIO.id}/start${RUN_LIVE?'?mode=live':''}`);
     RUN = j.run; RUN_SCEN = j.scenario; SELTAB = RUN.interaction_index ?? 0;
     renderRunner();
   } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)} <button class="btn btn-sm" onclick="backToEditor()">voltar</button></div>`; }
@@ -470,7 +471,7 @@ function renderRunner() {
   el.innerHTML = `
     <div class="runner-top">
       <button class="btn btn-sm" id="rn-back">← Voltar ao editor</button>
-      <span class="who">Como o <strong>aluno</strong> vê (abas liberam em sequência) — com controles do professor <span class="mock-tag">mock</span></span>
+      <span class="who">Como o <strong>aluno</strong> vê (abas liberam em sequência) — com controles do professor <span class="mock-tag">${RUN_LIVE ? '🤖 IA real' : 'mock'}</span></span>
     </div>
     <div class="rn-tabs">${tabs}</div>
     <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || '<div class="empty">—</div>'}</div>
@@ -496,16 +497,29 @@ function renderRunner() {
 function studentTurnsInCurrent() {
   let n=0; for (let i=RUN.transcript.length-1;i>=0;i--){ if(RUN.transcript[i].kind==='interaction')break; if(RUN.transcript[i].kind==='student')n++; } return n;
 }
+function thinking(on){ const t=document.getElementById('rn-transcript'); if(!t)return; t.querySelector('.rn-thinking')?.remove(); if(on){ t.insertAdjacentHTML('beforeend', `<div class="rn-thinking empty">⏳ as personas estão pensando…</div>`); t.scrollTop=t.scrollHeight; } }
 async function postTurn(text) {
+  if (RUN_LIVE) thinking(true);
   try { const j = await api('POST',`/scenarios/api/run/${RUN.id}/turn`,{text}); RUN=j.run; SELTAB = RUN.interaction_index ?? SELTAB; renderRunner(); }
-  catch (e) { const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
+  catch (e) { thinking(false); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
-async function sendTurn() { const inp = document.getElementById('rn-input'); const text = inp?.value.trim(); if (!text||!RUN) return; await postTurn(text); }
-async function autogen() { if (!RUN) return; await postTurn(MOCK_ANSWERS[studentTurnsInCurrent() % MOCK_ANSWERS.length]); }
+async function sendTurn() {
+  const inp = document.getElementById('rn-input'); const text = inp?.value.trim(); if (!text||!RUN) return;
+  inp.value='';
+  if (RUN_LIVE) { RUN.transcript.push({ speaker:'student', kind:'student', text }); renderRunner(); }
+  await postTurn(text);
+}
+async function autogen() {
+  if (!RUN) return;
+  const text = MOCK_ANSWERS[studentTurnsInCurrent() % MOCK_ANSWERS.length];
+  if (RUN_LIVE) { RUN.transcript.push({ speaker:'student', kind:'student', text }); renderRunner(); }
+  await postTurn(text);
+}
 async function advance() {
   if (!RUN) return;
+  if (RUN_LIVE) thinking(true);
   try { const j = await api('POST',`/scenarios/api/run/${RUN.id}/advance`); RUN=j.run; SELTAB = RUN.interaction_index ?? SELTAB; renderRunner(); }
-  catch (e) { const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
+  catch (e) { thinking(false); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 
 document.getElementById('persona-modal').addEventListener('click', e => { if (e.target.id==='persona-modal') show('persona-modal',false); });

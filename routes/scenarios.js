@@ -188,15 +188,37 @@ router.post("/scenarios/api/scenarios/:id/pdf/evaluate", async (req, res) => {
     res.json({ scenario: enrich(saved), coherence });
 });
 
-// ---- Execução MOCK (percorre as interações em ordem) ----
+// ---- Execução: MOCK (roteirizado, zero token) ou LIVE (ScenarioOrchestrator) ----
+// O modo é escolhido por ?mode=live. O agente e o liveEngine são importados sob
+// demanda (lazy) — assim o servidor DB-free de preview sobe sem precisar de chave
+// OpenAI enquanto só o mock for usado.
+const isLive = req => req.query?.mode === "live";
+async function liveDeps() {
+    const [agentsMod, live] = await Promise.all([
+        import("../lib/agents.js"),
+        import("../lib/scenarios/liveEngine.js"),
+    ]);
+    return { agent: agentsMod.scenarioOrchestratorAgent, live };
+}
+
 router.post("/scenarios/api/run/:scenarioId/start", async (req, res) => {
     const scenario = await store.getScenario(req.params.scenarioId);
     if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
     if (!(scenario.interactions || []).length) return bad(res, "cenário sem interações");
     const byId = personasById(scenario);
+    const total = scenario.interactions.length;
     const run = await store.createRun(scenario.id);
     run.interaction_index = 0;
-    run.transcript = [scenarioFrame(scenario), ...interactionStart(scenario.interactions[0], byId, 0, scenario.interactions.length)];
+    run.mode = isLive(req) ? "live" : "mock";
+    run.memory = null;
+    try {
+        if (run.mode === "live") {
+            const { agent, live } = await liveDeps();
+            run.transcript = [live.scenarioFrame(scenario), ...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[0], personasById: byId, idx: 0, total, runMemory: "", meterCtx: {} }))];
+        } else {
+            run.transcript = [scenarioFrame(scenario), ...interactionStart(scenario.interactions[0], byId, 0, total)];
+        }
+    } catch (e) { return res.status(500).json({ error: `falha ao iniciar (${run.mode}): ${e.message}` }); }
     await store.saveRun(run);
     res.json({ run, scenario: enrich(scenario) });
 });
@@ -211,7 +233,18 @@ router.post("/scenarios/api/run/:runId/turn", json, async (req, res) => {
     if (!it || it.kind !== "student") return bad(res, "esta etapa não aceita resposta do aluno — avance");
     const byId = personasById(scenario);
     run.transcript.push({ speaker: "student", kind: "student", text });
-    run.transcript.push(...respond(it, byId, run.transcript, text));
+    try {
+        if (run.mode === "live") {
+            const { agent, live } = await liveDeps();
+            const r = await live.respondLive(agent, { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, meterCtx: {} });
+            run.memory = r.memory ?? run.memory;
+            run.transcript.push(...r.entries);
+            run.last_action = r.action?.kind || "speak";
+            await store.saveRun(run);
+            return res.json({ run, action: r.action || null });
+        }
+        run.transcript.push(...respond(it, byId, run.transcript, text));
+    } catch (e) { return res.status(500).json({ error: `falha no turno (live): ${e.message}` }); }
     await store.saveRun(run);
     res.json({ run });
 });
@@ -230,7 +263,16 @@ router.post("/scenarios/api/run/:runId/advance", async (req, res) => {
     }
     const byId = personasById(scenario);
     run.interaction_index = next;
-    run.transcript.push(...interactionStart(scenario.interactions[next], byId, next, total));
+    run.memory = null;
+    try {
+        if (run.mode === "live") {
+            const { agent, live } = await liveDeps();
+            const runMemory = live.buildRunMemory(scenario, run.transcript, next);
+            run.transcript.push(...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[next], personasById: byId, idx: next, total, runMemory, meterCtx: {} })));
+        } else {
+            run.transcript.push(...interactionStart(scenario.interactions[next], byId, next, total));
+        }
+    } catch (e) { return res.status(500).json({ error: `falha ao avançar (live): ${e.message}` }); }
     await store.saveRun(run);
     res.json({ run, done: false });
 });
