@@ -19,11 +19,14 @@ const STUDIO_MARKUP = `
   <div id="studio-actions">
     <button class="btn btn-primary" id="st-save">Salvar cenário</button>
     <button class="btn" id="st-test">▶ Testar</button>
+    <button class="btn" id="st-export" title="Exportar este cenário inteiro como YAML">⬇ Exportar YAML</button>
+    <button class="btn" id="st-import" title="Importar um cenário inteiro ou uma persona de um YAML">⬆ Importar YAML</button>
     <label class="hint" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="st-live"/> IA real (gpt-5.5 · custa tokens)</label>
     <span class="hint" id="st-msg"></span>
   </div>
   <div id="scenario-runner" class="hidden"></div>
   <div class="overlay hidden" id="persona-modal"><div class="modal" id="persona-modal-body"></div></div>
+  <div class="overlay hidden" id="yaml-modal"><div class="modal" id="yaml-modal-body"></div></div>
 </div>`;
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -159,7 +162,7 @@ function cpCardHtml(p, i) {
   return `<div class="cp-card">
     <div class="pc-head"><span>${esc(p.icon)}</span><div><div class="pc-name">${esc(p.name)}</div><div class="pc-role">${esc(p.role)}</div></div></div>
     <div class="chips">${p.voice?`<span class="chip voice">🔊 ${esc((voiceLabel(p.voice)||'').split(' —')[0])}</span>`:''}${p.template_id?`<span class="chip">de template</span>`:''}</div>
-    <div class="cp-actions"><button class="btn btn-sm" data-cpedit="${i}">Editar</button><button class="btn btn-ghost btn-sm" data-cpdel="${i}">Remover</button></div>
+    <div class="cp-actions"><button class="btn btn-sm" data-cpedit="${i}">Editar</button><button class="btn btn-ghost btn-sm" data-cpyaml="${i}" title="Exportar esta persona em YAML">YAML</button><button class="btn btn-ghost btn-sm" data-cpdel="${i}">Remover</button></div>
   </div>`;
 }
 function templateCardHtml(p) {
@@ -167,7 +170,7 @@ function templateCardHtml(p) {
     <div class="pc-head"><span class="pc-icon">${esc(p.icon)}</span><div><div class="pc-name">${esc(p.name)}</div><div class="pc-role">${esc(p.role)}</div></div></div>
     <div class="chips">${p.gender?`<span class="chip">${esc(p.gender)}</span>`:''}${p.voice?`<span class="chip voice">🔊 ${esc((voiceLabel(p.voice)||'').split(' —')[0])}</span>`:''}</div>
     ${(p.objectives||[]).length?`<div class="chips">${p.objectives.slice(0,2).map(o=>`<span class="chip">${esc(o)}</span>`).join('')}</div>`:''}
-    <div class="card-actions"><button class="btn btn-primary btn-sm" data-use="${p.id}">+ Usar no cenário</button><button class="btn btn-sm" data-edit="${p.id}">Editar</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Excluir</button></div>
+    <div class="card-actions"><button class="btn btn-primary btn-sm" data-use="${p.id}">+ Usar no cenário</button><button class="btn btn-sm" data-edit="${p.id}">Editar</button><button class="btn btn-ghost btn-sm" data-tyaml="${p.id}" title="Exportar este template em YAML">YAML</button><button class="btn btn-ghost btn-sm" data-del="${p.id}">Excluir</button></div>
   </div>`;
 }
 function renderPersonasPane() {
@@ -185,11 +188,13 @@ function renderPersonasPane() {
     <div class="grid" id="pp-templates">${TEMPLATES.length ? TEMPLATES.map(templateCardHtml).join('') : '<div class="empty">Nenhum template ainda.</div>'}</div>`;
   const pane = document.getElementById('studio-pane');
   pane.querySelectorAll('[data-cpedit]').forEach(b=>b.onclick=()=>openPersonaEditor(SCENARIO.personas[+b.dataset.cpedit], 'scenario', +b.dataset.cpedit));
+  pane.querySelectorAll('[data-cpyaml]').forEach(b=>b.onclick=()=>exportPersonaYaml(SCENARIO.personas[+b.dataset.cpyaml]));
   pane.querySelectorAll('[data-cpdel]').forEach(b=>b.onclick=()=>removeScenarioPersona(+b.dataset.cpdel));
   document.getElementById('pp-add-blank').onclick = () => openPersonaEditor(null, 'scenario', null);
   document.getElementById('pp-new-template').onclick = () => openPersonaEditor(null, 'template');
   pane.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>useTemplate(b.dataset.use));
   pane.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openPersonaEditor(templateById(b.dataset.edit), 'template'));
+  pane.querySelectorAll('[data-tyaml]').forEach(b=>b.onclick=()=>exportPersonaYaml(templateById(b.dataset.tyaml)));
   pane.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delTemplate(b.dataset.del));
 }
 function useTemplate(id) {
@@ -388,6 +393,65 @@ async function saveScenario() {
 }
 async function testRun() { if (await saveScenario()) startRunner(document.getElementById('st-live')?.checked); }
 
+// ============ IMPORT / EXPORT YAML (cenário inteiro OU persona) ============
+// O YAML é só uma ponte: o formulário continua a fonte de verdade. Import popula
+// o SCENARIO em memória; o professor revisa e clica Salvar.
+function openYamlModal({ title, value, editable, onSubmit, submitLabel }) {
+  const body = document.getElementById('yaml-modal-body');
+  body.innerHTML = `
+    <h3>${esc(title)}</h3>
+    <textarea id="yaml-text" class="textarea" rows="18" spellcheck="false" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px" ${editable ? '' : 'readonly'} placeholder="${editable ? 'Cole aqui o YAML de um cenário inteiro ou de uma persona…' : ''}">${esc(value || '')}</textarea>
+    <div class="hint" id="yaml-msg" style="margin-top:6px"></div>
+    <div class="row" style="margin-top:var(--sp-2)">
+      ${editable ? `<button class="btn btn-primary" id="yaml-submit">${esc(submitLabel || 'Importar')}</button>` : `<button class="btn btn-primary" id="yaml-copy">Copiar</button>`}
+      <button class="btn" id="yaml-close">Fechar</button>
+    </div>`;
+  show('yaml-modal', true);
+  document.getElementById('yaml-close').onclick = () => show('yaml-modal', false);
+  if (!editable) {
+    document.getElementById('yaml-copy').onclick = async () => {
+      const t = document.getElementById('yaml-text'); t.select();
+      try { await navigator.clipboard.writeText(t.value); } catch { try { document.execCommand('copy'); } catch {} }
+      document.getElementById('yaml-msg').textContent = 'copiado ✓';
+    };
+  } else {
+    document.getElementById('yaml-submit').onclick = async () => {
+      try { await onSubmit(document.getElementById('yaml-text').value); }
+      catch (e) { document.getElementById('yaml-msg').textContent = e.message; }
+    };
+  }
+}
+async function exportScenarioYaml() {
+  harvestCurrent();
+  try {
+    const { yaml } = await api('POST', '/scenarios/api/yaml/to', { scenario: { name: SCENARIO.name, description: SCENARIO.description, personas: SCENARIO.personas, interactions: SCENARIO.interactions } });
+    openYamlModal({ title: 'Exportar cenário (YAML)', value: yaml, editable: false });
+  } catch (e) { setSaveMsg(e.message); }
+}
+async function exportPersonaYaml(persona) {
+  if (!persona) return;
+  try { const { yaml } = await api('POST', '/scenarios/api/yaml/to', { persona }); openYamlModal({ title: `Exportar persona — ${persona.name || ''} (YAML)`, value: yaml, editable: false }); }
+  catch (e) { alert(e.message); }
+}
+function openImportYaml() {
+  openYamlModal({
+    title: 'Importar YAML (cenário inteiro ou persona)', value: '', editable: true, submitLabel: 'Importar',
+    onSubmit: async (yamlText) => {
+      const out = await api('POST', '/scenarios/api/yaml/from', { yaml: yamlText });
+      if (out.kind === 'scenario') {
+        SCENARIO = out.scenario;
+        show('yaml-modal', false); updateCounts(); renderTab('cenario');
+        setSaveMsg('cenário importado — revise nas abas e clique em Salvar');
+      } else if (out.kind === 'persona') {
+        SCENARIO.personas = SCENARIO.personas || [];
+        SCENARIO.personas.push(out.persona);
+        show('yaml-modal', false); updateCounts(); renderTab('personas');
+        setSaveMsg('persona importada — revise e clique em Salvar');
+      }
+    },
+  });
+}
+
 // ============ RUNNER (página do aluno: abas por interação, liberação sequencial) ============
 let RUN = null, RUN_SCEN = null, SELTAB = 0, RUN_LIVE = false;
 const MOCK_ANSWERS = [
@@ -509,7 +573,10 @@ window.mountStudio = function ({ root, workToken } = {}) {
   ROOT.querySelectorAll('#studio-seg .seg-btn').forEach(b => b.onclick = () => renderTab(b.dataset.tab));
   document.getElementById('st-save').onclick = saveScenario;
   document.getElementById('st-test').onclick = testRun;
+  document.getElementById('st-export').onclick = exportScenarioYaml;
+  document.getElementById('st-import').onclick = openImportYaml;
   document.getElementById('persona-modal').addEventListener('click', e => { if (e.target.id==='persona-modal') show('persona-modal', false); });
+  document.getElementById('yaml-modal').addEventListener('click', e => { if (e.target.id==='yaml-modal') show('yaml-modal', false); });
   return loadAll().catch(e => { ROOT.insertAdjacentHTML('beforeend', `<div class="empty">Falha ao carregar: ${esc(e.message)}</div>`); });
 };
 })();

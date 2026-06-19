@@ -18,6 +18,7 @@ import { randomUUID } from "crypto";
 import * as store from "../lib/scenarios/store.js";
 import * as db from "../lib/db.js";
 import { requireAdmin } from "../lib/middleware.js";
+import { scenarioToYaml, personaToYaml, parseYaml } from "../lib/scenarios/scenarioYaml.js";
 import { VOICES } from "../config/voices.js";
 import {
     scenarioFrame, interactionStart, respond, evaluatePdfMock,
@@ -43,6 +44,23 @@ router.get("/scenarios/api/meta", (_req, res) => {
         genders: GENDERS.map(v => ({ value: v, label: v[0].toUpperCase() + v.slice(1) })),
         voices: VOICES.map(v => ({ value: v.id, label: v.label, gender: v.gender })),
     });
+});
+
+// ---- Import/export YAML (cenário inteiro OU persona isolada) — stateless ----
+// Conversores puros (sem banco); servem o estúdio inline e o standalone. O YAML
+// é só uma ponte: o objeto continua sendo o formato canônico (form + JSONB).
+router.post("/scenarios/api/yaml/to", json, (req, res) => {
+    try {
+        if (req.body?.persona) return res.json({ yaml: personaToYaml(req.body.persona) });
+        if (req.body?.scenario) return res.json({ yaml: scenarioToYaml(req.body.scenario) });
+        return bad(res, "envie { scenario } ou { persona }");
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post("/scenarios/api/yaml/from", json, (req, res) => {
+    const text = str(req.body?.yaml);
+    if (!text) return bad(res, "cole um YAML");
+    try { res.json(parseYaml(text)); }
+    catch (e) { bad(res, e.message); }
 });
 
 // ---- Assistente do professor (propõe; não salva) ----
