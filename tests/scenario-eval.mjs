@@ -52,7 +52,7 @@ function maybeWarn() {
 }
 
 // ---- modos: stubs (dry) ou agentes reais ----
-let agent, askStudent, askJudge, PRINCIPAL, FAST, evaluator = null;
+let agent, askStudent, askJudge, PRINCIPAL, FAST, evaluator = null, grader = null, DEFAULT_RUBRIC = null, weightedFinal = null;
 
 if (DRY) {
     PRINCIPAL = "(dry)"; FAST = "(dry)";
@@ -91,7 +91,14 @@ if (DRY) {
     };
 
     agent = new ScenarioOrchestratorAgent(client, PRINCIPAL);
-    if (EVALUATE) { const { ScenarioEvaluatorAgent } = await import("../agents/ScenarioEvaluatorAgent.js"); evaluator = new ScenarioEvaluatorAgent(client, PRINCIPAL); }
+    if (EVALUATE) {
+        const { ScenarioEvaluatorAgent } = await import("../agents/ScenarioEvaluatorAgent.js");
+        const { GradingAgent } = await import("../agents/GradingAgent.js");
+        const rubric = await import("../lib/rubric.js");
+        evaluator = new ScenarioEvaluatorAgent(client, PRINCIPAL);
+        grader = new GradingAgent(client, PRINCIPAL);
+        DEFAULT_RUBRIC = rubric.DEFAULT_RUBRIC; weightedFinal = rubric.weightedFinal;
+    }
 
     // Aluno simulado (modelo barato). Texto puro. Cego ao framing de "avaliação".
     askStudent = async ({ scenario, interaction, personaLine, history }) => {
@@ -144,7 +151,16 @@ async function runScenario(scenario) {
     const verdict = await askJudge({ scenario, transcript });
     let evaluation = null;
     if (evaluator) { try { evaluation = await evaluator.evaluate({ scenario, transcript, meterCtx: {} }); } catch (e) { evaluation = { error: e.message }; } }
-    return { transcript, verdict, evaluation };
+    let grades = null;
+    if (grader && evaluation && !evaluation.error) {
+        const scored = [];
+        for (const c of DEFAULT_RUBRIC) {
+            try { const g = await grader.grade({ internalReport: evaluation, criterion: c, meterCtx: {} }); scored.push({ id: c.id, name: c.name, weight: c.weight, ...g }); }
+            catch (e) { scored.push({ id: c.id, name: c.name, weight: c.weight, score: null, justification: "(erro: " + e.message + ")" }); }
+        }
+        grades = { criteria: scored, final: weightedFinal(scored.filter(s => s.score != null)) };
+    }
+    return { transcript, verdict, evaluation, grades };
 }
 
 // ---- transcript legível (.txt) ----
@@ -166,6 +182,10 @@ function renderTranscriptTxt(r) {
         if (r.evaluation.overall?.strengths?.length) L.push(`  Fortes: ${r.evaluation.overall.strengths.join("; ")}`);
         if (r.evaluation.overall?.improvements?.length) L.push(`  Melhorar: ${r.evaluation.overall.improvements.join("; ")}`);
         if (r.evaluation.delivery_authorship_note) L.push(`  Forma/autoria: ${r.evaluation.delivery_authorship_note}`);
+    }
+    if (r.grades) {
+        L.push(`\n— NOTAS (GradingAgent · rubrica default) — FINAL: ${r.grades.final}/10`);
+        (r.grades.criteria || []).forEach(c => L.push(`  • ${c.name} (peso ${c.weight}): ${c.score ?? "—"} — ${c.justification}`));
     }
     return L.join("\n");
 }
@@ -190,8 +210,8 @@ function estimateUsd() {
     for (const s of scenarios) {
         process.stdout.write(`▶ ${s.id} (${s.name})… `);
         try {
-            const { transcript, verdict, evaluation } = await runScenario(s);
-            results.push({ id: s.id, name: s.name, verdict, turns: transcript.length, transcript, evaluation });
+            const { transcript, verdict, evaluation, grades } = await runScenario(s);
+            results.push({ id: s.id, name: s.name, verdict, turns: transcript.length, transcript, evaluation, grades });
             console.log(`ok — geral ${verdict.overall ?? "?"}/5${DRY ? "" : ` | acumulado $${tally.spent.toFixed(2)}`}`);
         } catch (e) {
             results.push({ id: s.id, name: s.name, error: e.message });
