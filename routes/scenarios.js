@@ -295,4 +295,38 @@ router.post("/scenarios/api/run/:runId/advance", async (req, res) => {
     res.json({ run, done: false });
 });
 
+// ---- Avaliação interna + notas de um run (professor; persistem no run) ----
+router.post("/scenarios/api/run/:runId/evaluate", async (req, res) => {
+    const run = await store.getRun(req.params.runId);
+    if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    const scenario = await store.getScenario(run.scenario_id);
+    if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
+    try {
+        const { scenarioEvaluatorAgent } = await import("../lib/agents.js");
+        const evaluation = await scenarioEvaluatorAgent.evaluate({ scenario: enrich(scenario), transcript: run.transcript, meterCtx: {} });
+        run.evaluation_json = evaluation;
+        await store.saveRun(run);
+        res.json({ evaluation });
+    } catch (e) { res.status(500).json({ error: `falha na avaliação: ${e.message}` }); }
+});
+router.post("/scenarios/api/run/:runId/grades", json, async (req, res) => {
+    const run = await store.getRun(req.params.runId);
+    if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    if (!run.evaluation_json) return bad(res, "avalie o run antes de calcular as notas");
+    try {
+        const { gradingAgent } = await import("../lib/agents.js");
+        const { DEFAULT_RUBRIC, weightedFinal } = await import("../lib/rubric.js");
+        const rubric = Array.isArray(req.body?.rubric) && req.body.rubric.length ? req.body.rubric : DEFAULT_RUBRIC;
+        const scored = [];
+        for (const c of rubric) {
+            const g = await gradingAgent.grade({ internalReport: run.evaluation_json, criterion: c, meterCtx: {} });
+            scored.push({ id: c.id, name: c.name, weight: c.weight, ...g });
+        }
+        const grades = { criteria: scored, final: weightedFinal(scored.filter(s => s.score != null)), computed_at: new Date().toISOString() };
+        run.grades_json = grades;
+        await store.saveRun(run);
+        res.json({ grades });
+    } catch (e) { res.status(500).json({ error: `falha nas notas: ${e.message}` }); }
+});
+
 export default router;
