@@ -328,5 +328,19 @@ router.post("/scenarios/api/run/:runId/grades", json, async (req, res) => {
         res.json({ grades });
     } catch (e) { res.status(500).json({ error: `falha nas notas: ${e.message}` }); }
 });
+// Devolutiva FORMATIVA ao aluno (reusa o StudentFeedbackAgent sobre o relatório
+// do cenário). per_question:[] satisfaz a validação do agente (que é tunada para
+// o relatório de entrevista single) sem que ela rejeite feedback do cenário.
+router.post("/scenarios/api/run/:runId/devolutiva", json, async (req, res) => {
+    const run = await store.getRun(req.params.runId);
+    if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    if (!run.evaluation_json) return bad(res, "avalie o run antes de gerar a devolutiva");
+    try {
+        const { studentFeedbackAgent } = await import("../lib/agents.js");
+        const report = { per_question: [], ...run.evaluation_json };
+        const devolutiva = await studentFeedbackAgent.derive({ internalReport: report, guidelines: str(req.body?.guidelines) || null, meterCtx: {} });
+        res.json({ devolutiva });
+    } catch (e) { res.status(500).json({ error: `falha na devolutiva: ${e.message}` }); }
+});
 
 export default router;
