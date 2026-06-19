@@ -30,6 +30,7 @@ import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
 import diagRoutes from "./routes/diag.js";
+import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
 
@@ -54,7 +55,7 @@ app.use(staticRoutes);
 app.use(adminRoutes);
 app.use(workRoutes);
 app.use(interviewRoutes);
-app.use(scenarioRoutes); // /scenarios/* — sistema multiagente (fase mock)
+app.use(requireAdmin, scenarioRoutes); // /scenarios/api/* gateado (config do professor). Página /scenarios é servida por staticRoutes (pública, como /admin); a API exige sessão. O dev server scenarios-dev.mjs monta sem gate (local).
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 
 app.listen(PORT, "0.0.0.0", async () => {
