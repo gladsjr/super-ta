@@ -46,7 +46,9 @@ export class ScenarioOrchestratorAgent {
         this.client = openaiClient;
         this.model = model;
 
-        this.turnSystemBody = `Sua função: conduzir UM TURNO de uma INTERAÇÃO de role-play multiagente. A cena é definida no BRIEFING DA INTERAÇÃO (no user prompt): o cenário geral, o objetivo desta etapa, a instrução, as PERSONAS participantes (cada uma com sua agenda) e a memória do que já aconteceu. Você decide QUAL persona responde agora e O QUE ela diz — e devolve um JSON no schema abaixo. O código traduz seu output em comportamento real.
+        this.turnSystemBody = `Sua função: conduzir UM TURNO de uma INTERAÇÃO de role-play multiagente. A cena é definida no BRIEFING DA INTERAÇÃO (no user prompt): o cenário geral, a DINÂMICA desta etapa (quem apresenta/conduz e como tratar o trabalho do aluno), os MATERIAIS disponíveis, a instrução, as PERSONAS participantes (cada uma com sua agenda) e a memória do que já aconteceu. Você decide QUAL persona responde agora e O QUE ela diz — e devolve um JSON no schema abaixo. O código traduz seu output em comportamento real.
+
+A DINÂMICA do briefing é a lei desta etapa: respeite quem conduz (às vezes é a persona; às vezes é a outra ponta, e a persona responde/reage) e o papel do trabalho do aluno.
 
 VOCÊ ENCARNA A PERSONA QUE ESCOLHER em speaker_persona_id. A fala em action.message sai na voz dessa persona, sem edição — vocabulário, postura e registro são os dela (definidos na agenda). Dentro da cena não há "aluno" nem "avaliação": há personas conduzindo a situação com quem está do outro lado.
 
@@ -57,19 +59,19 @@ ESCOLHA DE QUEM FALA (speaker_persona_id):
 
 QUANDO USAR CADA action.kind:
 - "speak": a persona escolhida reage à última fala da outra ponta e/ou avança a agenda dela (pergunta, sondagem, provocação no registro da persona). action.message OBRIGATÓRIA.
-- "advance": o OBJETIVO desta interação já foi suficientemente coberto — sinalize para passar à próxima etapa do cenário. message pode ser uma fala curta de transição ("acho que por aqui já entendi o suficiente") ou vazia.
+- "advance": a DINÂMICA desta etapa já cumpriu seu propósito (os pontos centrais foram cobertos) — sinalize para passar à próxima etapa do cenário. message pode ser uma fala curta de transição ("acho que por aqui já entendi o suficiente") ou vazia.
 - "finalize": a outra ponta sinalizou que quer encerrar / desengajou. message curto de fechamento, em personagem.
 
 RITMO E ENCERRAMENTO (importante — o objetivo é uma etapa que FECHA bem, não que se arrasta):
-- NÃO esgote o assunto. Quando os pontos centrais do objetivo desta etapa já foram tocados — tipicamente após 2 a 4 trocas — PREFIRA "advance" com uma fala CURTA de fechamento em action.message (ex.: "ok, por aqui já tenho o que precisava, vamos seguir"), em vez de abrir mais uma pergunta nova.
+- NÃO esgote o assunto. Quando os pontos centrais desta etapa já foram tocados — tipicamente após 2 a 4 trocas — PREFIRA "advance" com uma fala CURTA de fechamento em action.message (ex.: "ok, por aqui já tenho o que precisava, vamos seguir"), em vez de abrir mais uma pergunta nova.
 - NÃO encerre no meio de uma pergunta sua: se no ÚLTIMO turno VOCÊ fez uma pergunta e a outra ponta ainda não respondeu, NÃO use advance — dê a ela a chance de responder primeiro.
-- Em etapas de objetivo "feedback" ou "apresentação", o fechamento costuma vir mais cedo; em "negociação"/"avaliação"/"discussão" você pode pressionar um pouco mais, mas ainda assim FECHE com uma fala de transição em vez de cortar seco.
+- Em formas como "feedback" ou "apresentação", o fechamento costuma vir mais cedo; em "negociação"/"arguição"/"discussão" você pode pressionar um pouco mais, mas ainda assim FECHE com uma fala de transição em vez de cortar seco.
 
 ${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
 
 REGRAS:
 - NÃO invente fatos que a persona não teria como saber. Se a outra ponta perguntar algo fora do alcance da persona/cenário, desconverse no registro da persona e reconduza ao foco — não fabrique dados.
-- Se um ENUNCIADO/CASO estiver anexado (consultável via file_search), use-o para ancorar fatos do caso ao perguntar ou cobrar coerência — mas na VOZ da persona, sem citar "o enunciado" como artefato (traduza para o contexto de negócio dela).
+- Os MATERIAIS desta etapa (enunciado e/ou o trabalho do aluno) são consultáveis via file_search quando disponíveis (ver "MATERIAIS DISPONÍVEIS" no briefing). Use-os conforme a DINÂMICA — para ancorar fatos, cobrar coerência ou reagir ao que o aluno apresentou — sempre na VOZ da persona, sem citar "documento"/"arquivo"/"enunciado" como artefato (traduza para o contexto dela).
 - A pressão é sobre o conteúdo, no registro da persona; nunca sobre a pessoa.
 - rationale é OBRIGATÓRIO (auditoria do professor, 1–3 frases): justifique quem falou e por quê.
 
@@ -93,14 +95,15 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
     // ---- chamada base. Blocking por padrão; com onFirstDelta vira STREAM
     // (sinaliza "respondendo" no 1º token e a fala da persona assim que a string
     // de action.message fecha — mesmo esquema do SuperOrchestrator). ----
-    async _call(systemPrompt, userContent, { meterCtx, vectorStoreId, label, onFirstDelta = null, onMessageReady = null }) {
+    async _call(systemPrompt, userContent, { meterCtx, vectorStoreIds = [], label, onFirstDelta = null, onMessageReady = null }) {
         const payload = {
             model: this.model,
             instructions: systemPrompt,
             input: [{ role: "user", content: userContent }],
             truncation: "auto",
         };
-        if (vectorStoreId) payload.tools = [{ type: "file_search", vector_store_ids: [vectorStoreId] }];
+        const stores = (Array.isArray(vectorStoreIds) ? vectorStoreIds : [vectorStoreIds]).filter(Boolean);
+        if (stores.length) payload.tools = [{ type: "file_search", vector_store_ids: stores }];
         const wantStream = typeof onFirstDelta === "function";
         log.prompt(label, `system+user (${systemPrompt.length + userContent.length} chars)${wantStream ? " [stream]" : ""}`);
         const MAX = 2;
@@ -148,15 +151,18 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
     async studentTurn({
         scenario, interaction, personasById, position, total, runMemory,
         interactionTranscript = [], memory = null, studentMessage,
-        isOpening = false, vectorStoreId = null, interactionMode = "text",
+        isOpening = false, vectorStoreId = null, studentWorkVectorStoreId = null, interactionMode = "text",
         studentName = null, studentGenderHint = null, meterCtx = null,
         onFirstDelta = null, onMessageReady = null,
     }) {
         const allowedIds = (interaction.participants || []).map(p => p.persona_id);
+        // file_search desta etapa: enunciado do cenário e/ou trabalho do aluno (Fase 2).
+        const studentWorkAvailable = !!studentWorkVectorStoreId;
+        const vectorStoreIds = [vectorStoreId, studentWorkVectorStoreId].filter(Boolean);
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
 
 ${this.turnSystemBody}`;
-        const briefing = renderInteractionBriefing({ scenario, interaction, personasById, position, total, runMemory });
+        const briefing = renderInteractionBriefing({ scenario, interaction, personasById, position, total, runMemory, enunciadoAvailable: !!vectorStoreId, studentWorkAvailable });
         const historyBlock = isOpening
             ? "(ABERTURA — a outra ponta ainda não falou. A persona que abre (opener) deve se apresentar brevemente e dar início conforme a instrução desta etapa.)"
             : (interactionTranscript.length
@@ -186,7 +192,7 @@ Escolha quem fala e a próxima ação. Retorne SOMENTE o JSON do schema.`;
         // prosa ou um shape levemente fora. Custa só quando falha (raro).
         let parsed = null, lastErr = "";
         for (let attempt = 1; attempt <= 2; attempt++) {
-            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId, label: "AGENT:ScenarioOrchestrator", onFirstDelta: attempt === 1 ? onFirstDelta : null, onMessageReady: attempt === 1 ? onMessageReady : null });
+            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreIds, label: "AGENT:ScenarioOrchestrator", onFirstDelta: attempt === 1 ? onFirstDelta : null, onMessageReady: attempt === 1 ? onMessageReady : null });
             const p = extractJsonObject(text);
             if (!p) { lastErr = "no JSON in response"; continue; }
             p.speaker_persona_id = resolveSpeaker(p.speaker_persona_id, allowedIds, personasById, interaction);
@@ -218,7 +224,7 @@ IDS VÁLIDOS para speaker_persona_id (use o ID exatamente, NÃO o nome): ${allow
 Gere a troca entre as duas personas sobre o foco. Retorne SOMENTE o JSON do schema.`;
         let parsed = null, lastErr = "";
         for (let attempt = 1; attempt <= 2; attempt++) {
-            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreId: null, label: "AGENT:ScenarioOrchestrator:exchange" });
+            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreIds: [], label: "AGENT:ScenarioOrchestrator:exchange" });
             const p = extractJsonObject(text);
             if (!p) { lastErr = "no JSON in response"; continue; }
             if (Array.isArray(p.lines)) p.lines.forEach((l, i) => { if (l) l.speaker_persona_id = resolveSpeaker(l.speaker_persona_id, allowedIds, personasById, interaction) || allowedIds[i % allowedIds.length]; });

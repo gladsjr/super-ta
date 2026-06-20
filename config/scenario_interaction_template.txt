@@ -4,9 +4,14 @@
 
 **ESTA INTERAÇÃO** (etapa {{position}} de {{total}} na sequência ordenada do cenário)
 Título: {{interaction_title}}
-Objetivo desta etapa: {{objective_label}}
-Instrução desta etapa: {{instruction}}
+Instrução ao aluno nesta etapa: {{instruction}}
 {{focus_line}}
+
+**DINÂMICA DESTA INTERAÇÃO** (como esta etapa funciona — quem apresenta, quem conduz e como você trata o trabalho do aluno)
+{{dynamics_block}}
+
+**MATERIAIS DISPONÍVEIS NESTA ETAPA** (consultáveis via file_search)
+{{materials_block}}
 
 **PARTICIPANTES DESTA INTERAÇÃO**
 Cada participante abaixo é uma persona. Quando uma persona falar, encarne-a pelo bloco correspondente.

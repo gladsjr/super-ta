@@ -196,7 +196,7 @@ Subsistema separado em `/scenarios` (ver replit.md). UM cenário = explicação 
 ```mermaid
 flowchart LR
   RunStart(["/scenarios/api/run/:id/start|turn|advance"]) --> Live["liveEngine<br/>(guardrails: falante válido,<br/>teto de turnos, memória de run)"]
-  Live --> Brief["renderInteractionBriefing<br/>(cenário + objetivo + personas + memória)"]
+  Live --> Brief["renderInteractionBriefing<br/>(cenário + DINÂMICA/forma + materiais<br/>+ personas + memória)"]
   Brief --> ScenOrq["ScenarioOrchestratorAgent<br/>(1 reasoning call/turno:<br/>escolhe quem fala + a fala)"]
   ScenOrq --> TurnOut>"speak | advance | finalize<br/>(scenarioActionSchema)"]
   ScenOrq --> ExchangeOut>"persona↔persona: 2–4 falas"]
@@ -227,7 +227,7 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
 1. **Templates `.txt`** ([config/](../config/)):
    - [interview_prompt_template.txt](../config/interview_prompt_template.txt) — renderizado por `PrepBuilderAgent.buildPlan` para gerar o plano de entrevista.
    - [interviewer_agenda_template.txt](../config/interviewer_agenda_template.txt) — bloco de agenda compartilhado por todos os agentes que operam no contexto da entrevista. Renderizado por `renderInterviewerAgenda()` em [lib/interviewerAgenda.js](../lib/interviewerAgenda.js), que também exporta a constante **`INTERVIEWER_YAML_SKELETON`** (esqueleto/contrato de chaves da persona, sem valores) injetada no `ConfigAssistantAgent` para que ele emita/edite YAML com chaves válidas.
-   - [scenario_persona_template.txt](../config/scenario_persona_template.txt) e [scenario_interaction_template.txt](../config/scenario_interaction_template.txt) — agenda da persona do cenário e briefing da interação (objetivo, instrução, foco, posição, participantes, memória de run). Renderizados por `renderPersonaAgenda()` / `renderInteractionBriefing()` em [lib/scenarios/agenda.js](../lib/scenarios/agenda.js), consumidos pelo `ScenarioOrchestratorAgent`. (Sistema multiagente — fase MOCK/validação.)
+   - [scenario_persona_template.txt](../config/scenario_persona_template.txt) e [scenario_interaction_template.txt](../config/scenario_interaction_template.txt) — agenda da persona do cenário e briefing da interação (DINÂMICA da forma, MATERIAIS disponíveis, instrução, foco, posição, participantes, memória de run). Renderizados por `renderPersonaAgenda()` / `renderInteractionBriefing()` em [lib/scenarios/agenda.js](../lib/scenarios/agenda.js); o bloco **DINÂMICA** (a "camada" por FORMA da interação) vem de **`FORM_DYNAMICS`** em [lib/scenarios/interactionForms.js](../lib/scenarios/interactionForms.js), mais o `form_prompt` livre na forma personalizada. Consumidos pelo `ScenarioOrchestratorAgent`. (Sistema multiagente.)
    - [narrator_intro.txt](../config/narrator_intro.txt) — script fixo lido por [lib/narrator.js](../lib/narrator.js) e enviado à TTS (não à LLM de raciocínio); produz o áudio do "orientador" que toca antes do entrevistador no modo áudio.
    - [student_instructions.html](../static/student_instructions.html) — instruções mostradas ao aluno no modal "Instruções" (não vai à LLM, mas é conteúdo editável).
 2. **`systemPromptBody` + preâmbulo padronizado em classes de agente** ([agents/](../agents/)):

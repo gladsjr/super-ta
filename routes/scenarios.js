@@ -19,6 +19,7 @@ import * as store from "../lib/scenarios/store.js";
 import * as db from "../lib/db.js";
 import { requireAdmin } from "../lib/middleware.js";
 import { scenarioToYaml, personaToYaml, parseYaml } from "../lib/scenarios/scenarioYaml.js";
+import { FORMS, FORM_LABELS, FORM_DEFAULT_WORK, formKind, normalizeForm } from "../lib/scenarios/interactionForms.js";
 import { VOICES } from "../config/voices.js";
 import {
     scenarioFrame, interactionStart, respond, evaluatePdfMock,
@@ -38,6 +39,7 @@ const cpId = () => `cp_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
 // ---- Meta (enums para a UI) ----
 router.get("/scenarios/api/meta", (_req, res) => {
     res.json({
+        forms: FORMS.map(v => ({ value: v, label: FORM_LABELS[v], default_work: !!FORM_DEFAULT_WORK[v], kind: formKind(v) })),
         objective_types: OBJECTIVE_TYPES.map(v => ({ value: v, label: objectiveLabel(v) })),
         participant_roles: PARTICIPANT_ROLES.map(v => ({ value: v, label: ROLE_LABEL[v] || v })),
         interaction_kinds: INTERACTION_KINDS.map(v => ({ value: v, label: v === "student" ? "Aluno ↔ persona(s)" : "Persona ↔ persona" })),
@@ -137,32 +139,39 @@ function validateScenario(b) {
     if (its.length === 0) return "inclua ao menos uma interação";
     for (const it of its) {
         if (!str(it.title)) return "toda interação precisa de um título";
-        if (!INTERACTION_KINDS.includes(it.kind)) return "tipo de interação inválido";
-        if (!OBJECTIVE_TYPES.includes(it.objective_type)) return `objetivo inválido na interação "${it.title}"`;
+        const form = normalizeForm(it);          // aceita form novo ou objective_type/kind legado
+        if (!FORMS.includes(form)) return `forma inválida na interação "${it.title}"`;
+        if (form === "custom" && !str(it.form_prompt)) return `"${it.title}": a forma personalizada exige um prompt`;
+        const kind = formKind(form);
         const parts = Array.isArray(it.participants) ? it.participants : [];
-        if (it.kind === "persona_exchange") {
-            if (parts.length !== 2) return `"${it.title}": persona↔persona precisa de exatamente 2 personas`;
+        if (kind === "persona_exchange") {
+            if (parts.length !== 2) return `"${it.title}": deliberação entre personas precisa de exatamente 2 personas`;
             if (parts[0].persona_id === parts[1].persona_id) return `"${it.title}": as duas personas devem ser diferentes`;
         } else {
             if (parts.length === 0) return `"${it.title}": inclua ao menos uma persona`;
         }
         for (const p of parts) {
             if (!ids.has(p.persona_id)) return `"${it.title}": escolha personas do cenário`;
-            if (it.kind === "student" && !PARTICIPANT_ROLES.includes(p.role)) return `"${it.title}": papel inválido`;
+            if (kind === "student" && !PARTICIPANT_ROLES.includes(p.role)) return `"${it.title}": papel inválido`;
         }
     }
     return null;
 }
 function cleanInteraction(it, i) {
+    const form = normalizeForm(it);
+    const kind = formKind(form);                 // derivado da forma; gravado p/ o engine
     const parts = (it.participants || []).map(p => ({ persona_id: p.persona_id, role: PARTICIPANT_ROLES.includes(p.role) ? p.role : "questionamento" }));
+    const incWork = typeof it.includes_student_work === "boolean" ? it.includes_student_work : !!FORM_DEFAULT_WORK[form];
     return {
         id: str(it.id) || `i_${i}_${randomUUID().slice(0, 6)}`,
         title: str(it.title),
-        kind: it.kind,
-        objective_type: it.objective_type,
+        form,
+        form_prompt: str(it.form_prompt),
+        includes_student_work: incWork,
+        kind,
         participants: parts,
         opener_persona_id: it.opener_persona_id || parts[0]?.persona_id || null,
-        focus: it.kind === "persona_exchange" ? str(it.focus) : "",
+        focus: kind === "persona_exchange" ? str(it.focus) : "",
         instruction: str(it.instruction),
         example_questions: lines(it.example_questions),
     };

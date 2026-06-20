@@ -88,6 +88,8 @@ function renderCurrent() {
 const objOpts = sel => META.objective_types.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
 const roleOpts = sel => META.participant_roles.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
 const kindOpts = sel => META.interaction_kinds.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
+const formOpts = sel => (META.forms||[]).map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
+const formMeta = v => (META.forms||[]).find(f => f.value === v) || {};
 const genderOpts = sel => `<option value="">—</option>` + META.genders.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
 const voiceOpts = sel => `<option value="">— sem voz —</option>` + META.voices.map(o => `<option value="${o.value}" ${sel===o.value?'selected':''}>${esc(o.label)}</option>`).join('');
 const scenPersonaOpts = sel => (SCENARIO.personas||[]).map(p => `<option value="${p.id}" ${sel===p.id?'selected':''}>${esc(p.icon)} ${esc(p.name)}</option>`).join('');
@@ -151,7 +153,8 @@ function applyAssistProposals(out) {
   SCENARIO.interactions = SCENARIO.interactions || [];
   (out.new_interactions||[]).forEach(ni => {
     const participants = (ni.participants||[]).map(p => ({ persona_id: byName[(p.persona_name||'').toLowerCase()], role:p.role })).filter(p => p.persona_id);
-    SCENARIO.interactions.push({ id:'i_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9), title:ni.title, kind:ni.kind, objective_type:ni.objective_type, participants, opener_persona_id: participants[0]?.persona_id||null, focus:ni.focus||'', instruction:ni.instruction||'', example_questions:[] });
+    const niForm = ni.kind==='persona_exchange' ? 'deliberacao' : ({apresentacao:'apresentacao',feedback:'feedback',avaliacao:'arguicao',negociacao:'negociacao',discussao:'discussao',diagnostico:'consultoria'}[ni.objective_type] || 'arguicao');
+    SCENARIO.interactions.push({ id:'i_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9), title:ni.title, form:niForm, form_prompt:'', includes_student_work: !!formMeta(niForm).default_work, participants, opener_persona_id: participants[0]?.persona_id||null, focus:ni.focus||'', instruction:ni.instruction||'', example_questions:[] });
   });
   if ((out.new_interactions||[]).length) parts.push((out.new_interactions.length)+' interação(ões)');
   return parts.length ? 'apliquei '+parts.join(', ')+' — revise nas abas 🎭/↔️ e salve' : '';
@@ -282,8 +285,10 @@ function partRowHtml(part, kind) {
     <button class="icon-btn pr-del" type="button" title="remover">✕</button></div>`;
 }
 function interactionCardHtml(it) {
-  it = it || { kind:'student', objective_type:META.objective_types[0]?.value, participants:[], title:'', focus:'', instruction:'', example_questions:[] };
-  const isEx = it.kind==='persona_exchange';
+  it = it || { form:(META.forms[0]?.value||'apresentacao'), participants:[], title:'', focus:'', instruction:'', form_prompt:'', example_questions:[], includes_student_work: !!(META.forms[0]?.default_work) };
+  const form = it.form || 'apresentacao';
+  const isEx = form==='deliberacao';
+  const pkind = isEx ? 'persona_exchange' : 'student';
   return `<div class="it-card ${isEx?'ex':''}" data-id="${esc(it.id||'')}">
     <div class="it-head"><span class="it-n">#</span>
       <input class="input it-title" value="${esc(it.title||'')}" placeholder="Título da interação" style="flex:1"/>
@@ -293,11 +298,12 @@ function interactionCardHtml(it) {
     <div class="it-summary"></div>
     <div class="it-body">
       <div class="row2">
-        <div class="field" style="flex:1"><label>Tipo</label><select class="select it-kind">${kindOpts(it.kind)}</select></div>
-        <div class="field" style="flex:1"><label>Objetivo</label><select class="select it-objective">${objOpts(it.objective_type)}</select></div>
+        <div class="field" style="flex:2"><label>Forma da interação <span class="hint">define a dinâmica (quem apresenta/conduz)</span></label><select class="select it-form">${formOpts(form)}</select></div>
+        <div class="field" style="flex:1;display:flex;align-items:flex-end"><label class="hint" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="it-work" ${it.includes_student_work?'checked':''}/> incluir o trabalho do aluno</label></div>
       </div>
+      <div class="field"><label>Prompt da dinâmica <span class="hint">obrigatório na forma "Personalizada"; opcional como nuance nas demais</span></label><textarea class="textarea it-form-prompt" rows="2" placeholder="Ex.: você é um jurado de hackathon cético; interrompa se enrolar e exija números">${esc(it.form_prompt||'')}</textarea></div>
       <div class="field"><label>Participantes <span class="hint it-student-only">personas do cenário + papéis</span><span class="hint it-exchange-only">exatamente 2 personas que conversam</span></label>
-        <div class="it-parts">${(it.participants||[]).map(p=>partRowHtml(p, it.kind)).join('') || partRowHtml(null, it.kind)}</div>
+        <div class="it-parts">${(it.participants||[]).map(p=>partRowHtml(p, pkind)).join('') || partRowHtml(null, pkind)}</div>
         <button class="btn btn-sm it-add-part" type="button">+ participante</button></div>
       <div class="field it-exchange-only"><label>Foco da conversa <span class="hint">o que as duas personas discutem</span></label><input class="input it-focus" value="${esc(it.focus||'')}" placeholder="Ex.: vale investir? maior risco?"/></div>
       <div class="field it-student-only"><label>Instrução ao aluno</label><input class="input it-instruction" value="${esc(it.instruction||'')}" placeholder="O que o aluno deve fazer nesta etapa"/></div>
@@ -306,8 +312,8 @@ function interactionCardHtml(it) {
   </div>`;
 }
 function syncInteractionCard(card) {
-  const kind = card.querySelector('.it-kind').value;
-  const isEx = kind==='persona_exchange';
+  const form = card.querySelector('.it-form').value;
+  const isEx = form==='deliberacao';
   card.classList.toggle('ex', isEx);
   card.querySelectorAll('.it-student-only').forEach(e=>e.style.display = isEx?'none':'');
   card.querySelectorAll('.it-exchange-only').forEach(e=>e.style.display = isEx?'':'none');
@@ -315,17 +321,18 @@ function syncInteractionCard(card) {
   updateSummary(card);
 }
 function updateSummary(card) {
-  const kind = card.querySelector('.it-kind').value;
+  const form = card.querySelector('.it-form').value;
   const nParts = card.querySelectorAll('.part-row').length;
-  card.querySelector('.it-summary').textContent = `${kindLabel(kind)} · ${nParts} participante(s)`;
+  card.querySelector('.it-summary').textContent = `${formMeta(form).label || form} · ${nParts} participante(s)`;
 }
 function renumberInteractions() { document.querySelectorAll('#sf-interactions .it-card .it-n').forEach((n,i)=>n.textContent = (i+1)+'.'); }
 function harvestInteractions() {
   return [...document.querySelectorAll('#sf-interactions .it-card')].map(card => ({
     id: card.dataset.id || undefined,
     title: card.querySelector('.it-title').value.trim(),
-    kind: card.querySelector('.it-kind').value,
-    objective_type: card.querySelector('.it-objective').value,
+    form: card.querySelector('.it-form').value,
+    form_prompt: card.querySelector('.it-form-prompt').value.trim(),
+    includes_student_work: card.querySelector('.it-work').checked,
     participants: [...card.querySelectorAll('.part-row')].map(r=>({ persona_id:r.querySelector('.pr-persona').value, role:r.querySelector('.pr-role').value })),
     focus: card.querySelector('.it-focus').value.trim(),
     instruction: card.querySelector('.it-instruction').value.trim(),
@@ -343,7 +350,7 @@ function renderInteracoesPane() {
   const itsEl = document.getElementById('sf-interactions');
   itsEl.querySelectorAll('.it-card').forEach(syncInteractionCard); renumberInteractions();
   document.getElementById('sf-add-interaction').onclick = () => { itsEl.insertAdjacentHTML('beforeend', interactionCardHtml(null)); const c=itsEl.lastElementChild; syncInteractionCard(c); renumberInteractions(); };
-  itsEl.addEventListener('change', e => { if (e.target.classList.contains('it-kind')) syncInteractionCard(e.target.closest('.it-card')); });
+  itsEl.addEventListener('change', e => { if (e.target.classList.contains('it-form')) { const card=e.target.closest('.it-card'); const fm=formMeta(e.target.value); const wk=card.querySelector('.it-work'); if (wk) wk.checked = !!fm.default_work; syncInteractionCard(card); } });
   itsEl.addEventListener('input', e => { if (e.target.classList.contains('it-title')) updateSummary(e.target.closest('.it-card')); });
   itsEl.addEventListener('click', e => {
     const card = e.target.closest('.it-card'); if (!card) return;
@@ -351,7 +358,7 @@ function renderInteracoesPane() {
     else if (e.target.classList.contains('it-del')) { if (itsEl.children.length>1) card.remove(); renumberInteractions(); }
     else if (e.target.classList.contains('it-up') && card.previousElementSibling) { card.parentNode.insertBefore(card, card.previousElementSibling); renumberInteractions(); }
     else if (e.target.classList.contains('it-down') && card.nextElementSibling) { card.parentNode.insertBefore(card.nextElementSibling, card); renumberInteractions(); }
-    else if (e.target.classList.contains('it-add-part')) { card.querySelector('.it-parts').insertAdjacentHTML('beforeend', partRowHtml(null, card.querySelector('.it-kind').value)); updateSummary(card); }
+    else if (e.target.classList.contains('it-add-part')) { const pkind = card.querySelector('.it-form').value==='deliberacao'?'persona_exchange':'student'; card.querySelector('.it-parts').insertAdjacentHTML('beforeend', partRowHtml(null, pkind)); updateSummary(card); }
     else if (e.target.classList.contains('pr-del')) { const parts=card.querySelector('.it-parts'); if (parts.children.length>1) e.target.closest('.part-row').remove(); updateSummary(card); }
   });
 }
