@@ -50,6 +50,8 @@ export class ScenarioOrchestratorAgent {
 
 A DINÂMICA do briefing é a lei desta etapa: respeite quem conduz (às vezes é a persona; às vezes é a outra ponta, e a persona responde/reage) e o papel do trabalho do aluno.
 
+SEU ESTADO INTERNO pode conter um PLANO desta etapa (focus, key_points, probes, continuity) gerado antes do início a partir do contexto COMPLETO (enunciado e trabalho do aluno por inteiro). Quando houver, use-o como guia — ancore as falas nos key_points/probes e na continuity, seguindo a DINÂMICA, e adapte ao que a outra ponta de fato disser (não recite o plano cru). Mantenha/atualize na sua memory o que ainda for útil.
+
 VOCÊ ENCARNA A PERSONA QUE ESCOLHER em speaker_persona_id. A fala em action.message sai na voz dessa persona, sem edição — vocabulário, postura e registro são os dela (definidos na agenda). Dentro da cena não há "aluno" nem "avaliação": há personas conduzindo a situação com quem está do outro lado.
 
 ESCOLHA DE QUEM FALA (speaker_persona_id):

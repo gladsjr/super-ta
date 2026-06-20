@@ -35,8 +35,19 @@ const runView = (run) => ({
 });
 async function liveDeps() {
     const [a, l] = await Promise.all([import("../lib/agents.js"), import("../lib/scenarios/liveEngine.js")]);
-    return { agent: a.scenarioOrchestratorAgent, live: l };
+    return { agent: a.scenarioOrchestratorAgent, prepAgent: a.scenarioPrepAgent, live: l };
 }
+// A etapa está "pronta" para abrir? (não pede trabalho do aluno, ou já foi anexado)
+const interactionReady = (run, it) => !it.includes_student_work || !!workVsId(run, it);
+// A abertura da interação corrente já rodou? (há persona/aside após o último cabeçalho)
+function openerDone(transcript) {
+    for (let i = (transcript || []).length - 1; i >= 0; i--) {
+        if (transcript[i].kind === "interaction") return false;
+        if (transcript[i].kind === "persona" || transcript[i].kind === "aside") return true;
+    }
+    return false;
+}
+const fileId = (run, it) => (it && run?.student_work && run.student_work[it.id]?.file_id) || null;
 
 // Estado / resume: a página carrega isto ao entrar com o token.
 router.get("/s/:submissionToken/scenario/state", requireSubmissionToken, async (req, res) => {
@@ -54,14 +65,23 @@ router.post("/s/:submissionToken/scenario/start", requireSubmissionToken, async 
     let run = await store.getRunBySubmission(req.submission.id);
     if (run) return res.json({ run: runView(run), scenario: studentScenario(scenario), resumed: true });
     const byId = personasById(scenario);
-    const { agent, live } = await liveDeps();
+    const { agent, prepAgent, live } = await liveDeps();
     run = await store.createRun(scenario.id, req.submission.id);
     run.mode = "live"; run.interaction_index = 0;
+    const it0 = scenario.interactions[0];
+    const total = scenario.interactions.length;
+    // Cabeçalho sempre; a ABERTURA (via prep) só quando a etapa está pronta — se
+    // pede trabalho e o aluno ainda não anexou, a abertura vem no upload.
+    run.transcript = [live.scenarioFrame(scenario), live.interactionHeader(it0, byId, 0, total)];
     try {
-        run.transcript = [live.scenarioFrame(scenario), ...(await live.interactionStartLive(agent, {
-            scenario, interaction: scenario.interactions[0], personasById: byId, idx: 0,
-            total: scenario.interactions.length, runMemory: "", interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, scenario.interactions[0]),
-        }))];
+        if (interactionReady(run, it0)) {
+            const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
+                scenario, interaction: it0, personasById: byId, idx: 0, total, runMemory: "",
+                interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
+                enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, it0),
+            });
+            run.transcript.push(...entries); run.memory = memory;
+        }
     } catch (e) { return res.status(500).json({ error: `falha ao iniciar: ${e.message}` }); }
     await store.saveRun(run);
     res.json({ run: runView(run), scenario: studentScenario(scenario), resumed: false });
@@ -123,11 +143,20 @@ router.post("/s/:submissionToken/scenario/advance", requireSubmissionToken, asyn
         return res.json({ run: runView(run), done: true });
     }
     const byId = personasById(scenario);
-    const { agent, live } = await liveDeps();
+    const { agent, prepAgent, live } = await liveDeps();
     run.interaction_index = next; run.memory = null;
+    const itN = scenario.interactions[next];
+    const runMemory = live.buildRunMemory(scenario, run.transcript, next);
+    run.transcript.push(live.interactionHeader(itN, byId, next, total));
     try {
-        const runMemory = live.buildRunMemory(scenario, run.transcript, next);
-        run.transcript.push(...(await live.interactionStartLive(agent, { scenario, interaction: scenario.interactions[next], personasById: byId, idx: next, total, runMemory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, scenario.interactions[next]) })));
+        if (interactionReady(run, itN)) {
+            const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
+                scenario, interaction: itN, personasById: byId, idx: next, total, runMemory,
+                interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
+                enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, itN),
+            });
+            run.transcript.push(...entries); run.memory = memory;
+        }
     } catch (e) { return res.status(500).json({ error: `falha ao avançar: ${e.message}` }); }
     await store.saveRun(run);
     res.json({ run: runView(run), done: false });
@@ -154,6 +183,23 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
         const vsId = await createVectorStoreWithFiles([uploaded.id], `${run.id}:${it.id}`);
         run.student_work = run.student_work || {};
         run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, uploaded_at: new Date().toISOString() };
+
+        // É a interação corrente e a abertura ainda não rodou? Então AGORA o prep
+        // lê o contexto completo (com o trabalho) e a persona ABRE já informada.
+        const curIt = scenario.interactions[run.interaction_index];
+        if (curIt && curIt.id === it.id && curIt.kind === "student" && !openerDone(run.transcript)) {
+            try {
+                const byId = personasById(scenario);
+                const { agent, prepAgent, live } = await liveDeps();
+                const runMemory = live.buildRunMemory(scenario, run.transcript, run.interaction_index);
+                const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
+                    scenario, interaction: curIt, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, runMemory,
+                    interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
+                    enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: uploaded.id,
+                });
+                run.transcript.push(...entries); run.memory = memory;
+            } catch (e) { /* prep é best-effort no upload: não derruba o anexo */ }
+        }
         await store.saveRun(run);
         res.json({ ok: true, interaction_id: it.id, filename: name, run: runView(run) });
     } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
