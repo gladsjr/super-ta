@@ -36,7 +36,7 @@
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TOKEN = (location.pathname.match(/\/s\/([0-9a-f]{12})/i) || [])[1] || '';
 const API = `/s/${TOKEN}/scenario`;
-let SCEN = null, RUN = null, SELTAB = 0, REPLACE_WORK = null;
+let SCEN = null, RUN = null, SELTAB = 0;
 
 async function api(method, path, body) {
   const r = await fetch(API + path, { method, headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -94,9 +94,11 @@ function render() {
   const isExchangeStep = !done && SELTAB === cur && itAtSel && itAtSel.kind === 'persona_exchange';
   const viewingPast = SELTAB < cur;
   // Trabalho do aluno por interação: se a etapa pede e ainda não anexou, mostra o upload ANTES de liberar a resposta.
-  const needsWork = isStudentStep && itAtSel.includes_student_work && (!hasWork(itAtSel) || REPLACE_WORK === itAtSel.id);
-  const workNote = isStudentStep && itAtSel.includes_student_work && hasWork(itAtSel) && REPLACE_WORK !== itAtSel.id
-    ? `<div class="rn-controls"><span class="hint">📎 trabalho anexado: <strong>${esc(RUN.student_work[itAtSel.id].filename)}</strong> <button class="btn btn-ghost btn-sm" id="rn-work-replace">trocar</button></span></div>` : '';
+  const needsWork = isStudentStep && itAtSel.includes_student_work && !hasWork(itAtSel);
+  // Uma vez anexado, o trabalho fica TRAVADO nesta etapa — a persona já o leu e
+  // planejou a conversa em cima dele; trocar no meio não faria sentido.
+  const workNote = isStudentStep && itAtSel.includes_student_work && hasWork(itAtSel)
+    ? `<div class="rn-controls"><span class="hint">📎 trabalho desta etapa: <strong>${esc(RUN.student_work[itAtSel.id].filename)}</strong> (a persona já leu)</span></div>` : '';
   const workBox = `
       <div class="rn-controls" style="flex-direction:column;align-items:stretch;gap:6px">
         <span class="hint">Esta etapa pede o seu trabalho — anexe-o (PDF) para a persona poder consultá-lo.</span>
@@ -119,7 +121,6 @@ function render() {
   const send = document.getElementById('rn-send'); if (send) send.onclick = sendTurn;
   const inp = document.getElementById('rn-input'); if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); } });
   const wsend = document.getElementById('rn-work-send'); if (wsend) wsend.onclick = () => uploadWork(itAtSel.id);
-  const wrep = document.getElementById('rn-work-replace'); if (wrep) wrep.onclick = () => { REPLACE_WORK = itAtSel.id; render(); };
 }
 async function uploadWork(iid) {
   const fileEl = document.getElementById('rn-work-file'); const msg = document.getElementById('rn-work-msg');
@@ -129,7 +130,7 @@ async function uploadWork(iid) {
   try {
     const r = await fetch(`${API}/interactions/${encodeURIComponent(iid)}/work`, { method: 'POST', body: fd });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    if (j.run) RUN = j.run; REPLACE_WORK = null; render();
+    if (j.run) RUN = j.run; render();
   } catch (e) { if (msg) msg.textContent = e.message; }
 }
 function thinking(on) { const t = document.getElementById('rn-transcript'); if (!t) return; t.querySelector('.rn-thinking')?.remove(); if (on) { t.insertAdjacentHTML('beforeend', '<div class="rn-thinking">⏳ aguarde…</div>'); t.scrollTop = t.scrollHeight; } }
