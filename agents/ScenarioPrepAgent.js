@@ -39,7 +39,7 @@ Produza JSON com EXATAMENTE estes campos:
   "contradictions": [ { "where": ["seção/figura 1", "seção/figura 2"], "description": "o que está em conflito, em uma frase" } ],
   "probes": [ "2-5 sondagens/perguntas na VOZ da persona, ancoradas nos pontos acima" ],
   "continuity": "o que puxar das etapas anteriores (se a memória trouxer algo); senão vazio",
-  "opening": "a 1ª fala da persona NESTA etapa, na voz dela — já reagindo ao material quando houver, conforme a DINÂMICA (curta, natural, sem citar 'documento'/'arquivo' como artefato)"
+  "opening": "a 1ª fala da persona NESTA etapa, na voz dela — já reagindo ao material quando houver, conforme a DINÂMICA (curta, natural, sem citar 'documento'/'arquivo' como artefato). TERMINE com um CONVITE claro para a outra ponta agir já (apresentar/começar/responder), para a conversa fluir sem um 'ok' intermediário — ex.: 'me apresente seu raciocínio sobre X' em vez de só enunciar o que você quer testar"
 }
 
 Regras:

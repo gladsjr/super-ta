@@ -12,7 +12,7 @@
 import express from "express";
 import multer from "multer";
 import OpenAI from "openai";
-import { requireSubmissionToken } from "../lib/middleware.js";
+import { requireSubmissionToken, requireAdmin } from "../lib/middleware.js";
 import * as store from "../lib/scenarios/store.js";
 
 const router = express.Router();
@@ -48,13 +48,21 @@ function openerDone(transcript) {
     return false;
 }
 const fileId = (run, it) => (it && run?.student_work && run.student_work[it.id]?.file_id) || null;
+// Entradas da interação CORRENTE (após o último cabeçalho de interação).
+function currentSegment(transcript) {
+    const out = [];
+    for (const e of transcript || []) { if (e.kind === "interaction") out.length = 0; else out.push(e); }
+    return out;
+}
 
 // Estado / resume: a página carrega isto ao entrar com o token.
 router.get("/s/:submissionToken/scenario/state", requireSubmissionToken, async (req, res) => {
     const scenario = await store.getScenarioByWork(req.work.id);
     if (!scenario) return res.json({ has_scenario: false });
     const run = await store.getRunBySubmission(req.submission.id);
-    res.json({ has_scenario: true, scenario: studentScenario(scenario), run: run ? runView(run) : null, total: (scenario.interactions || []).length });
+    // is_admin: o professor pode estar logado e testando pela própria URL do aluno
+    // → a UI mostra o atalho de "gerar resposta do aluno (IA)".
+    res.json({ has_scenario: true, scenario: studentScenario(scenario), run: run ? runView(run) : null, total: (scenario.interactions || []).length, is_admin: !!req.session?.user });
 });
 
 // Começar (ou resumir) o cenário.
@@ -203,6 +211,42 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
         await store.saveRun(run);
         res.json({ ok: true, interaction_id: it.id, filename: name, run: runView(run) });
     } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
+});
+
+// (PROFESSOR) Gera uma resposta plausível do aluno via IA, para o professor TESTAR
+// o cenário pela própria tela do aluno. requireAdmin: só com sessão de professor.
+// Reusa a ideia do aluno simulado de tests/scenario-eval.mjs (modelo barato, prosa).
+router.post("/s/:submissionToken/scenario/simulate-student", requireSubmissionToken, requireAdmin, async (req, res) => {
+    const run = await store.getRunBySubmission(req.submission.id);
+    if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    const scenario = await store.getScenarioByWork(req.work.id);
+    if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
+    const it = scenario.interactions[run.interaction_index];
+    if (!it || it.kind !== "student") return bad(res, "esta etapa não aceita resposta do aluno");
+    try {
+        const { openai } = await import("../lib/openaiClient.js");
+        const { FAST_MODEL } = await import("../lib/config.js");
+        const { meteredResponses } = await import("../lib/billing.js");
+        const { formDynamics, normalizeForm } = await import("../lib/scenarios/interactionForms.js");
+        const seg = currentSegment(run.transcript);
+        const lastPersona = [...seg].reverse().find(e => e.kind === "persona");
+        const history = seg.map(e => `${e.kind === "student" ? "EU" : (e.name || "persona")}: ${e.text}`).join("\n");
+        const sys = `Você é a OUTRA PONTA de uma cena de role-play: o protagonista (estudante) que apresenta/sustenta o próprio trabalho ou conduz a conversa, conforme a dinâmica. Responda à última fala da persona de forma plausível e natural, como alguém que domina razoavelmente o assunto mas pode ter lacunas — nem perfeito, nem evasivo. 1 a 3 frases, em primeira pessoa, sem markdown. Não quebre o personagem nem comente que é um teste.`;
+        const usr = `CENÁRIO: ${scenario.name} — ${scenario.description}
+ESTA ETAPA: ${it.title}
+DINÂMICA: ${formDynamics(normalizeForm(it))}
+INSTRUÇÃO AO ALUNO: ${it.instruction || "(livre)"}
+
+HISTÓRICO DA ETAPA:
+${history || "(início)"}
+
+ÚLTIMA FALA DA PERSONA: ${lastPersona?.text || "(abertura)"}
+
+Responda como o estudante (1 a 3 frases).`;
+        const r = await meteredResponses({ workId: req.work.id, agentLabel: "AGENT:SimStudent", model: FAST_MODEL },
+            () => openai.responses.create({ model: FAST_MODEL, instructions: sys, input: [{ role: "user", content: usr }], truncation: "auto" }));
+        res.json({ text: (r.output_text || "").trim() });
+    } catch (e) { res.status(500).json({ error: `falha ao simular: ${e.message}` }); }
 });
 
 export default router;

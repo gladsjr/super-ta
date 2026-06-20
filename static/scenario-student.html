@@ -36,7 +36,7 @@
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TOKEN = (location.pathname.match(/\/s\/([0-9a-f]{12})/i) || [])[1] || '';
 const API = `/s/${TOKEN}/scenario`;
-let SCEN = null, RUN = null, SELTAB = 0;
+let SCEN = null, RUN = null, SELTAB = 0, IS_ADMIN = false;
 
 async function api(method, path, body) {
   const r = await fetch(API + path, { method, headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -46,14 +46,34 @@ async function api(method, path, body) {
 }
 const personaById = id => (SCEN?.personas || []).find(p => p.id === id);
 const hasWork = it => !!(it && RUN?.student_work && RUN.student_work[it.id]);
+// O prep (lê o material por inteiro e planeja a etapa) leva alguns segundos — em
+// vez de uma tela parada, mostra um progresso encadeado. setText recebe cada passo.
+const prepSteps = withWork => withWork
+  ? ['📖 a persona está lendo seu trabalho…', '🧠 planejando a conversa…', '✍️ preparando a abertura…']
+  : ['🧠 planejando a conversa…', '✍️ preparando a abertura…'];
+function cycleStatus(setText, withWork) {
+  const steps = prepSteps(withWork); let i = 0; setText(steps[0]);
+  const id = setInterval(() => { if (i < steps.length - 1) setText(steps[++i]); }, 3500);
+  return () => clearInterval(id);
+}
 
 async function boot() {
   try {
     const st = await api('GET', '/state');
     if (!st.has_scenario) { document.getElementById('root').innerHTML = '<div class="empty">Este trabalho não tem um cenário configurado.</div>'; return; }
     SCEN = st.scenario;
+    IS_ADMIN = !!st.is_admin;   // professor testando pela URL do aluno → atalho de IA
     document.getElementById('title').textContent = SCEN.name || 'Cenário';
+    // Sem run, o /start roda o prep da 1ª etapa (lento) — mostra progresso; salvo
+    // se a 1ª etapa pede trabalho (aí a abertura só vem após o upload).
+    const firstNeedsWork = !st.run && !!SCEN.interactions?.[0]?.includes_student_work;
+    let stop = () => {};
+    if (!st.run && !firstNeedsWork) {
+      document.getElementById('root').innerHTML = '<div class="empty" id="prep-status">iniciando…</div>';
+      stop = cycleStatus(t => { const el = document.getElementById('prep-status'); if (el) el.textContent = t; }, false);
+    }
     const j = await api('POST', '/start'); // cria ou resume
+    stop();
     SCEN = j.scenario; RUN = j.run; SELTAB = RUN.interaction_index ?? 0;
     document.getElementById('subtitle').textContent = j.resumed ? 'Você está retomando de onde parou.' : '';
     render();
@@ -111,7 +131,7 @@ function render() {
     ${isStudentStep ? (needsWork ? workBox : `
       ${workNote}
       <div class="runner-input"><textarea class="textarea" id="rn-input" rows="2" placeholder="Sua resposta…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
-      <div class="rn-controls"><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`) : ''}
+      <div class="rn-controls">${IS_ADMIN ? `<button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma resposta plausível do aluno com IA — você revisa e envia">⚙ resposta do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`) : ''}
     ${isExchangeStep ? `<div class="rn-controls"><span class="hint">As personas conversam entre si — leia e avance.</span><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
     ${viewingPast ? `<div class="rn-controls"><span class="hint">Etapa concluída (somente leitura). Volte à aba atual para continuar.</span></div>` : ''}
     ${done ? `<div class="rn-controls"><span class="hint">✓ Você concluiu o cenário.</span></div>` : ''}`;
@@ -121,17 +141,26 @@ function render() {
   const send = document.getElementById('rn-send'); if (send) send.onclick = sendTurn;
   const inp = document.getElementById('rn-input'); if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); } });
   const wsend = document.getElementById('rn-work-send'); if (wsend) wsend.onclick = () => uploadWork(itAtSel.id);
+  const aig = document.getElementById('rn-aigen'); if (aig) aig.onclick = aiGen;
+}
+// (professor) preenche a caixa com uma resposta plausível do aluno gerada por IA.
+async function aiGen() {
+  const inp = document.getElementById('rn-input'), btn = document.getElementById('rn-aigen'); if (!inp) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⚙ gerando…'; }
+  try { const j = await api('POST', '/simulate-student'); inp.value = j.text || ''; inp.focus(); }
+  catch (e) { alert(e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '⚙ resposta do aluno (IA)'; } }
 }
 async function uploadWork(iid) {
   const fileEl = document.getElementById('rn-work-file'); const msg = document.getElementById('rn-work-msg');
   if (!fileEl?.files[0]) { if (msg) msg.textContent = 'escolha um arquivo'; return; }
-  if (msg) msg.textContent = 'enviando e indexando…';
+  const stop = cycleStatus(t => { if (msg) msg.textContent = t; }, true);
   const fd = new FormData(); fd.append('file', fileEl.files[0]);
   try {
     const r = await fetch(`${API}/interactions/${encodeURIComponent(iid)}/work`, { method: 'POST', body: fd });
-    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    const j = await r.json().catch(() => ({})); stop(); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     if (j.run) RUN = j.run; render();
-  } catch (e) { if (msg) msg.textContent = e.message; }
+  } catch (e) { stop(); if (msg) msg.textContent = e.message; }
 }
 function thinking(on) { const t = document.getElementById('rn-transcript'); if (!t) return; t.querySelector('.rn-thinking')?.remove(); if (on) { t.insertAdjacentHTML('beforeend', '<div class="rn-thinking">⏳ aguarde…</div>'); t.scrollTop = t.scrollHeight; } }
 function setStatus(msg, partial) {
@@ -166,9 +195,11 @@ async function sendTurn() {
   } catch (e) { setStatus(''); const t=document.getElementById('rn-transcript'); if (t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 async function advance() {
-  thinking(true);
-  try { const j = await api('POST', '/advance'); RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
-  catch (e) { thinking(false); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
+  // O /advance roda o prep da próxima etapa (ou a deliberação entre personas) —
+  // mostra progresso encadeado no lugar da tela parada.
+  const stop = cycleStatus(t => setStatus(t), false);
+  try { const j = await api('POST', '/advance'); stop(); RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
+  catch (e) { stop(); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 boot();
 </script>
