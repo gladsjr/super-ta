@@ -36,7 +36,7 @@
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TOKEN = (location.pathname.match(/\/s\/([0-9a-f]{12})/i) || [])[1] || '';
 const API = `/s/${TOKEN}/scenario`;
-let SCEN = null, RUN = null, SELTAB = 0;
+let SCEN = null, RUN = null, SELTAB = 0, REPLACE_WORK = null;
 
 async function api(method, path, body) {
   const r = await fetch(API + path, { method, headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -45,6 +45,7 @@ async function api(method, path, body) {
   return j;
 }
 const personaById = id => (SCEN?.personas || []).find(p => p.id === id);
+const hasWork = it => !!(it && RUN?.student_work && RUN.student_work[it.id]);
 
 async function boot() {
   try {
@@ -92,13 +93,23 @@ function render() {
   const isStudentStep = !done && SELTAB === cur && itAtSel && itAtSel.kind === 'student';
   const isExchangeStep = !done && SELTAB === cur && itAtSel && itAtSel.kind === 'persona_exchange';
   const viewingPast = SELTAB < cur;
+  // Trabalho do aluno por interação: se a etapa pede e ainda não anexou, mostra o upload ANTES de liberar a resposta.
+  const needsWork = isStudentStep && itAtSel.includes_student_work && (!hasWork(itAtSel) || REPLACE_WORK === itAtSel.id);
+  const workNote = isStudentStep && itAtSel.includes_student_work && hasWork(itAtSel) && REPLACE_WORK !== itAtSel.id
+    ? `<div class="rn-controls"><span class="hint">📎 trabalho anexado: <strong>${esc(RUN.student_work[itAtSel.id].filename)}</strong> <button class="btn btn-ghost btn-sm" id="rn-work-replace">trocar</button></span></div>` : '';
+  const workBox = `
+      <div class="rn-controls" style="flex-direction:column;align-items:stretch;gap:6px">
+        <span class="hint">Esta etapa pede o seu trabalho — anexe-o (PDF) para a persona poder consultá-lo.</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="file" id="rn-work-file" accept=".pdf,.txt,.md"/><button class="btn btn-primary" id="rn-work-send">Anexar trabalho</button><span class="hint" id="rn-work-msg"></span></div>
+      </div>`;
 
   document.getElementById('root').innerHTML = `
     <div class="rn-tabs">${tabs}</div>
     <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || '<div class="empty">—</div>'}</div>
-    ${isStudentStep ? `
+    ${isStudentStep ? (needsWork ? workBox : `
+      ${workNote}
       <div class="runner-input"><textarea class="textarea" id="rn-input" rows="2" placeholder="Sua resposta…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
-      <div class="rn-controls"><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
+      <div class="rn-controls"><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`) : ''}
     ${isExchangeStep ? `<div class="rn-controls"><span class="hint">As personas conversam entre si — leia e avance.</span><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
     ${viewingPast ? `<div class="rn-controls"><span class="hint">Etapa concluída (somente leitura). Volte à aba atual para continuar.</span></div>` : ''}
     ${done ? `<div class="rn-controls"><span class="hint">✓ Você concluiu o cenário.</span></div>` : ''}`;
@@ -107,6 +118,19 @@ function render() {
   const adv = document.getElementById('rn-advance'); if (adv) adv.onclick = advance;
   const send = document.getElementById('rn-send'); if (send) send.onclick = sendTurn;
   const inp = document.getElementById('rn-input'); if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); } });
+  const wsend = document.getElementById('rn-work-send'); if (wsend) wsend.onclick = () => uploadWork(itAtSel.id);
+  const wrep = document.getElementById('rn-work-replace'); if (wrep) wrep.onclick = () => { REPLACE_WORK = itAtSel.id; render(); };
+}
+async function uploadWork(iid) {
+  const fileEl = document.getElementById('rn-work-file'); const msg = document.getElementById('rn-work-msg');
+  if (!fileEl?.files[0]) { if (msg) msg.textContent = 'escolha um arquivo'; return; }
+  if (msg) msg.textContent = 'enviando e indexando…';
+  const fd = new FormData(); fd.append('file', fileEl.files[0]);
+  try {
+    const r = await fetch(`${API}/interactions/${encodeURIComponent(iid)}/work`, { method: 'POST', body: fd });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    if (j.run) RUN = j.run; REPLACE_WORK = null; render();
+  } catch (e) { if (msg) msg.textContent = e.message; }
 }
 function thinking(on) { const t = document.getElementById('rn-transcript'); if (!t) return; t.querySelector('.rn-thinking')?.remove(); if (on) { t.insertAdjacentHTML('beforeend', '<div class="rn-thinking">⏳ aguarde…</div>'); t.scrollTop = t.scrollHeight; } }
 function setStatus(msg, partial) {
