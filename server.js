@@ -30,6 +30,7 @@ import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
 import scenarioStudentRoutes from "./routes/scenarioStudent.js";
+import scenarioCockpitRoutes from "./routes/scenarioCockpit.js";
 import diagRoutes from "./routes/diag.js";
 import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
@@ -54,6 +55,7 @@ app.get("/me", meHandler);
 // montamos sem prefixo para preservar exatamente as URLs anteriores.
 app.use(staticRoutes);
 app.use(adminRoutes);
+app.use(scenarioCockpitRoutes); // /w/:t/scenario-runs|scenario-evaluations/* — cockpit do professor p/ cenários (requireAdmin por rota). Antes de workRoutes (paths específicos).
 app.use(workRoutes);
 app.use(interviewRoutes);
 app.use("/scenarios/api", requireAdmin); // gate de sessão SÓ na API de config do professor (path-scoped; não afeta o fluxo do aluno nem a página pública /scenarios).

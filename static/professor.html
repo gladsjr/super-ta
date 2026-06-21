@@ -6,6 +6,15 @@
 <title>ORATIA — Professor</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
 <link rel="stylesheet" href="/static/css/studio.css"/>
+<style>
+  /* Cockpit de cenário (visão por aluno só-leitura). */
+  .sc-conv { display:flex; flex-direction:column; gap:6px; max-height:420px; overflow:auto; margin-top:8px; padding:8px; background:var(--bg-muted,#f7f5ef); border-radius:6px; }
+  .sc-b { padding:6px 10px; border-radius:10px; max-width:90%; font-size:var(--fs-sm); }
+  .sc-b-student { align-self:flex-end; background:var(--accent-100,#d8efe9); }
+  .sc-b-persona { align-self:flex-start; background:var(--bg-raised,#fff); border:1px solid var(--ink-200,#e5e1d8); }
+  .sc-b-hint { align-self:center; background:var(--gold-50,#fdf8ec); border:1px dashed var(--gold-300,#e6cf94); font-style:italic; }
+  .sc-itk { font-size:var(--fs-xs); color:var(--ink-600,#6b6555); font-weight:600; margin-top:4px; }
+</style>
 <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
 <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
 <style>
@@ -460,6 +469,7 @@
 </dialog>
 
 <script src="/static/js/studio.js"></script>
+<script src="/static/js/scenarioCockpit.js"></script>
 <script>
 const workToken = location.pathname.split('/').filter(Boolean)[1];
 
@@ -492,6 +502,20 @@ async function load() {
       window.__studioMounted = true;
       window.mountStudio({ root: document.getElementById('studio-mount'), workToken });
     }
+    // Cockpit de cenário (lote-first) ocupa a aba "Alunos & avaliação"; as abas
+    // de avaliação/notas da entrevista somem (mundo isolado, sem risco à entrevista).
+    document.getElementById('tab-btn-alunos').textContent = 'Alunos & avaliação';
+    document.getElementById('tab-btn-avaliacao').style.display = 'none';
+    document.getElementById('tab-btn-notas').style.display = 'none';
+    const al = document.getElementById('tab-alunos');
+    if (al && !window.__scCockpitMounted) {
+      window.__scCockpitMounted = true;
+      [...al.children].forEach(c => c.classList.add('hidden'));   // some o conteúdo de entrevista (segue populado, sem efeito)
+      const m = document.createElement('div'); m.id = 'scenario-cockpit-mount'; al.appendChild(m);
+      if (window.mountScenarioCockpit) window.mountScenarioCockpit({ root: m, workToken });
+    }
+    const curTab = document.querySelector('.tab-btn.is-active')?.dataset.tab;
+    if (curTab === 'avaliacao' || curTab === 'notas') setTab('alunos');
   }
 
   const enunciadoUrl = `/w/${encodeURIComponent(workToken)}/enunciado`;
