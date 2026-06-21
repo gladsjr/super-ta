@@ -159,7 +159,7 @@ function applyAssistProposals(out) {
   (out.new_interactions||[]).forEach(ni => {
     const participants = (ni.participants||[]).map(p => ({ persona_id: byName[(p.persona_name||'').toLowerCase()], role:p.role })).filter(p => p.persona_id);
     const niForm = ni.kind==='persona_exchange' ? 'deliberacao' : ({apresentacao:'apresentacao',feedback:'feedback',avaliacao:'arguicao',negociacao:'negociacao',discussao:'discussao',diagnostico:'consultoria'}[ni.objective_type] || 'arguicao');
-    SCENARIO.interactions.push({ id:'i_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9), title:ni.title, form:niForm, form_prompt:'', includes_student_work: !!formMeta(niForm).default_work, participants, opener_persona_id: participants[0]?.persona_id||null, focus:ni.focus||'', instruction:ni.instruction||'', example_questions:[] });
+    SCENARIO.interactions.push({ id:'i_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9), title:ni.title, form:niForm, form_prompt:'', includes_student_work: !!formMeta(niForm).default_work, participants, opener_persona_id: participants[0]?.persona_id||null, focus:ni.focus||'', instruction:ni.instruction||'', example_questions:[], private_info:[] });
   });
   if ((out.new_interactions||[]).length) parts.push((out.new_interactions.length)+' interação(ões)');
   return parts.length ? 'apliquei '+parts.join(', ')+' — revise nas abas 🎭/↔️ e salve' : '';
@@ -289,11 +289,21 @@ function partRowHtml(part, kind) {
     <select class="select pr-role" ${kind==='persona_exchange'?'style="display:none"':''}>${roleOpts(part?.role)}</select>
     <button class="icon-btn pr-del" type="button" title="remover">✕</button></div>`;
 }
+function scenarioPersonaMap() { const b={}; (SCENARIO.personas||[]).forEach(p=>b[p.id]=p); return b; }
+function cardParticipants(card) { return [...card.querySelectorAll('.it-parts .part-row')].map(r=>({ persona_id:r.querySelector('.pr-persona').value })); }
+// Linha de "informação privada": texto + checkboxes das personas participantes que a detêm.
+function privateRowHtml(pi, participants, byId) {
+  pi = pi || { text:'', persona_ids:[] };
+  const checks = (participants||[]).map(p=>{ const per=byId[p.persona_id]; if(!per) return ''; const on=(pi.persona_ids||[]).includes(p.persona_id);
+    return `<label class="hint" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="checkbox" class="pi-persona" value="${esc(p.persona_id)}" ${on?'checked':''}/> ${esc(per.icon||'')} ${esc(per.name)}</label>`; }).join('');
+  return `<div class="pi-row" style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px"><div style="flex:1"><input class="input pi-text" value="${esc(pi.text||'')}" placeholder="Ex.: a usina entrega ~80 kW contínuos"/><div class="pi-personas" style="margin-top:4px">${checks||'<span class="hint">defina participantes acima para atribuir</span>'}</div></div><button class="icon-btn pi-del" type="button" title="remover">✕</button></div>`;
+}
 function interactionCardHtml(it) {
-  it = it || { form:(META.forms[0]?.value||'apresentacao'), participants:[], title:'', focus:'', instruction:'', form_prompt:'', example_questions:[], includes_student_work: !!(META.forms[0]?.default_work) };
+  it = it || { form:(META.forms[0]?.value||'apresentacao'), participants:[], title:'', focus:'', instruction:'', form_prompt:'', example_questions:[], private_info:[], includes_student_work: !!(META.forms[0]?.default_work) };
   const form = it.form || 'apresentacao';
   const isEx = form==='deliberacao';
   const pkind = isEx ? 'persona_exchange' : 'student';
+  const byId = scenarioPersonaMap();
   return `<div class="it-card ${isEx?'ex':''}" data-id="${esc(it.id||'')}">
     <div class="it-head"><span class="it-n">#</span>
       <input class="input it-title" value="${esc(it.title||'')}" placeholder="Título da interação" style="flex:1"/>
@@ -312,8 +322,11 @@ function interactionCardHtml(it) {
         <div class="it-parts">${(it.participants||[]).map(p=>partRowHtml(p, pkind)).join('') || partRowHtml(null, pkind)}</div>
         <button class="btn btn-sm it-add-part" type="button">+ participante</button></div>
       <div class="field it-exchange-only"><label>Foco da conversa <span class="hint">o que as duas personas discutem</span></label><input class="input it-focus" value="${esc(it.focus||'')}" placeholder="Ex.: vale investir? maior risco?"/></div>
-      <div class="field it-student-only"><label>Instrução ao aluno</label><input class="input it-instruction" value="${esc(it.instruction||'')}" placeholder="O que o aluno deve fazer nesta etapa"/></div>
-      <div class="field"><label>Perguntas de exemplo <span class="hint">desta interação — um por linha</span></label><textarea class="textarea it-questions" rows="2">${esc((it.example_questions||[]).join('\n'))}</textarea></div>
+      <div class="field it-student-only"><label>Instrução ao aluno <span class="hint">mostrada ao aluno no topo da etapa e usada como contexto pelas personas</span></label><input class="input it-instruction" value="${esc(it.instruction||'')}" placeholder="O que o aluno deve fazer nesta etapa"/></div>
+      <div class="field it-student-only"><label>Informações que as personas têm e o aluno não <span class="hint">reveladas só nesta etapa, se o aluno perguntar/conduzir — marque quem detém cada uma</span></label>
+        <div class="it-private">${(it.private_info||[]).map(pi=>privateRowHtml(pi, it.participants||[], byId)).join('')}</div>
+        <button class="btn btn-sm it-add-private" type="button">+ informação privada</button></div>
+      <div class="field"><label>Mensagens de exemplo da persona <span class="hint">inspiração de falas/perguntas da persona nesta etapa — uma por linha</span></label><textarea class="textarea it-questions" rows="2">${esc((it.example_questions||[]).join('\n'))}</textarea></div>
     </div>
   </div>`;
 }
@@ -344,6 +357,7 @@ function harvestInteractions() {
     instruction: card.querySelector('.it-instruction').value.trim(),
     example_questions: card.querySelector('.it-questions').value.split('\n').map(x=>x.trim()).filter(Boolean),
     time_limit_min: (() => { const n = parseInt((card.querySelector('.it-time-limit')?.value||'').trim(), 10); return (n && n > 0) ? n : null; })(),
+    private_info: [...card.querySelectorAll('.it-private .pi-row')].map(r=>({ text:r.querySelector('.pi-text').value.trim(), persona_ids:[...r.querySelectorAll('.pi-persona:checked')].map(c=>c.value) })).filter(x=>x.text),
   }));
 }
 function renderInteracoesPane() {
@@ -367,6 +381,8 @@ function renderInteracoesPane() {
     else if (e.target.classList.contains('it-down') && card.nextElementSibling) { card.parentNode.insertBefore(card.nextElementSibling, card); renumberInteractions(); }
     else if (e.target.classList.contains('it-add-part')) { const pkind = card.querySelector('.it-form').value==='deliberacao'?'persona_exchange':'student'; card.querySelector('.it-parts').insertAdjacentHTML('beforeend', partRowHtml(null, pkind)); updateSummary(card); }
     else if (e.target.classList.contains('pr-del')) { const parts=card.querySelector('.it-parts'); if (parts.children.length>1) e.target.closest('.part-row').remove(); updateSummary(card); }
+    else if (e.target.classList.contains('it-add-private')) { card.querySelector('.it-private').insertAdjacentHTML('beforeend', privateRowHtml(null, cardParticipants(card), scenarioPersonaMap())); }
+    else if (e.target.classList.contains('pi-del')) { e.target.closest('.pi-row')?.remove(); }
   });
 }
 

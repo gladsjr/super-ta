@@ -59,6 +59,16 @@ const briefNoRules = renderInteractionBriefing({ scenario: { name: "S", descript
 ok(!briefNoRules.includes("REGRAS DO CENÁRIO"), "sem escopo/premissas, o bloco de regras some");
 ok(!briefNoRules.includes("TEMPO DESTA ETAPA"), "sem time_limit, o bloco de tempo some");
 
+section("briefing: info privada por persona + exemplos de falas");
+const briefPriv = renderInteractionBriefing({
+    scenario, personasById, position: 1, total: 1,
+    interaction: { ...iArguicao, private_info: [{ text: "a usina entrega 80 kW contínuos", persona_ids: ["cp_marcos"] }], example_questions: ["E o consumo nos picos?"] },
+});
+ok(briefPriv.includes("INFORMAÇÃO QUE SÓ VOCÊ TEM"), "briefing marca a info privada da persona");
+ok(briefPriv.includes("80 kW contínuos"), "briefing traz o conteúdo da info privada");
+ok(briefPriv.includes("EXEMPLOS DE FALAS DAS PERSONAS") && briefPriv.includes("consumo nos picos"), "briefing liga os exemplos de falas");
+ok(!/\{\{\w+\}\}/.test(briefPriv), "briefing com info privada/exemplos não deixou placeholder");
+
 // ---- 2. Schema de ação ----
 section("validateScenarioTurn");
 const allow = ["cp_marcos", "cp_ana"];

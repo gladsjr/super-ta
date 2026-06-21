@@ -71,6 +71,16 @@ test("round-trip de out_of_scope, premissas e time_limit_min", () => {
     assert.equal(scenarioToYaml(back.scenario), scenarioToYaml(s), "round-trip idempotente com os campos novos");
 });
 
+test("round-trip de private_info (personas por nome)", () => {
+    const s = { ...SCEN, interactions: [{ ...SCEN.interactions[0], private_info: [{ text: "a usina entrega 80 kW", persona_ids: ["cp_marcos"] }] }, SCEN.interactions[1]] };
+    const back = parseYaml(scenarioToYaml(s));
+    const pi = back.scenario.interactions[0].private_info;
+    assert.equal(pi.length, 1);
+    assert.equal(pi[0].text, "a usina entrega 80 kW");
+    const marcosId = back.scenario.personas.find(p => p.name === "Marcos").id;
+    assert.deepEqual(pi[0].persona_ids, [marcosId], "persona resolvida por nome no import");
+});
+
 test("import das 6 personas da entrevista", () => {
     const t = interviewerPersonaTemplates();
     assert.equal(t.length, 6, "6 YAMLs em config/interviewers/");

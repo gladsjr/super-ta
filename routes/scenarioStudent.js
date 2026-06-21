@@ -26,7 +26,7 @@ const studentScenario = (s) => ({
     // Regras globais visíveis ao aluno (painel): fora de escopo + premissas.
     out_of_scope: s.out_of_scope || "", premissas: s.premissas || "",
     personas: (s.personas || []).map(p => ({ id: p.id, name: p.name, icon: p.icon, role: p.role })),
-    interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work, time_limit_min: it.time_limit_min || null })),
+    interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work, time_limit_min: it.time_limit_min || null, instruction: it.instruction || "" })),
 });
 const personasById = (s) => { const b = {}; for (const p of s.personas || []) b[p.id] = p; return b; };
 // Trabalho do aluno (por interação) já anexado neste run? Devolve o vector store id.
@@ -137,10 +137,8 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     // TEMPO ESGOTADO (wall-clock): a persona já se despediu — não chama o LLM.
     // Registra a fala tardia + um balão de DICA dizendo que a persona não responde.
     if (ts && ts.phase === "over") {
-        const opener = byId[it.opener_persona_id] || byId[(it.participants || [])[0]?.persona_id];
-        const who = opener?.name || "a persona";
         run.transcript.push({ speaker: "student", kind: "student", text });
-        run.transcript.push({ speaker: "system", kind: "hint", title: "⏰ Tempo esgotado", text: `O tempo desta etapa terminou; ${who} já se despediu. Avance para a próxima etapa.` });
+        run.transcript.push({ speaker: "system", kind: "hint", title: "⏰ Tempo esgotado", text: `O tempo desta etapa terminou — a persona não responde mais. Avance para a próxima etapa.` });
         await store.saveRun(run);
         if (req.query.stream === "1") {
             res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
@@ -266,7 +264,7 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
 // (PROFESSOR) Gera uma resposta plausível do aluno via IA, para o professor TESTAR
 // o cenário pela própria tela do aluno. requireAdmin: só com sessão de professor.
 // Reusa a ideia do aluno simulado de tests/scenario-eval.mjs (modelo barato, prosa).
-router.post("/s/:submissionToken/scenario/simulate-student", requireSubmissionToken, requireAdmin, async (req, res) => {
+router.post("/s/:submissionToken/scenario/simulate-student", requireSubmissionToken, requireAdmin, json, async (req, res) => {
     const run = await store.getRunBySubmission(req.submission.id);
     if (!run) return res.status(404).json({ error: "execução não encontrada" });
     const scenario = await store.getScenarioByWork(req.work.id);
@@ -278,10 +276,14 @@ router.post("/s/:submissionToken/scenario/simulate-student", requireSubmissionTo
         const { FAST_MODEL } = await import("../lib/config.js");
         const { meteredResponses } = await import("../lib/billing.js");
         const { formDynamics, normalizeForm } = await import("../lib/scenarios/interactionForms.js");
+        const { STUDENT_PROFILES } = await import("../lib/studentSimulator.js");
         const seg = currentSegment(run.transcript);
         const lastPersona = [...seg].reverse().find(e => e.kind === "persona");
         const history = seg.map(e => `${e.kind === "student" ? "EU" : (e.name || "persona")}: ${e.text}`).join("\n");
-        const sys = `Você é a OUTRA PONTA de uma cena de role-play: o protagonista (estudante) que apresenta/sustenta o próprio trabalho ou conduz a conversa, conforme a dinâmica. Responda à última fala da persona de forma plausível e natural, como alguém que domina razoavelmente o assunto mas pode ter lacunas — nem perfeito, nem evasivo. 1 a 3 frases, em primeira pessoa, sem markdown. Não quebre o personagem nem comente que é um teste.`;
+        // Perfil de resposta (mesmos da entrevista): domina/vago/inseguro/contradiz; sem perfil = equilibrado.
+        const profile = STUDENT_PROFILES[str(req.body?.profile)] ? str(req.body.profile) : null;
+        const behavior = profile ? STUDENT_PROFILES[profile].system : "Responda como alguém que domina razoavelmente o assunto, mas pode ter lacunas — nem perfeito, nem evasivo.";
+        const sys = `Você é a OUTRA PONTA de uma cena de role-play: o protagonista (estudante) que apresenta/sustenta o próprio trabalho ou conduz a conversa, conforme a dinâmica. ${behavior} Responda à última fala da persona em 1 a 3 frases, em primeira pessoa, sem markdown. Não quebre o personagem nem comente que é um teste.`;
         const usr = `CENÁRIO: ${scenario.name} — ${scenario.description}
 ESTA ETAPA: ${it.title}
 DINÂMICA: ${formDynamics(normalizeForm(it))}

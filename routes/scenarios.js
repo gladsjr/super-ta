@@ -163,6 +163,11 @@ function cleanInteraction(it, i) {
     const kind = formKind(form);                 // derivado da forma; gravado p/ o engine
     const parts = (it.participants || []).map(p => ({ persona_id: p.persona_id, role: PARTICIPANT_ROLES.includes(p.role) ? p.role : "questionamento" }));
     const incWork = typeof it.includes_student_work === "boolean" ? it.includes_student_work : !!FORM_DEFAULT_WORK[form];
+    // Informações privadas das personas: persona_ids só valem se forem participantes desta interação.
+    const partIds = new Set(parts.map(p => p.persona_id));
+    const privateInfo = (Array.isArray(it.private_info) ? it.private_info : [])
+        .map(pi => ({ text: str(pi?.text), persona_ids: (Array.isArray(pi?.persona_ids) ? pi.persona_ids : []).filter(id => partIds.has(id)) }))
+        .filter(pi => pi.text);
     return {
         id: str(it.id) || `i_${i}_${randomUUID().slice(0, 6)}`,
         title: str(it.title),
@@ -176,6 +181,7 @@ function cleanInteraction(it, i) {
         instruction: str(it.instruction),
         example_questions: lines(it.example_questions),
         time_limit_min: (typeof it.time_limit_min === "number" && it.time_limit_min > 0) ? Math.round(it.time_limit_min) : null,
+        private_info: privateInfo,
     };
 }
 function cleanScenario(b) {

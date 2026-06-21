@@ -12,7 +12,7 @@ Instrução ao aluno nesta etapa: {{instruction}}
 
 **MATERIAIS DISPONÍVEIS NESTA ETAPA** (consultáveis via file_search)
 {{materials_block}}
-
+{{examples_block}}
 **PARTICIPANTES DESTA INTERAÇÃO**
 Cada participante abaixo é uma persona. Quando uma persona falar, encarne-a pelo bloco correspondente.
 

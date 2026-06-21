@@ -74,7 +74,8 @@ ${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
 REGRAS DO CENÁRIO E TEMPO (quando o briefing trouxer):
 - FORA DO ESCOPO: se a outra ponta levar a conversa a um tópico marcado como fora do escopo, responda EVASIVO / reconduza ao foco da etapa — SEM declarar "isto está fora do escopo" dentro da cena — e preencha action.hint {title, body} para avisar o aluno, em meta (fora do role-play), de que o tópico está fora do escopo. Nunca aborde esses tópicos por iniciativa própria. Use action.hint SÓ nesse caso (é raro); omita-o no resto.
 - PREMISSAS: são dadas como conhecidas por todos (você e a outra ponta). Só as mencione se for perguntado OU se a fala/trabalho da outra ponta CONTRARIAR uma premissa — aí questione no registro da persona.
-- TEMPO: se o briefing definir tempo para a etapa, a abertura menciona o tempo disponível na voz da persona. O user prompt pode informar o TEMPO RESTANTE a cada turno: quando sinalizar que falta pouco, avise a outra ponta que o tempo está acabando, aceite só mais UMA resposta e então use finalize com uma despedida curta em personagem. Encaminhe o fechamento sem quebrar a naturalidade da cena.
+- TEMPO: se o briefing definir tempo para a etapa, a abertura menciona o tempo disponível na voz da persona. O user prompt pode informar o TEMPO RESTANTE a cada turno. Você NUNCA encerra a etapa por causa do relógio: quem encerra é a outra ponta (ela decide quando seguir) ou o tempo zerando (o sistema cuida disso). Quando faltar pouco, no máximo comente de leve, em personagem, que o tempo está acabando — mas continue conduzindo/respondendo normalmente, sem se despedir nem usar finalize por causa do tempo.
+- INFORMAÇÃO PRIVADA: a agenda de uma persona pode trazer "INFORMAÇÃO QUE SÓ VOCÊ TEM NESTA ETAPA". Trate-a como algo que a outra ponta NÃO sabe: revele apenas quando ela perguntar ou conduzir a conversa até aquele ponto; não entregue de graça nem despeje tudo de uma vez — solte aos poucos, conforme a conversa pedir.
 
 REGRAS:
 - NÃO invente fatos que a persona não teria como saber. Se a outra ponta perguntar algo fora do alcance da persona/cenário, desconverse no registro da persona e reconduza ao foco — não fabrique dados.
@@ -184,7 +185,7 @@ ${this.turnSystemBody}`;
         // `over` é tratado no servidor, sem chamar o LLM).
         const remMin = timeState ? Math.max(0, Math.round((timeState.remaining_sec ?? 0) / 60)) : null;
         const timeBlock = timeState
-            ? `\n\n**TEMPO RESTANTE NESTA ETAPA**: ~${remMin} min.${timeState.phase === "closing" ? " FALTA POUCO: avise que o tempo está acabando, aceite só mais uma resposta e então finalize com uma despedida curta em personagem." : ""}`
+            ? `\n\n**TEMPO RESTANTE NESTA ETAPA**: ~${remMin} min.${timeState.phase === "closing" ? " FALTA POUCO: você pode comentar de leve, em personagem, que o tempo está acabando, mas NÃO encerre nem se despeça por causa do tempo — continue conduzindo/respondendo normalmente. Quem encerra é a outra ponta ou o relógio." : ""}`
             : "";
         const userContent = `${briefing}
 

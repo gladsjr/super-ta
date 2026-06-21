@@ -20,7 +20,8 @@
   .b-persona { background: var(--bg-raised,#fff); border:1px solid var(--ink-200); align-self:flex-start; }
   .b-student { background: var(--accent-100, #d8efe9); align-self:flex-end; }
   .b-aside { align-self:center; max-width:92%; font-size: var(--fs-sm); font-style:italic; color: var(--ink-600); background: var(--gold-50,#fdf8ec); border:1px dashed var(--gold-300,#e6cf94); border-radius:10px; }
-  .runner-input { display:flex; gap: var(--sp-2); margin-top: var(--sp-3); } .runner-input textarea { flex:1; }
+  .runner-input { display:flex; gap: var(--sp-2); margin-top: var(--sp-3); align-items:flex-end; } .runner-input textarea { flex:1; min-height:90px; resize:vertical; }
+  .task-note { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--accent-50,#eef8f4); border:1px solid var(--accent-300,#9ed8cc); border-radius: var(--r-sm,6px); font-size: var(--fs-sm); color: var(--ink-800); }
   .rn-controls { display:flex; gap: var(--sp-2); margin-top: var(--sp-2); align-items:center; flex-wrap:wrap; }
   .empty { color: var(--ink-500); padding: var(--sp-4); text-align:center; }
   .rn-thinking { color: var(--ink-500); font-style:italic; padding: var(--sp-1) var(--sp-2); }
@@ -136,6 +137,9 @@ function render() {
   const limitMin = (isStudentStep && itAtSel.time_limit_min) ? itAtSel.time_limit_min : 0;
   const remMs = (isStudentStep && limitMin) ? remainingMsOf(seg?.header, limitMin) : null;
   const overTime = remMs !== null && remMs <= 0;
+  // Tarefa da etapa (instrução ao aluno): agora visível ao aluno no topo da etapa.
+  const taskNote = isStudentStep && itAtSel.instruction
+    ? `<div class="task-note">📋 <strong>Sua tarefa nesta etapa:</strong> ${esc(itAtSel.instruction)}</div>` : '';
   // Painel de regras (premissas + fora de escopo): aberto na 1ª etapa, sempre acessível.
   const rulesPanel = (SCEN.out_of_scope || SCEN.premissas) ? `
     <details class="rules-panel" ${cur===0&&!done?'open':''}>
@@ -153,12 +157,12 @@ function render() {
     ${rulesPanel}
     <div class="rn-tabs">${tabs}</div>
     <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || '<div class="empty">—</div>'}</div>
+    ${isStudentStep ? taskNote : ''}
     ${isStudentStep ? (needsWork ? workBox : (overTime ? `
+      <div class="rn-controls"><span class="hint">⏰ O tempo desta etapa terminou — a persona não responde mais.</span><button class="btn btn-primary" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : `
       ${workNote}
-      <div class="rn-controls"><span class="hint">⏰ O tempo desta etapa terminou — a persona se despediu.</span><button class="btn btn-primary" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : `
-      ${workNote}
-      <div class="runner-input"><textarea class="textarea" id="rn-input" rows="2" placeholder="Sua resposta…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
-      <div class="rn-controls">${limitMin?`<span id="rn-timer" class="it-timer">⏰ —</span>`:''}${IS_ADMIN ? `<button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma resposta plausível do aluno com IA — você revisa e envia">⚙ resposta do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`)) : ''}
+      <div class="runner-input"><textarea class="textarea" id="rn-input" rows="4" placeholder="Sua resposta…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
+      <div class="rn-controls">${limitMin?`<span id="rn-timer" class="it-timer">⏰ —</span>`:''}${IS_ADMIN ? `<select class="select" id="rn-aiprofile" style="max-width:160px" title="(professor) perfil do aluno simulado"><option value="">perfil…</option><option value="domina">Domina</option><option value="vago">Vago / enrola</option><option value="inseguro">Inseguro</option><option value="contradiz">Contradiz</option></select><button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma resposta plausível do aluno com IA — você revisa e envia">⚙ resposta do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`)) : ''}
     ${isExchangeStep ? `<div class="rn-controls"><span class="hint">As personas conversam entre si — leia e avance.</span><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
     ${viewingPast ? `<div class="rn-controls"><span class="hint">Etapa concluída (somente leitura). Volte à aba atual para continuar.</span></div>` : ''}
     ${done ? `<div class="rn-controls"><span class="hint">✓ Você concluiu o cenário.</span></div>` : ''}`;
@@ -197,7 +201,8 @@ function startTimer(header, limitMin) {
 async function aiGen() {
   const inp = document.getElementById('rn-input'), btn = document.getElementById('rn-aigen'); if (!inp) return;
   if (btn) { btn.disabled = true; btn.textContent = '⚙ gerando…'; }
-  try { const j = await api('POST', '/simulate-student'); inp.value = j.text || ''; inp.focus(); }
+  const profile = document.getElementById('rn-aiprofile')?.value || '';
+  try { const j = await api('POST', '/simulate-student', { profile }); inp.value = j.text || ''; inp.focus(); }
   catch (e) { alert(e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '⚙ resposta do aluno (IA)'; } }
 }

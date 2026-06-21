@@ -35,6 +35,7 @@ Faça uma busca dedicada por contradições dentro do próprio trabalho (número
 REGRAS DO CENÁRIO (quando o briefing trouxer "REGRAS DO CENÁRIO"):
 - PREMISSAS: verifique se o trabalho/posição do aluno respeita cada premissa. Para cada premissa NÃO cumprida, registre um key_point/probe (onde + o que falta), para a persona questionar. Premissas cumpridas não viram pergunta.
 - FORA DO ESCOPO: não planeje abordar esses tópicos — eles ficam de fora do focus/probes.
+- INFORMAÇÃO PRIVADA: se a agenda de uma persona trouxer "INFORMAÇÃO QUE SÓ VOCÊ TEM NESTA ETAPA", ela é detida pela persona e desconhecida da outra ponta — NÃO a coloque na abertura nem a entregue de graça; ela só será revelada se a outra ponta perguntar/conduzir até lá. No plano, no máximo registre (em continuity/free_notes) o que pode ser revelado e sob qual gatilho.
 
 Produza JSON com EXATAMENTE estes campos:
 {
@@ -43,7 +44,7 @@ Produza JSON com EXATAMENTE estes campos:
   "contradictions": [ { "where": ["seção/figura 1", "seção/figura 2"], "description": "o que está em conflito, em uma frase" } ],
   "probes": [ "2-5 sondagens/perguntas na VOZ da persona, ancoradas nos pontos acima" ],
   "continuity": "o que puxar das etapas anteriores (se a memória trouxer algo); senão vazio",
-  "opening": "a 1ª fala da persona NESTA etapa, na voz dela — já reagindo ao material quando houver, conforme a DINÂMICA (curta, natural, sem citar 'documento'/'arquivo' como artefato). TERMINE com um CONVITE claro para a outra ponta agir já (apresentar/começar/responder), para a conversa fluir sem um 'ok' intermediário — ex.: 'me apresente seu raciocínio sobre X' em vez de só enunciar o que você quer testar"
+  "opening": "a 1ª fala da persona NESTA etapa, na voz dela. É a PRIMEIRA fala — não há NADA antes dela; então NÃO comece como se estivesse respondendo a alguém (nada de 'Claro', 'Sim', 'Entendi', 'Boa pergunta'). Abra situando a cena/apresentando-se conforme a DINÂMICA, reagindo ao material quando houver, e TERMINE com um CONVITE claro para a outra ponta agir já (apresentar/começar/perguntar), para a conversa fluir sem um 'ok' intermediário — ex.: 'me apresente seu raciocínio sobre X' ou, em consultoria, 'pode começar pelas perguntas que achar mais importantes'. Curta, natural, sem citar 'documento'/'arquivo' como artefato, e SEM revelar aqui qualquer INFORMAÇÃO PRIVADA da persona (isso só sai se a outra ponta perguntar/conduzir até lá)."
 }
 
 Regras:
