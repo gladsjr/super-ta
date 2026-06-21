@@ -45,6 +45,20 @@ ok(!/\{\{\w+\}\}/.test(brief), "briefing não deixou placeholder por preencher")
 const briefEx = renderInteractionBriefing({ scenario, interaction: iDelib, personasById, position: 3, total: 4 });
 ok(briefEx.includes("Foco da conversa entre as personas"), "briefing de persona_exchange traz o foco");
 
+section("briefing: regras do cenário (escopo/premissas) e tempo");
+const briefRules = renderInteractionBriefing({
+    scenario: { name: "S", description: "d", out_of_scope: "salário; política", premissas: "orçamento aprovado" },
+    interaction: { ...iArguicao, time_limit_min: 12 }, personasById, position: 1, total: 1,
+});
+ok(briefRules.includes("REGRAS DO CENÁRIO"), "briefing traz o bloco de regras quando há escopo/premissas");
+ok(briefRules.includes("FORA DO ESCOPO") && briefRules.includes("salário; política"), "briefing inclui os tópicos fora do escopo");
+ok(briefRules.includes("PREMISSAS") && briefRules.includes("orçamento aprovado"), "briefing inclui as premissas");
+ok(briefRules.includes("TEMPO DESTA ETAPA") && briefRules.includes("12 minuto"), "briefing menciona o tempo da etapa");
+ok(!/\{\{\w+\}\}/.test(briefRules), "briefing com regras/tempo não deixou placeholder");
+const briefNoRules = renderInteractionBriefing({ scenario: { name: "S", description: "d" }, interaction: iArguicao, personasById, position: 1, total: 1 });
+ok(!briefNoRules.includes("REGRAS DO CENÁRIO"), "sem escopo/premissas, o bloco de regras some");
+ok(!briefNoRules.includes("TEMPO DESTA ETAPA"), "sem time_limit, o bloco de tempo some");
+
 // ---- 2. Schema de ação ----
 section("validateScenarioTurn");
 const allow = ["cp_marcos", "cp_ana"];
@@ -53,6 +67,9 @@ ok(!validateScenarioTurn({ speaker_persona_id: "x", action: { kind: "speak", mes
 ok(!validateScenarioTurn({ speaker_persona_id: "cp_marcos", action: { kind: "speak", message: "" }, rationale: "r" }, allow).valid, "speak sem message é inválido");
 ok(validateScenarioTurn({ speaker_persona_id: "cp_marcos", action: { kind: "advance", message: "" }, rationale: "r" }, allow).valid, "advance sem message é válido");
 ok(!validateScenarioTurn({ speaker_persona_id: "cp_marcos", action: { kind: "speak", message: "oi" } }, allow).valid, "sem rationale é inválido");
+ok(validateScenarioTurn({ speaker_persona_id: "cp_marcos", action: { kind: "speak", message: "oi", hint: { title: "Fora do escopo", body: "esse tema não faz parte do cenário" } }, rationale: "r" }, allow).valid, "speak com hint válido");
+ok(!validateScenarioTurn({ speaker_persona_id: "cp_marcos", action: { kind: "speak", message: "oi", hint: { title: "x", body: "" } }, rationale: "r" }, allow).valid, "hint com body vazio é inválido");
+ok(validateScenarioTurn({ speaker_persona_id: "cp_marcos", action: { kind: "speak", message: "oi", hint: null }, rationale: "r" }, allow).valid, "hint null é ignorado (válido)");
 
 section("validatePersonaExchange");
 ok(validatePersonaExchange({ lines: [{ speaker_persona_id: "cp_marcos", message: "a" }, { speaker_persona_id: "cp_ana", message: "b" }], rationale: "r" }, allow).valid, "exchange válido");

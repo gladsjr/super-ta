@@ -56,6 +56,21 @@ interactions:
     assert.throws(() => parseYaml(badRef), /não está nas personas|não encontrada/i);
 });
 
+test("round-trip de out_of_scope, premissas e time_limit_min", () => {
+    const s = {
+        ...SCEN,
+        out_of_scope: "não falar de salário",
+        premissas: "assuma orçamento aprovado",
+        interactions: [{ ...SCEN.interactions[0], time_limit_min: 15 }, SCEN.interactions[1]],
+    };
+    const back = parseYaml(scenarioToYaml(s));
+    assert.equal(back.scenario.out_of_scope, "não falar de salário");
+    assert.equal(back.scenario.premissas, "assuma orçamento aprovado");
+    assert.equal(back.scenario.interactions[0].time_limit_min, 15);
+    assert.equal(back.scenario.interactions[1].time_limit_min, null, "sem tempo definido → null");
+    assert.equal(scenarioToYaml(back.scenario), scenarioToYaml(s), "round-trip idempotente com os campos novos");
+});
+
 test("import das 6 personas da entrevista", () => {
     const t = interviewerPersonaTemplates();
     assert.equal(t.length, 6, "6 YAMLs em config/interviewers/");

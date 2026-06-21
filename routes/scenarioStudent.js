@@ -23,8 +23,10 @@ const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 
 const studentScenario = (s) => ({
     id: s.id, name: s.name, description: s.description,
+    // Regras globais visíveis ao aluno (painel): fora de escopo + premissas.
+    out_of_scope: s.out_of_scope || "", premissas: s.premissas || "",
     personas: (s.personas || []).map(p => ({ id: p.id, name: p.name, icon: p.icon, role: p.role })),
-    interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work })),
+    interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work, time_limit_min: it.time_limit_min || null })),
 });
 const personasById = (s) => { const b = {}; for (const p of s.personas || []) b[p.id] = p; return b; };
 // Trabalho do aluno (por interação) já anexado neste run? Devolve o vector store id.
@@ -53,6 +55,27 @@ function currentSegment(transcript) {
     const out = [];
     for (const e of transcript || []) { if (e.kind === "interaction") out.length = 0; else out.push(e); }
     return out;
+}
+// Cabeçalho (kind:"interaction") da etapa corrente — onde mora o relógio da etapa.
+function currentHeader(transcript) {
+    for (let i = (transcript || []).length - 1; i >= 0; i--) if (transcript[i].kind === "interaction") return transcript[i];
+    return null;
+}
+// Carimba o início do relógio da etapa no cabeçalho corrente quando a abertura é
+// empurrada (1×). O relógio é wall-clock e desconta `paused_ms` (latência das personas).
+function stampStart(run) {
+    const h = currentHeader(run.transcript);
+    if (h && !h.started_at) { h.started_at = new Date().toISOString(); h.paused_ms = 0; }
+}
+// Estado de tempo da etapa corrente. phase: normal | closing (≤2min) | over (≤0).
+// null quando a etapa não tem limite ou o relógio ainda não começou.
+function timeStateOf(it, header) {
+    const limitMs = (it && typeof it.time_limit_min === "number" && it.time_limit_min > 0) ? it.time_limit_min * 60000 : 0;
+    if (!limitMs || !header?.started_at) return null;
+    const elapsed = Date.now() - Date.parse(header.started_at) - (header.paused_ms || 0);
+    const remaining = limitMs - elapsed;
+    const phase = remaining <= 0 ? "over" : (remaining <= 120000 ? "closing" : "normal");
+    return { remaining_sec: Math.max(0, Math.round(remaining / 1000)), phase };
 }
 
 // Estado / resume: a página carrega isto ao entrar com o token.
@@ -88,7 +111,7 @@ router.post("/s/:submissionToken/scenario/start", requireSubmissionToken, async 
                 interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
                 enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, it0),
             });
-            run.transcript.push(...entries); run.memory = memory;
+            run.transcript.push(...entries); run.memory = memory; stampStart(run);
         }
     } catch (e) { return res.status(500).json({ error: `falha ao iniciar: ${e.message}` }); }
     await store.saveRun(run);
@@ -108,8 +131,31 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     if (it.includes_student_work && !workVsId(run, it)) return bad(res, "anexe o seu trabalho desta etapa antes de responder");
     const byId = personasById(scenario);
     const { agent, live } = await liveDeps();
+    const header = currentHeader(run.transcript);
+    const ts = timeStateOf(it, header);
+
+    // TEMPO ESGOTADO (wall-clock): a persona já se despediu — não chama o LLM.
+    // Registra a fala tardia + um balão de DICA dizendo que a persona não responde.
+    if (ts && ts.phase === "over") {
+        const opener = byId[it.opener_persona_id] || byId[(it.participants || [])[0]?.persona_id];
+        const who = opener?.name || "a persona";
+        run.transcript.push({ speaker: "student", kind: "student", text });
+        run.transcript.push({ speaker: "system", kind: "hint", title: "⏰ Tempo esgotado", text: `O tempo desta etapa terminou; ${who} já se despediu. Avance para a próxima etapa.` });
+        await store.saveRun(run);
+        if (req.query.stream === "1") {
+            res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+            res.write(`event: done\ndata: ${JSON.stringify({ run: runView(run), action: { kind: "timeout" } })}\n\n`);
+            return res.end();
+        }
+        return res.json({ run: runView(run), action: { kind: "timeout" } });
+    }
+
     run.transcript.push({ speaker: "student", kind: "student", text });
-    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it) };
+    const timeState = ts && ts.phase !== "over" ? ts : null;   // só normal/closing vão ao LLM
+    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it), timeState };
+    // PAUSA do relógio: o tempo de processamento da persona (entre o aluno enviar e
+    // receber) não conta no tempo dele — acumula em paused_ms do cabeçalho da etapa.
+    const pause = (ms) => { if (header && ts) header.paused_ms = (header.paused_ms || 0) + ms; };
 
     // STREAM (mantém o esquema de otimização do /chat): sinaliza "respondendo" no
     // 1º token e entrega a fala da persona assim que pronta, antes de fechar o run.
@@ -117,8 +163,10 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
         res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
         const send = (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data || {})}\n\n`);
         send("thinking");
+        const t0 = Date.now();
         try {
             const r = await live.respondLive(agent, { ...ctx, onFirstDelta: () => send("responding"), onMessageReady: (msg) => send("message", { text: msg }) });
+            pause(Date.now() - t0);
             run.memory = r.memory ?? run.memory;
             run.transcript.push(...r.entries);
             await store.saveRun(run);
@@ -127,8 +175,10 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
         return res.end();
     }
 
+    const t0 = Date.now();
     try {
         const r = await live.respondLive(agent, ctx);
+        pause(Date.now() - t0);
         run.memory = r.memory ?? run.memory;
         run.transcript.push(...r.entries);
         await store.saveRun(run);
@@ -163,7 +213,7 @@ router.post("/s/:submissionToken/scenario/advance", requireSubmissionToken, asyn
                 interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
                 enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, itN),
             });
-            run.transcript.push(...entries); run.memory = memory;
+            run.transcript.push(...entries); run.memory = memory; stampStart(run);
         }
     } catch (e) { return res.status(500).json({ error: `falha ao avançar: ${e.message}` }); }
     await store.saveRun(run);
@@ -205,7 +255,7 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
                     interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
                     enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: uploaded.id,
                 });
-                run.transcript.push(...entries); run.memory = memory;
+                run.transcript.push(...entries); run.memory = memory; stampStart(run);
             } catch (e) { /* prep é best-effort no upload: não derruba o anexo */ }
         }
         await store.saveRun(run);

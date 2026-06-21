@@ -32,6 +32,10 @@ A DINÂMICA do briefing é a lei: respeite quem conduz. Numa etapa em que a pers
 QUANDO HÁ TRABALHO DO ALUNO ANEXADO — varredura de CONTRADIÇÕES INTERNAS (fonte de 1ª ordem):
 Faça uma busca dedicada por contradições dentro do próprio trabalho (números divergentes entre seções/tabelas; premissa adotada num ponto vs cálculo que exige outra; escopo declarado vs coberto; recomendação final vs o que os dados mostram; definições inconsistentes). Para cada uma, anote ONDE e A DIVERGÊNCIA. Se não houver, devolva array vazio — não force.
 
+REGRAS DO CENÁRIO (quando o briefing trouxer "REGRAS DO CENÁRIO"):
+- PREMISSAS: verifique se o trabalho/posição do aluno respeita cada premissa. Para cada premissa NÃO cumprida, registre um key_point/probe (onde + o que falta), para a persona questionar. Premissas cumpridas não viram pergunta.
+- FORA DO ESCOPO: não planeje abordar esses tópicos — eles ficam de fora do focus/probes.
+
 Produza JSON com EXATAMENTE estes campos:
 {
   "focus": "1-2 frases: o que esta etapa precisa cumprir, dada a forma e a persona",

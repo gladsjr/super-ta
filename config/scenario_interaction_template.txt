@@ -1,12 +1,12 @@
 **CENÁRIO** (contexto geral da cena — é o que o enunciado/PDF detalha à outra ponta)
 {{scenario_name}}
 {{scenario_description}}
-
+{{rules_block}}
 **ESTA INTERAÇÃO** (etapa {{position}} de {{total}} na sequência ordenada do cenário)
 Título: {{interaction_title}}
 Instrução ao aluno nesta etapa: {{instruction}}
 {{focus_line}}
-
+{{time_block}}
 **DINÂMICA DESTA INTERAÇÃO** (como esta etapa funciona — quem apresenta, quem conduz e como você trata o trabalho do aluno)
 {{dynamics_block}}
 

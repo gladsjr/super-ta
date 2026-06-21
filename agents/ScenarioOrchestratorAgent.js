@@ -71,6 +71,11 @@ RITMO E ENCERRAMENTO (importante — o objetivo é uma etapa que FECHA bem, não
 
 ${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
 
+REGRAS DO CENÁRIO E TEMPO (quando o briefing trouxer):
+- FORA DO ESCOPO: se a outra ponta levar a conversa a um tópico marcado como fora do escopo, responda EVASIVO / reconduza ao foco da etapa — SEM declarar "isto está fora do escopo" dentro da cena — e preencha action.hint {title, body} para avisar o aluno, em meta (fora do role-play), de que o tópico está fora do escopo. Nunca aborde esses tópicos por iniciativa própria. Use action.hint SÓ nesse caso (é raro); omita-o no resto.
+- PREMISSAS: são dadas como conhecidas por todos (você e a outra ponta). Só as mencione se for perguntado OU se a fala/trabalho da outra ponta CONTRARIAR uma premissa — aí questione no registro da persona.
+- TEMPO: se o briefing definir tempo para a etapa, a abertura menciona o tempo disponível na voz da persona. O user prompt pode informar o TEMPO RESTANTE a cada turno: quando sinalizar que falta pouco, avise a outra ponta que o tempo está acabando, aceite só mais UMA resposta e então use finalize com uma despedida curta em personagem. Encaminhe o fechamento sem quebrar a naturalidade da cena.
+
 REGRAS:
 - NÃO invente fatos que a persona não teria como saber. Se a outra ponta perguntar algo fora do alcance da persona/cenário, desconverse no registro da persona e reconduza ao foco — não fabrique dados.
 - Os MATERIAIS desta etapa (enunciado e/ou o trabalho do aluno) são consultáveis via file_search quando disponíveis (ver "MATERIAIS DISPONÍVEIS" no briefing). Use-os conforme a DINÂMICA — para ancorar fatos, cobrar coerência ou reagir ao que o aluno apresentou — sempre na VOZ da persona, sem citar "documento"/"arquivo"/"enunciado" como artefato (traduza para o contexto dela).
@@ -154,7 +159,7 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
         scenario, interaction, personasById, position, total, runMemory,
         interactionTranscript = [], memory = null, studentMessage,
         isOpening = false, vectorStoreId = null, studentWorkVectorStoreId = null, interactionMode = "text",
-        studentName = null, studentGenderHint = null, meterCtx = null,
+        studentName = null, studentGenderHint = null, timeState = null, meterCtx = null,
         onFirstDelta = null, onMessageReady = null,
     }) {
         const allowedIds = (interaction.participants || []).map(p => p.persona_id);
@@ -174,6 +179,13 @@ ${this.turnSystemBody}`;
             ? `\nPersona que abre (use como speaker_persona_id): ${interaction.opener_persona_id}`
             : "";
         const memoryBlock = memory ? JSON.stringify(memory, null, 2) : "(vazio — primeiro turno desta interação)";
+        // Estado de TEMPO (quando a etapa tem limite): o relógio é wall-clock e já
+        // desconta a latência da persona; aqui chega só `normal`/`closing` (o caso
+        // `over` é tratado no servidor, sem chamar o LLM).
+        const remMin = timeState ? Math.max(0, Math.round((timeState.remaining_sec ?? 0) / 60)) : null;
+        const timeBlock = timeState
+            ? `\n\n**TEMPO RESTANTE NESTA ETAPA**: ~${remMin} min.${timeState.phase === "closing" ? " FALTA POUCO: avise que o tempo está acabando, aceite só mais uma resposta e então finalize com uma despedida curta em personagem." : ""}`
+            : "";
         const userContent = `${briefing}
 
 **HISTÓRICO DESTA INTERAÇÃO (em ordem)**
@@ -185,7 +197,7 @@ ${memoryBlock}
 **FALA RECÉM-RECEBIDA DA OUTRA PONTA**
 """
 ${isOpening ? "(ainda não há fala — esta é a abertura)" : (studentMessage || "")}
-"""
+"""${timeBlock}
 
 IDS VÁLIDOS para speaker_persona_id (use o ID exatamente, NÃO o nome): ${allowedIds.join(", ")}
 Escolha quem fala e a próxima ação. Retorne SOMENTE o JSON do schema.`;

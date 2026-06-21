@@ -67,7 +67,10 @@ function updateCounts() {
 
 // ===== navegação por abas (mantém SCENARIO em memória; salva edições do DOM ao trocar) =====
 function harvestCurrent() {
-  if (document.getElementById('sf-name')) { SCENARIO.name = val('sf-name'); SCENARIO.description = val('sf-description'); }
+  if (document.getElementById('sf-name')) {
+    SCENARIO.name = val('sf-name'); SCENARIO.description = val('sf-description');
+    SCENARIO.out_of_scope = val('sf-out-of-scope'); SCENARIO.premissas = val('sf-premissas');
+  }
   if (document.getElementById('sf-interactions')) { SCENARIO.interactions = harvestInteractions(); }
 }
 function renderTab(name) {
@@ -104,6 +107,8 @@ function renderCenarioPane() {
     <div class="section-title">Cenário</div>
     <div class="field"><label>Nome do cenário</label><input class="input" id="sf-name" value="${esc(s.name||'')}" placeholder="Ex.: Banca de investidores"/></div>
     <div class="field"><label>Explicação geral <span class="hint">o que o cenário representa — é o que o enunciado (PDF) detalha ao aluno</span></label><textarea class="textarea" id="sf-description" rows="4">${esc(s.description||'')}</textarea></div>
+    <div class="field"><label>Fora do escopo <span class="hint">o que NUNCA será abordado no cenário — o aluno é avisado e as personas desconversam se ele tocar no assunto</span></label><textarea class="textarea" id="sf-out-of-scope" rows="2" placeholder="Ex.: questões salariais; decisões de outras áreas; o mérito político da lei">${esc(s.out_of_scope||'')}</textarea></div>
+    <div class="field"><label>Premissas <span class="hint">pressupostos que o aluno e as personas já conhecem; o aluno precisa considerá-las no trabalho</span></label><textarea class="textarea" id="sf-premissas" rows="2" placeholder="Ex.: o orçamento já foi aprovado; assuma a base de clientes de 2024; a fusão é irreversível">${esc(s.premissas||'')}</textarea></div>
 
     <div class="section-title">Enunciado (PDF)</div>
     <div class="pdf-box" id="sf-pdf-box">${editing ? pdfBoxHtml(s) : '<span class="hint">Salve o cenário (barra abaixo) para anexar e avaliar o PDF.</span>'}</div>
@@ -302,6 +307,7 @@ function interactionCardHtml(it) {
         <div class="field" style="flex:1;display:flex;align-items:flex-end"><label class="hint" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="it-work" ${it.includes_student_work?'checked':''}/> incluir o trabalho do aluno</label></div>
       </div>
       <div class="field"><label>Prompt da dinâmica <span class="hint">obrigatório na forma "Personalizada"; opcional como nuance nas demais</span></label><textarea class="textarea it-form-prompt" rows="2" placeholder="Ex.: você é um jurado de hackathon cético; interrompa se enrolar e exija números">${esc(it.form_prompt||'')}</textarea></div>
+      <div class="field it-student-only"><label>Tempo máximo (min) <span class="hint">opcional — mostra cronômetro e a persona conduz pelo tempo; vazio = sem limite</span></label><input class="input it-time-limit" type="number" min="1" step="1" style="max-width:140px" value="${it.time_limit_min||''}" placeholder="sem limite"/></div>
       <div class="field"><label>Participantes <span class="hint it-student-only">personas do cenário + papéis</span><span class="hint it-exchange-only">exatamente 2 personas que conversam</span></label>
         <div class="it-parts">${(it.participants||[]).map(p=>partRowHtml(p, pkind)).join('') || partRowHtml(null, pkind)}</div>
         <button class="btn btn-sm it-add-part" type="button">+ participante</button></div>
@@ -337,6 +343,7 @@ function harvestInteractions() {
     focus: card.querySelector('.it-focus').value.trim(),
     instruction: card.querySelector('.it-instruction').value.trim(),
     example_questions: card.querySelector('.it-questions').value.split('\n').map(x=>x.trim()).filter(Boolean),
+    time_limit_min: (() => { const n = parseInt((card.querySelector('.it-time-limit')?.value||'').trim(), 10); return (n && n > 0) ? n : null; })(),
   }));
 }
 function renderInteracoesPane() {
@@ -393,7 +400,7 @@ function wirePdfBox(s) {
 function setSaveMsg(t){ document.getElementById('st-msg').textContent = t; }
 async function saveScenario() {
   harvestCurrent();
-  const body = { ...(SCENARIO.id?{id:SCENARIO.id}:{}), name:SCENARIO.name, description:SCENARIO.description, personas:SCENARIO.personas, interactions:SCENARIO.interactions };
+  const body = { ...(SCENARIO.id?{id:SCENARIO.id}:{}), name:SCENARIO.name, description:SCENARIO.description, out_of_scope:SCENARIO.out_of_scope, premissas:SCENARIO.premissas, personas:SCENARIO.personas, interactions:SCENARIO.interactions };
   const saveUrl = WORK_TOKEN ? `/w/${WORK_TOKEN}/scenario` : '/scenarios/api/scenarios';
   try { const j = await api('POST', saveUrl, body); SCENARIO = j.scenario; updateCounts(); renderCurrent(); setSaveMsg('Salvo ✓'); return true; }
   catch (e) { setSaveMsg(e.message); return false; }

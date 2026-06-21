@@ -142,6 +142,7 @@ function validateScenario(b) {
         const form = normalizeForm(it);          // aceita form novo ou objective_type/kind legado
         if (!FORMS.includes(form)) return `forma inválida na interação "${it.title}"`;
         if (form === "custom" && !str(it.form_prompt)) return `"${it.title}": a forma personalizada exige um prompt`;
+        if (it.time_limit_min != null && (typeof it.time_limit_min !== "number" || !(it.time_limit_min > 0))) return `"${it.title}": o tempo (min) deve ser um número positivo`;
         const kind = formKind(form);
         const parts = Array.isArray(it.participants) ? it.participants : [];
         if (kind === "persona_exchange") {
@@ -174,6 +175,7 @@ function cleanInteraction(it, i) {
         focus: kind === "persona_exchange" ? str(it.focus) : "",
         instruction: str(it.instruction),
         example_questions: lines(it.example_questions),
+        time_limit_min: (typeof it.time_limit_min === "number" && it.time_limit_min > 0) ? Math.round(it.time_limit_min) : null,
     };
 }
 function cleanScenario(b) {
@@ -188,6 +190,8 @@ function cleanScenario(b) {
         ...(b.id ? { id: b.id } : {}),
         name: str(b.name),
         description: str(b.description),
+        out_of_scope: str(b.out_of_scope),
+        premissas: str(b.premissas),
         personas,
         interactions: (Array.isArray(b.interactions) ? b.interactions : []).map(cleanInteraction),
     };
