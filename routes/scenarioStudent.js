@@ -167,6 +167,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
             pause(Date.now() - t0);
             run.memory = r.memory ?? run.memory;
             run.transcript.push(...r.entries);
+            if (header) header.await_reveal_at = new Date().toISOString();   // marca "resposta pronta" p/ a pausa manual (/reveal credita o tempo)
             await store.saveRun(run);
             send("done", { run: runView(run), action: r.action || null });
         } catch (e) { send("error", { error: e.message }); }
@@ -179,9 +180,25 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
         pause(Date.now() - t0);
         run.memory = r.memory ?? run.memory;
         run.transcript.push(...r.entries);
+        if (header) header.await_reveal_at = new Date().toISOString();
         await store.saveRun(run);
         res.json({ run: runView(run), action: r.action || null });
     } catch (e) { return res.status(500).json({ error: `falha no turno: ${e.message}` }); }
+});
+
+// Revelar a resposta segurada (pausa manual do aluno): credita o tempo entre a
+// resposta ficar pronta (await_reveal_at) e este clique como PAUSA — o relógio
+// wall-clock não anda nesse intervalo. Sem await_reveal_at pendente, é no-op.
+router.post("/s/:submissionToken/scenario/reveal", requireSubmissionToken, async (req, res) => {
+    const run = await store.getRunBySubmission(req.submission.id);
+    if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    const h = currentHeader(run.transcript);
+    if (h && h.await_reveal_at) {
+        h.paused_ms = (h.paused_ms || 0) + Math.max(0, Date.now() - Date.parse(h.await_reveal_at));
+        delete h.await_reveal_at;
+        await store.saveRun(run);
+    }
+    res.json({ run: runView(run) });
 });
 
 // Avançar para a próxima interação.

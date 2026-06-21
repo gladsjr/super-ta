@@ -6,7 +6,7 @@
 <title>ORATIA — Cenário</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
 <style>
-  .wrap { max-width: 760px; margin: 0 auto; padding: var(--sp-4); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: var(--sp-4) var(--sp-4) 56px; }
   .rn-tabs { display:flex; gap:6px; flex-wrap:wrap; margin: var(--sp-3) 0; }
   .rn-tab { font-size: var(--fs-xs); padding:6px 12px; border-radius:999px; border:1px solid var(--ink-200); color: var(--ink-600); background: var(--bg-raised,#fff); cursor:pointer; }
   .rn-tab.active { background: var(--ink-900,#1c1a17); color:#fff; border-color: var(--ink-900,#1c1a17); }
@@ -37,6 +37,8 @@
   .it-timer { font-variant-numeric: tabular-nums; font-size: var(--fs-sm); padding:2px 10px; border-radius:999px; border:1px solid var(--ink-200); color: var(--ink-700); background: var(--bg-muted,#f4f2ec); }
   .it-timer.low { color:#8a4f10; border-color:#e6cf94; background:#fdf8ec; }
   .it-timer.over { color:#fff; background:#b4453a; border-color:#b4453a; }
+  /* Área de espera/pausa do turno (a persona respondendo / pausado). */
+  .rn-wait { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding: var(--sp-1) var(--sp-2); }
 </style>
 </head>
 <body>
@@ -137,8 +139,10 @@ function render() {
   const limitMin = (isStudentStep && itAtSel.time_limit_min) ? itAtSel.time_limit_min : 0;
   const remMs = (isStudentStep && limitMin) ? remainingMsOf(seg?.header, limitMin) : null;
   const overTime = remMs !== null && remMs <= 0;
-  // Tarefa da etapa (instrução ao aluno): agora visível ao aluno no topo da etapa.
-  const taskNote = isStudentStep && itAtSel.instruction
+  // Tarefa da etapa (instrução ao aluno): aparece só no INÍCIO da etapa (some
+  // assim que o aluno manda a 1ª mensagem) — não fica seguindo a conversa.
+  const stepStarted = (seg?.entries || []).some(e => e.kind === 'student');
+  const taskNote = isStudentStep && itAtSel.instruction && !stepStarted
     ? `<div class="task-note">📋 <strong>Sua tarefa nesta etapa:</strong> ${esc(itAtSel.instruction)}</div>` : '';
   // Painel de regras (premissas + fora de escopo): aberto na 1ª etapa, sempre acessível.
   const rulesPanel = (SCEN.out_of_scope || SCEN.premissas) ? `
@@ -162,7 +166,7 @@ function render() {
       <div class="rn-controls"><span class="hint">⏰ O tempo desta etapa terminou — a persona não responde mais.</span><button class="btn btn-primary" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : `
       ${workNote}
       <div class="runner-input"><textarea class="textarea" id="rn-input" rows="4" placeholder="Sua resposta…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
-      <div class="rn-controls">${limitMin?`<span id="rn-timer" class="it-timer">⏰ —</span>`:''}${IS_ADMIN ? `<select class="select" id="rn-aiprofile" style="max-width:160px" title="(professor) perfil do aluno simulado"><option value="">perfil…</option><option value="domina">Domina</option><option value="vago">Vago / enrola</option><option value="inseguro">Inseguro</option><option value="contradiz">Contradiz</option></select><button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma resposta plausível do aluno com IA — você revisa e envia">⚙ resposta do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`)) : ''}
+      <div class="rn-controls">${limitMin?`<span id="rn-timer" class="it-timer">⏰ —</span>`:''}${IS_ADMIN ? `<select class="select" id="rn-aiprofile" style="max-width:160px" title="(professor) perfil do aluno simulado"><option value="">perfil…</option><option value="domina">Domina</option><option value="vago">Vago / enrola</option><option value="inseguro">Inseguro</option><option value="contradiz">Contradiz</option></select><button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma mensagem plausível do aluno com IA — você revisa e envia">⚙ mensagem do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`)) : ''}
     ${isExchangeStep ? `<div class="rn-controls"><span class="hint">As personas conversam entre si — leia e avance.</span><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
     ${viewingPast ? `<div class="rn-controls"><span class="hint">Etapa concluída (somente leitura). Volte à aba atual para continuar.</span></div>` : ''}
     ${done ? `<div class="rn-controls"><span class="hint">✓ Você concluiu o cenário.</span></div>` : ''}`;
@@ -177,7 +181,10 @@ function render() {
   if (isStudentStep && limitMin && !needsWork && !overTime) startTimer(seg.header, limitMin);
 }
 // ===== cronômetro da etapa (wall-clock; congela enquanto a persona processa) =====
-let TIMER_ID = null, TURN_INFLIGHT = false;
+// PAUSE_REQUESTED: o aluno pediu para pausar (sair) antes da resposta aparecer.
+// AWAITING_REVEAL: a resposta já está pronta, mas segurada até ele clicar continuar.
+// HELD_RUN: o run com a resposta segurada (só vira RUN ao continuar).
+let TIMER_ID = null, TURN_INFLIGHT = false, PAUSE_REQUESTED = false, AWAITING_REVEAL = false, HELD_RUN = null;
 function clearTimer() { if (TIMER_ID) { clearInterval(TIMER_ID); TIMER_ID = null; } }
 function remainingMsOf(header, limitMin) {
   if (!header?.started_at || !limitMin) return null;
@@ -204,7 +211,7 @@ async function aiGen() {
   const profile = document.getElementById('rn-aiprofile')?.value || '';
   try { const j = await api('POST', '/simulate-student', { profile }); inp.value = j.text || ''; inp.focus(); }
   catch (e) { alert(e.message); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '⚙ resposta do aluno (IA)'; } }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '⚙ mensagem do aluno (IA)'; } }
 }
 async function uploadWork(iid) {
   const fileEl = document.getElementById('rn-work-file'); const msg = document.getElementById('rn-work-msg');
@@ -225,20 +232,43 @@ function setStatus(msg, partial) {
   else if (msg) t.insertAdjacentHTML('beforeend', `<div class="rn-thinking">${esc(msg)}</div>`);
   t.scrollTop = t.scrollHeight;
 }
+// Indicador de espera do turno. Enquanto a persona responde, o aluno pode PAUSAR
+// (sair); ao voltar, clica "continuar" e a resposta aparece — o relógio fica
+// congelado o tempo todo (a pausa não consome o tempo dele).
+function renderWait() {
+  const t = document.getElementById('rn-transcript'); if (!t) return;
+  t.querySelector('.rn-thinking')?.remove(); t.querySelector('.rn-partial')?.remove(); t.querySelector('.rn-wait')?.remove();
+  let html;
+  if (AWAITING_REVEAL) html = `<div class="rn-wait"><span class="rn-thinking">⏸ Pausado — a resposta da persona está pronta.</span><button class="btn btn-sm" id="rn-continue">▶ continuar</button></div>`;
+  else if (PAUSE_REQUESTED) html = `<div class="rn-wait"><span class="rn-thinking">⏸ Pausado — pode sair; ao voltar, clique continuar (o relógio está parado).</span></div>`;
+  else html = `<div class="rn-wait"><span class="rn-thinking">✍️ a persona está respondendo…</span><button class="btn btn-sm" id="rn-pause" title="pausar o relógio e ver a resposta só quando você voltar">⏸ pausar e sair</button></div>`;
+  t.insertAdjacentHTML('beforeend', html); t.scrollTop = t.scrollHeight;
+  const pb = document.getElementById('rn-pause'); if (pb) pb.onclick = () => { PAUSE_REQUESTED = true; renderWait(); };
+  const cb = document.getElementById('rn-continue'); if (cb) cb.onclick = continueReveal;
+  // Trava a caixa enquanto o turno está em espera (evita disparar outro turno).
+  const inp = document.getElementById('rn-input'); if (inp) inp.disabled = true;
+  const sb = document.getElementById('rn-send'); if (sb) sb.disabled = true;
+}
+async function continueReveal() {
+  RUN = HELD_RUN || RUN; AWAITING_REVEAL = false; PAUSE_REQUESTED = false; HELD_RUN = null;
+  try { const j = await api('POST', '/reveal'); if (j.run) RUN = j.run; } catch (e) {}  // credita a pausa no relógio (server)
+  TURN_INFLIGHT = false; SELTAB = RUN.interaction_index ?? SELTAB; render();
+}
 function handleSSE(chunk) {
   const ev = (chunk.match(/event: (.+)/) || [])[1];
   const dl = (chunk.match(/data: (.+)/) || [])[1];
   let data = {}; try { data = JSON.parse(dl || '{}'); } catch (e) {}
-  if (ev === 'thinking') setStatus('⏳ pensando…');
-  else if (ev === 'responding') setStatus('✍️ respondendo…');
-  else if (ev === 'message') setStatus('', data.text);
-  else if (ev === 'done') { TURN_INFLIGHT = false; RUN = data.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
-  else if (ev === 'error') { TURN_INFLIGHT = false; setStatus(''); const t=document.getElementById('rn-transcript'); if (t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(data.error || 'erro')}</div>`); }
+  if (ev === 'thinking' || ev === 'responding') renderWait();
+  else if (ev === 'done') {
+    if (PAUSE_REQUESTED) { HELD_RUN = data.run; AWAITING_REVEAL = true; renderWait(); }   // segura a resposta; relógio fica congelado
+    else { TURN_INFLIGHT = false; RUN = data.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
+  }
+  else if (ev === 'error') { TURN_INFLIGHT = false; PAUSE_REQUESTED = false; AWAITING_REVEAL = false; HELD_RUN = null; setStatus(''); const t=document.getElementById('rn-transcript'); if (t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(data.error || 'erro')}</div>`); }
 }
 async function sendTurn() {
   const inp = document.getElementById('rn-input'); const text = inp?.value.trim(); if (!text) return;
-  TURN_INFLIGHT = true;   // congela o cronômetro até a resposta chegar (a latência não conta)
-  inp.value = ''; RUN.transcript.push({ speaker:'student', kind:'student', text }); render(); setStatus('⏳ pensando…');
+  TURN_INFLIGHT = true; PAUSE_REQUESTED = false; AWAITING_REVEAL = false; HELD_RUN = null;   // congela o cronômetro até a resposta aparecer
+  inp.value = ''; RUN.transcript.push({ speaker:'student', kind:'student', text }); render(); renderWait();
   try {
     const resp = await fetch(API + '/turn?stream=1', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
     if (!resp.ok || !resp.body) { const j = await resp.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + resp.status)); }
