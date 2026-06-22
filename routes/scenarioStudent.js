@@ -61,6 +61,17 @@ function currentHeader(transcript) {
     for (let i = (transcript || []).length - 1; i >= 0; i--) if (transcript[i].kind === "interaction") return transcript[i];
     return null;
 }
+// A pausa manual marca `await_reveal_at` no cabeçalho quando a resposta fica
+// pronta; o /reveal o consome creditando o tempo. Se o aluno NÃO usou a pausa
+// (fluxo normal) ou recarregou a página, o marcador fica órfão. Como o hold não
+// sobrevive a reload nem a um novo turno/avanço, limpamos o resíduo nesses pontos
+// (nunca durante um hold ativo — aí nenhum destes endpoints é chamado). Devolve
+// true se removeu algo, p/ o chamador decidir persistir.
+function clearStaleReveal(run) {
+    const h = currentHeader(run?.transcript);
+    if (h && h.await_reveal_at) { delete h.await_reveal_at; return true; }
+    return false;
+}
 // Carimba o início do relógio da etapa no cabeçalho corrente quando a abertura é
 // empurrada (1×). O relógio é wall-clock e desconta `paused_ms` (latência das personas).
 function stampStart(run) {
@@ -83,6 +94,7 @@ router.get("/s/:submissionToken/scenario/state", requireSubmissionToken, async (
     const scenario = await store.getScenarioByWork(req.work.id);
     if (!scenario) return res.json({ has_scenario: false });
     const run = await store.getRunBySubmission(req.submission.id);
+    if (run && clearStaleReveal(run)) await store.saveRun(run);   // reload encerra o hold: limpa o resíduo
     // is_admin: o professor pode estar logado e testando pela própria URL do aluno
     // → a UI mostra o atalho de "gerar resposta do aluno (IA)".
     res.json({ has_scenario: true, scenario: studentScenario(scenario), run: run ? runView(run) : null, total: (scenario.interactions || []).length, is_admin: !!req.session?.user });
@@ -114,7 +126,10 @@ router.post("/s/:submissionToken/scenario/start", requireSubmissionToken, async 
     if (!scenario) return res.status(404).json({ error: "este trabalho não tem cenário" });
     if (!(scenario.interactions || []).length) return bad(res, "cenário sem interações");
     let run = await store.getRunBySubmission(req.submission.id);
-    if (run) return res.json({ run: runView(run), scenario: studentScenario(scenario), resumed: true });
+    if (run) {
+        if (clearStaleReveal(run)) await store.saveRun(run);   // resume encerra o hold: limpa o resíduo
+        return res.json({ run: runView(run), scenario: studentScenario(scenario), resumed: true });
+    }
     const byId = personasById(scenario);
     const { agent, prepAgent, live } = await liveDeps();
     run = await store.createRun(scenario.id, req.submission.id);
@@ -149,6 +164,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     const it = scenario.interactions[run.interaction_index];
     if (!it || it.kind !== "student") return bad(res, "esta etapa não aceita resposta — avance");
     if (it.includes_student_work && !workVsId(run, it)) return bad(res, "anexe o seu trabalho desta etapa antes de responder");
+    clearStaleReveal(run);   // novo turno consome a resposta anterior; persistido no saveRun deste turno
     const byId = personasById(scenario);
     const { agent, live } = await liveDeps();
     const header = currentHeader(run.transcript);
@@ -227,6 +243,7 @@ router.post("/s/:submissionToken/scenario/advance", requireSubmissionToken, asyn
     if (!run) return res.status(404).json({ error: "execução não encontrada" });
     const scenario = await store.getScenarioByWork(req.work.id);
     if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
+    clearStaleReveal(run);   // avançar consome a resposta da etapa anterior
     const total = scenario.interactions.length;
     const next = (run.interaction_index ?? 0) + 1;
     if (next >= total) {
