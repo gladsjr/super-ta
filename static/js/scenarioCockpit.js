@@ -65,6 +65,7 @@
         <button class="btn btn-sm sc-batch" data-op="scenario-evaluations/grade-publish" data-scope="grade_publish" title="torna a nota visível ao aluno">Publicar notas</button>
         <button class="btn btn-sm" id="sc-refresh" title="atualizar a lista">↻ atualizar</button>
       </div>
+      <label class="hint" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px" title="por padrão os lotes pulam quem já tem avaliação/devolutiva/nota; marque para refazer tudo — ex.: recalcular notas depois de editar a rúbrica"><input type="checkbox" id="sc-force"/> sobrescrever existentes (refaz quem já tem — use após editar a rúbrica/diretrizes)</label>
     </div>
 
     <div class="card">
@@ -123,9 +124,10 @@
   }
   async function runBatch(op) {
     if (POLL) return;
+    const force = !!document.getElementById('sc-force')?.checked;
     setBatchDisabled(true);
-    const el = document.getElementById('sc-batch-status'); if (el) el.textContent = 'iniciando…';
-    try { await api('POST', `/${op}`, {}); pollStatus(); }
+    const el = document.getElementById('sc-batch-status'); if (el) el.textContent = force ? 'iniciando (sobrescrevendo)…' : 'iniciando…';
+    try { await api('POST', `/${op}`, { force }); pollStatus(); }
     catch (e) { setBatchDisabled(false); if (el) el.textContent = e.message; }
   }
 

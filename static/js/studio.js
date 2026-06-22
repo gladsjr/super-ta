@@ -73,13 +73,18 @@ function harvestCurrent() {
   }
   if (document.getElementById('sf-interactions')) { SCENARIO.interactions = harvestInteractions(); }
 }
-function renderTab(name) {
-  harvestCurrent();
+function renderTab(name, opts) {
+  // Em troca normal de aba colhemos o DOM da aba atual antes de sair.
+  // Logo após substituir o SCENARIO inteiro (import YAML), o DOM ainda é o
+  // do cenário ANTERIOR — colher ali sobrescreveria o que acabou de entrar;
+  // por isso o import passa { skipHarvest:true }.
+  if (!opts || !opts.skipHarvest) harvestCurrent();
   CURRENT_TAB = name;
   document.querySelectorAll('#studio-seg .seg-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab===name));
   if (name==='personas') renderPersonasPane();
   else if (name==='interacoes') renderInteracoesPane();
   else renderCenarioPane();
+  updateCounts();
 }
 function renderCurrent() {
   if (CURRENT_TAB==='personas') renderPersonasPane();
@@ -358,7 +363,13 @@ function harvestInteractions() {
     example_questions: card.querySelector('.it-questions').value.split('\n').map(x=>x.trim()).filter(Boolean),
     time_limit_min: (() => { const n = parseInt((card.querySelector('.it-time-limit')?.value||'').trim(), 10); return (n && n > 0) ? n : null; })(),
     private_info: [...card.querySelectorAll('.it-private .pi-row')].map(r=>({ text:r.querySelector('.pi-text').value.trim(), persona_ids:[...r.querySelectorAll('.pi-persona:checked')].map(c=>c.value) })).filter(x=>x.text),
-  }));
+  }))
+  // Descarta o card-placeholder em branco (renderInteracoesPane sempre mostra ao
+  // menos um card mesmo sem interações): sem título, sem participante real, sem
+  // nenhum conteúdo, ele não é uma interação — colhê-lo geraria etapa fantasma.
+  .filter(it => it.title || it.instruction || it.focus || it.form_prompt
+    || it.example_questions.length || it.private_info.length
+    || it.participants.some(p => p.persona_id));
 }
 function renderInteracoesPane() {
   const s = SCENARIO;
@@ -454,7 +465,7 @@ function openYamlModal({ title, value, editable, onSubmit, submitLabel }) {
 async function exportScenarioYaml() {
   harvestCurrent();
   try {
-    const { yaml } = await api('POST', '/scenarios/api/yaml/to', { scenario: { name: SCENARIO.name, description: SCENARIO.description, personas: SCENARIO.personas, interactions: SCENARIO.interactions } });
+    const { yaml } = await api('POST', '/scenarios/api/yaml/to', { scenario: { name: SCENARIO.name, description: SCENARIO.description, out_of_scope: SCENARIO.out_of_scope, premissas: SCENARIO.premissas, personas: SCENARIO.personas, interactions: SCENARIO.interactions } });
     openYamlModal({ title: 'Exportar cenário (YAML)', value: yaml, editable: false });
   } catch (e) { setSaveMsg(e.message); }
 }
@@ -470,12 +481,12 @@ function openImportYaml() {
       const out = await api('POST', '/scenarios/api/yaml/from', { yaml: yamlText });
       if (out.kind === 'scenario') {
         SCENARIO = out.scenario;
-        show('yaml-modal', false); updateCounts(); renderTab('cenario');
+        show('yaml-modal', false); renderTab('cenario', { skipHarvest: true });
         setSaveMsg('cenário importado — revise nas abas e clique em Salvar');
       } else if (out.kind === 'persona') {
         SCENARIO.personas = SCENARIO.personas || [];
         SCENARIO.personas.push(out.persona);
-        show('yaml-modal', false); updateCounts(); renderTab('personas');
+        show('yaml-modal', false); renderTab('personas', { skipHarvest: true });
         setSaveMsg('persona importada — revise e clique em Salvar');
       }
     },
