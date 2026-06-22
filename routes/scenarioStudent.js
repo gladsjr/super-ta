@@ -88,6 +88,26 @@ router.get("/s/:submissionToken/scenario/state", requireSubmissionToken, async (
     res.json({ has_scenario: true, scenario: studentScenario(scenario), run: run ? runView(run) : null, total: (scenario.interactions || []).length, is_admin: !!req.session?.user });
 });
 
+// Resultado PUBLICADO ao aluno: devolutiva e nota, DESACOPLADAS (cada uma só
+// aparece se publicada), espelhando o /s/:t/evaluation da entrevista. A nota
+// nunca traz a justificativa (auditoria interna do professor). A devolutiva
+// (run.devolutiva_json) já é a versão sanitizada do StudentFeedbackAgent.
+router.get("/s/:submissionToken/scenario/evaluation", requireSubmissionToken, async (req, res) => {
+    const run = await store.getRunBySubmission(req.submission.id);
+    if (!run) return res.json({ evaluation_published: false, grade_published: false });
+    const devPub = !!run.evaluation_published_at, gradePub = !!run.grade_published_at;
+    res.json({
+        evaluation_published: devPub,
+        published_at: run.evaluation_published_at || null,
+        devolutiva: devPub ? run.devolutiva_json : null,
+        grade_published: gradePub,
+        grade_published_at: run.grade_published_at || null,
+        grade: (gradePub && run.grades_json)
+            ? { final: run.grades_json.final, criteria: (run.grades_json.criteria || []).map(c => ({ name: c.name, weight: c.weight, score: c.score })) }
+            : null,
+    });
+});
+
 // Começar (ou resumir) o cenário.
 router.post("/s/:submissionToken/scenario/start", requireSubmissionToken, async (req, res) => {
     const scenario = await store.getScenarioByWork(req.work.id);
