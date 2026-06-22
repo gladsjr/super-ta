@@ -71,7 +71,7 @@ router.post("/scenarios/api/assistant", json, async (req, res) => {
     if (!message) return bad(res, "mensagem vazia");
     try {
         const { scenarioAssistantAgent } = await import("../lib/agents.js");
-        const templates = (await store.listTemplates()).map(t => ({ name: t.name, role: t.role }));
+        const templates = (await store.listTemplates()).map(t => ({ name: t.name, role: t.role, description: t.description || "" }));
         const out = await scenarioAssistantAgent.chat({
             scenario: req.body?.scenario || {},
             templates,

@@ -136,38 +136,103 @@ function renderAssistLog() {
   if (!ASSIST_HISTORY.length) return '<div class="hint">Converse para montar cenário, personas e interações em linguagem natural. O assistente propõe; você revisa nas abas e salva.</div>';
   return ASSIST_HISTORY.map(m => `<div class="assist-msg-${m.role==='assistant'?'assistant':'user'}"><strong>${m.role==='assistant'?'🤖':'você'}:</strong> ${esc(m.content)}</div>`).join('');
 }
+// Visão COMPLETA do cenário p/ o assistente (por NOME — ele não lida com ids).
+function assistScenarioView() {
+  const byId = {}; (SCENARIO.personas||[]).forEach(p => byId[p.id] = p);
+  return {
+    name: SCENARIO.name||'', description: SCENARIO.description||'',
+    out_of_scope: SCENARIO.out_of_scope||'', premissas: SCENARIO.premissas||'',
+    personas: (SCENARIO.personas||[]).map(p => ({ name:p.name, role:p.role, tone:p.tone||'',
+      objectives:p.objectives||[], concerns:p.concerns||[], knowledge_scope:p.knowledge?.scope||[] })),
+    interactions: (SCENARIO.interactions||[]).map(it => ({ title:it.title, form:it.form,
+      instruction:it.instruction||'', focus:it.focus||'', time_limit_min: it.time_limit_min||null,
+      includes_student_work: !!it.includes_student_work, example_questions: it.example_questions||[],
+      participants:(it.participants||[]).map(pp => ({ persona_name: byId[pp.persona_id]?.name||'', role: pp.role })),
+      private_info:(it.private_info||[]).map(pi => ({ text: pi.text, personas:(pi.persona_ids||[]).map(id => byId[id]?.name).filter(Boolean) })) })),
+  };
+}
 async function sendAssist() {
   const inp = document.getElementById('assist-input'); const text = inp.value.trim(); if (!text) return;
   harvestCurrent();
   inp.value=''; ASSIST_HISTORY.push({ role:'user', content:text });
   document.getElementById('assist-log').innerHTML = renderAssistLog() + '<div class="hint">⏳ pensando…</div>';
   try {
-    const out = await api('POST','/scenarios/api/assistant', { message:text, history: ASSIST_HISTORY.slice(0,-1),
-      scenario: { name:SCENARIO.name, description:SCENARIO.description, personas:(SCENARIO.personas||[]).map(p=>({name:p.name,role:p.role})), interactions:(SCENARIO.interactions||[]).map(it=>({title:it.title,kind:it.kind,objective_type:it.objective_type})) } });
+    const out = await api('POST','/scenarios/api/assistant', { message:text, history: ASSIST_HISTORY.slice(0,-1), scenario: assistScenarioView() });
     const summary = applyAssistProposals(out);
     ASSIST_HISTORY.push({ role:'assistant', content: out.reply + (summary?`\n→ ${summary}`:'') });
     updateCounts(); renderCenarioPane();
   } catch (e) { ASSIST_HISTORY.push({ role:'assistant', content:'(erro: '+e.message+')' }); renderCenarioPane(); }
 }
+const newLocalId = pfx => pfx+'_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9);
+const findPersonaByName = name => (SCENARIO.personas||[]).find(p => (p.name||'').toLowerCase() === String(name||'').toLowerCase());
+const templateByName = name => TEMPLATES.find(t => (t.name||'').toLowerCase() === String(name||'').toLowerCase());
+// Aplica as PROPOSTAS do assistente (ops add/update) ao cenário em memória. Nada
+// é salvo — o professor revisa nas abas e clica Salvar.
 function applyAssistProposals(out) {
   const parts = [];
-  if (out.scenario_patch) { if (out.scenario_patch.name) SCENARIO.name = out.scenario_patch.name; if (out.scenario_patch.description) SCENARIO.description = out.scenario_patch.description; parts.push('cenário'); }
   SCENARIO.personas = SCENARIO.personas || [];
-  const byName = {}; SCENARIO.personas.forEach(p => byName[(p.name||'').toLowerCase()] = p.id);
-  (out.new_personas||[]).forEach(np => {
-    const id = 'cp_local_' + Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9);
-    SCENARIO.personas.push({ id, name:np.name, icon:'🧑', role:np.role, tone:np.tone||'', description:np.description||'', objectives:np.objectives||[], concerns:np.concerns||[], decision_criteria:[], constraints:[], information_needs:[], evaluation_mode:[], knowledge:{ scope:np.knowledge_scope||[], assets:[], level:'' }, example_questions:[] });
-    byName[(np.name||'').toLowerCase()] = id;
-  });
-  if ((out.new_personas||[]).length) parts.push((out.new_personas.length)+' persona(s)');
   SCENARIO.interactions = SCENARIO.interactions || [];
-  (out.new_interactions||[]).forEach(ni => {
-    const participants = (ni.participants||[]).map(p => ({ persona_id: byName[(p.persona_name||'').toLowerCase()], role:p.role })).filter(p => p.persona_id);
-    const niForm = ni.kind==='persona_exchange' ? 'deliberacao' : ({apresentacao:'apresentacao',feedback:'feedback',avaliacao:'arguicao',negociacao:'negociacao',discussao:'discussao',diagnostico:'consultoria'}[ni.objective_type] || 'arguicao');
-    SCENARIO.interactions.push({ id:'i_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9), title:ni.title, form:niForm, form_prompt:'', includes_student_work: !!formMeta(niForm).default_work, participants, opener_persona_id: participants[0]?.persona_id||null, focus:ni.focus||'', instruction:ni.instruction||'', example_questions:[], private_info:[] });
+  // 1) globais
+  const p = out.scenario_patch;
+  if (p) {
+    if (p.name) SCENARIO.name = p.name;
+    if (p.description !== undefined) SCENARIO.description = p.description;
+    if (p.out_of_scope !== undefined) SCENARIO.out_of_scope = p.out_of_scope;
+    if (p.premissas !== undefined) SCENARIO.premissas = p.premissas;
+    parts.push('cenário');
+  }
+  // 2) personas (add/update; from_template usa um template como base)
+  const setPersonaFields = (t, src) => {
+    for (const f of ['role','tone','description','authority','gender']) if (src[f] !== undefined) t[f] = src[f];
+    for (const f of ['objectives','concerns','decision_criteria','constraints','information_needs','evaluation_mode','example_questions']) if (src[f] !== undefined) t[f] = src[f];
+    if (src.knowledge_scope !== undefined || src.knowledge_level !== undefined) {
+      t.knowledge = t.knowledge || { scope:[], assets:[], level:'' };
+      if (src.knowledge_scope !== undefined) t.knowledge.scope = src.knowledge_scope;
+      if (src.knowledge_level !== undefined) t.knowledge.level = src.knowledge_level;
+    }
+  };
+  let nP = 0;
+  (out.personas||[]).forEach(po => {
+    let t = findPersonaByName(po.name);
+    if (po.op === 'update' && t) { setPersonaFields(t, po); nP++; return; }
+    const base = po.from_template ? templateByName(po.from_template) : null;
+    t = base
+      ? { ...JSON.parse(JSON.stringify(base)), id:newLocalId('cp'), template_id: base.id, name: po.name }
+      : { id:newLocalId('cp'), name: po.name, icon:'🧑', role:'', tone:'', description:'', authority:'', gender:'', voice:'', objectives:[], concerns:[], decision_criteria:[], constraints:[], information_needs:[], evaluation_mode:[], knowledge:{ scope:[], assets:[], level:'' }, example_questions:[] };
+    setPersonaFields(t, po);
+    if (!t.role) t.role = po.role || '(defina o papel)';
+    SCENARIO.personas.push(t); nP++;
   });
-  if ((out.new_interactions||[]).length) parts.push((out.new_interactions.length)+' interação(ões)');
-  return parts.length ? 'apliquei '+parts.join(', ')+' — revise nas abas 🎭/↔️ e salve' : '';
+  if (nP) parts.push(nP+' persona(s)');
+  // 3) interações (add/update; resolve participantes/info privada por NOME)
+  const findInteraction = ref => {
+    if (typeof ref === 'number') return SCENARIO.interactions[ref-1] || null;
+    if (typeof ref === 'string' && ref) return SCENARIO.interactions.find(it => (it.title||'').toLowerCase() === ref.toLowerCase()) || null;
+    return null;
+  };
+  const mapParticipants = arr => (arr||[]).map(pp => { const per = findPersonaByName(pp.persona_name); return per ? { persona_id: per.id, role: pp.role } : null; }).filter(Boolean);
+  const mapPrivate = (arr, partIds) => (arr||[]).map(x => ({ text:x.text, persona_ids:(x.personas||[]).map(n => findPersonaByName(n)?.id).filter(id => id && partIds.includes(id)) })).filter(x => x.text);
+  let nI = 0;
+  (out.interactions||[]).forEach(io => {
+    let it = io.op === 'update' ? findInteraction(io.ref) : null;
+    if (!it) {
+      it = { id:newLocalId('i'), title: io.title||'Nova interação', form: io.form||'arguicao', form_prompt:'', includes_student_work:false, participants:[], opener_persona_id:null, focus:'', instruction:'', example_questions:[], private_info:[], time_limit_min:null };
+      SCENARIO.interactions.push(it);
+    }
+    if (io.title) it.title = io.title;
+    if (io.form) { it.form = io.form; if (io.includes_student_work === undefined) it.includes_student_work = !!formMeta(io.form).default_work; }
+    if (io.form_prompt !== undefined) it.form_prompt = io.form_prompt;
+    if (io.instruction !== undefined) it.instruction = io.instruction;
+    if (io.focus !== undefined) it.focus = io.focus;
+    if (io.time_limit_min !== undefined) it.time_limit_min = io.time_limit_min;
+    if (io.includes_student_work !== undefined) it.includes_student_work = io.includes_student_work;
+    if (io.example_questions !== undefined) it.example_questions = io.example_questions;
+    if (io.participants) { it.participants = mapParticipants(io.participants); it.opener_persona_id = it.participants[0]?.persona_id || null; }
+    if (io.private_info) { const pids = (it.participants||[]).map(x=>x.persona_id); it.private_info = mapPrivate(io.private_info, pids); }
+    nI++;
+  });
+  if (nI) parts.push(nI+' interação(ões)');
+  return parts.length ? 'apliquei '+parts.join(', ')+' — revise nas abas 🎬/🎭/↔️ e salve' : '';
 }
 
 // ============ ABA 2 — PERSONAS (escolhidas no topo + biblioteca de templates) ============

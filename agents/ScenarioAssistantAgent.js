@@ -1,17 +1,20 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
 import { renderAgentPreamble } from "../lib/agentPreamble.js";
-import { OBJECTIVE_TYPES, PARTICIPANT_ROLES, INTERACTION_KINDS, objectiveLabel, ROLE_LABEL } from "../lib/scenarios/mockEngine.js";
+import { PARTICIPANT_ROLES, ROLE_LABEL } from "../lib/scenarios/mockEngine.js";
+import { FORMS, FORM_LABELS, FORM_DYNAMICS, FORM_DEFAULT_WORK, formKind } from "../lib/scenarios/interactionForms.js";
 import { extractJsonObject } from "../lib/scenarios/scenarioActionSchema.js";
 
 /**
- * ScenarioAssistantAgent — assistente do PROFESSOR para o modelo de cenários.
+ * ScenarioAssistantAgent — assistente do PROFESSOR no ESTÚDIO DE CENÁRIOS.
  *
- * Análogo ao ConfigAssistantAgent (entrevista single), mas para o novo modelo:
- * ajuda a montar o CENÁRIO (explicação geral), as PERSONAS e as INTERAÇÕES em
- * linguagem natural. NUNCA salva — devolve uma resposta conversacional + uma
- * lista de PROPOSTAS estruturadas que a UI aplica ao cenário em edição; o
- * professor revisa e salva. Modelo: fast_model. Audience: professor_via_ui.
+ * Conhece o MODELO COMPLETO do cenário (formas e suas dinâmicas, fora de escopo,
+ * premissas, informações privadas por interação, tempo, trabalho do aluno,
+ * mensagens de exemplo, personas com profundidade) e sabe não só PROPOR coisas
+ * novas como AJUSTAR o que já existe (ops add/update). NUNCA salva — devolve
+ * uma resposta conversacional + propostas estruturadas que a interface aplica ao
+ * cenário em edição; o professor revisa nas abas e clica Salvar. Modelo:
+ * fast_model. Audience: professor_via_ui.
  */
 export class ScenarioAssistantAgent {
     static TYPE = "scenario_assistant";
@@ -21,42 +24,64 @@ export class ScenarioAssistantAgent {
         this.client = openaiClient;
         this.model = model;
 
-        const objList = OBJECTIVE_TYPES.map(v => `${v} (${objectiveLabel(v)})`).join(", ");
         const roleList = PARTICIPANT_ROLES.map(v => `${v} (${ROLE_LABEL[v]})`).join(", ");
-        this.systemPromptBody = `Você é o assistente de configuração do professor no ESTÚDIO DE CENÁRIOS. Ajuda a desenhar uma cena de role-play multiagente em linguagem natural. Você NÃO salva nada — você PROPÕE, e o professor aplica e salva na interface.
+        const formBlock = FORMS.map(f => `  - ${f} — ${FORM_LABELS[f]}${FORM_DYNAMICS[f] ? `: ${FORM_DYNAMICS[f]}` : " (a dinâmica vem do form_prompt que o professor escreve)"}`).join("\n");
 
-MODELO (entenda bem antes de propor):
-- CENÁRIO: o nível geral — um nome + uma explicação geral (é o que o enunciado/PDF detalha ao aluno) + uma SEQUÊNCIA ORDENADA de interações.
-- PERSONA: um personagem do cenário (papel, tom, objetivos, preocupações, conhecimento). As interações escolhem entre as personas do cenário.
-- INTERAÇÃO: cada etapa ordenada. Dois tipos (kind): "student" (aluno↔1 ou aluno↔N personas) ou "persona_exchange" (duas personas conversam entre si sobre um "foco"; o aluno observa). Cada interação tem um objetivo.
-  - objetivos válidos (objective_type): ${objList}.
-  - papéis válidos por participante numa interação "student" (role): ${roleList}.
+        this.systemPromptBody = `Você é o assistente de configuração do professor no ESTÚDIO DE CENÁRIOS. Ajuda a desenhar uma cena de role-play multiagente em linguagem natural, com domínio PROFUNDO de como cada parte funciona. Você NÃO salva nada — você PROPÕE (criar ou ajustar), e o professor revisa e salva na interface.
 
-COMO RESPONDER (SEMPRE só JSON, neste formato):
+═══════ O MODELO (entenda a fundo antes de propor) ═══════
+
+CENÁRIO (nível geral):
+- "name" + "description": o nome e a explicação geral da cena (é o que o enunciado/PDF detalha ao aluno).
+- "out_of_scope" (FORA DE ESCOPO): assuntos que NUNCA serão abordados na cena. O aluno é avisado; se ele tocar nesses temas, as personas DESCONVERSAM (sem meta-comentar) e o sistema mostra uma dica fora do role-play. Use para impedir desvios (ex.: "questões salariais; o mérito político da lei").
+- "premissas": pressupostos que aluno e personas já tomam como dados. As personas só cobram se o aluno CONTRARIAR uma premissa. Use para fixar o terreno (ex.: "o orçamento já foi aprovado; assuma a base de clientes de 2024").
+
+PERSONA (um personagem reutilizável da cena). Campos: role (quem é, em uma frase), tone (tom/estilo), description, authority (o que pode decidir), gender, objectives[], concerns[], decision_criteria[], constraints[], information_needs[], evaluation_mode[], knowledge_scope[] (o que ela sabe), knowledge_level (alto/médio/baixo), example_questions[] (falas/perguntas típicas DELA). Personas ricas geram conversas melhores — proponha objetivos e preocupações concretos, não genéricos.
+
+INTERAÇÃO (cada etapa ORDENADA; o aluno passa por elas em sequência). A peça central é a FORMA, que define a DINÂMICA (quem apresenta, quem conduz, como a persona trata o trabalho do aluno). Formas válidas (campo "form"):
+${formBlock}
+  • A forma "deliberacao" é a única em que DUAS personas conversam entre si e o aluno observa (precisa de exatamente 2 participantes + um "focus"). Todas as outras são aluno↔persona(s).
+  • "custom" exige um "form_prompt" descrevendo a dinâmica à mão. Nas demais, "form_prompt" é opcional (nuance).
+- "instruction": a tarefa do aluno nesta etapa — é MOSTRADA a ele e também orienta as personas.
+- "participants": as personas desta etapa, por NOME, cada uma com um "role": ${roleList}. (Em "deliberacao" o role é ignorado.)
+- "time_limit_min": tempo opcional (minutos) — mostra cronômetro; a persona conduz pelo tempo e avisa quando falta pouco; vazio = sem limite.
+- "includes_student_work": se esta etapa pede o upload do trabalho do aluno (a persona o lê). Default por forma — só mexa se o professor pedir.
+- "example_questions": exemplos de falas/perguntas da persona NESTA etapa (inspiração para o orquestrador).
+- "private_info": informações que as personas TÊM e o aluno NÃO — reveladas só nesta etapa, e só se o aluno PERGUNTAR/conduzir (nunca de graça). Cada item tem um "text" e a lista de "personas" (por nome, entre as participantes) que a detêm. Use para criar assimetria de informação (ex.: numa consultoria, a fonte só conta um detalhe se perguntada).
+
+═══════ COMO RESPONDER (SEMPRE só JSON, neste formato) ═══════
 {
-  "reply": "resposta conversacional ao professor, em português, curta e prática. Explique o que você propôs e por quê. Se faltar informação, pergunte.",
-  "scenario_patch": { "name": "...", "description": "..." } | null,   // ajuste do nome/explicação geral; null se não mudar
-  "new_personas": [
-    { "name": "...", "role": "...", "tone": "...", "description": "...", "objectives": ["..."], "concerns": ["..."], "knowledge_scope": ["..."] }
+  "reply": "resposta conversacional ao professor, em português, curta e prática: o que você propôs/ajustou e por quê. Se faltar informação para decidir bem, PERGUNTE em vez de inventar.",
+  "scenario_patch": { "name"?: "...", "description"?: "...", "out_of_scope"?: "...", "premissas"?: "..." } | null,
+  "personas": [
+    { "op": "add" | "update", "name": "<chave: nome da persona>", "from_template"?: "<nome de um template da biblioteca p/ usar como base>",
+      "role"?, "tone"?, "description"?, "authority"?, "gender"?,
+      "objectives"?: [], "concerns"?: [], "knowledge_scope"?: [], "knowledge_level"?,
+      "decision_criteria"?: [], "constraints"?: [], "information_needs"?: [], "evaluation_mode"?: [], "example_questions"?: [] }
   ],
-  "new_interactions": [
-    { "title": "...", "kind": "student | persona_exchange", "objective_type": "<um dos válidos>", "instruction": "instrução ao aluno (em student)", "focus": "foco (só em persona_exchange)",
-      "participants": [ { "persona_name": "<nome de uma persona NOVA acima OU já existente no cenário>", "role": "<um dos papéis válidos; ignorado em persona_exchange>" } ] }
+  "interactions": [
+    { "op": "add" | "update", "ref"?: <para update: o número (1-based) da etapa OU o título atual>,
+      "title"?, "form"?: "<uma das formas válidas>", "form_prompt"?, "instruction"?, "focus"?,
+      "time_limit_min"?: <número de minutos ou null>, "includes_student_work"?: <true|false>,
+      "participants"?: [ { "persona_name": "<persona do cenário ou recém-proposta>", "role"?: "<um dos papéis>" } ],
+      "example_questions"?: [],
+      "private_info"?: [ { "text": "...", "personas": ["<nome de participante>", ...] } ] }
   ]
 }
 
-REGRAS:
-- Proponha incrementos coerentes com o que o professor pediu. Não invente um cenário inteiro se ele só pediu uma persona.
-- Em "participants", refira personas por NOME (a interface resolve o id). persona_exchange precisa de exatamente 2 personas.
-- Liste em new_personas só personas que ainda não existem no cenário (o estado atual vem no input). Para reusar uma persona existente, referencie pelo nome em participants sem recriá-la.
-- Use objetivos e papéis APENAS da lista válida.
-- Seja conciso. Não despeje listas enormes; proponha o essencial e ofereça refinar.`;
+═══════ REGRAS ═══════
+- INCREMENTAL e fiel ao pedido: não invente um cenário inteiro se o professor só pediu uma persona ou um ajuste. Para AJUSTAR algo que já existe, use op:"update" referenciando pelo nome (persona) ou pelo número/título (interação) — mande SÓ os campos que mudam.
+- Em "personas", liste só o que muda/nasce. Para reusar um template e adaptá-lo, use op:"add" com "from_template" e sobrescreva os campos que quiser.
+- Em "participants", refira personas por NOME (a interface resolve o id). Use papéis e formas APENAS das listas válidas. "deliberacao" precisa de exatamente 2 personas.
+- "private_info" só faz sentido em formas com aluno (não em deliberacao) e as personas citadas devem estar entre as participantes.
+- Aproveite fora_de_escopo/premissas/private_info quando ajudarem o desenho pedagógico — são o que dá controle ao professor. Mas não os force onde não cabem.
+- Seja conciso. Proponha o essencial e ofereça refinar.`;
     }
 
     /**
      * @param {object} p
-     * @param {object} p.scenario   estado atual { name, description, personas:[{name,role}], interactions:[{title,kind,objective_type}] }
-     * @param {Array}  p.templates  biblioteca de templates disponível [{name, role}]
+     * @param {object} p.scenario   estado atual completo (visão por NOME): { name, description, out_of_scope, premissas, personas:[{name,role,...}], interactions:[{title,form,instruction,participants:[{persona_name,role}],private_info:[{text,personas}],...}] }
+     * @param {Array}  p.templates  biblioteca [{name, role, description}]
      * @param {Array}  p.history    turnos anteriores [{role:'user'|'assistant', content}]
      * @param {string} p.message    mensagem do professor
      * @param {object|null} p.meterCtx
@@ -65,18 +90,13 @@ REGRAS:
         const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
 
 ${this.systemPromptBody}`;
-        const state = {
-            name: scenario.name || "(sem nome)",
-            description: scenario.description || "(sem explicação)",
-            personas: (scenario.personas || []).map(p => ({ name: p.name, role: p.role })),
-            interactions: (scenario.interactions || []).map(it => ({ title: it.title, kind: it.kind, objective_type: it.objective_type })),
-        };
         const histBlock = (history || []).slice(-8).map(h => `${h.role === "assistant" ? "ASSISTENTE" : "PROFESSOR"}: ${h.content}`).join("\n") || "(início da conversa)";
-        const userContent = `**ESTADO ATUAL DO CENÁRIO EM EDIÇÃO**
-${JSON.stringify(state, null, 2)}
+        const tmplBlock = (templates || []).map(t => `- ${t.name} (${t.role})${t.description ? ` — ${String(t.description).slice(0, 120)}` : ""}`).join("\n") || "(nenhum)";
+        const userContent = `**ESTADO ATUAL DO CENÁRIO EM EDIÇÃO** (interações numeradas para você referenciar em ops de update)
+${JSON.stringify(this.#scenarioView(scenario), null, 2)}
 
-**TEMPLATES DISPONÍVEIS NA BIBLIOTECA** (pode sugerir reusar)
-${(templates || []).map(t => `- ${t.name} (${t.role})`).join("\n") || "(nenhum)"}
+**TEMPLATES DISPONÍVEIS NA BIBLIOTECA** (pode reusar como base via from_template)
+${tmplBlock}
 
 **HISTÓRICO DA CONVERSA**
 ${histBlock}
@@ -92,21 +112,104 @@ Responda SOMENTE com o JSON do formato especificado.`;
                 this.client.responses.create({ model: this.model, instructions: systemPrompt, input: [{ role: "user", content: userContent }], truncation: "auto" })));
         const parsed = extractJsonObject(response.output_text || "");
         if (!parsed || typeof parsed.reply !== "string") {
-            return { reply: "Desculpe, não consegui formular uma proposta agora. Pode reformular?", scenario_patch: null, new_personas: [], new_interactions: [] };
+            return { reply: "Desculpe, não consegui formular uma proposta agora. Pode reformular?", scenario_patch: null, personas: [], interactions: [] };
         }
-        // Saneamento leve: enums válidos; persona_exchange com exatamente 2.
-        const newInteractions = (Array.isArray(parsed.new_interactions) ? parsed.new_interactions : []).filter(it => it && it.title && INTERACTION_KINDS.includes(it.kind) && OBJECTIVE_TYPES.includes(it.objective_type)).map(it => ({
-            title: String(it.title), kind: it.kind, objective_type: it.objective_type,
-            instruction: typeof it.instruction === "string" ? it.instruction : "",
-            focus: it.kind === "persona_exchange" && typeof it.focus === "string" ? it.focus : "",
-            participants: (Array.isArray(it.participants) ? it.participants : []).filter(p => p && p.persona_name).map(p => ({ persona_name: String(p.persona_name), role: PARTICIPANT_ROLES.includes(p.role) ? p.role : "questionamento" })),
-        }));
-        log.info("AGENT:ScenarioAssistant", `reply=${log.preview(parsed.reply, 80)} personas=${(parsed.new_personas || []).length} interactions=${newInteractions.length}`);
-        return {
+
+        const out = {
             reply: parsed.reply,
-            scenario_patch: parsed.scenario_patch && typeof parsed.scenario_patch === "object" ? parsed.scenario_patch : null,
-            new_personas: Array.isArray(parsed.new_personas) ? parsed.new_personas.filter(p => p && p.name && p.role) : [],
-            new_interactions: newInteractions,
+            scenario_patch: this.#cleanPatch(parsed.scenario_patch),
+            personas: (Array.isArray(parsed.personas) ? parsed.personas : []).map(p => this.#cleanPersonaOp(p)).filter(Boolean),
+            interactions: (Array.isArray(parsed.interactions) ? parsed.interactions : []).map(it => this.#cleanInteractionOp(it)).filter(Boolean),
         };
+        log.info("AGENT:ScenarioAssistant", `reply=${log.preview(parsed.reply, 80)} patch=${!!out.scenario_patch} personas=${out.personas.length} interactions=${out.interactions.length}`);
+        return out;
+    }
+
+    // --- Visão do estado para o prompt: numera interações e usa nomes ---
+    #scenarioView(s) {
+        return {
+            name: s.name || "(sem nome)",
+            description: s.description || "(sem explicação)",
+            out_of_scope: s.out_of_scope || "(vazio)",
+            premissas: s.premissas || "(vazio)",
+            personas: (s.personas || []).map(p => ({
+                name: p.name, role: p.role, tone: p.tone || undefined,
+                objectives: p.objectives?.length ? p.objectives : undefined,
+                concerns: p.concerns?.length ? p.concerns : undefined,
+            })),
+            interactions: (s.interactions || []).map((it, i) => ({
+                "#": i + 1, title: it.title, form: it.form, instruction: it.instruction || undefined,
+                focus: it.focus || undefined, time_limit_min: it.time_limit_min || undefined,
+                includes_student_work: it.includes_student_work || undefined,
+                participants: (it.participants || []).map(pp => ({ persona_name: pp.persona_name, role: pp.role })),
+                private_info: it.private_info?.length ? it.private_info : undefined,
+            })),
+        };
+    }
+
+    // --- Saneamento das propostas (enums válidos; só strings/arrays previstos) ---
+    #str(v) { return typeof v === "string" ? v.trim() : ""; }
+    #lines(v) { return Array.isArray(v) ? v.map(x => this.#str(x)).filter(Boolean) : (this.#str(v) ? [this.#str(v)] : []); }
+
+    #cleanPatch(p) {
+        if (!p || typeof p !== "object") return null;
+        const o = {};
+        for (const f of ["name", "description", "out_of_scope", "premissas"]) {
+            if (typeof p[f] === "string") o[f] = p[f].trim();
+        }
+        return Object.keys(o).length ? o : null;
+    }
+
+    #cleanPersonaOp(p) {
+        if (!p || typeof p !== "object" || !this.#str(p.name)) return null;
+        const op = p.op === "update" ? "update" : "add";
+        const o = { op, name: this.#str(p.name) };
+        if (this.#str(p.from_template)) o.from_template = this.#str(p.from_template);
+        for (const f of ["role", "tone", "description", "authority", "gender", "knowledge_level"]) {
+            if (typeof p[f] === "string" && p[f].trim()) o[f] = p[f].trim();
+        }
+        for (const f of ["objectives", "concerns", "knowledge_scope", "decision_criteria", "constraints", "information_needs", "evaluation_mode", "example_questions"]) {
+            if (p[f] !== undefined) o[f] = this.#lines(p[f]);
+        }
+        return o;
+    }
+
+    #cleanInteractionOp(it) {
+        if (!it || typeof it !== "object") return null;
+        const op = it.op === "update" ? "update" : "add";
+        const o = { op };
+        // ref para update: número (1-based) ou título
+        if (op === "update") {
+            if (typeof it.ref === "number" && it.ref > 0) o.ref = Math.round(it.ref);
+            else if (this.#str(it.ref)) o.ref = this.#str(it.ref);
+            else if (this.#str(it.title)) o.ref = this.#str(it.title);   // fallback: casa por título
+        }
+        if (this.#str(it.title)) o.title = this.#str(it.title);
+        if (FORMS.includes(it.form)) o.form = it.form;
+        if (this.#str(it.form_prompt)) o.form_prompt = this.#str(it.form_prompt);
+        if (this.#str(it.instruction)) o.instruction = this.#str(it.instruction);
+        if (this.#str(it.focus)) o.focus = this.#str(it.focus);
+        if (it.time_limit_min === null) o.time_limit_min = null;
+        else if (typeof it.time_limit_min === "number" && it.time_limit_min > 0) o.time_limit_min = Math.round(it.time_limit_min);
+        if (typeof it.includes_student_work === "boolean") o.includes_student_work = it.includes_student_work;
+        if (Array.isArray(it.participants)) {
+            o.participants = it.participants.filter(pp => pp && this.#str(pp.persona_name)).map(pp => ({
+                persona_name: this.#str(pp.persona_name),
+                role: PARTICIPANT_ROLES.includes(pp.role) ? pp.role : "questionamento",
+            }));
+        }
+        if (it.example_questions !== undefined) o.example_questions = this.#lines(it.example_questions);
+        if (Array.isArray(it.private_info)) {
+            o.private_info = it.private_info.filter(pi => pi && this.#str(pi.text)).map(pi => ({
+                text: this.#str(pi.text),
+                personas: Array.isArray(pi.personas) ? pi.personas.map(n => this.#str(n)).filter(Boolean) : [],
+            }));
+        }
+        // add precisa de ao menos um título OU forma para valer
+        if (op === "add" && !o.title && !o.form && !o.participants?.length) return null;
+        // Aplica o default de "incluir trabalho" da forma quando a forma é nova e o professor não disse o contrário.
+        if (o.form && o.includes_student_work === undefined && op === "add") o.includes_student_work = !!FORM_DEFAULT_WORK[o.form];
+        o.kind = o.form ? formKind(o.form) : undefined;
+        return o;
     }
 }
