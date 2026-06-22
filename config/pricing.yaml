@@ -26,21 +26,27 @@ default_work_budget_usd: 4.00
 # tudo dividido por 1.000.000.
 #
 # Observação sobre cached: a documentação oficial costuma definir cache hit
-# como ~10% do preço de input padrão. Adotamos 50% (mais caro que o real)
-# como margem; o orçamento estoura cedo, nunca tarde.
+# como ~10% do preço de input padrão (cache hit barateia 90%).
+#
+# Antes adotávamos 50% (5x o real) como margem conservadora. Mas com a alta
+# taxa de cache hit medida (~65% de TODO o input; 76% no orquestrador da
+# entrevista), esses 5x deixaram de ser margem e viraram DISTORÇÃO: o medidor
+# superfaturava ~28% e estourava o orçamento cedo demais (menos entrevistas por
+# dólar). Corrigido para o preço oficial (~10% do input). Verificar contra a
+# tabela da OpenAI ao trocar de modelo.
 # ---------------------------------------------------------------------------
 text:
   gpt-5.4:
     input_per_mtok: 2.50
-    input_cached_per_mtok: 1.25
+    input_cached_per_mtok: 0.25   # ~10% do input (oficial)
     output_per_mtok: 15.00
   gpt-5.5:
     input_per_mtok: 5.00
-    input_cached_per_mtok: 2.50   # conservador; oficial Standard = 0.50
+    input_cached_per_mtok: 0.50   # ~10% do input (oficial Standard)
     output_per_mtok: 30.00
   gpt-5.4-mini:
     input_per_mtok: 0.75
-    input_cached_per_mtok: 0.375
+    input_cached_per_mtok: 0.075  # ~10% do input (oficial)
     output_per_mtok: 4.50
 
 # ---------------------------------------------------------------------------

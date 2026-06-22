@@ -265,6 +265,9 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
             // auto-truncation evita 4xx por estouro de contexto.
             truncation: "auto",
         };
+        // Dica de roteamento de cache (não altera a saída): agrupa os turnos de
+        // todos os alunos do mesmo trabalho (mesma agenda no prefixo estável).
+        if (meterCtx?.workId) payload.prompt_cache_key = `iv:${meterCtx.workId}`;
         if (this.reasoningEffort) {
             payload.reasoning = { effort: this.reasoningEffort };
         }

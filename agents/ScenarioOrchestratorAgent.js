@@ -110,6 +110,10 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
             input: [{ role: "user", content: userContent }],
             truncation: "auto",
         };
+        // Dica de roteamento de cache (não altera a saída): agrupa os turnos de
+        // TODOS os alunos do mesmo trabalho, que compartilham o mesmo prefixo
+        // estável (preâmbulo + briefing) — eleva a taxa de cache hit entre alunos.
+        if (meterCtx?.workId) payload.prompt_cache_key = `sc:${meterCtx.workId}`;
         const stores = (Array.isArray(vectorStoreIds) ? vectorStoreIds : [vectorStoreIds]).filter(Boolean);
         if (stores.length) payload.tools = [{ type: "file_search", vector_store_ids: stores }];
         const wantStream = typeof onFirstDelta === "function";
