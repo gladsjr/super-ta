@@ -62,6 +62,17 @@ test("op update de interação carrega ref (número) e só os campos enviados", 
     assert.equal(it.title, undefined);                // não mexe no que não foi enviado
 });
 
+test("op de interação carrega position (reordenar/inserir em posição)", async () => {
+    const agent = agentReturning({
+        reply: "movi a etapa do CFO para o início",
+        interactions: [{ op: "update", ref: "Entrevista inicial com o CFO", position: 1 }],
+    });
+    const out = await agent.chat({ scenario: {}, templates: [], history: [], message: "m" });
+    assert.equal(out.interactions[0].op, "update");
+    assert.equal(out.interactions[0].ref, "Entrevista inicial com o CFO");
+    assert.equal(out.interactions[0].position, 1);
+});
+
 test("resposta sem reply válido cai no fallback seguro", async () => {
     const agent = agentReturning({ nope: true });
     const out = await agent.chat({ scenario: {}, templates: [], history: [], message: "m" });

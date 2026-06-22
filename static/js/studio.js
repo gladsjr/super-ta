@@ -16,6 +16,7 @@ const STUDIO_MARKUP = `
     <button class="seg-btn" data-tab="interacoes" role="tab">↔️ Interações <span class="seg-count" id="seg-count-interacoes"></span></button>
   </div>
   <div id="studio-pane"></div>
+  <div id="studio-assistant"></div>
   <div id="studio-actions">
     <button class="btn btn-primary" id="st-save">Salvar cenário</button>
     <button class="btn" id="st-test">▶ Testar</button>
@@ -116,22 +117,32 @@ function renderCenarioPane() {
     <div class="field"><label>Premissas <span class="hint">pressupostos que o aluno e as personas já conhecem; o aluno precisa considerá-las no trabalho</span></label><textarea class="textarea" id="sf-premissas" rows="2" placeholder="Ex.: o orçamento já foi aprovado; assuma a base de clientes de 2024; a fusão é irreversível">${esc(s.premissas||'')}</textarea></div>
 
     <div class="section-title">Enunciado (PDF)</div>
-    <div class="pdf-box" id="sf-pdf-box">${editing ? pdfBoxHtml(s) : '<span class="hint">Salve o cenário (barra abaixo) para anexar e avaliar o PDF.</span>'}</div>
-
-    <div class="section-title">Assistente do professor <span class="hint" style="font-weight:400">descreva a cena — ele propõe; você revisa nas abas e salva</span></div>
-    <div class="assist-stub">
-      <div id="assist-log" class="assist-log"></div>
-      <div class="assist-fake"><input class="input" id="assist-input" placeholder="Ex.: crie uma banca com 2 investidores céticos sobre um pitch de SaaS — pitch, arguição e deliberação"/><button class="btn btn-sm" id="assist-send">Enviar</button></div>
-      <div class="hint" id="assist-msg"></div>
-    </div>`;
+    <div class="pdf-box" id="sf-pdf-box">${editing ? pdfBoxHtml(s) : '<span class="hint">Salve o cenário (barra abaixo) para anexar e avaliar o PDF.</span>'}</div>`;
   if (editing) wirePdfBox(s);
-  document.getElementById('assist-log').innerHTML = renderAssistLog();
-  document.getElementById('assist-send').onclick = sendAssist;
-  document.getElementById('assist-input').addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); sendAssist(); } });
 }
 
 // Assistente do professor (chat): propõe; o professor aplica e salva.
+// Vive num PAINEL PERSISTENTE (#studio-assistant), fora das abas — fica visível
+// em Cenário/Personas/Interações. Montado 1x; só o log é re-renderizado.
 let ASSIST_HISTORY = [];
+function renderAssistantPanel() {
+  const el = document.getElementById('studio-assistant'); if (!el) return;
+  el.innerHTML = `
+    <div class="section-title">🤖 Assistente do professor <span class="hint" style="font-weight:400">descreva a cena — ele propõe; você revisa nas abas e salva</span></div>
+    <div class="assist-stub">
+      <div id="assist-log" class="assist-log"></div>
+      <div class="assist-fake"><textarea class="textarea" id="assist-input" rows="3" placeholder="Ex.: crie uma banca com 2 investidores céticos sobre um pitch de SaaS — pitch, arguição e deliberação. (Enter envia; Shift+Enter quebra linha)"></textarea><button class="btn btn-sm btn-primary" id="assist-send">Enviar</button></div>
+      <div class="hint" id="assist-msg"></div>
+    </div>`;
+  renderAssistantLog();
+  document.getElementById('assist-send').onclick = sendAssist;
+  document.getElementById('assist-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAssist(); } });
+}
+function renderAssistantLog() {
+  const el = document.getElementById('assist-log'); if (!el) return;
+  el.innerHTML = renderAssistLog();
+  el.scrollTop = el.scrollHeight;   // rola para a última mensagem
+}
 function renderAssistLog() {
   if (!ASSIST_HISTORY.length) return '<div class="hint">Converse para montar cenário, personas e interações em linguagem natural. O assistente propõe; você revisa nas abas e salva.</div>';
   return ASSIST_HISTORY.map(m => `<div class="assist-msg-${m.role==='assistant'?'assistant':'user'}"><strong>${m.role==='assistant'?'🤖':'você'}:</strong> ${esc(m.content)}</div>`).join('');
@@ -155,13 +166,15 @@ async function sendAssist() {
   const inp = document.getElementById('assist-input'); const text = inp.value.trim(); if (!text) return;
   harvestCurrent();
   inp.value=''; ASSIST_HISTORY.push({ role:'user', content:text });
-  document.getElementById('assist-log').innerHTML = renderAssistLog() + '<div class="hint">⏳ pensando…</div>';
+  renderAssistantLog();
+  const log = document.getElementById('assist-log');
+  if (log) { log.insertAdjacentHTML('beforeend', '<div class="hint">⏳ pensando…</div>'); log.scrollTop = log.scrollHeight; }
   try {
     const out = await api('POST','/scenarios/api/assistant', { message:text, history: ASSIST_HISTORY.slice(0,-1), scenario: assistScenarioView() });
     const summary = applyAssistProposals(out);
     ASSIST_HISTORY.push({ role:'assistant', content: out.reply + (summary?`\n→ ${summary}`:'') });
-    updateCounts(); renderCenarioPane();
-  } catch (e) { ASSIST_HISTORY.push({ role:'assistant', content:'(erro: '+e.message+')' }); renderCenarioPane(); }
+    updateCounts(); renderCurrent(); renderAssistantLog();   // reflete na aba ativa; mantém o painel do assistente
+  } catch (e) { ASSIST_HISTORY.push({ role:'assistant', content:'(erro: '+e.message+')' }); renderAssistantLog(); }
 }
 const newLocalId = pfx => pfx+'_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9);
 const findPersonaByName = name => (SCENARIO.personas||[]).find(p => (p.name||'').toLowerCase() === String(name||'').toLowerCase());
@@ -229,6 +242,13 @@ function applyAssistProposals(out) {
     if (io.example_questions !== undefined) it.example_questions = io.example_questions;
     if (io.participants) { it.participants = mapParticipants(io.participants); it.opener_persona_id = it.participants[0]?.persona_id || null; }
     if (io.private_info) { const pids = (it.participants||[]).map(x=>x.persona_id); it.private_info = mapPrivate(io.private_info, pids); }
+    // Reordenação: move a etapa para a posição pedida (1-based, clampeada).
+    if (typeof io.position === 'number' && io.position > 0) {
+      const cur = SCENARIO.interactions.indexOf(it);
+      if (cur !== -1) SCENARIO.interactions.splice(cur, 1);
+      const dest = Math.max(0, Math.min(io.position - 1, SCENARIO.interactions.length));
+      SCENARIO.interactions.splice(dest, 0, it);
+    }
     nI++;
   });
   if (nI) parts.push(nI+' interação(ões)');
@@ -683,6 +703,7 @@ window.mountStudio = function ({ root, workToken } = {}) {
   document.getElementById('st-import').onclick = openImportYaml;
   document.getElementById('persona-modal').addEventListener('click', e => { if (e.target.id==='persona-modal') show('persona-modal', false); });
   document.getElementById('yaml-modal').addEventListener('click', e => { if (e.target.id==='yaml-modal') show('yaml-modal', false); });
+  renderAssistantPanel();   // painel persistente do assistente (fora das abas)
   return loadAll().catch(e => { ROOT.insertAdjacentHTML('beforeend', `<div class="empty">Falha ao carregar: ${esc(e.message)}</div>`); });
 };
 })();

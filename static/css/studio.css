@@ -48,8 +48,9 @@
 /* assistente */
 .studio-root .assist-stub { border:1px dashed var(--accent-300,#9ed8cc); border-radius: var(--r-md,8px); padding: var(--sp-3); background: var(--accent-50,#eef8f5); }
 .studio-root .assist-head { font-weight:600; display:flex; gap: var(--sp-2); align-items:center; margin-bottom:4px; }
-.studio-root .assist-fake { display:flex; gap: var(--sp-2); margin-top: var(--sp-2); } .studio-root .assist-fake input { flex:1; }
-.studio-root .assist-log { max-height: 220px; overflow:auto; display:flex; flex-direction:column; gap:6px; font-size: var(--fs-sm); }
+.studio-root .assist-fake { display:flex; gap: var(--sp-2); margin-top: var(--sp-2); align-items:flex-end; } .studio-root .assist-fake input, .studio-root .assist-fake textarea { flex:1; }
+.studio-root .assist-log { min-height: 240px; max-height: 420px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; font-size: var(--fs-sm); padding-right:4px; }
+.studio-root #studio-assistant { margin-top: var(--sp-3); }
 .studio-root .assist-msg-user { align-self:flex-end; background: var(--accent-100,#d8efe9); border-radius:10px; padding:5px 10px; max-width:90%; }
 .studio-root .assist-msg-assistant { align-self:flex-start; background: var(--bg-raised,#fff); border:1px solid var(--ink-200); border-radius:10px; padding:5px 10px; max-width:92%; white-space:pre-wrap; }
 /* barra de ação global */

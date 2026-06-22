@@ -38,7 +38,7 @@ CENÁRIO (nível geral):
 
 PERSONA (um personagem reutilizável da cena). Campos: role (quem é, em uma frase), tone (tom/estilo), description, authority (o que pode decidir), gender, objectives[], concerns[], decision_criteria[], constraints[], information_needs[], evaluation_mode[], knowledge_scope[] (o que ela sabe), knowledge_level (alto/médio/baixo), example_questions[] (falas/perguntas típicas DELA). Personas ricas geram conversas melhores — proponha objetivos e preocupações concretos, não genéricos.
 
-INTERAÇÃO (cada etapa ORDENADA; o aluno passa por elas em sequência). A peça central é a FORMA, que define a DINÂMICA (quem apresenta, quem conduz, como a persona trata o trabalho do aluno). Formas válidas (campo "form"):
+INTERAÇÃO (cada etapa ORDENADA; o aluno passa por elas EM SEQUÊNCIA, da 1ª à última). A ORDEM É PARTE DO DESENHO: se o professor descreve uma sequência ("primeiro X, depois Y, por fim Z"; "a 1ª e a última devem ser com o CFO"), crie/organize as etapas EXATAMENTE nessa ordem. Para colocar uma etapa numa posição específica (nova ou existente), use o campo "position" (número 1-based). A peça central é a FORMA, que define a DINÂMICA (quem apresenta, quem conduz, como a persona trata o trabalho do aluno). Formas válidas (campo "form"):
 ${formBlock}
   • A forma "deliberacao" é a única em que DUAS personas conversam entre si e o aluno observa (precisa de exatamente 2 participantes + um "focus"). Todas as outras são aluno↔persona(s).
   • "custom" exige um "form_prompt" descrevendo a dinâmica à mão. Nas demais, "form_prompt" é opcional (nuance).
@@ -61,6 +61,7 @@ ${formBlock}
   ],
   "interactions": [
     { "op": "add" | "update", "ref"?: <para update: o número (1-based) da etapa OU o título atual>,
+      "position"?: <número 1-based: posição desejada da etapa na sequência (insere/move para lá)>,
       "title"?, "form"?: "<uma das formas válidas>", "form_prompt"?, "instruction"?, "focus"?,
       "time_limit_min"?: <número de minutos ou null>, "includes_student_work"?: <true|false>,
       "participants"?: [ { "persona_name": "<persona do cenário ou recém-proposta>", "role"?: "<um dos papéis>" } ],
@@ -71,6 +72,7 @@ ${formBlock}
 
 ═══════ REGRAS ═══════
 - INCREMENTAL e fiel ao pedido: não invente um cenário inteiro se o professor só pediu uma persona ou um ajuste. Para AJUSTAR algo que já existe, use op:"update" referenciando pelo nome (persona) ou pelo número/título (interação) — mande SÓ os campos que mudam.
+- ORDEM das interações: respeite a sequência que o professor descreveu. Para mover uma etapa existente para outra posição, use op:"update" com "ref" (número/título atual) + "position" (destino). Para criar já numa posição específica, use op:"add" com "position". Sem "position", a etapa nova vai para o fim.
 - Em "personas", liste só o que muda/nasce. Para reusar um template e adaptá-lo, use op:"add" com "from_template" e sobrescreva os campos que quiser.
 - Em "participants", refira personas por NOME (a interface resolve o id). Use papéis e formas APENAS das listas válidas. "deliberacao" precisa de exatamente 2 personas.
 - "private_info" só faz sentido em formas com aluno (não em deliberacao) e as personas citadas devem estar entre as participantes.
@@ -184,6 +186,7 @@ Responda SOMENTE com o JSON do formato especificado.`;
             else if (this.#str(it.ref)) o.ref = this.#str(it.ref);
             else if (this.#str(it.title)) o.ref = this.#str(it.title);   // fallback: casa por título
         }
+        if (typeof it.position === "number" && it.position > 0) o.position = Math.round(it.position);
         if (this.#str(it.title)) o.title = this.#str(it.title);
         if (FORMS.includes(it.form)) o.form = it.form;
         if (this.#str(it.form_prompt)) o.form_prompt = this.#str(it.form_prompt);
