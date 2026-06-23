@@ -109,9 +109,12 @@ ${message}
 Responda SOMENTE com o JSON do formato especificado.`;
 
         log.prompt("AGENT:ScenarioAssistant", `system+user (${systemPrompt.length + userContent.length} chars)`);
+        // Esforço de raciocínio BAIXO: a tarefa é propor edições estruturadas (não
+        // resolver problema difícil); o ganho de latência é grande e a qualidade de
+        // ordenação/forma se mantém (verificado). Ajustável se algum caso pedir mais.
         const response = await log.span("AGENT:ScenarioAssistant", "responses.create", () =>
             meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioAssistant", model: this.model }, () =>
-                this.client.responses.create({ model: this.model, instructions: systemPrompt, input: [{ role: "user", content: userContent }], truncation: "auto" })));
+                this.client.responses.create({ model: this.model, instructions: systemPrompt, input: [{ role: "user", content: userContent }], reasoning: { effort: "low" }, truncation: "auto" })));
         const parsed = extractJsonObject(response.output_text || "");
         if (!parsed || typeof parsed.reply !== "string") {
             return { reply: "Desculpe, não consegui formular uma proposta agora. Pode reformular?", scenario_patch: null, personas: [], interactions: [] };
