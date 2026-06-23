@@ -334,7 +334,7 @@ function openPersonaEditor(persona, target, index) {
     ${linesArea('pf-objectives','Objetivos','um por linha', persona.objectives)}
     ${linesArea('pf-concerns','Preocupações','um por linha', persona.concerns)}
     ${linesArea('pf-knowscope','O que ela sabe','um por linha', k.scope)}
-    ${linesArea('pf-questions','Perguntas de exemplo','intrínsecas — um por linha', persona.example_questions)}
+    ${linesArea('pf-questions','Mensagens de exemplo','falas típicas da persona (afirmações, objeções, hesitações ou perguntas) — uma por linha', persona.example_questions)}
     <div class="row" style="margin:var(--sp-2) 0"><button class="btn btn-sm" type="button" id="pf-adv-toggle">▸ Avançado</button></div>
     <div class="advanced hidden" id="pf-advanced">
       <div class="field"><label>Descrição</label><textarea class="textarea" rows="2" id="pf-description">${esc(persona.description||'')}</textarea></div>
@@ -667,12 +667,15 @@ function openImportYaml() {
 
 // ============ RUNNER (página do aluno: abas por interação, liberação sequencial) ============
 let RUN = null, RUN_SCEN = null, SELTAB = 0, RUN_LIVE = false;
+// Respostas mock do aluno: NEUTRAS quanto ao domínio (o mock é zero-token e não
+// conhece o cenário). Antes eram de um pitch de farmácia e injetavam um caso
+// alheio — servem só para o professor ver a MECÂNICA da etapa, não o conteúdo.
 const MOCK_ANSWERS = [
-  "Resolvemos a gestão de validade de estoque para pequenas farmácias — hoje elas perdem cerca de 8% em produtos vencidos.",
-  "Nosso mercado endereçável é de R$2,4 bi; chegamos a ele via integração direta com os distribuidores.",
-  "A retenção em 3 meses está em 87% e o CAC se paga em 4 meses.",
-  "O risco maior é a dependência de poucos fornecedores; já estamos diversificando a base.",
-  "Pedimos R$1,5 mi para 18 meses de operação, com foco em time comercial e produto.",
+  "Posso te explicar melhor como estou pensando nesse ponto.",
+  "Pelo que levantei até aqui, faz sentido seguir por esse caminho — mas ainda tenho dúvidas.",
+  "Esse é justamente o ponto que eu queria entender melhor com você.",
+  "Tenho uma ressalva sobre isso; deixa eu colocar como estou enxergando.",
+  "Acho que consigo sustentar essa escolha, mas reconheço que há um risco a considerar.",
 ];
 function runPersonaById(id){ return (RUN_SCEN?.personas||[]).find(p=>p.id===id); }
 function studioVisible(on){ show('studio-seg', on); show('studio-pane', on); show('studio-actions', on); show('scenario-runner', !on); }
