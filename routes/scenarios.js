@@ -78,6 +78,12 @@ router.post("/scenarios/api/assistant", json, async (req, res) => {
     if (req.query.stream === "1") {
         res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
         const send = (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data || {})}\n\n`);
+        // Flush imediato: sem um 1º write logo na abertura, o Chrome segura o stream
+        // (fetch+ReadableStream) e o 1º texto só aparece junto com o fim — foi o que
+        // inflou o "tempo até o 1º conteúdo" no estúdio. Mesmo esquema do fluxo do
+        // aluno (send("thinking") antes do trabalho). O cliente ignora eventos que
+        // não conhece, então isto é seguro.
+        send("thinking");
         try {
             const out = await scenarioAssistantAgent.chat({ scenario, templates, history, message, meterCtx: {}, onReplyDelta: (d) => send("reply", { delta: d }) });
             send("done", out);
