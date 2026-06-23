@@ -629,16 +629,23 @@ async function saveScenario() {
 // roda os turnos no modelo barato (só vale para submissão de teste).
 async function testRun() {
   if (!WORK_TOKEN) { setSaveMsg('o teste abre a tela do aluno — disponível em trabalho (não no estúdio global)'); return; }
-  if (!(await saveScenario())) return;
   const fast = document.getElementById('st-test-model')?.value === 'fast';
+  // Abre a aba JÁ no gesto do clique (síncrono). Em Chrome, window.open DEPOIS de
+  // um await (save + criar submissão) cai fora do gesto do usuário e é bloqueado
+  // como popup — a UI dizia "aberto ✓" mas nenhuma aba surgia (#38). Abrimos uma
+  // aba placeholder agora e só apontamos o location quando o token nascer.
+  const win = window.open('', '_blank');
+  if (win) { try { win.document.write('<!doctype html><meta charset="utf-8"><title>Abrindo teste…</title><body style="font:14px system-ui;padding:24px;color:#444">Preparando o teste…</body>'); } catch (e) {} }
+  if (!(await saveScenario())) { win?.close(); return; }
   setSaveMsg('criando teste…');
   try {
     const j = await api('POST', `/w/${WORK_TOKEN}/submissions`, { labels: ['Teste do professor'], is_test: true });
     const tok = j.submissions?.[0]?.submission_token;
     if (!tok) throw new Error('não consegui criar a submissão de teste');
-    window.open(`/s/${tok}${fast ? '?model=fast' : ''}`, '_blank');
-    setSaveMsg('teste aberto em nova aba — como o aluno vê ✓');
-  } catch (e) { setSaveMsg(e.message); }
+    const url = `/s/${tok}${fast ? '?model=fast' : ''}`;
+    if (win && !win.closed) { win.location.replace(url); setSaveMsg('teste aberto em nova aba — como o aluno vê ✓'); }
+    else { setSaveMsg('o navegador bloqueou a nova aba — abrindo o teste nesta…'); window.location.href = url; }
+  } catch (e) { win?.close(); setSaveMsg(e.message); }
 }
 
 // ============ IMPORT / EXPORT YAML (cenário inteiro OU persona) ============
