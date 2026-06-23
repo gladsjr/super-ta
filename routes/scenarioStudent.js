@@ -40,10 +40,17 @@ const runView = (run) => ({
     // "Li o material" por interação (artefato): { iid: iso }.
     artifact_acks: run.artifact_acks || {},
 });
-async function liveDeps() {
+async function liveDeps(fast = false) {
     const [a, l] = await Promise.all([import("../lib/agents.js"), import("../lib/scenarios/liveEngine.js")]);
-    return { agent: a.scenarioOrchestratorAgent, prepAgent: a.scenarioPrepAgent, live: l };
+    return {
+        agent: fast ? a.scenarioOrchestratorAgentFast : a.scenarioOrchestratorAgent,
+        prepAgent: fast ? a.scenarioPrepAgentFast : a.scenarioPrepAgent,
+        live: l,
+    };
 }
+// "Testar (rápido)" do professor: usa o modelo BARATO nos turnos. Só vale para
+// submissão de TESTE (req.submission.is_test) — aluno real nunca escolhe modelo.
+const wantsFast = (req) => req.query?.model === "fast" && !!req.submission?.is_test;
 // A etapa está "pronta" para abrir? (não pede trabalho do aluno, ou já foi anexado)
 const interactionReady = (run, it) => !it.includes_student_work || !!workVsId(run, it);
 // A abertura da interação corrente já rodou? (há persona/aside após o último cabeçalho)
@@ -136,7 +143,7 @@ router.post("/s/:submissionToken/scenario/start", requireSubmissionToken, async 
         return res.json({ run: runView(run), scenario: studentScenario(scenario), resumed: true });
     }
     const byId = personasById(scenario);
-    const { agent, prepAgent, live } = await liveDeps();
+    const { agent, prepAgent, live } = await liveDeps(wantsFast(req));
     run = await store.createRun(scenario.id, req.submission.id);
     run.mode = "live"; run.interaction_index = 0;
     const it0 = scenario.interactions[0];
@@ -172,7 +179,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     if (it.artifact?.file_id && !run.artifact_acks?.[it.id]) return bad(res, "leia o material desta etapa antes de responder");
     clearStaleReveal(run);   // novo turno consome a resposta anterior; persistido no saveRun deste turno
     const byId = personasById(scenario);
-    const { agent, live } = await liveDeps();
+    const { agent, live } = await liveDeps(wantsFast(req));
     const header = currentHeader(run.transcript);
     const ts = timeStateOf(it, header);
 
@@ -259,7 +266,7 @@ router.post("/s/:submissionToken/scenario/advance", requireSubmissionToken, asyn
         return res.json({ run: runView(run), done: true });
     }
     const byId = personasById(scenario);
-    const { agent, prepAgent, live } = await liveDeps();
+    const { agent, prepAgent, live } = await liveDeps(wantsFast(req));
     run.interaction_index = next; run.memory = null;
     const itN = scenario.interactions[next];
     const runMemory = live.buildRunMemory(scenario, run.transcript, next);
@@ -306,7 +313,7 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
         if (curIt && curIt.id === it.id && curIt.kind === "student" && !openerDone(run.transcript)) {
             try {
                 const byId = personasById(scenario);
-                const { agent, prepAgent, live } = await liveDeps();
+                const { agent, prepAgent, live } = await liveDeps(wantsFast(req));
                 const runMemory = live.buildRunMemory(scenario, run.transcript, run.interaction_index);
                 const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
                     scenario, interaction: curIt, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, runMemory,

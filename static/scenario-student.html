@@ -56,6 +56,9 @@
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TOKEN = (location.pathname.match(/\/s\/([0-9a-f]{12})/i) || [])[1] || '';
 const API = `/s/${TOKEN}/scenario`;
+// "Testar (rápido)" do professor: ?model=fast vem na URL e é repassado aos turnos
+// (o servidor só honra em submissão de teste). Aluno real abre sem isso.
+const MODELQ = new URLSearchParams(location.search).get('model') === 'fast' ? 'model=fast' : '';
 let SCEN = null, RUN = null, SELTAB = 0, IS_ADMIN = false, RESULT = null;
 
 async function api(method, path, body) {
@@ -92,7 +95,7 @@ async function boot() {
       document.getElementById('root').innerHTML = '<div class="empty" id="prep-status">iniciando…</div>';
       stop = cycleStatus(t => { const el = document.getElementById('prep-status'); if (el) el.textContent = t; }, false);
     }
-    const j = await api('POST', '/start'); // cria ou resume
+    const j = await api('POST', '/start' + (MODELQ ? '?' + MODELQ : '')); // cria ou resume
     stop();
     SCEN = j.scenario; RUN = j.run; SELTAB = RUN.interaction_index ?? 0;
     document.getElementById('subtitle').textContent = j.resumed ? 'Você está retomando de onde parou.' : '';
@@ -323,7 +326,7 @@ async function sendTurn() {
   TURN_INFLIGHT = true; PAUSE_REQUESTED = false; AWAITING_REVEAL = false; HELD_RUN = null;   // congela o cronômetro até a resposta aparecer
   inp.value = ''; RUN.transcript.push({ speaker:'student', kind:'student', text }); render(); renderWait();
   try {
-    const resp = await fetch(API + '/turn?stream=1', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
+    const resp = await fetch(API + '/turn?stream=1' + (MODELQ ? '&' + MODELQ : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
     if (!resp.ok || !resp.body) { const j = await resp.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + resp.status)); }
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
     while (true) {
@@ -337,7 +340,7 @@ async function advance() {
   // O /advance roda o prep da próxima etapa (ou a deliberação entre personas) —
   // mostra progresso encadeado no lugar da tela parada.
   const stop = cycleStatus(t => setStatus(t), false);
-  try { const j = await api('POST', '/advance'); stop(); RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
+  try { const j = await api('POST', '/advance' + (MODELQ ? '?' + MODELQ : '')); stop(); RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
   catch (e) { stop(); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 boot();

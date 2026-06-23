@@ -22,10 +22,9 @@ const STUDIO_MARKUP = `
     <button class="btn" id="st-test">▶ Testar</button>
     <button class="btn" id="st-export" title="Exportar este cenário inteiro como YAML">⬇ Exportar YAML</button>
     <button class="btn" id="st-import" title="Importar um cenário inteiro ou uma persona de um YAML">⬆ Importar YAML</button>
-    <label class="hint" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="st-live"/> IA real (gpt-5.5 · custa tokens)</label>
+    <label class="hint" style="display:inline-flex;align-items:center;gap:5px" title="Testar abre a tela do aluno (custa tokens). 'rápido' usa um modelo barato para iterar; 'final' usa o gpt-5.5 (fiel ao que o aluno vai viver).">modelo do teste: <select class="select" id="st-test-model" style="max-width:150px"><option value="">final (gpt-5.5)</option><option value="fast">rápido</option></select></label>
     <span class="hint" id="st-msg"></span>
   </div>
-  <div id="scenario-runner" class="hidden"></div>
   <div class="overlay hidden" id="persona-modal"><div class="modal" id="persona-modal-body"></div></div>
   <div class="overlay hidden" id="yaml-modal"><div class="modal" id="yaml-modal-body"></div></div>
 </div>`;
@@ -604,7 +603,23 @@ async function saveScenario() {
   try { const j = await api('POST', saveUrl, body); SCENARIO = j.scenario; updateCounts(); renderCurrent(); setSaveMsg('Salvo ✓'); return true; }
   catch (e) { setSaveMsg(e.message); return false; }
 }
-async function testRun() { if (await saveScenario()) startRunner(document.getElementById('st-live')?.checked); }
+// Testar = abrir a TELA REAL do aluno (um runner só, sem mock): salva, cunha uma
+// submissão de teste e abre /s/<token> em nova aba. A tela do aluno já traz engine
+// vivo + aluno simulado por IA (com perfis) + materiais + tempo. O modelo "rápido"
+// roda os turnos no modelo barato (só vale para submissão de teste).
+async function testRun() {
+  if (!WORK_TOKEN) { setSaveMsg('o teste abre a tela do aluno — disponível em trabalho (não no estúdio global)'); return; }
+  if (!(await saveScenario())) return;
+  const fast = document.getElementById('st-test-model')?.value === 'fast';
+  setSaveMsg('criando teste…');
+  try {
+    const j = await api('POST', `/w/${WORK_TOKEN}/submissions`, { labels: ['Teste do professor'], is_test: true });
+    const tok = j.submissions?.[0]?.submission_token;
+    if (!tok) throw new Error('não consegui criar a submissão de teste');
+    window.open(`/s/${tok}${fast ? '?model=fast' : ''}`, '_blank');
+    setSaveMsg('teste aberto em nova aba — como o aluno vê ✓');
+  } catch (e) { setSaveMsg(e.message); }
+}
 
 // ============ IMPORT / EXPORT YAML (cenário inteiro OU persona) ============
 // O YAML é só uma ponte: o formulário continua a fonte de verdade. Import popula
@@ -663,121 +678,6 @@ function openImportYaml() {
       }
     },
   });
-}
-
-// ============ RUNNER (página do aluno: abas por interação, liberação sequencial) ============
-let RUN = null, RUN_SCEN = null, SELTAB = 0, RUN_LIVE = false;
-// Respostas mock do aluno: NEUTRAS quanto ao domínio (o mock é zero-token e não
-// conhece o cenário). Antes eram de um pitch de farmácia e injetavam um caso
-// alheio — servem só para o professor ver a MECÂNICA da etapa, não o conteúdo.
-const MOCK_ANSWERS = [
-  "Posso te explicar melhor como estou pensando nesse ponto.",
-  "Pelo que levantei até aqui, faz sentido seguir por esse caminho — mas ainda tenho dúvidas.",
-  "Esse é justamente o ponto que eu queria entender melhor com você.",
-  "Tenho uma ressalva sobre isso; deixa eu colocar como estou enxergando.",
-  "Acho que consigo sustentar essa escolha, mas reconheço que há um risco a considerar.",
-];
-function runPersonaById(id){ return (RUN_SCEN?.personas||[]).find(p=>p.id===id); }
-function studioVisible(on){ show('studio-seg', on); show('studio-pane', on); show('studio-actions', on); show('scenario-runner', !on); }
-async function startRunner(live=false) {
-  RUN_LIVE = !!live; studioVisible(false);
-  const el = document.getElementById('scenario-runner');
-  el.innerHTML = `<div class="empty">${RUN_LIVE ? '🤖 As personas estão entrando em cena… (IA real — pode levar alguns segundos)' : 'Iniciando…'}</div>`;
-  try {
-    const j = await api('POST',`/scenarios/api/run/${SCENARIO.id}/start${RUN_LIVE?'?mode=live':''}`);
-    RUN = j.run; RUN_SCEN = j.scenario; SELTAB = RUN.interaction_index ?? 0;
-    renderRunner();
-  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)} <button class="btn btn-sm" id="rn-err-back">voltar</button></div>`; document.getElementById('rn-err-back')?.addEventListener('click', backToEditor); }
-}
-function backToEditor(){ RUN=null; studioVisible(true); renderTab(CURRENT_TAB); }
-function transcriptSegments() {
-  const intro = []; const segs = []; let cur = null;
-  for (const e of (RUN.transcript||[])) {
-    if (e.kind === 'interaction') { cur = { header:e, entries:[] }; segs.push(cur); }
-    else if (!cur) intro.push(e);
-    else cur.entries.push(e);
-  }
-  return { intro, segs };
-}
-function bubbleHtml(t) {
-  if (t.kind==='scenario') return `<div class="t-scenario">${esc(t.text)}</div>`;
-  if (t.kind==='interaction') return `<div class="t-interaction"><strong>${esc(t.text)}</strong>${t.meta?`<div class="meta">${esc(t.meta)}</div>`:''}</div>`;
-  if (t.kind==='student') return `<div class="bubble b-student">${esc(t.text)}</div>`;
-  if (t.kind==='aside') return `<div class="bubble b-aside"><div class="b-name">${esc(t.name)} → ${esc(runPersonaById(t.to)?.name||'persona')} (entre personas)</div>${esc(t.text)}</div>`;
-  return `<div class="bubble b-persona"><div class="b-name">${esc(t.icon||'')} ${esc(t.name)}</div>${esc(t.text)}</div>`;
-}
-function renderRunner() {
-  const total = (RUN_SCEN.interactions||[]).length;
-  const cur = RUN.interaction_index ?? 0;
-  const done = cur >= total;
-  const el = document.getElementById('scenario-runner');
-  const tabs = (RUN_SCEN.interactions||[]).map((it,i)=>{
-    const locked = i > cur;
-    const cls = i===SELTAB ? 'active' : (i<cur ? 'done' : (locked?'locked':''));
-    const mark = i<cur ? '✓ ' : (locked ? '🔒 ' : '');
-    return `<button class="rn-tab ${cls}" data-tab="${i}" ${locked?'disabled':''}>${mark}${i+1}. ${esc(it.title)}</button>`;
-  }).join('');
-
-  const { intro, segs } = transcriptSegments();
-  const seg = segs[SELTAB];
-  const entries = (SELTAB===0 ? intro : []).concat(seg ? [seg.header, ...seg.entries] : []);
-  const itAtSel = RUN_SCEN.interactions[SELTAB];
-  const isStudentStep = !done && SELTAB===cur && itAtSel && itAtSel.kind==='student';
-  const isExchangeStep = !done && SELTAB===cur && itAtSel && itAtSel.kind==='persona_exchange';
-  const viewingPast = SELTAB < cur;
-
-  el.innerHTML = `
-    <div class="runner-top">
-      <button class="btn btn-sm" id="rn-back">← Voltar ao editor</button>
-      <span class="who">Como o <strong>aluno</strong> vê (abas liberam em sequência) — com controles do professor <span class="mock-tag">${RUN_LIVE ? '🤖 IA real' : 'mock'}</span></span>
-    </div>
-    <div class="rn-tabs">${tabs}</div>
-    <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || '<div class="empty">—</div>'}</div>
-    ${isStudentStep ? `
-      <div class="runner-input"><textarea class="textarea" id="rn-input" rows="2" placeholder="Responda como o aluno…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
-      <div class="rn-controls">
-        <span class="prof-ctl">👩‍🏫 Professor: <button class="btn btn-sm" id="rn-autogen">⚙ Gerar resposta do aluno (mock)</button></span>
-        <button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button>
-      </div>` : ''}
-    ${isExchangeStep ? `
-      <div class="rn-controls"><span class="hint">Esta etapa é entre as personas — o aluno lê e avança.</span>
-        <button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
-    ${viewingPast ? `<div class="rn-controls"><span class="hint">Interação concluída (somente leitura). Volte à aba atual para continuar.</span></div>` : ''}
-    ${done ? `<div class="rn-controls"><span class="hint">✓ Cenário concluído.</span></div>` : ''}`;
-
-  document.getElementById('rn-back').onclick = backToEditor;
-  el.querySelectorAll('.rn-tab').forEach(b => { if (!b.disabled) b.onclick = () => { SELTAB = +b.dataset.tab; renderRunner(); }; });
-  const adv = document.getElementById('rn-advance'); if (adv) adv.onclick = advance;
-  const send = document.getElementById('rn-send'); if (send) send.onclick = sendTurn;
-  const inp = document.getElementById('rn-input'); if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendTurn();} });
-  const ag = document.getElementById('rn-autogen'); if (ag) ag.onclick = autogen;
-}
-function studentTurnsInCurrent() {
-  let n=0; for (let i=RUN.transcript.length-1;i>=0;i--){ if(RUN.transcript[i].kind==='interaction')break; if(RUN.transcript[i].kind==='student')n++; } return n;
-}
-function thinking(on){ const t=document.getElementById('rn-transcript'); if(!t)return; t.querySelector('.rn-thinking')?.remove(); if(on){ t.insertAdjacentHTML('beforeend', `<div class="rn-thinking empty">⏳ as personas estão pensando…</div>`); t.scrollTop=t.scrollHeight; } }
-async function postTurn(text) {
-  if (RUN_LIVE) thinking(true);
-  try { const j = await api('POST',`/scenarios/api/run/${RUN.id}/turn`,{text}); RUN=j.run; SELTAB = RUN.interaction_index ?? SELTAB; renderRunner(); }
-  catch (e) { thinking(false); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
-}
-async function sendTurn() {
-  const inp = document.getElementById('rn-input'); const text = inp?.value.trim(); if (!text||!RUN) return;
-  inp.value='';
-  if (RUN_LIVE) { RUN.transcript.push({ speaker:'student', kind:'student', text }); renderRunner(); }
-  await postTurn(text);
-}
-async function autogen() {
-  if (!RUN) return;
-  const text = MOCK_ANSWERS[studentTurnsInCurrent() % MOCK_ANSWERS.length];
-  if (RUN_LIVE) { RUN.transcript.push({ speaker:'student', kind:'student', text }); renderRunner(); }
-  await postTurn(text);
-}
-async function advance() {
-  if (!RUN) return;
-  if (RUN_LIVE) thinking(true);
-  try { const j = await api('POST',`/scenarios/api/run/${RUN.id}/advance`); RUN=j.run; SELTAB = RUN.interaction_index ?? SELTAB; renderRunner(); }
-  catch (e) { thinking(false); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 
 // ============ MONTAGEM ============
