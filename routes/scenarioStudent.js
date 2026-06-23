@@ -26,7 +26,10 @@ const studentScenario = (s) => ({
     // Regras globais visíveis ao aluno (painel): fora de escopo + premissas.
     out_of_scope: s.out_of_scope || "", premissas: s.premissas || "",
     personas: (s.personas || []).map(p => ({ id: p.id, name: p.name, icon: p.icon, role: p.role })),
-    interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work, time_limit_min: it.time_limit_min || null, instruction: it.instruction || "" })),
+    interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work, time_limit_min: it.time_limit_min || null, instruction: it.instruction || "",
+        // Artefato (PDF) da etapa: só o nome vai ao aluno (o link é uma rota; os ids
+        // da OpenAI ficam no servidor). O aluno precisa confirmar a leitura.
+        artifact: it.artifact ? { filename: it.artifact.filename } : null })),
 });
 const personasById = (s) => { const b = {}; for (const p of s.personas || []) b[p.id] = p; return b; };
 // Trabalho do aluno (por interação) já anexado neste run? Devolve o vector store id.
@@ -34,6 +37,8 @@ const workVsId = (run, it) => (it && run?.student_work && run.student_work[it.id
 const runView = (run) => ({
     id: run.id, interaction_index: run.interaction_index, transcript: run.transcript, done: !!run.done,
     student_work: Object.fromEntries(Object.entries(run.student_work || {}).map(([k, v]) => [k, { filename: v.filename, uploaded_at: v.uploaded_at }])),
+    // "Li o material" por interação (artefato): { iid: iso }.
+    artifact_acks: run.artifact_acks || {},
 });
 async function liveDeps() {
     const [a, l] = await Promise.all([import("../lib/agents.js"), import("../lib/scenarios/liveEngine.js")]);
@@ -144,7 +149,7 @@ router.post("/s/:submissionToken/scenario/start", requireSubmissionToken, async 
             const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
                 scenario, interaction: it0, personasById: byId, idx: 0, total, runMemory: "",
                 interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
-                enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, it0),
+                enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, it0), artifactFileId: it0.artifact?.file_id || null,
             });
             run.transcript.push(...entries); run.memory = memory; stampStart(run);
         }
@@ -164,6 +169,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     const it = scenario.interactions[run.interaction_index];
     if (!it || it.kind !== "student") return bad(res, "esta etapa não aceita resposta — avance");
     if (it.includes_student_work && !workVsId(run, it)) return bad(res, "anexe o seu trabalho desta etapa antes de responder");
+    if (it.artifact?.file_id && !run.artifact_acks?.[it.id]) return bad(res, "leia o material desta etapa antes de responder");
     clearStaleReveal(run);   // novo turno consome a resposta anterior; persistido no saveRun deste turno
     const byId = personasById(scenario);
     const { agent, live } = await liveDeps();
@@ -186,7 +192,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
 
     run.transcript.push({ speaker: "student", kind: "student", text });
     const timeState = ts && ts.phase !== "over" ? ts : null;   // só normal/closing vão ao LLM
-    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it), timeState };
+    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it), artifactVectorStoreId: it.artifact?.vector_store_id || null, timeState };
     // PAUSA do relógio: o tempo de processamento da persona (entre o aluno enviar e
     // receber) não conta no tempo dele — acumula em paused_ms do cabeçalho da etapa.
     const pause = (ms) => { if (header && ts) header.paused_ms = (header.paused_ms || 0) + ms; };
@@ -263,7 +269,7 @@ router.post("/s/:submissionToken/scenario/advance", requireSubmissionToken, asyn
             const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
                 scenario, interaction: itN, personasById: byId, idx: next, total, runMemory,
                 interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
-                enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, itN),
+                enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: fileId(run, itN), artifactFileId: itN.artifact?.file_id || null,
             });
             run.transcript.push(...entries); run.memory = memory; stampStart(run);
         }
@@ -305,7 +311,7 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
                 const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
                     scenario, interaction: curIt, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, runMemory,
                     interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
-                    enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: uploaded.id,
+                    enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: uploaded.id, artifactFileId: curIt.artifact?.file_id || null,
                 });
                 run.transcript.push(...entries); run.memory = memory; stampStart(run);
             } catch (e) { /* prep é best-effort no upload: não derruba o anexo */ }
@@ -313,6 +319,34 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
         await store.saveRun(run);
         res.json({ ok: true, interaction_id: it.id, filename: name, run: runView(run) });
     } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
+});
+
+// ARTEFATO da etapa (PDF que o professor anexou): servir os bytes ao aluno para
+// LEITURA (proxia a OpenAI Files — não guardamos os bytes localmente).
+router.get("/s/:submissionToken/scenario/interactions/:iid/artifact", requireSubmissionToken, async (req, res) => {
+    const scenario = await store.getScenarioByWork(req.work.id);
+    if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
+    const it = (scenario.interactions || []).find(x => x.id === req.params.iid);
+    if (!it || !it.artifact?.storage_key) return res.status(404).json({ error: "esta etapa não tem material" });
+    try {
+        // Servimos do NOSSO storage (a OpenAI bloqueia download de purpose=user_data).
+        const { streamAudio } = await import("../lib/audioStore.js");
+        const stream = await streamAudio(it.artifact.storage_key);
+        if (!stream) return res.status(404).json({ error: "material indisponível" });
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(it.artifact.filename || "material.pdf")}"`);
+        stream.on("error", () => { if (!res.headersSent) res.status(502).end(); });
+        stream.pipe(res);
+    } catch (e) { res.status(502).json({ error: `falha ao servir o material: ${e.message}` }); }
+});
+// "Li o material": registra o aceite do aluno (libera responder nesta etapa).
+router.post("/s/:submissionToken/scenario/interactions/:iid/artifact/ack", requireSubmissionToken, async (req, res) => {
+    const run = await store.getRunBySubmission(req.submission.id);
+    if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    run.artifact_acks = run.artifact_acks || {};
+    run.artifact_acks[req.params.iid] = new Date().toISOString();
+    await store.saveRun(run);
+    res.json({ run: runView(run) });
 });
 
 // (PROFESSOR) Gera uma resposta plausível do aluno via IA, para o professor TESTAR

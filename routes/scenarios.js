@@ -158,6 +158,13 @@ function validateScenario(b) {
     }
     return null;
 }
+// Artefato (PDF) de etapa: gravado pelo endpoint de upload; aqui só PRESERVAMOS
+// o que veio (o estúdio reenvia no save). Sem upload via save — igual ao pdf do
+// enunciado, é um sub-objeto com os ids da OpenAI.
+function cleanArtifact(a) {
+    if (!a || typeof a !== "object" || !str(a.file_id)) return null;
+    return { filename: str(a.filename) || "material.pdf", file_id: str(a.file_id), vector_store_id: str(a.vector_store_id), storage_key: str(a.storage_key), uploaded_at: str(a.uploaded_at) || new Date().toISOString() };
+}
 function cleanInteraction(it, i) {
     const form = normalizeForm(it);
     const kind = formKind(form);                 // derivado da forma; gravado p/ o engine
@@ -182,6 +189,7 @@ function cleanInteraction(it, i) {
         example_questions: lines(it.example_questions),
         time_limit_min: (typeof it.time_limit_min === "number" && it.time_limit_min > 0) ? Math.round(it.time_limit_min) : null,
         private_info: privateInfo,
+        artifact: cleanArtifact(it.artifact),
     };
 }
 function cleanScenario(b) {
@@ -292,6 +300,49 @@ router.post("/scenarios/api/scenarios/:id/pdf-file", pdfUpload.single("file"), a
         const saved = await store.saveScenario({ id: s.id, pdf: { filename: name, file_id: uploaded.id, vector_store_id: vectorStoreId, uploaded_at: new Date().toISOString() }, coherence: null });
         res.json({ scenario: enrich(saved) });
     } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
+});
+
+// ---- Artefato (PDF) por INTERAÇÃO (work-scoped, admin) ----
+// O professor anexa um PDF a uma etapa: o aluno o lê (link + "li o material") e a
+// persona da etapa o consulta via file_search. Igual ao enunciado, vira File +
+// Vector Store na OpenAI; os ids ficam em interaction.artifact (no cenário).
+async function findWorkScenario(req, res) {
+    const work = await db.getWorkByToken(String(req.params.workToken || "").toLowerCase());
+    if (!work) { res.status(404).json({ error: "trabalho não encontrado" }); return null; }
+    const scenario = await store.getScenarioByWork(work.id);
+    if (!scenario) { res.status(404).json({ error: "cenário não encontrado" }); return null; }
+    return { work, scenario };
+}
+router.post("/w/:workToken/scenario/interactions/:iid/artifact-file", requireAdmin, pdfUpload.single("file"), async (req, res) => {
+    const ctx = await findWorkScenario(req, res); if (!ctx) return;
+    const it = (ctx.scenario.interactions || []).find(x => x.id === req.params.iid);
+    if (!it) return bad(res, "interação não encontrada");
+    if (!req.file) return bad(res, "envie um arquivo no campo 'file'");
+    try {
+        const { openai } = await import("../lib/openaiClient.js");
+        const { createVectorStoreWithFiles } = await import("../lib/sessionLifecycle.js");
+        const { putAudio } = await import("../lib/audioStore.js");
+        const name = req.file.originalname || "material.pdf";
+        const uploaded = await openai.files.create({ file: await OpenAI.toFile(req.file.buffer, name), purpose: "user_data" });
+        const vectorStoreId = await createVectorStoreWithFiles([uploaded.id], ctx.scenario.id);
+        // A OpenAI não deixa baixar arquivos purpose=user_data, então guardamos os
+        // bytes também no nosso storage para SERVIR o PDF ao aluno (a cópia da
+        // OpenAI serve só ao RAG/file_search).
+        const storageKey = `artifacts/${ctx.scenario.id}/${req.params.iid}.pdf`;
+        await putAudio({ key: storageKey, buffer: req.file.buffer, mimetype: "application/pdf" });
+        it.artifact = { filename: name, file_id: uploaded.id, vector_store_id: vectorStoreId, storage_key: storageKey, uploaded_at: new Date().toISOString() };
+        const saved = await store.saveScenario({ id: ctx.scenario.id, interactions: ctx.scenario.interactions });
+        res.json({ scenario: enrich(saved) });
+    } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
+});
+router.delete("/w/:workToken/scenario/interactions/:iid/artifact", requireAdmin, async (req, res) => {
+    const ctx = await findWorkScenario(req, res); if (!ctx) return;
+    const it = (ctx.scenario.interactions || []).find(x => x.id === req.params.iid);
+    if (!it) return bad(res, "interação não encontrada");
+    if (it.artifact?.storage_key) { try { const { deleteAudio } = await import("../lib/audioStore.js"); await deleteAudio(it.artifact.storage_key); } catch { /* best-effort */ } }
+    it.artifact = null;
+    const saved = await store.saveScenario({ id: ctx.scenario.id, interactions: ctx.scenario.interactions });
+    res.json({ scenario: enrich(saved) });
 });
 
 // ---- Execução: MOCK (roteirizado, zero token) ou LIVE (ScenarioOrchestrator) ----

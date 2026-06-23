@@ -163,18 +163,20 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
     async studentTurn({
         scenario, interaction, personasById, position, total, runMemory,
         interactionTranscript = [], memory = null, studentMessage,
-        isOpening = false, vectorStoreId = null, studentWorkVectorStoreId = null, interactionMode = "text",
+        isOpening = false, vectorStoreId = null, studentWorkVectorStoreId = null, artifactVectorStoreId = null, interactionMode = "text",
         studentName = null, studentGenderHint = null, timeState = null, meterCtx = null,
         onFirstDelta = null, onMessageReady = null,
     }) {
         const allowedIds = (interaction.participants || []).map(p => p.persona_id);
-        // file_search desta etapa: enunciado do cenário e/ou trabalho do aluno (Fase 2).
+        // file_search desta etapa: enunciado + trabalho do aluno (Fase 2) + artefato
+        // da etapa (material que o aluno também leu — conhecimento COMPARTILHADO).
         const studentWorkAvailable = !!studentWorkVectorStoreId;
-        const vectorStoreIds = [vectorStoreId, studentWorkVectorStoreId].filter(Boolean);
+        const artifactAvailable = !!artifactVectorStoreId;
+        const vectorStoreIds = [vectorStoreId, studentWorkVectorStoreId, artifactVectorStoreId].filter(Boolean);
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
 
 ${this.turnSystemBody}`;
-        const briefing = renderInteractionBriefing({ scenario, interaction, personasById, position, total, runMemory, enunciadoAvailable: !!vectorStoreId, studentWorkAvailable });
+        const briefing = renderInteractionBriefing({ scenario, interaction, personasById, position, total, runMemory, enunciadoAvailable: !!vectorStoreId, studentWorkAvailable, artifactAvailable });
         const historyBlock = isOpening
             ? "(ABERTURA — a outra ponta ainda não falou. A persona que abre (opener) deve se apresentar brevemente e dar início conforme a instrução desta etapa.)"
             : (interactionTranscript.length

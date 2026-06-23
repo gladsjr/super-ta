@@ -139,6 +139,18 @@ function render() {
   const viewingPast = SELTAB < cur;
   // Trabalho do aluno por interação: se a etapa pede e ainda não anexou, mostra o upload ANTES de liberar a resposta.
   const needsWork = isStudentStep && itAtSel.includes_student_work && !hasWork(itAtSel);
+  // Material (artefato PDF) da etapa: o aluno LÊ (link) e confirma ("li o material")
+  // antes de responder. O ack fica no run (artifact_acks).
+  const artAcked = isStudentStep && itAtSel.artifact && !!(RUN.artifact_acks || {})[itAtSel.id];
+  const needsArtifact = isStudentStep && itAtSel.artifact && !artAcked;
+  const artLink = itAtSel?.artifact ? `${API}/interactions/${encodeURIComponent(itAtSel.id)}/artifact` : '';
+  const materialGate = `
+    <div class="rn-controls" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div class="task-note">📄 <strong>Material desta etapa:</strong> <a href="${artLink}" target="_blank" rel="noopener">abrir &ldquo;${esc(itAtSel?.artifact?.filename||'material')}&rdquo; (PDF)</a></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" id="rn-art-ack">✓ Li o material</button><span class="hint">leia o material acima — depois sua resposta é liberada</span></div>
+    </div>`;
+  const materialNote = (isStudentStep && itAtSel.artifact && artAcked)
+    ? `<div class="rn-controls"><span class="hint">📄 material: <a href="${artLink}" target="_blank" rel="noopener">${esc(itAtSel.artifact.filename)}</a> · ✓ lido</span></div>` : '';
   // Uma vez anexado, o trabalho fica TRAVADO nesta etapa — a persona já o leu e
   // planejou a conversa em cima dele; trocar no meio não faria sentido.
   const workNote = isStudentStep && itAtSel.includes_student_work && hasWork(itAtSel)
@@ -197,11 +209,12 @@ function render() {
     ${showConclusion ? finalPanel : `
     <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || '<div class="empty">—</div>'}</div>
     ${isStudentStep ? taskNote : ''}
-    ${isStudentStep ? (needsWork ? workBox : (overTime ? `
+    ${isStudentStep ? (needsWork ? workBox : (needsArtifact ? materialGate : (overTime ? `
       <div class="rn-controls"><span class="hint">⏰ O tempo desta etapa terminou — a persona não responde mais.</span><button class="btn btn-primary" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : `
+      ${materialNote}
       ${workNote}
       <div class="runner-input"><textarea class="textarea" id="rn-input" rows="4" placeholder="Sua resposta…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
-      <div class="rn-controls">${limitMin?`<span id="rn-timer" class="it-timer">⏰ —</span>`:''}${IS_ADMIN ? `<select class="select" id="rn-aiprofile" style="max-width:160px" title="(professor) perfil do aluno simulado"><option value="">perfil…</option><option value="domina">Domina</option><option value="vago">Vago / enrola</option><option value="inseguro">Inseguro</option><option value="contradiz">Contradiz</option></select><button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma mensagem plausível do aluno com IA — você revisa e envia">⚙ mensagem do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`)) : ''}
+      <div class="rn-controls">${limitMin?`<span id="rn-timer" class="it-timer">⏰ —</span>`:''}${IS_ADMIN ? `<select class="select" id="rn-aiprofile" style="max-width:160px" title="(professor) perfil do aluno simulado"><option value="">perfil…</option><option value="domina">Domina</option><option value="vago">Vago / enrola</option><option value="inseguro">Inseguro</option><option value="contradiz">Contradiz</option></select><button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma mensagem plausível do aluno com IA — você revisa e envia">⚙ mensagem do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`))) : ''}
     ${isExchangeStep ? `<div class="rn-controls"><span class="hint">As personas conversam entre si — leia e avance.</span><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
     ${viewingPast ? `<div class="rn-controls"><span class="hint">Etapa concluída (somente leitura).${done ? ' Abra a aba <strong>🎉 Conclusão</strong>.' : ' Volte à aba atual para continuar.'}</span></div>` : ''}`}`;
 
@@ -210,9 +223,15 @@ function render() {
   const send = document.getElementById('rn-send'); if (send) send.onclick = sendTurn;
   const inp = document.getElementById('rn-input'); if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); } });
   const wsend = document.getElementById('rn-work-send'); if (wsend) wsend.onclick = () => uploadWork(itAtSel.id);
+  const aack = document.getElementById('rn-art-ack'); if (aack) aack.onclick = () => ackArtifact(itAtSel.id);
   const aig = document.getElementById('rn-aigen'); if (aig) aig.onclick = aiGen;
   clearTimer();
-  if (isStudentStep && limitMin && !needsWork && !overTime) startTimer(seg.header, limitMin);
+  if (isStudentStep && limitMin && !needsWork && !needsArtifact && !overTime) startTimer(seg.header, limitMin);
+}
+// "Li o material": registra o aceite (libera responder na etapa) e re-renderiza.
+async function ackArtifact(iid) {
+  try { const j = await api('POST', `/interactions/${encodeURIComponent(iid)}/artifact/ack`); if (j.run) RUN = j.run; render(); }
+  catch (e) { alert(e.message); }
 }
 // ===== cronômetro da etapa (wall-clock; congela enquanto a persona processa) =====
 // PAUSE_REQUESTED: o aluno pediu para pausar (sair) antes da resposta aparecer.

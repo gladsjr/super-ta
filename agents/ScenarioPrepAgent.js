@@ -58,20 +58,21 @@ Regras:
      * Planeja uma interação. Lê os PDFs inteiros (input_file) quando há file_id.
      * @returns {Promise<{focus,key_points,contradictions,probes,continuity,opening}>}
      */
-    async prepInteraction({ scenario, interaction, personasById, position, total, runMemory = "", enunciadoFileId = null, studentWorkFileId = null, meterCtx = null }) {
+    async prepInteraction({ scenario, interaction, personasById, position, total, runMemory = "", enunciadoFileId = null, studentWorkFileId = null, artifactFileId = null, meterCtx = null }) {
         const systemPrompt = `${renderAgentPreamble({ audience: "orchestrator_only" })}
 
 ${this.prepSystemBody}`;
         const briefing = renderInteractionBriefing({
             scenario, interaction, personasById, position, total, runMemory,
-            enunciadoAvailable: !!enunciadoFileId, studentWorkAvailable: !!studentWorkFileId,
+            enunciadoAvailable: !!enunciadoFileId, studentWorkAvailable: !!studentWorkFileId, artifactAvailable: !!artifactFileId,
         });
         const content = [{ type: "input_text", text: `${briefing}\n\nPlaneje esta interação. Retorne SOMENTE o JSON do plano.` }];
         if (enunciadoFileId) content.push({ type: "input_file", file_id: enunciadoFileId });
         if (studentWorkFileId) content.push({ type: "input_file", file_id: studentWorkFileId });
+        if (artifactFileId) content.push({ type: "input_file", file_id: artifactFileId });
 
         const payload = { model: this.model, instructions: systemPrompt, input: [{ role: "user", content }], truncation: "auto" };
-        log.prompt("AGENT:ScenarioPrep", `briefing (${briefing.length} chars) files=${[enunciadoFileId && "enunciado", studentWorkFileId && "trabalho"].filter(Boolean).join("+") || "nenhum"}`);
+        log.prompt("AGENT:ScenarioPrep", `briefing (${briefing.length} chars) files=${[enunciadoFileId && "enunciado", studentWorkFileId && "trabalho", artifactFileId && "material"].filter(Boolean).join("+") || "nenhum"}`);
 
         let text, lastErr = null;
         for (let attempt = 1; attempt <= 2; attempt++) {

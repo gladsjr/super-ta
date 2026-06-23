@@ -417,6 +417,13 @@ function interactionCardHtml(it) {
         <div class="it-private">${(it.private_info||[]).map(pi=>privateRowHtml(pi, it.participants||[], byId)).join('')}</div>
         <button class="btn btn-sm it-add-private" type="button">+ informação privada</button></div>
       <div class="field"><label>Mensagens de exemplo da persona <span class="hint">inspiração de falas/perguntas da persona nesta etapa — uma por linha</span></label><textarea class="textarea it-questions" rows="2">${esc((it.example_questions||[]).join('\n'))}</textarea></div>
+      ${WORK_TOKEN ? `<div class="field it-student-only"><label>Material da etapa (PDF) <span class="hint">o aluno lê no início e confirma "li o material"; a persona conhece e discute o conteúdo</span></label>
+        ${it.artifact
+          ? `<div class="row" style="gap:8px;align-items:center"><span>📄 <strong>${esc(it.artifact.filename)}</strong></span><button class="btn btn-sm it-art-del" type="button">remover</button><span class="hint it-art-msg"></span></div>`
+          : ((it.id && !String(it.id).startsWith('i_local_'))
+              ? `<div class="row" style="gap:8px;align-items:center"><input type="file" class="it-art-file" accept=".pdf"/><button class="btn btn-sm it-art-send" type="button">anexar PDF</button><span class="hint it-art-msg"></span></div>`
+              : `<span class="hint">salve o cenário para anexar um material a esta etapa</span>`)}
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -436,8 +443,12 @@ function updateSummary(card) {
 }
 function renumberInteractions() { document.querySelectorAll('#sf-interactions .it-card .it-n').forEach((n,i)=>n.textContent = (i+1)+'.'); }
 function harvestInteractions() {
+  // Artefato (PDF) não é campo editável no card — é gravado por upload. Preservamos
+  // o que já está no SCENARIO em memória (por id) para o save não apagá-lo.
+  const artById = {}; (SCENARIO?.interactions||[]).forEach(it => { if (it.id && it.artifact) artById[it.id] = it.artifact; });
   return [...document.querySelectorAll('#sf-interactions .it-card')].map(card => ({
     id: card.dataset.id || undefined,
+    artifact: (card.dataset.id && artById[card.dataset.id]) || null,
     title: card.querySelector('.it-title').value.trim(),
     form: card.querySelector('.it-form').value,
     form_prompt: card.querySelector('.it-form-prompt').value.trim(),
@@ -479,7 +490,39 @@ function renderInteracoesPane() {
     else if (e.target.classList.contains('pr-del')) { const parts=card.querySelector('.it-parts'); if (parts.children.length>1) e.target.closest('.part-row').remove(); updateSummary(card); }
     else if (e.target.classList.contains('it-add-private')) { card.querySelector('.it-private').insertAdjacentHTML('beforeend', privateRowHtml(null, cardParticipants(card), scenarioPersonaMap())); }
     else if (e.target.classList.contains('pi-del')) { e.target.closest('.pi-row')?.remove(); }
+    else if (e.target.classList.contains('it-art-send')) { uploadArtifact(card); }
+    else if (e.target.classList.contains('it-art-del')) { removeArtifact(card); }
   });
+}
+// Anexa/remove o material (PDF) de uma etapa (work-scoped). Preserva edições:
+// colhe o estado atual, persiste só o artefato no servidor e atualiza a memória.
+async function uploadArtifact(card) {
+  const id = card.dataset.id, fileEl = card.querySelector('.it-art-file'), msg = card.querySelector('.it-art-msg');
+  if (!id || String(id).startsWith('i_local_')) { if (msg) msg.textContent = 'salve o cenário primeiro'; return; }
+  if (!fileEl?.files[0]) { if (msg) msg.textContent = 'escolha um PDF'; return; }
+  if (msg) msg.textContent = 'enviando e indexando…';
+  harvestCurrent();
+  const fd = new FormData(); fd.append('file', fileEl.files[0]);
+  try {
+    const r = await fetch(`/w/${WORK_TOKEN}/scenario/interactions/${encodeURIComponent(id)}/artifact-file`, { method:'POST', body: fd });
+    const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+    const srvIt = (j.scenario?.interactions||[]).find(x => x.id === id);
+    const memIt = (SCENARIO.interactions||[]).find(x => x.id === id);
+    if (memIt) memIt.artifact = srvIt?.artifact || null;
+    renderInteracoesPane();
+  } catch (e) { if (msg) msg.textContent = e.message; }
+}
+async function removeArtifact(card) {
+  const id = card.dataset.id, msg = card.querySelector('.it-art-msg');
+  if (!id) return;
+  harvestCurrent();
+  try {
+    const r = await fetch(`/w/${WORK_TOKEN}/scenario/interactions/${encodeURIComponent(id)}/artifact`, { method:'DELETE' });
+    const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+    const memIt = (SCENARIO.interactions||[]).find(x => x.id === id);
+    if (memIt) memIt.artifact = null;
+    renderInteracoesPane();
+  } catch (e) { if (msg) msg.textContent = e.message; }
 }
 
 // ============ PDF ============
