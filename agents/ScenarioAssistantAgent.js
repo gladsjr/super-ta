@@ -4,6 +4,7 @@ import { renderAgentPreamble } from "../lib/agentPreamble.js";
 import { PARTICIPANT_ROLES, ROLE_LABEL } from "../lib/scenarios/mockEngine.js";
 import { FORMS, FORM_LABELS, FORM_DYNAMICS, FORM_DEFAULT_WORK, formKind } from "../lib/scenarios/interactionForms.js";
 import { extractJsonObject } from "../lib/scenarios/scenarioActionSchema.js";
+import { extractJsonStringValue } from "../lib/superOrchestrator/actionSchema.js";
 
 /**
  * ScenarioAssistantAgent — assistente do PROFESSOR no ESTÚDIO DE CENÁRIOS.
@@ -88,7 +89,7 @@ ${formBlock}
      * @param {string} p.message    mensagem do professor
      * @param {object|null} p.meterCtx
      */
-    async chat({ scenario = {}, templates = [], history = [], message, meterCtx = null }) {
+    async chat({ scenario = {}, templates = [], history = [], message, meterCtx = null, onReplyDelta = null }) {
         const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
 
 ${this.systemPromptBody}`;
@@ -108,14 +109,35 @@ ${message}
 
 Responda SOMENTE com o JSON do formato especificado.`;
 
-        log.prompt("AGENT:ScenarioAssistant", `system+user (${systemPrompt.length + userContent.length} chars)`);
+        log.prompt("AGENT:ScenarioAssistant", `system+user (${systemPrompt.length + userContent.length} chars)${onReplyDelta ? " [stream]" : ""}`);
         // Esforço de raciocínio BAIXO: a tarefa é propor edições estruturadas (não
         // resolver problema difícil); o ganho de latência é grande e a qualidade de
         // ordenação/forma se mantém (verificado). Ajustável se algum caso pedir mais.
-        const response = await log.span("AGENT:ScenarioAssistant", "responses.create", () =>
-            meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioAssistant", model: this.model }, () =>
-                this.client.responses.create({ model: this.model, instructions: systemPrompt, input: [{ role: "user", content: userContent }], reasoning: { effort: "low" }, truncation: "auto" })));
-        const parsed = extractJsonObject(response.output_text || "");
+        const payload = { model: this.model, instructions: systemPrompt, input: [{ role: "user", content: userContent }], reasoning: { effort: "low" }, truncation: "auto" };
+        // STREAMING (onReplyDelta): o `reply` é o 1º campo do JSON, então sai antes
+        // das propostas — extraímos seu valor incrementalmente e emitimos os deltas
+        // (o professor vê o texto fluindo). As propostas só são parseadas no fim.
+        let text;
+        if (typeof onReplyDelta === "function") {
+            const stream = await log.span("AGENT:ScenarioAssistant", "responses.create[stream]", () =>
+                meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioAssistant", model: this.model }, () =>
+                    this.client.responses.create({ ...payload, stream: true })));
+            const collected = []; let finalResponse = null, sent = 0;
+            for await (const event of stream) {
+                if (event?.type === "response.output_text.delta") {
+                    if (typeof event.delta === "string") collected.push(event.delta);
+                    const m = extractJsonStringValue(collected.join(""), "reply");
+                    if (m && m.value && m.value.length > sent) { try { onReplyDelta(m.value.slice(sent)); } catch (e) { log.error("AGENT:ScenarioAssistant", `onReplyDelta: ${e.message}`); } sent = m.value.length; }
+                } else if (event?.type === "response.completed") { finalResponse = event.response ?? null; }
+            }
+            text = finalResponse?.output_text ?? collected.join("");
+        } else {
+            const response = await log.span("AGENT:ScenarioAssistant", "responses.create", () =>
+                meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioAssistant", model: this.model }, () =>
+                    this.client.responses.create(payload)));
+            text = response.output_text || "";
+        }
+        const parsed = extractJsonObject(text || "");
         if (!parsed || typeof parsed.reply !== "string") {
             return { reply: "Desculpe, não consegui formular uma proposta agora. Pode reformular?", scenario_patch: null, personas: [], interactions: [] };
         }

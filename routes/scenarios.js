@@ -69,16 +69,23 @@ router.post("/scenarios/api/yaml/from", json, (req, res) => {
 router.post("/scenarios/api/assistant", json, async (req, res) => {
     const message = str(req.body?.message);
     if (!message) return bad(res, "mensagem vazia");
+    const scenario = req.body?.scenario || {};
+    const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const { scenarioAssistantAgent } = await import("../lib/agents.js");
+    const templates = (await store.listTemplates()).map(t => ({ name: t.name, role: t.role, description: t.description || "" }));
+    // STREAM (?stream=1): emite o `reply` parte a parte (event:reply) e, no fim, o
+    // objeto completo com as propostas (event:done) — o estúdio aplica no done.
+    if (req.query.stream === "1") {
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+        const send = (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data || {})}\n\n`);
+        try {
+            const out = await scenarioAssistantAgent.chat({ scenario, templates, history, message, meterCtx: {}, onReplyDelta: (d) => send("reply", { delta: d }) });
+            send("done", out);
+        } catch (e) { send("error", { error: e.message }); }
+        return res.end();
+    }
     try {
-        const { scenarioAssistantAgent } = await import("../lib/agents.js");
-        const templates = (await store.listTemplates()).map(t => ({ name: t.name, role: t.role, description: t.description || "" }));
-        const out = await scenarioAssistantAgent.chat({
-            scenario: req.body?.scenario || {},
-            templates,
-            history: Array.isArray(req.body?.history) ? req.body.history : [],
-            message,
-            meterCtx: {},
-        });
+        const out = await scenarioAssistantAgent.chat({ scenario, templates, history, message, meterCtx: {} });
         res.json(out);
     } catch (e) { res.status(500).json({ error: `assistente indisponível: ${e.message}` }); }
 });

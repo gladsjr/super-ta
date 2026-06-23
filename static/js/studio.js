@@ -165,15 +165,35 @@ async function sendAssist() {
   const inp = document.getElementById('assist-input'); const text = inp.value.trim(); if (!text) return;
   harvestCurrent();
   inp.value=''; ASSIST_HISTORY.push({ role:'user', content:text });
+  const history = ASSIST_HISTORY.slice(0, -1);
   renderAssistantLog();
+  // Mostra o reply STREAMANDO num balão temporário (parte a parte, como ChatGPT).
   const log = document.getElementById('assist-log');
-  if (log) { log.insertAdjacentHTML('beforeend', '<div class="hint">⏳ pensando…</div>'); log.scrollTop = log.scrollHeight; }
+  if (log) { log.insertAdjacentHTML('beforeend', '<div class="assist-msg-assistant" id="assist-stream"><strong>🤖:</strong> <span class="assist-stream-txt"></span><span class="hint"> ⏳</span></div>'); log.scrollTop = log.scrollHeight; }
+  const streamTxt = () => document.querySelector('#assist-stream .assist-stream-txt');
   try {
-    const out = await api('POST','/scenarios/api/assistant', { message:text, history: ASSIST_HISTORY.slice(0,-1), scenario: assistScenarioView() });
+    const resp = await fetch('/scenarios/api/assistant?stream=1', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message:text, history, scenario: assistScenarioView() }) });
+    if (!resp.ok || !resp.body) throw new Error('HTTP '+resp.status);
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf=''; let out=null, reply='';
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i+2);
+        const ev = (chunk.match(/event: (.+)/)||[])[1]; const dl = (chunk.match(/data: ([\s\S]+)/)||[])[1];
+        let data={}; try { data = JSON.parse(dl||'{}'); } catch (e) {}
+        if (ev === 'reply') { reply += (data.delta||''); const el = streamTxt(); if (el) { el.textContent = reply; const lg=document.getElementById('assist-log'); if (lg) lg.scrollTop = lg.scrollHeight; } }
+        else if (ev === 'done') { out = data; }
+        else if (ev === 'error') { throw new Error(data.error||'erro'); }
+      }
+    }
+    document.getElementById('assist-stream')?.remove();
+    if (!out) throw new Error('resposta incompleta');
     const summary = applyAssistProposals(out);
-    ASSIST_HISTORY.push({ role:'assistant', content: out.reply + (summary?`\n→ ${summary}`:'') });
+    ASSIST_HISTORY.push({ role:'assistant', content: (out.reply||reply) + (summary?`\n→ ${summary}`:'') });
     updateCounts(); renderCurrent(); renderAssistantLog();   // reflete na aba ativa; mantém o painel do assistente
-  } catch (e) { ASSIST_HISTORY.push({ role:'assistant', content:'(erro: '+e.message+')' }); renderAssistantLog(); }
+  } catch (e) { document.getElementById('assist-stream')?.remove(); ASSIST_HISTORY.push({ role:'assistant', content:'(erro: '+e.message+')' }); renderAssistantLog(); }
 }
 const newLocalId = pfx => pfx+'_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9);
 const findPersonaByName = name => (SCENARIO.personas||[]).find(p => (p.name||'').toLowerCase() === String(name||'').toLowerCase());
