@@ -183,7 +183,10 @@ function cleanInteraction(it, i) {
         .map(pi => ({ id: str(pi?.id) || `pi_${randomUUID().slice(0, 8)}`, text: str(pi?.text), persona_ids: (Array.isArray(pi?.persona_ids) ? pi.persona_ids : []).filter(id => partIds.has(id)), artifact: cleanArtifact(pi?.artifact) }))
         .filter(pi => pi.text || pi.artifact);
     return {
-        id: str(it.id) || `i_${i}_${randomUUID().slice(0, 6)}`,
+        // Ids TEMPORÁRIOS do estúdio (i_local_*, do assistente/import) viram id
+        // ESTÁVEL no 1º save — senão o gate de anexo de PDF (que exclui i_local_*)
+        // ficaria travado para sempre. Id já estável é preservado.
+        id: (str(it.id) && !str(it.id).startsWith("i_local_")) ? str(it.id) : `i_${i}_${randomUUID().slice(0, 6)}`,
         title: str(it.title),
         form,
         form_prompt: str(it.form_prompt),
