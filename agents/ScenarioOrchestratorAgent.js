@@ -163,16 +163,17 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
     async studentTurn({
         scenario, interaction, personasById, position, total, runMemory,
         interactionTranscript = [], memory = null, studentMessage,
-        isOpening = false, vectorStoreId = null, studentWorkVectorStoreId = null, artifactVectorStoreId = null, interactionMode = "text",
+        isOpening = false, vectorStoreId = null, studentWorkVectorStoreId = null, artifactVectorStoreId = null, privateArtifactVectorStoreIds = [], interactionMode = "text",
         studentName = null, studentGenderHint = null, timeState = null, meterCtx = null,
         onFirstDelta = null, onMessageReady = null,
     }) {
         const allowedIds = (interaction.participants || []).map(p => p.persona_id);
         // file_search desta etapa: enunciado + trabalho do aluno (Fase 2) + artefato
-        // da etapa (material que o aluno também leu — conhecimento COMPARTILHADO).
+        // da etapa (material COMPARTILHADO que o aluno também leu) + artefatos
+        // PRIVADOS das personas (a persona revela conforme a conversa; o briefing diz qual é qual).
         const studentWorkAvailable = !!studentWorkVectorStoreId;
         const artifactAvailable = !!artifactVectorStoreId;
-        const vectorStoreIds = [vectorStoreId, studentWorkVectorStoreId, artifactVectorStoreId].filter(Boolean);
+        const vectorStoreIds = [vectorStoreId, studentWorkVectorStoreId, artifactVectorStoreId, ...(privateArtifactVectorStoreIds || [])].filter(Boolean);
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_interviewer_voice", interactionMode, studentName, studentGenderHint })}
 
 ${this.turnSystemBody}`;

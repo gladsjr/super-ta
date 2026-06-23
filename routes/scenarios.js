@@ -173,8 +173,8 @@ function cleanInteraction(it, i) {
     // Informações privadas das personas: persona_ids só valem se forem participantes desta interação.
     const partIds = new Set(parts.map(p => p.persona_id));
     const privateInfo = (Array.isArray(it.private_info) ? it.private_info : [])
-        .map(pi => ({ text: str(pi?.text), persona_ids: (Array.isArray(pi?.persona_ids) ? pi.persona_ids : []).filter(id => partIds.has(id)) }))
-        .filter(pi => pi.text);
+        .map(pi => ({ id: str(pi?.id) || `pi_${randomUUID().slice(0, 8)}`, text: str(pi?.text), persona_ids: (Array.isArray(pi?.persona_ids) ? pi.persona_ids : []).filter(id => partIds.has(id)), artifact: cleanArtifact(pi?.artifact) }))
+        .filter(pi => pi.text || pi.artifact);
     return {
         id: str(it.id) || `i_${i}_${randomUUID().slice(0, 6)}`,
         title: str(it.title),
@@ -341,6 +341,39 @@ router.delete("/w/:workToken/scenario/interactions/:iid/artifact", requireAdmin,
     if (!it) return bad(res, "interação não encontrada");
     if (it.artifact?.storage_key) { try { const { deleteAudio } = await import("../lib/audioStore.js"); await deleteAudio(it.artifact.storage_key); } catch { /* best-effort */ } }
     it.artifact = null;
+    const saved = await store.saveScenario({ id: ctx.scenario.id, interactions: ctx.scenario.interactions });
+    res.json({ scenario: enrich(saved) });
+});
+
+// ---- Artefato (PDF) de uma INFORMAÇÃO PRIVADA (Estágio B) ----
+// O conteúdo do PDF é a informação privada da persona: ela o consulta via
+// file_search e revela conforme a conversa (NUNCA servido/exposto ao aluno).
+router.post("/w/:workToken/scenario/interactions/:iid/private-info/:pid/artifact-file", requireAdmin, pdfUpload.single("file"), async (req, res) => {
+    const ctx = await findWorkScenario(req, res); if (!ctx) return;
+    const it = (ctx.scenario.interactions || []).find(x => x.id === req.params.iid);
+    if (!it) return bad(res, "interação não encontrada");
+    const pi = (it.private_info || []).find(x => x.id === req.params.pid);
+    if (!pi) return bad(res, "informação privada não encontrada (salve o cenário antes de anexar)");
+    if (!req.file) return bad(res, "envie um arquivo no campo 'file'");
+    try {
+        const { openai } = await import("../lib/openaiClient.js");
+        const { createVectorStoreWithFiles } = await import("../lib/sessionLifecycle.js");
+        const name = req.file.originalname || "privado.pdf";
+        const uploaded = await openai.files.create({ file: await OpenAI.toFile(req.file.buffer, name), purpose: "user_data" });
+        const vectorStoreId = await createVectorStoreWithFiles([uploaded.id], `${ctx.scenario.id}:${pi.id}`);
+        // Sem storage_key: o artefato PRIVADO não é servido ao aluno (só a persona o lê via RAG).
+        pi.artifact = { filename: name, file_id: uploaded.id, vector_store_id: vectorStoreId, uploaded_at: new Date().toISOString() };
+        const saved = await store.saveScenario({ id: ctx.scenario.id, interactions: ctx.scenario.interactions });
+        res.json({ scenario: enrich(saved) });
+    } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
+});
+router.delete("/w/:workToken/scenario/interactions/:iid/private-info/:pid/artifact", requireAdmin, async (req, res) => {
+    const ctx = await findWorkScenario(req, res); if (!ctx) return;
+    const it = (ctx.scenario.interactions || []).find(x => x.id === req.params.iid);
+    if (!it) return bad(res, "interação não encontrada");
+    const pi = (it.private_info || []).find(x => x.id === req.params.pid);
+    if (!pi) return bad(res, "informação privada não encontrada");
+    pi.artifact = null;
     const saved = await store.saveScenario({ id: ctx.scenario.id, interactions: ctx.scenario.interactions });
     res.json({ scenario: enrich(saved) });
 });

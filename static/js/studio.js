@@ -381,12 +381,17 @@ function partRowHtml(part, kind) {
 }
 function scenarioPersonaMap() { const b={}; (SCENARIO.personas||[]).forEach(p=>b[p.id]=p); return b; }
 function cardParticipants(card) { return [...card.querySelectorAll('.it-parts .part-row')].map(r=>({ persona_id:r.querySelector('.pr-persona').value })); }
-// Linha de "informação privada": texto + checkboxes das personas participantes que a detêm.
+// Linha de "informação privada": texto e/ou PDF (artefato privado) + checkboxes das personas que a detêm.
 function privateRowHtml(pi, participants, byId) {
   pi = pi || { text:'', persona_ids:[] };
   const checks = (participants||[]).map(p=>{ const per=byId[p.persona_id]; if(!per) return ''; const on=(pi.persona_ids||[]).includes(p.persona_id);
     return `<label class="hint" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="checkbox" class="pi-persona" value="${esc(p.persona_id)}" ${on?'checked':''}/> ${esc(per.icon||'')} ${esc(per.name)}</label>`; }).join('');
-  return `<div class="pi-row" style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px"><div style="flex:1"><input class="input pi-text" value="${esc(pi.text||'')}" placeholder="Ex.: a usina entrega ~80 kW contínuos"/><div class="pi-personas" style="margin-top:4px">${checks||'<span class="hint">defina participantes acima para atribuir</span>'}</div></div><button class="icon-btn pi-del" type="button" title="remover">✕</button></div>`;
+  // Artefato privado (PDF): só com cenário salvo (a info privada precisa de id no servidor).
+  const artBox = WORK_TOKEN ? (pi.artifact
+    ? `<div class="hint" style="margin-top:4px">📄 material privado: <strong>${esc(pi.artifact.filename)}</strong> <button class="btn btn-ghost btn-sm pi-art-del" type="button">remover</button><span class="hint pi-art-msg"></span></div>`
+    : (pi.id ? `<div class="hint" style="margin-top:4px"><input type="file" class="pi-art-file" accept=".pdf" style="max-width:200px"/><button class="btn btn-ghost btn-sm pi-art-send" type="button">anexar PDF</button><span class="hint pi-art-msg"></span></div>`
+            : `<div class="hint" style="margin-top:4px">salve o cenário para anexar um PDF a esta informação</div>`)) : '';
+  return `<div class="pi-row" data-pi-id="${esc(pi.id||'')}" style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px"><div style="flex:1"><input class="input pi-text" value="${esc(pi.text||'')}" placeholder="Ex.: a usina entrega ~80 kW contínuos (ou anexe um PDF)"/><div class="pi-personas" style="margin-top:4px">${checks||'<span class="hint">defina participantes acima para atribuir</span>'}</div>${artBox}</div><button class="icon-btn pi-del" type="button" title="remover">✕</button></div>`;
 }
 function interactionCardHtml(it) {
   it = it || { form:(META.forms[0]?.value||'apresentacao'), participants:[], title:'', focus:'', instruction:'', form_prompt:'', example_questions:[], private_info:[], includes_student_work: !!(META.forms[0]?.default_work) };
@@ -444,8 +449,13 @@ function updateSummary(card) {
 function renumberInteractions() { document.querySelectorAll('#sf-interactions .it-card .it-n').forEach((n,i)=>n.textContent = (i+1)+'.'); }
 function harvestInteractions() {
   // Artefato (PDF) não é campo editável no card — é gravado por upload. Preservamos
-  // o que já está no SCENARIO em memória (por id) para o save não apagá-lo.
-  const artById = {}; (SCENARIO?.interactions||[]).forEach(it => { if (it.id && it.artifact) artById[it.id] = it.artifact; });
+  // o que já está no SCENARIO em memória (por id) para o save não apagá-lo. Idem
+  // para o artefato PRIVADO de cada informação privada (chave interação:pi).
+  const artById = {}, piArtById = {};
+  (SCENARIO?.interactions||[]).forEach(it => {
+    if (it.id && it.artifact) artById[it.id] = it.artifact;
+    if (it.id) (it.private_info||[]).forEach(pi => { if (pi.id && pi.artifact) piArtById[`${it.id}:${pi.id}`] = pi.artifact; });
+  });
   return [...document.querySelectorAll('#sf-interactions .it-card')].map(card => ({
     id: card.dataset.id || undefined,
     artifact: (card.dataset.id && artById[card.dataset.id]) || null,
@@ -458,7 +468,7 @@ function harvestInteractions() {
     instruction: card.querySelector('.it-instruction').value.trim(),
     example_questions: card.querySelector('.it-questions').value.split('\n').map(x=>x.trim()).filter(Boolean),
     time_limit_min: (() => { const n = parseInt((card.querySelector('.it-time-limit')?.value||'').trim(), 10); return (n && n > 0) ? n : null; })(),
-    private_info: [...card.querySelectorAll('.it-private .pi-row')].map(r=>({ text:r.querySelector('.pi-text').value.trim(), persona_ids:[...r.querySelectorAll('.pi-persona:checked')].map(c=>c.value) })).filter(x=>x.text),
+    private_info: [...card.querySelectorAll('.it-private .pi-row')].map(r=>{ const pid=r.dataset.piId||undefined; return { id:pid, text:r.querySelector('.pi-text').value.trim(), persona_ids:[...r.querySelectorAll('.pi-persona:checked')].map(c=>c.value), artifact:(card.dataset.id&&pid&&piArtById[`${card.dataset.id}:${pid}`])||null }; }).filter(x=>x.text || x.artifact),
   }))
   // Descarta o card-placeholder em branco (renderInteracoesPane sempre mostra ao
   // menos um card mesmo sem interações): sem título, sem participante real, sem
@@ -492,7 +502,41 @@ function renderInteracoesPane() {
     else if (e.target.classList.contains('pi-del')) { e.target.closest('.pi-row')?.remove(); }
     else if (e.target.classList.contains('it-art-send')) { uploadArtifact(card); }
     else if (e.target.classList.contains('it-art-del')) { removeArtifact(card); }
+    else if (e.target.classList.contains('pi-art-send')) { uploadPrivateArtifact(card, e.target.closest('.pi-row')); }
+    else if (e.target.classList.contains('pi-art-del')) { removePrivateArtifact(card, e.target.closest('.pi-row')); }
   });
+}
+// Anexa/remove o PDF de uma INFORMAÇÃO PRIVADA (só persona o lê; nunca servido ao aluno).
+async function uploadPrivateArtifact(card, piRow) {
+  const iid = card.dataset.id, pid = piRow?.dataset.piId, fileEl = piRow?.querySelector('.pi-art-file'), msg = piRow?.querySelector('.pi-art-msg');
+  if (!iid || String(iid).startsWith('i_local_') || !pid) { if (msg) msg.textContent = 'salve o cenário primeiro'; return; }
+  if (!fileEl?.files[0]) { if (msg) msg.textContent = 'escolha um PDF'; return; }
+  if (msg) msg.textContent = 'enviando e indexando…';
+  harvestCurrent();
+  const fd = new FormData(); fd.append('file', fileEl.files[0]);
+  try {
+    const r = await fetch(`/w/${WORK_TOKEN}/scenario/interactions/${encodeURIComponent(iid)}/private-info/${encodeURIComponent(pid)}/artifact-file`, { method:'POST', body: fd });
+    const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+    const srvIt = (j.scenario?.interactions||[]).find(x => x.id === iid);
+    const srvPi = (srvIt?.private_info||[]).find(x => x.id === pid);
+    const memIt = (SCENARIO.interactions||[]).find(x => x.id === iid);
+    const memPi = (memIt?.private_info||[]).find(x => x.id === pid);
+    if (memPi) memPi.artifact = srvPi?.artifact || null;
+    renderInteracoesPane();
+  } catch (e) { if (msg) msg.textContent = e.message; }
+}
+async function removePrivateArtifact(card, piRow) {
+  const iid = card.dataset.id, pid = piRow?.dataset.piId, msg = piRow?.querySelector('.pi-art-msg');
+  if (!iid || !pid) return;
+  harvestCurrent();
+  try {
+    const r = await fetch(`/w/${WORK_TOKEN}/scenario/interactions/${encodeURIComponent(iid)}/private-info/${encodeURIComponent(pid)}/artifact`, { method:'DELETE' });
+    const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+    const memIt = (SCENARIO.interactions||[]).find(x => x.id === iid);
+    const memPi = (memIt?.private_info||[]).find(x => x.id === pid);
+    if (memPi) memPi.artifact = null;
+    renderInteracoesPane();
+  } catch (e) { if (msg) msg.textContent = e.message; }
 }
 // Anexa/remove o material (PDF) de uma etapa (work-scoped). Preserva edições:
 // colhe o estado atual, persiste só o artefato no servidor e atualiza a memória.

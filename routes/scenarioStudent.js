@@ -192,7 +192,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
 
     run.transcript.push({ speaker: "student", kind: "student", text });
     const timeState = ts && ts.phase !== "over" ? ts : null;   // só normal/closing vão ao LLM
-    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it), artifactVectorStoreId: it.artifact?.vector_store_id || null, timeState };
+    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it), artifactVectorStoreId: it.artifact?.vector_store_id || null, privateArtifactVectorStoreIds: (it.private_info || []).map(pi => pi.artifact?.vector_store_id).filter(Boolean), timeState };
     // PAUSA do relógio: o tempo de processamento da persona (entre o aluno enviar e
     // receber) não conta no tempo dele — acumula em paused_ms do cabeçalho da etapa.
     const pause = (ms) => { if (header && ts) header.paused_ms = (header.paused_ms || 0) + ms; };
