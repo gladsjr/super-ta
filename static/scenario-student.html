@@ -59,7 +59,7 @@ const API = `/s/${TOKEN}/scenario`;
 // "Testar (rápido)" do professor: ?model=fast vem na URL e é repassado aos turnos
 // (o servidor só honra em submissão de teste). Aluno real abre sem isso.
 const MODELQ = new URLSearchParams(location.search).get('model') === 'fast' ? 'model=fast' : '';
-let SCEN = null, RUN = null, SELTAB = 0, IS_ADMIN = false, RESULT = null;
+let SCEN = null, RUN = null, SELTAB = 0, IS_ADMIN = false, RESULT = null, PREPPING = false;
 
 async function api(method, path, body) {
   const r = await fetch(API + path, { method, headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -128,7 +128,7 @@ function render() {
   let tabs = (SCEN.interactions || []).map((it, i) => {
     const locked = i > cur;
     const cls = i === SELTAB ? 'active' : (i < cur ? 'done' : (locked ? 'locked' : ''));
-    const mark = i < cur ? '✓ ' : (locked ? '🔒 ' : '');
+    const mark = i < cur ? '✓ ' : ((locked && !(PREPPING && i === SELTAB)) ? '🔒 ' : '');
     return `<button class="rn-tab ${cls}" data-tab="${i}" ${locked?'disabled':''}>${mark}${i+1}. ${esc(it.title)}</button>`;
   }).join('');
   // Concluído: aba sintética de Conclusão (data-tab = total) — onde mora a tela final.
@@ -210,7 +210,7 @@ function render() {
     ${rulesPanel}
     <div class="rn-tabs">${tabs}</div>
     ${showConclusion ? finalPanel : `
-    <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || '<div class="empty">—</div>'}</div>
+    <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || (PREPPING ? '' : '<div class="empty">—</div>')}</div>
     ${isStudentStep ? taskNote : ''}
     ${isStudentStep ? (needsWork ? workBox : (needsArtifact ? materialGate : (overTime ? `
       <div class="rn-controls"><span class="hint">⏰ O tempo desta etapa terminou — a persona não responde mais.</span><button class="btn btn-primary" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : `
@@ -337,11 +337,18 @@ async function sendTurn() {
   } catch (e) { TURN_INFLIGHT = false; setStatus(''); const t=document.getElementById('rn-transcript'); if (t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 async function advance() {
-  // O /advance roda o prep da próxima etapa (ou a deliberação entre personas) —
-  // mostra progresso encadeado no lugar da tela parada.
+  if (PREPPING) return;   // evita duplo-avanço enquanto a próxima etapa é preparada
+  // Transição IMEDIATA: já mostramos a próxima etapa (aba + transcript vazio) e o
+  // indicador de preparação aparece no contexto dela — não grudado na etapa
+  // anterior (#45). O /advance roda o prep da próxima etapa em seguida.
+  const cur = RUN.interaction_index ?? 0;
+  const total = (SCEN.interactions || []).length;
+  const hasNext = cur + 1 < total;
+  PREPPING = true;
+  if (hasNext) { SELTAB = cur + 1; render(); }
   const stop = cycleStatus(t => setStatus(t), false);
-  try { const j = await api('POST', '/advance' + (MODELQ ? '?' + MODELQ : '')); stop(); RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
-  catch (e) { stop(); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
+  try { const j = await api('POST', '/advance' + (MODELQ ? '?' + MODELQ : '')); stop(); PREPPING = false; RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
+  catch (e) { stop(); PREPPING = false; if (hasNext) SELTAB = cur; render(); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }
 boot();
 </script>
