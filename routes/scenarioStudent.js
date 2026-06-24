@@ -328,6 +328,52 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
     } catch (e) { res.status(500).json({ error: `falha no upload/vector store: ${e.message}` }); }
 });
 
+// GERAR o trabalho do aluno por IA — SÓ no modo de TESTE do professor (submissão
+// is_test). Pega o contexto (enunciado + cenário + etapa), gera o texto, vira PDF
+// (pdfkit) e anexa pelo MESMO caminho do upload manual. Conveniência para testar a
+// etapa de apresentação sem o professor produzir um PDF à mão.
+router.post("/s/:submissionToken/scenario/interactions/:iid/work-generate", requireSubmissionToken, async (req, res) => {
+    if (!req.submission?.is_test) return bad(res, "geração de trabalho é exclusiva do modo de teste do professor");
+    const scenario = await store.getScenarioByWork(req.work.id);
+    if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
+    const it = (scenario.interactions || []).find(x => x.id === req.params.iid);
+    if (!it) return bad(res, "interação não encontrada");
+    if (!it.includes_student_work) return bad(res, "esta etapa não pede o trabalho do aluno");
+    const run = await store.getRunBySubmission(req.submission.id);
+    if (!run) return res.status(404).json({ error: "execução não encontrada — inicie o cenário primeiro" });
+    try {
+        const { generateWorkText, textToPdfBuffer } = await import("../lib/scenarios/testWorkGen.js");
+        const { openai } = await import("../lib/openaiClient.js");
+        const { createVectorStoreWithFiles } = await import("../lib/sessionLifecycle.js");
+        const text = await generateWorkText({ scenario, interaction: it, enunciadoFileId: scenario.pdf?.file_id || null, meterCtx: { workId: req.work.id } });
+        if (!text) return bad(res, "não consegui gerar o trabalho — tente de novo");
+        const pdf = await textToPdfBuffer(`Trabalho (teste) — ${it.title || ""}`, text);
+        const name = `trabalho-teste-${it.id}.pdf`;
+        const uploaded = await openai.files.create({ file: await OpenAI.toFile(pdf, name), purpose: "user_data" });
+        const vsId = await createVectorStoreWithFiles([uploaded.id], `${run.id}:${it.id}`);
+        run.student_work = run.student_work || {};
+        run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, uploaded_at: new Date().toISOString(), generated: true };
+        // Igual ao upload: se é a etapa corrente e a abertura ainda não rodou, o prep
+        // lê o contexto (com o trabalho gerado) e a persona abre já informada.
+        const curIt = scenario.interactions[run.interaction_index];
+        if (curIt && curIt.id === it.id && curIt.kind === "student" && !openerDone(run.transcript)) {
+            try {
+                const byId = personasById(scenario);
+                const { agent, prepAgent, live } = await liveDeps(wantsFast(req));
+                const runMemory = live.buildRunMemory(scenario, run.transcript, run.interaction_index);
+                const { entries, memory } = await live.prepAndOpenLive(prepAgent, agent, {
+                    scenario, interaction: curIt, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, runMemory,
+                    interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id },
+                    enunciadoFileId: scenario.pdf?.file_id || null, studentWorkFileId: uploaded.id, artifactFileId: curIt.artifact?.file_id || null,
+                });
+                run.transcript.push(...entries); run.memory = memory; stampStart(run);
+            } catch (e) { /* prep best-effort */ }
+        }
+        await store.saveRun(run);
+        res.json({ ok: true, interaction_id: it.id, filename: name, generated: true, run: runView(run) });
+    } catch (e) { res.status(500).json({ error: `falha ao gerar o trabalho: ${e.message}` }); }
+});
+
 // ARTEFATO da etapa (PDF que o professor anexou): servir os bytes ao aluno para
 // LEITURA (proxia a OpenAI Files — não guardamos os bytes localmente).
 router.get("/s/:submissionToken/scenario/interactions/:iid/artifact", requireSubmissionToken, async (req, res) => {
