@@ -459,7 +459,7 @@ function interactionCardHtml(it) {
       <div class="field it-student-only"><label>Informações que as personas têm e o aluno não <span class="hint">reveladas só nesta etapa, se o aluno perguntar/conduzir — marque quem detém cada uma</span></label>
         <div class="it-private">${(it.private_info||[]).map(pi=>privateRowHtml(pi, it.participants||[], byId)).join('')}</div>
         <button class="btn btn-sm it-add-private" type="button">+ informação privada</button></div>
-      <div class="field"><label>Mensagens de exemplo da persona <span class="hint">inspiração de falas/perguntas da persona nesta etapa — uma por linha</span></label><textarea class="textarea it-questions" rows="2">${esc((it.example_questions||[]).join('\n'))}</textarea></div>
+      <div class="field"><label>Mensagens de exemplo da persona <span class="hint">falas DA PERSONA nesta etapa (respostas, contexto, objeções, hesitações) — NÃO as perguntas que o aluno faria a ela; numa coleta/consultoria são o que a fonte responde. Uma por linha</span></label><textarea class="textarea it-questions" rows="2">${esc((it.example_questions||[]).join('\n'))}</textarea></div>
       ${WORK_TOKEN ? `<div class="field it-student-only"><label>Material da etapa (PDF) <span class="hint">o aluno lê no início e confirma "li o material"; a persona conhece e discute o conteúdo</span></label>
         ${it.artifact
           ? `<div class="row" style="gap:8px;align-items:center"><span>📄 <strong>${esc(it.artifact.filename)}</strong></span><button class="btn btn-sm it-art-del" type="button">remover</button><span class="hint it-art-msg"></span></div>`
