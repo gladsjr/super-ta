@@ -61,7 +61,7 @@ ESCOLHA DE QUEM FALA (speaker_persona_id):
 
 QUANDO USAR CADA action.kind:
 - "speak": a persona escolhida reage à última fala da outra ponta e/ou avança a agenda dela (pergunta, sondagem, provocação no registro da persona). action.message OBRIGATÓRIA.
-  ESTILO DA FALA (action.message): CURTA e conversacional — em geral 1 a 3 frases (é conversa falada, não relatório; evite listas e parágrafos longos). Responda PONTUALMENTE o que foi perguntado e PARE; NÃO despeje tudo o que sabe nem antecipe o que não foi pedido — entregue um detalhe de cada vez e deixe a outra ponta cavar o resto com novas perguntas. Numa coleta/consultoria a FONTE solta a informação aos poucos. A uma pergunta AMPLA (ex.: "quais seus objetivos e preocupações?"), NÃO enumere a lista inteira de uma vez — dê o ponto PRINCIPAL (no máximo mais um) e deixe os demais para quando a outra ponta perguntar especificamente; é mais natural e força o aluno a cavar. Respostas enxutas também saem mais rápido.
+  ESTILO DA FALA (action.message): CURTA e conversacional — em geral 1 a 3 frases (é conversa falada, não relatório; evite listas e parágrafos longos). Responda PONTUALMENTE o que foi perguntado e PARE; NÃO despeje tudo o que sabe nem antecipe o que não foi pedido — entregue um detalhe de cada vez e deixe a outra ponta cavar o resto com novas perguntas. Numa coleta/consultoria a FONTE solta a informação aos poucos. A uma pergunta AMPLA (ex.: "quais seus objetivos e preocupações?"), NÃO enumere a lista inteira de uma vez — dê o ponto PRINCIPAL (no máximo mais um) e deixe os demais para quando a outra ponta perguntar especificamente; é mais natural e força o aluno a cavar. Respostas enxutas também saem mais rápido. NÃO embrulhe a fala inteira em aspas — escreva o conteúdo direto, sem aspas de abertura/fechamento em volta (a persona está FALANDO, não citando).
 - "advance": a DINÂMICA desta etapa já cumpriu seu propósito (os pontos centrais foram cobertos) — sinalize para passar à próxima etapa do cenário. message pode ser uma fala curta de transição ("acho que por aqui já entendi o suficiente") ou vazia.
 - "finalize": a outra ponta sinalizou que quer encerrar / desengajou. message curto de fechamento, em personagem.
 
@@ -143,8 +143,11 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
                                 const m = extractJsonStringValue(buf, "message");
                                 if (m && m.value) {
                                     // Stream token-a-token da fala da persona (mesmo esquema do reply do assistente).
-                                    if (typeof onMessageDelta === "function" && m.value.length > msgSent) { try { onMessageDelta(m.value.slice(msgSent)); } catch (e) { log.error(label, `onMessageDelta: ${e.message}`); } msgSent = m.value.length; }
-                                    if (!messageSignaled && typeof onMessageReady === "function" && m.complete && m.value.trim()) { messageSignaled = true; try { onMessageReady(m.value); } catch (e) { log.error(label, `onMessageReady: ${e.message}`); } }
+                                    // O modelo às vezes embrulha a fala em aspas; descasca a aspa de INÍCIO no stream
+                                    // (a do fim é tratada no valor final do studentTurn, que re-renderiza limpo).
+                                    let mv = m.value; if (/^["“”'‘’]/.test(mv)) mv = mv.slice(1);
+                                    if (typeof onMessageDelta === "function" && mv.length > msgSent) { try { onMessageDelta(mv.slice(msgSent)); } catch (e) { log.error(label, `onMessageDelta: ${e.message}`); } msgSent = mv.length; }
+                                    if (!messageSignaled && typeof onMessageReady === "function" && m.complete && mv.trim()) { messageSignaled = true; try { onMessageReady(mv); } catch (e) { log.error(label, `onMessageReady: ${e.message}`); } }
                                 }
                             }
                         } else if (event?.type === "response.completed") { finalResponse = event.response ?? null; }
@@ -235,6 +238,13 @@ Escolha quem fala e a próxima ação. Retorne SOMENTE o JSON do schema.`;
             parsed = p; break;
         }
         if (!parsed) throw new Error(`ScenarioOrchestratorAgent.studentTurn: ${lastErr}`);
+        // O modelo às vezes embrulha a fala inteira em aspas (viram conteúdo do valor
+        // JSON e aparecem na UI). Descasca um par de aspas de embrulho para a fala
+        // sair limpa — no valor final (o re-render usa este texto).
+        if (parsed.action && typeof parsed.action.message === "string") {
+            const t = parsed.action.message.trim();
+            if (t.length >= 2 && /^["“”'‘’]/.test(t) && /["“”'‘’]$/.test(t)) parsed.action.message = t.slice(1, -1).trim();
+        }
         log.info("AGENT:ScenarioOrchestrator", `kind=${parsed.action.kind} speaker=${parsed.speaker_persona_id} msg=${log.preview(parsed.action.message, 80)}`);
         return parsed;
     }
