@@ -124,6 +124,20 @@ function renderCenarioPane() {
 // Vive num PAINEL PERSISTENTE (#studio-assistant), fora das abas — fica visível
 // em Cenário/Personas/Interações. Montado 1x; só o log é re-renderizado.
 let ASSIST_HISTORY = [];
+// Snapshot do SCENARIO IMEDIATAMENTE antes de aplicar a última proposta do
+// assistente — permite "Desfazer" e voltar à configuração anterior. Um nível
+// (a última alteração); sobrescrito a cada nova proposta aplicada.
+let ASSIST_UNDO = null;
+function refreshUndoBtn() {
+  const b = document.getElementById('assist-undo'); if (!b) return;
+  b.style.display = ASSIST_UNDO ? 'inline-block' : 'none';
+}
+function revertAssist() {
+  if (!ASSIST_UNDO) return;
+  SCENARIO = ASSIST_UNDO; ASSIST_UNDO = null;
+  updateCounts(); renderCurrent(); renderAssistantLog(); refreshUndoBtn();
+  const m = document.getElementById('assist-msg'); if (m) m.textContent = 'Alteração do assistente desfeita ✓ — revise e salve.';
+}
 function renderAssistantPanel() {
   const el = document.getElementById('studio-assistant'); if (!el) return;
   el.innerHTML = `
@@ -131,10 +145,12 @@ function renderAssistantPanel() {
     <div class="assist-stub">
       <div id="assist-log" class="assist-log"></div>
       <div class="assist-fake"><textarea class="textarea" id="assist-input" rows="3" placeholder="Ex.: crie uma banca com 2 investidores céticos sobre um pitch de SaaS — pitch, arguição e deliberação. (Enter envia; Shift+Enter quebra linha)"></textarea><button class="btn btn-sm btn-primary" id="assist-send">Enviar</button></div>
-      <div class="hint" id="assist-msg"></div>
+      <div style="display:flex;align-items:center;gap:8px"><button class="btn btn-sm" id="assist-undo" style="display:none" title="Volta o cenário ao estado anterior à última alteração do assistente">↩ Desfazer alteração do assistente</button><span class="hint" id="assist-msg"></span></div>
     </div>`;
   renderAssistantLog();
   document.getElementById('assist-send').onclick = sendAssist;
+  document.getElementById('assist-undo').onclick = revertAssist;
+  refreshUndoBtn();
   document.getElementById('assist-input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAssist(); } });
 }
 function renderAssistantLog() {
@@ -169,7 +185,7 @@ async function sendAssist() {
   renderAssistantLog();
   // Mostra o reply STREAMANDO num balão temporário (parte a parte, como ChatGPT).
   const log = document.getElementById('assist-log');
-  if (log) { log.insertAdjacentHTML('beforeend', '<div class="assist-msg-assistant" id="assist-stream"><strong>🤖:</strong> <span class="assist-stream-txt"></span><span class="hint"> ⏳</span></div>'); log.scrollTop = log.scrollHeight; }
+  if (log) { log.insertAdjacentHTML('beforeend', '<div class="assist-msg-assistant" id="assist-stream"><strong>🤖:</strong> <span class="assist-stream-txt"></span><span class="hint"> ⏳ gerando proposta… (as abas atualizam quando concluir)</span></div>'); log.scrollTop = log.scrollHeight; }
   const streamTxt = () => document.querySelector('#assist-stream .assist-stream-txt');
   try {
     const resp = await fetch('/scenarios/api/assistant?stream=1', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message:text, history, scenario: assistScenarioView() }) });
@@ -190,9 +206,12 @@ async function sendAssist() {
     }
     document.getElementById('assist-stream')?.remove();
     if (!out) throw new Error('resposta incompleta');
+    ASSIST_UNDO = JSON.parse(JSON.stringify(SCENARIO));   // snapshot ANTES de aplicar → habilita "Desfazer"
     const summary = applyAssistProposals(out);
     ASSIST_HISTORY.push({ role:'assistant', content: (out.reply||reply) + (summary?`\n→ ${summary}`:'') });
     updateCounts(); renderCurrent(); renderAssistantLog();   // reflete na aba ativa; mantém o painel do assistente
+    refreshUndoBtn();
+    const am = document.getElementById('assist-msg'); if (am && summary) am.textContent = 'Aplicado nas abas ✓ — revise e salve, ou desfaça.';
   } catch (e) { document.getElementById('assist-stream')?.remove(); ASSIST_HISTORY.push({ role:'assistant', content:'(erro: '+e.message+')' }); renderAssistantLog(); }
 }
 const newLocalId = pfx => pfx+'_local_'+Math.abs((Date.now()+Math.floor(Math.random()*1e6))%1e9);
