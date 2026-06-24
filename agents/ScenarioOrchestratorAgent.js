@@ -104,7 +104,7 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
     // ---- chamada base. Blocking por padrão; com onFirstDelta vira STREAM
     // (sinaliza "respondendo" no 1º token e a fala da persona assim que a string
     // de action.message fecha — mesmo esquema do SuperOrchestrator). ----
-    async _call(systemPrompt, userContent, { meterCtx, vectorStoreIds = [], label, onFirstDelta = null, onMessageReady = null }) {
+    async _call(systemPrompt, userContent, { meterCtx, vectorStoreIds = [], label, onFirstDelta = null, onMessageReady = null, onMessageDelta = null }) {
         const payload = {
             model: this.model,
             instructions: systemPrompt,
@@ -127,14 +127,18 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
                     payload.stream = true;
                     const stream = await log.span(label, `responses.create[stream]${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
                         meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => this.client.responses.create(payload)));
-                    const collected = []; let finalResponse = null, messageSignaled = false;
+                    const collected = []; let finalResponse = null, messageSignaled = false, msgSent = 0;
                     for await (const event of stream) {
                         if (event?.type === "response.output_text.delta") {
                             if (!firstDeltaFired) { firstDeltaFired = true; try { onFirstDelta(); } catch (e) { log.error(label, `onFirstDelta: ${e.message}`); } }
                             if (typeof event.delta === "string") collected.push(event.delta);
-                            if (!messageSignaled && typeof onMessageReady === "function") {
+                            if (typeof onMessageDelta === "function" || (!messageSignaled && typeof onMessageReady === "function")) {
                                 const m = extractJsonStringValue(collected.join(""), "message");
-                                if (m && m.complete && m.value.trim()) { messageSignaled = true; try { onMessageReady(m.value); } catch (e) { log.error(label, `onMessageReady: ${e.message}`); } }
+                                if (m && m.value) {
+                                    // Stream token-a-token da fala da persona (mesmo esquema do reply do assistente).
+                                    if (typeof onMessageDelta === "function" && m.value.length > msgSent) { try { onMessageDelta(m.value.slice(msgSent)); } catch (e) { log.error(label, `onMessageDelta: ${e.message}`); } msgSent = m.value.length; }
+                                    if (!messageSignaled && typeof onMessageReady === "function" && m.complete && m.value.trim()) { messageSignaled = true; try { onMessageReady(m.value); } catch (e) { log.error(label, `onMessageReady: ${e.message}`); } }
+                                }
                             }
                         } else if (event?.type === "response.completed") { finalResponse = event.response ?? null; }
                     }
@@ -166,7 +170,7 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
         interactionTranscript = [], memory = null, studentMessage,
         isOpening = false, vectorStoreId = null, studentWorkVectorStoreId = null, artifactVectorStoreId = null, privateArtifactVectorStoreIds = [], interactionMode = "text",
         studentName = null, studentGenderHint = null, timeState = null, meterCtx = null,
-        onFirstDelta = null, onMessageReady = null,
+        onFirstDelta = null, onMessageReady = null, onMessageDelta = null,
     }) {
         const allowedIds = (interaction.participants || []).map(p => p.persona_id);
         // file_search desta etapa: enunciado + trabalho do aluno (Fase 2) + artefato
@@ -215,7 +219,7 @@ Escolha quem fala e a próxima ação. Retorne SOMENTE o JSON do schema.`;
         // prosa ou um shape levemente fora. Custa só quando falha (raro).
         let parsed = null, lastErr = "";
         for (let attempt = 1; attempt <= 2; attempt++) {
-            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreIds, label: "AGENT:ScenarioOrchestrator", onFirstDelta: attempt === 1 ? onFirstDelta : null, onMessageReady: attempt === 1 ? onMessageReady : null });
+            const text = await this._call(systemPrompt, userContent, { meterCtx, vectorStoreIds, label: "AGENT:ScenarioOrchestrator", onFirstDelta: attempt === 1 ? onFirstDelta : null, onMessageReady: attempt === 1 ? onMessageReady : null, onMessageDelta: attempt === 1 ? onMessageDelta : null });
             const p = extractJsonObject(text);
             if (!p) { lastErr = "no JSON in response"; continue; }
             p.speaker_persona_id = resolveSpeaker(p.speaker_persona_id, allowedIds, personasById, interaction);

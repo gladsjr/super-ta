@@ -315,6 +315,16 @@ function handleSSE(chunk) {
   const dl = (chunk.match(/data: (.+)/) || [])[1];
   let data = {}; try { data = JSON.parse(dl || '{}'); } catch (e) {}
   if (ev === 'thinking' || ev === 'responding') renderWait();
+  else if (ev === 'message_delta') {
+    // Fala da persona em STREAMING (token a token), como o assistente/voz. Se o
+    // aluno pediu pausa, a resposta fica segurada — não revela aqui.
+    if (PAUSE_REQUESTED || AWAITING_REVEAL) return;
+    const t = document.getElementById('rn-transcript'); if (!t) return;
+    t.querySelector('.rn-wait')?.remove(); t.querySelector('.rn-thinking')?.remove();
+    let b = t.querySelector('.rn-stream-txt');
+    if (!b) { t.insertAdjacentHTML('beforeend', `<div class="bubble b-persona"><div class="rn-stream-txt"></div></div>`); b = t.querySelector('.rn-stream-txt'); }
+    b.textContent += (data.delta || ''); t.scrollTop = t.scrollHeight;
+  }
   else if (ev === 'done') {
     if (PAUSE_REQUESTED) { HELD_RUN = data.run; AWAITING_REVEAL = true; renderWait(); }   // segura a resposta; relógio fica congelado
     else { TURN_INFLIGHT = false; RUN = data.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }

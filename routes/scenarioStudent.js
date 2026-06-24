@@ -212,7 +212,7 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
         send("thinking");
         const t0 = Date.now();
         try {
-            const r = await live.respondLive(agent, { ...ctx, onFirstDelta: () => send("responding"), onMessageReady: (msg) => send("message", { text: msg }) });
+            const r = await live.respondLive(agent, { ...ctx, onFirstDelta: () => send("responding"), onMessageDelta: (d) => send("message_delta", { delta: d }), onMessageReady: (msg) => send("message", { text: msg }) });
             pause(Date.now() - t0);
             run.memory = r.memory ?? run.memory;
             run.transcript.push(...r.entries);
