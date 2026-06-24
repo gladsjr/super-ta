@@ -179,7 +179,7 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
 ${this.turnSystemBody}`;
         const briefing = renderInteractionBriefing({ scenario, interaction, personasById, position, total, runMemory, enunciadoAvailable: !!vectorStoreId, studentWorkAvailable, artifactAvailable });
         const historyBlock = isOpening
-            ? "(ABERTURA — a outra ponta ainda não falou. A persona que abre (opener) deve se apresentar brevemente e dar início conforme a instrução desta etapa.)"
+            ? "(ABERTURA — a outra ponta ainda não falou. A persona que abre (opener) se apresenta brevemente e dá início RESPEITANDO A DINÂMICA desta etapa (seção DINÂMICA do briefing). REGRA DE DIREÇÃO: se a dinâmica diz que a OUTRA PONTA conduz/entrevista e você é a FONTE (ex.: consultoria/coleta — o aluno te entrevista), ABRA COMO ENTREVISTADO: apresente-se, dê um enquadramento curto e geral do seu lado e DEVOLVA A PALAVRA. NÃO entreviste a outra ponta, NÃO faça a ela perguntas de levantamento ('o que mais pesa na operação?', 'quais critérios você quer usar?') e NÃO peça que ela explique o contexto — quem investiga é ela. Se você é um fornecedor sendo consultado, pode fazer um pitch inicial curto e então abrir para perguntas, sem revelar limitações espontaneamente. Ignore qualquer 'exemplo de fala' que soe como pergunta da OUTRA PONTA — esses não são suas falas de abertura.)"
             : (interactionTranscript.length
                 ? interactionTranscript.map(e => `${e.kind === "student" ? "OUTRA PONTA" : (e.name || "persona")}: ${e.text}`).join("\n")
                 : "(sem falas ainda nesta interação)");
