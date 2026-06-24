@@ -181,7 +181,9 @@ function cleanArtifact(a) {
 function cleanInteraction(it, i) {
     const form = normalizeForm(it);
     const kind = formKind(form);                 // derivado da forma; gravado p/ o engine
-    const parts = (it.participants || []).map(p => ({ persona_id: p.persona_id, role: PARTICIPANT_ROLES.includes(p.role) ? p.role : "questionamento" }));
+    // Em consultoria/coleta a persona é a FONTE (o aluno conduz). Coage para "fonte"
+    // — "conduz a entrevista" ali contradiz a forma — e cura cenários antigos ao salvar.
+    const parts = (it.participants || []).map(p => ({ persona_id: p.persona_id, role: form === "consultoria" ? "fonte" : (PARTICIPANT_ROLES.includes(p.role) ? p.role : "questionamento") }));
     const incWork = typeof it.includes_student_work === "boolean" ? it.includes_student_work : !!FORM_DEFAULT_WORK[form];
     // Informações privadas das personas: persona_ids só valem se forem participantes desta interação.
     const partIds = new Set(parts.map(p => p.persona_id));

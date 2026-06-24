@@ -526,7 +526,7 @@ function renderInteracoesPane() {
   const itsEl = document.getElementById('sf-interactions');
   itsEl.querySelectorAll('.it-card').forEach(syncInteractionCard); renumberInteractions();
   document.getElementById('sf-add-interaction').onclick = () => { itsEl.insertAdjacentHTML('beforeend', interactionCardHtml(null)); const c=itsEl.lastElementChild; syncInteractionCard(c); renumberInteractions(); };
-  itsEl.addEventListener('change', e => { if (e.target.classList.contains('it-form')) { const card=e.target.closest('.it-card'); const fm=formMeta(e.target.value); const wk=card.querySelector('.it-work'); if (wk) wk.checked = !!fm.default_work; syncInteractionCard(card); } });
+  itsEl.addEventListener('change', e => { if (e.target.classList.contains('it-form')) { const card=e.target.closest('.it-card'); const fm=formMeta(e.target.value); const wk=card.querySelector('.it-work'); if (wk) wk.checked = !!fm.default_work; if (e.target.value==='consultoria') card.querySelectorAll('.pr-role').forEach(s => { s.value='fonte'; }); syncInteractionCard(card); } });
   itsEl.addEventListener('input', e => { if (e.target.classList.contains('it-title')) updateSummary(e.target.closest('.it-card')); });
   itsEl.addEventListener('click', e => {
     const card = e.target.closest('.it-card'); if (!card) return;
