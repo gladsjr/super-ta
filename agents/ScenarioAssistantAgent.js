@@ -60,7 +60,7 @@ Num cenário com várias interações, a ASSIMETRIA DE INFORMAÇÃO é o coraç�
 
 ═══════ COMO RESPONDER (SEMPRE só JSON, neste formato) ═══════
 {
-  "reply": "resposta conversacional ao professor, em português, curta e prática: o que você propôs/ajustou e por quê. Se faltar informação para decidir bem, PERGUNTE em vez de inventar. FIDELIDADE OBRIGATÓRIA: o reply deve descrever SOMENTE o que de fato está nas ops abaixo. NUNCA afirme ter preenchido/alterado um campo que você não emitiu — ex.: só diga que 'preenchi a dinâmica' se cada interação citada tiver 'form_prompt' nas ops. Se não emitiu, não alegue.",
+  "reply": "resposta conversacional ao professor, em português, curta e prática: o que você está propondo/ajustando e por quê. TEMPO VERBAL: use PRESENTE ou GERÚNDIO ('Estou montando…', 'Ajustando as etapas…', 'Monto a estrutura com…'), NÃO o pretérito ('Montei…'/'Apliquei…'): quando este texto é lido, a proposta ainda está sendo gerada e só aparece nas abas ao concluir — o pretérito dá impressão falsa de já-pronto. Se faltar informação para decidir bem, PERGUNTE em vez de inventar. FIDELIDADE OBRIGATÓRIA: o reply deve descrever SOMENTE o que de fato está nas ops abaixo. NUNCA afirme ter preenchido/alterado um campo que você não emitiu — ex.: só diga que 'preenchi a dinâmica' se cada interação citada tiver 'form_prompt' nas ops. Se não emitiu, não alegue.",
   "scenario_patch": { "name"?: "...", "description"?: "...", "out_of_scope"?: "...", "premissas"?: "..." } | null,
   "personas": [
     { "op": "add" | "update", "name": "<chave: nome da persona>", "from_template"?: "<nome de um template da biblioteca p/ usar como base>",
@@ -97,7 +97,7 @@ Num cenário com várias interações, a ASSIMETRIA DE INFORMAÇÃO é o coraç�
      * @param {string} p.message    mensagem do professor
      * @param {object|null} p.meterCtx
      */
-    async chat({ scenario = {}, templates = [], history = [], message, meterCtx = null, onReplyDelta = null }) {
+    async chat({ scenario = {}, templates = [], history = [], message, meterCtx = null, onReplyDelta = null, onProgress = null }) {
         const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
 
 ${this.systemPromptBody}`;
@@ -130,12 +130,20 @@ Responda SOMENTE com o JSON do formato especificado.`;
             const stream = await log.span("AGENT:ScenarioAssistant", "responses.create[stream]", () =>
                 meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioAssistant", model: this.model }, () =>
                     this.client.responses.create({ ...payload, stream: true })));
-            const collected = []; let finalResponse = null, sent = 0;
+            const collected = []; let finalResponse = null, sent = 0, lastProg = 0;
             for await (const event of stream) {
                 if (event?.type === "response.output_text.delta") {
                     if (typeof event.delta === "string") collected.push(event.delta);
-                    const m = extractJsonStringValue(collected.join(""), "reply");
+                    const buf = collected.join("");
+                    const m = extractJsonStringValue(buf, "reply");
                     if (m && m.value && m.value.length > sent) { try { onReplyDelta(m.value.slice(sent)); } catch (e) { log.error("AGENT:ScenarioAssistant", `onReplyDelta: ${e.message}`); } sent = m.value.length; }
+                    // Progresso: conta interações já emitidas (marcador "form": — só
+                    // existe em interações; "form_prompt" não casa). Sinaliza ao
+                    // professor que a proposta está sendo gerada, item a item.
+                    if (typeof onProgress === "function") {
+                        const n = (buf.match(/"form"\s*:/g) || []).length;
+                        if (n > lastProg) { lastProg = n; try { onProgress(n); } catch (e) {} }
+                    }
                 } else if (event?.type === "response.completed") { finalResponse = event.response ?? null; }
             }
             text = finalResponse?.output_text ?? collected.join("");

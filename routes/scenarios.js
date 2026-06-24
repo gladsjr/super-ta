@@ -85,7 +85,7 @@ router.post("/scenarios/api/assistant", json, async (req, res) => {
         // não conhece, então isto é seguro.
         send("thinking");
         try {
-            const out = await scenarioAssistantAgent.chat({ scenario, templates, history, message, meterCtx: {}, onReplyDelta: (d) => send("reply", { delta: d }) });
+            const out = await scenarioAssistantAgent.chat({ scenario, templates, history, message, meterCtx: {}, onReplyDelta: (d) => send("reply", { delta: d }), onProgress: (n) => send("progress", { interactions: n }) });
             send("done", out);
         } catch (e) { send("error", { error: e.message }); }
         return res.end();

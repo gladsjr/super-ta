@@ -200,6 +200,7 @@ async function sendAssist() {
         const ev = (chunk.match(/event: (.+)/)||[])[1]; const dl = (chunk.match(/data: ([\s\S]+)/)||[])[1];
         let data={}; try { data = JSON.parse(dl||'{}'); } catch (e) {}
         if (ev === 'reply') { reply += (data.delta||''); const el = streamTxt(); if (el) { el.textContent = reply; const lg=document.getElementById('assist-log'); if (lg) lg.scrollTop = lg.scrollHeight; } }
+        else if (ev === 'progress') { const h = document.querySelector('#assist-stream .hint'); const n = data.interactions||0; if (h && n) h.textContent = ` ⏳ montando proposta… ${n} interação${n>1?'ões':''} (as abas atualizam ao concluir)`; }
         else if (ev === 'done') { out = data; }
         else if (ev === 'error') { throw new Error(data.error||'erro'); }
       }
