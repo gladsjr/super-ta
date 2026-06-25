@@ -96,7 +96,8 @@ async function boot() {
     render();
     let stop = () => {};
     if (!st.run && !firstNeedsWork) {
-      stop = cycleStatus(t => setStatus(t), false);   // indicador só da abertura, dentro do transcript
+      prepWaitBubble(SCEN.interactions[SELTAB]);   // bolha do opener (nome/ícone) + indicador
+      stop = cycleStatus(t => { const e = document.getElementById('rn-prep-ind'); if (e) e.textContent = t; }, false);
       const inp = document.getElementById('rn-input'); if (inp) inp.disabled = true;
       const sb = document.getElementById('rn-send'); if (sb) sb.disabled = true;
     }
@@ -301,6 +302,17 @@ async function generateWork(iid) {
   } catch (e) { stop(); if (btn) btn.disabled = false; if (msg) msg.textContent = e.message; }
 }
 function thinking(on) { const t = document.getElementById('rn-transcript'); if (!t) return; t.querySelector('.rn-thinking')?.remove(); if (on) { t.insertAdjacentHTML('beforeend', '<div class="rn-thinking">⏳ aguarde…</div>'); t.scrollTop = t.scrollHeight; } }
+// Bolha "preparando" já com o nome/ícone de quem vai ABRIR a etapa — feedback rico
+// durante o prep. (A fala em si não strema token-a-token: o "opening" é o último
+// campo que o prep gera, derivado do plano inteiro.) #49
+function prepWaitBubble(it) {
+  const t = document.getElementById('rn-transcript'); if (!t || !it) return;
+  const p = it.opener_persona_id ? personaById(it.opener_persona_id) : null;
+  t.querySelector('.rn-wait')?.remove(); t.querySelector('.rn-thinking')?.remove();
+  const nameHtml = p ? `<div class="b-name">${esc(p.icon||'')} ${esc(p.name)}</div>` : '';
+  t.insertAdjacentHTML('beforeend', `<div class="bubble b-persona">${nameHtml}<span class="rn-thinking" id="rn-prep-ind">✍️ preparando a abertura…</span></div>`);
+  t.scrollTop = t.scrollHeight;
+}
 function setStatus(msg, partial) {
   const t = document.getElementById('rn-transcript'); if (!t) return;
   t.querySelector('.rn-thinking')?.remove(); t.querySelector('.rn-partial')?.remove();
@@ -386,8 +398,8 @@ async function advance() {
   const total = (SCEN.interactions || []).length;
   const hasNext = cur + 1 < total;
   PREPPING = true;
-  if (hasNext) { SELTAB = cur + 1; render(); }
-  const stop = cycleStatus(t => setStatus(t), false);
+  if (hasNext) { SELTAB = cur + 1; render(); prepWaitBubble(SCEN.interactions[SELTAB]); }
+  const stop = cycleStatus(t => { const e = document.getElementById('rn-prep-ind'); if (e) e.textContent = t; }, false);
   try { const j = await api('POST', '/advance' + (MODELQ ? '?' + MODELQ : '')); stop(); PREPPING = false; RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
   catch (e) { stop(); PREPPING = false; if (hasNext) SELTAB = cur; render(); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
 }

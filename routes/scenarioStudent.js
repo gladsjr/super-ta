@@ -27,6 +27,7 @@ const studentScenario = (s) => ({
     out_of_scope: s.out_of_scope || "", premissas: s.premissas || "",
     personas: (s.personas || []).map(p => ({ id: p.id, name: p.name, icon: p.icon, role: p.role })),
     interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work, time_limit_min: it.time_limit_min || null, instruction: it.instruction || "",
+        opener_persona_id: it.opener_persona_id || (it.participants || [])[0]?.persona_id || null,   // p/ a UI mostrar quem abre durante o preparo (#49)
         // Artefato (PDF) da etapa: só o nome vai ao aluno (o link é uma rota; os ids
         // da OpenAI ficam no servidor). O aluno precisa confirmar a leitura.
         artifact: it.artifact ? { filename: it.artifact.filename } : null })),
