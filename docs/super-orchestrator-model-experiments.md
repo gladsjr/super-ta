@@ -193,19 +193,22 @@ em `work_cost_events` — **5 entrevistas por configuração**, 6 perguntas, alu
 simulado pelo harness de áudio. Inclui prep, todos os turnos do orquestrador,
 STT, TTS, devolutiva e notas.
 
-**Atualização de preços.** A tabela de preços da seção anterior é de jun/13. O
-`config/pricing.yaml` foi atualizado desde então (desconto oficial de input
-cacheado ~10% do input; `gpt-5.4` mais barato). Os números abaixo usam os
-**preços atuais**:
+**Atualização de preços (commit `eb99e8f`, 22/jun).** Mudou **só o preço do input
+cacheado**: de 50% → ~10% do input (desconto oficial de cache hit da OpenAI), nos
+três modelos. O `input` e o `output` **não mudaram** — e o `gpt-5.4` **continua
+sendo exatamente metade** do `gpt-5.5` em todos os eixos. (Os antigos 50%, = 5× o
+preço real de cache hit, faziam o medidor superfaturar ~28%.) Preços atuais:
 
-| Modelo | input | input cacheado | output |
+| Modelo | input | input cacheado (antes → agora) | output |
 |---|---|---|---|
-| `gpt-5.5` | 5,00 | **0,50** | 30,00 |
-| `gpt-5.4` | **1,25** | **0,25** | (≈10–15) |
-| `gpt-5.4-mini` | 0,75 | 0,075 | 4,50 |
+| `gpt-5.5` | 5,00 | 2,50 → **0,50** | 30,00 |
+| `gpt-5.4` | 2,50 | 1,25 → **0,25** | 15,00 |
+| `gpt-5.4-mini` | 0,75 | 0,375 → **0,075** | 4,50 |
 
-Agora o input do `gpt-5.4` é ~**1/4** do `gpt-5.5` (não metade), e o cacheado caiu
-para ~10% do input nos dois — o que muda as contas relativas vs. os runs A–C.
+Efeito vs. os runs A–C (que usaram o cacheado a 50%): o **piso** fica um pouco
+mais barato; o **teto** (recálculo cache-frio) usa o delta `input − cacheado` —
+para o `gpt-5.4`, **2,50 − 0,25 = 2,25/Mtok** (e não 1,00, erro que subestimava o
+teto numa primeira versão deste adendo).
 
 ### Conceito novo: PISO × TETO (o ritmo do aluno move o custo)
 
@@ -226,13 +229,13 @@ estiver quente**. O cache tem TTL curto (~5–10 min de inatividade):
 | | PISO (cache quente) | TETO (ritmo humano) | out tok do orquestrador / entrevista |
 |---|---|---|---|
 | `gpt-5.5` medium (produção) | **$1,52** | **$2,69** | ~5.840 |
-| `gpt-5.4` esforço alto | **$1,01** | **$1,32** | ~10.870 |
+| `gpt-5.4` esforço alto | **$1,01** | **$1,72** | ~10.870 |
 
-O `gpt-5.4/high` sai **~34% mais barato no piso e ~51% no teto** — apesar de
-**raciocinar ~2× mais** (o dobro de tokens de output). Como o `gpt-5.4` é ~4× mais
-barato no input, o líquido cai mesmo gerando mais; e no **teto** a vantagem dobra,
-porque o castigo do cache-frio é sobre o input (onde o `5.4` é mais barato).
-Coerente com o Run C (texto): é o esforço alto que torna o `5.4` competitivo.
+O `gpt-5.4/high` sai **~34% mais barato no piso e ~36% no teto** — apesar de
+**raciocinar ~2× mais** (o dobro de tokens de output). Como o `gpt-5.4` é metade
+do preço do `gpt-5.5` no input (e o input/contexto domina o custo do turno), o
+líquido cai mesmo o `5.4` gerando mais texto interno. Coerente com o Run C
+(texto): é o esforço alto que torna o `5.4` competitivo.
 
 ### Híbrido — só o orquestrador vira `gpt-5.4` high (prep e avaliação ficam em `gpt-5.5`)
 
@@ -242,16 +245,16 @@ braço `5.5`; orquestrador do braço `5.4/high`):
 | | por entrevista | economia vs produção |
 |---|---|---|
 | PISO | $1,52 → **$1,39** | $0,13 (**9%**) |
-| TETO | $2,69 → **$1,73** | $0,96 (**36%**) |
+| TETO | $2,69 → **$2,12** | $0,57 (**21%**) |
 
 A economia mora no **teto**: o orquestrador sozinho custa **$1,82/entrevista** no
-teto em `5.5`, contra **$0,87** em `5.4/high`. O híbrido captura **~2/3** da
-economia do "tudo-`5.4`" no teto ($2,69 → $1,73 vs $1,32 do tudo-`5.4`), mas
+teto em `5.5`, contra **$1,26** em `5.4/high`. O híbrido captura **~3/5** da
+economia do "tudo-`5.4`" no teto ($2,69 → $2,12 vs $1,72 do tudo-`5.4`), mas
 **preserva o `gpt-5.5` onde a qualidade tende a importar mais**: o **prep**
 (leitura profunda e única do trabalho — grounding/contradições) e a **avaliação**
 (notas/devolutiva). Só o **condutor por turno** vira o modelo barato.
 
-**Turma de 30 alunos (teto):** ~$81 (`5.5`) → **~$52 (híbrido)** → ~$40 (tudo-`5.4`).
+**Turma de 30 alunos (teto):** ~$81 (`5.5`) → **~$64 (híbrido)** → ~$52 (tudo-`5.4`).
 
 ### Qualidade — ainda NÃO re-medida em áudio
 Estes números são **só custo**. A qualidade do `gpt-5.4/high` foi medida em
