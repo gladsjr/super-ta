@@ -36,7 +36,7 @@ const personasById = (s) => { const b = {}; for (const p of s.personas || []) b[
 const workVsId = (run, it) => (it && run?.student_work && run.student_work[it.id]?.vector_store_id) || null;
 const runView = (run) => ({
     id: run.id, interaction_index: run.interaction_index, transcript: run.transcript, done: !!run.done,
-    student_work: Object.fromEntries(Object.entries(run.student_work || {}).map(([k, v]) => [k, { filename: v.filename, uploaded_at: v.uploaded_at }])),
+    student_work: Object.fromEntries(Object.entries(run.student_work || {}).map(([k, v]) => [k, { filename: v.filename, uploaded_at: v.uploaded_at, generated: !!v.generated, downloadable: !!v.storage_key }])),
     // "Li o material" por interação (artefato): { iid: iso }.
     artifact_acks: run.artifact_acks || {},
 });
@@ -304,8 +304,12 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work", requireSubmis
         const name = req.file.originalname || "trabalho.pdf";
         const uploaded = await openai.files.create({ file: await OpenAI.toFile(req.file.buffer, name), purpose: "user_data" });
         const vsId = await createVectorStoreWithFiles([uploaded.id], `${run.id}:${it.id}`);
+        // Guarda os bytes no NOSSO storage para servir de volta (download/inspeção). #50
+        const { putAudio } = await import("../lib/audioStore.js");
+        const storageKey = `student-work/${run.id}/${it.id}.pdf`;
+        await putAudio({ key: storageKey, buffer: req.file.buffer, mimetype: req.file.mimetype || "application/pdf" });
         run.student_work = run.student_work || {};
-        run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, uploaded_at: new Date().toISOString() };
+        run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, storage_key: storageKey, uploaded_at: new Date().toISOString() };
 
         // É a interação corrente e a abertura ainda não rodou? Então AGORA o prep
         // lê o contexto completo (com o trabalho) e a persona ABRE já informada.
@@ -351,8 +355,13 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work-generate", requ
         const name = `trabalho-teste-${it.id}.pdf`;
         const uploaded = await openai.files.create({ file: await OpenAI.toFile(pdf, name), purpose: "user_data" });
         const vsId = await createVectorStoreWithFiles([uploaded.id], `${run.id}:${it.id}`);
+        // Guarda os bytes no NOSSO storage para servir ao aluno/professor (a OpenAI
+        // bloqueia download de purpose=user_data). #50
+        const { putAudio } = await import("../lib/audioStore.js");
+        const storageKey = `student-work/${run.id}/${it.id}.pdf`;
+        await putAudio({ key: storageKey, buffer: pdf, mimetype: "application/pdf" });
         run.student_work = run.student_work || {};
-        run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, uploaded_at: new Date().toISOString(), generated: true };
+        run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, storage_key: storageKey, uploaded_at: new Date().toISOString(), generated: true };
         // Igual ao upload: se é a etapa corrente e a abertura ainda não rodou, o prep
         // lê o contexto (com o trabalho gerado) e a persona abre já informada.
         const curIt = scenario.interactions[run.interaction_index];
@@ -391,6 +400,23 @@ router.get("/s/:submissionToken/scenario/interactions/:iid/artifact", requireSub
         stream.on("error", () => { if (!res.headersSent) res.status(502).end(); });
         stream.pipe(res);
     } catch (e) { res.status(502).json({ error: `falha ao servir o material: ${e.message}` }); }
+});
+
+// TRABALHO DO ALUNO da etapa (PDF anexado ou gerado): servir os bytes do NOSSO
+// storage para download/inspeção (aluno e professor têm o token da submissão). #50
+router.get("/s/:submissionToken/scenario/interactions/:iid/work-file", requireSubmissionToken, async (req, res) => {
+    const run = await store.getRunBySubmission(req.submission.id);
+    const sw = run?.student_work?.[req.params.iid];
+    if (!sw?.storage_key) return res.status(404).json({ error: "trabalho não encontrado para esta etapa" });
+    try {
+        const { streamAudio } = await import("../lib/audioStore.js");
+        const stream = await streamAudio(sw.storage_key);
+        if (!stream) return res.status(404).json({ error: "trabalho indisponível" });
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(sw.filename || "trabalho.pdf")}"`);
+        stream.on("error", () => { if (!res.headersSent) res.status(502).end(); });
+        stream.pipe(res);
+    } catch (e) { res.status(502).json({ error: `falha ao servir o trabalho: ${e.message}` }); }
 });
 // "Li o material": registra o aceite do aluno (libera responder nesta etapa).
 router.post("/s/:submissionToken/scenario/interactions/:iid/artifact/ack", requireSubmissionToken, async (req, res) => {
