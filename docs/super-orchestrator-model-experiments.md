@@ -7,7 +7,9 @@ resposta** ao trocar o modelo forte por um mais barato/rápido, e quanto disso
 custa em **qualidade** — principalmente na capacidade de pegar contradições do
 aluno, que é a razão de existir da ferramenta.
 
-Data dos runs: 11–12/jun/2026. Harness usado: `tests/ab-orchestrator/`.
+Data dos runs A/B: 11–12/jun/2026 (harness `tests/ab-orchestrator/`, **texto**).
+Adendo de **custo em áudio real**: 24–25/jun/2026 (harness `tests/audio-e2e/`,
+entrevista inteira; ver seção própria abaixo).
 
 > **Aviso de confiança estatística.** Os runs de triagem têm amostra pequena
 > (3 entrevistas por configuração = "n=3"); o run inicial tem 6. São sinais
@@ -179,6 +181,95 @@ O knob de esforço é **fraco no `gpt-5.5`** (Run B: pouco efeito) e **forte no
 `gpt-5.4`** (Run C: muito efeito). Faz sentido: o modelo forte já está saturado,
 o mais fraco tem espaço para ganhar pensando mais. **Esforço não é um knob
 universalmente útil — ele rende onde o modelo ainda não saturou.**
+
+---
+
+## Adendo: custo em ÁUDIO real — entrevista LEGADA de 6 perguntas (24–25/jun/2026)
+
+Os A/B acima são **texto** (harness `tests/ab-orchestrator/`) e comparam o custo
+**por turno**. Esta seção é complementar: o **custo absoluto de uma entrevista
+legada inteira em ÁUDIO**, do `/start` ao fim + avaliação, medido do **gasto real**
+em `work_cost_events` — **5 entrevistas por configuração**, 6 perguntas, aluno
+simulado pelo harness de áudio. Inclui prep, todos os turnos do orquestrador,
+STT, TTS, devolutiva e notas.
+
+**Atualização de preços.** A tabela de preços da seção anterior é de jun/13. O
+`config/pricing.yaml` foi atualizado desde então (desconto oficial de input
+cacheado ~10% do input; `gpt-5.4` mais barato). Os números abaixo usam os
+**preços atuais**:
+
+| Modelo | input | input cacheado | output |
+|---|---|---|---|
+| `gpt-5.5` | 5,00 | **0,50** | 30,00 |
+| `gpt-5.4` | **1,25** | **0,25** | (≈10–15) |
+| `gpt-5.4-mini` | 0,75 | 0,075 | 4,50 |
+
+Agora o input do `gpt-5.4` é ~**1/4** do `gpt-5.5` (não metade), e o cacheado caiu
+para ~10% do input nos dois — o que muda as contas relativas vs. os runs A–C.
+
+### Conceito novo: PISO × TETO (o ritmo do aluno move o custo)
+
+O custo por turno do orquestrador é dominado pelo **input** (o contexto relido a
+cada turno), e o prompt caching desconta ~90% desse input **enquanto o cache
+estiver quente**. O cache tem TTL curto (~5–10 min de inatividade):
+
+- **PISO** — turnos colados (o harness responde em segundos): o cache fica
+  quente, o input sai barato. Melhor caso / **ritmo de laboratório**.
+- **TETO** — **ritmo humano**: o aluno pausa 30s–3min entre respostas; esse gap
+  **expira o cache** e o turno seguinte paga o contexto inteiro a preço cheio.
+  Recalculado tratando cada token cacheado como cache-frio. É a **projeção
+  realista para a aula** (e o número para orçar). *Esta dimensão não existia nos
+  A/B de texto, que rodam colados.*
+
+### `gpt-5.5` medium (default) × `gpt-5.4` high — 5 entrevistas de voz cada
+
+| | PISO (cache quente) | TETO (ritmo humano) | out tok do orquestrador / entrevista |
+|---|---|---|---|
+| `gpt-5.5` medium (produção) | **$1,52** | **$2,69** | ~5.840 |
+| `gpt-5.4` esforço alto | **$1,01** | **$1,32** | ~10.870 |
+
+O `gpt-5.4/high` sai **~34% mais barato no piso e ~51% no teto** — apesar de
+**raciocinar ~2× mais** (o dobro de tokens de output). Como o `gpt-5.4` é ~4× mais
+barato no input, o líquido cai mesmo gerando mais; e no **teto** a vantagem dobra,
+porque o castigo do cache-frio é sobre o input (onde o `5.4` é mais barato).
+Coerente com o Run C (texto): é o esforço alto que torna o `5.4` competitivo.
+
+### Híbrido — só o orquestrador vira `gpt-5.4` high (prep e avaliação ficam em `gpt-5.5`)
+
+Estimativa **composta** dos componentes reais dos dois lotes (prep + avaliação do
+braço `5.5`; orquestrador do braço `5.4/high`):
+
+| | por entrevista | economia vs produção |
+|---|---|---|
+| PISO | $1,52 → **$1,39** | $0,13 (**9%**) |
+| TETO | $2,69 → **$1,73** | $0,96 (**36%**) |
+
+A economia mora no **teto**: o orquestrador sozinho custa **$1,82/entrevista** no
+teto em `5.5`, contra **$0,87** em `5.4/high`. O híbrido captura **~2/3** da
+economia do "tudo-`5.4`" no teto ($2,69 → $1,73 vs $1,32 do tudo-`5.4`), mas
+**preserva o `gpt-5.5` onde a qualidade tende a importar mais**: o **prep**
+(leitura profunda e única do trabalho — grounding/contradições) e a **avaliação**
+(notas/devolutiva). Só o **condutor por turno** vira o modelo barato.
+
+**Turma de 30 alunos (teto):** ~$81 (`5.5`) → **~$52 (híbrido)** → ~$40 (tudo-`5.4`).
+
+### Qualidade — ainda NÃO re-medida em áudio
+Estes números são **só custo**. A qualidade do `gpt-5.4/high` foi medida em
+**texto** no Run C (empate técnico por turno; fechou quase todo o buraco de
+contradições: 14/2 → 10/7). Uma checagem de qualidade **específica do áudio** /
+da config híbrida **não foi feita** — recomendada antes de qualquer troca,
+sobretudo porque o `5.4/high` raciocina 2× mais (pode mudar a condução para
+melhor ou pior).
+
+### Ressalvas
+- **n=5** por configuração; o **híbrido é estimativa composta** (não rodei a
+  config exata — prep `5.5` + orquestrador `5.4/high` no mesmo run).
+- O **teto** é projeção (recálculo cache-frio), não um run com pausas reais.
+- O braço `5.5` rodou no esforço **default (= medium)**; o `5.4` em **high**.
+- Lotes em `superta_claude`: `95b0c3df6278` (`5.5` medium) e `41392d188ac6`
+  (`5.4`/high). Reproduzir: `node tests/audio-e2e/run.mjs --base <url> --work
+  <token> --persona <perfil> --pdf <trabalho>` (5×), depois somar `work_cost_events`
+  por submissão.
 
 ---
 
