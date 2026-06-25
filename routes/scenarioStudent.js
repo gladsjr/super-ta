@@ -14,6 +14,7 @@ import multer from "multer";
 import OpenAI from "openai";
 import { requireSubmissionToken, requireAdmin } from "../lib/middleware.js";
 import * as store from "../lib/scenarios/store.js";
+import { formLabel, normalizeForm } from "../lib/scenarios/interactionForms.js";
 
 const router = express.Router();
 const json = express.json({ limit: "256kb" });
@@ -26,11 +27,23 @@ const studentScenario = (s) => ({
     // Regras globais visíveis ao aluno (painel): fora de escopo + premissas.
     out_of_scope: s.out_of_scope || "", premissas: s.premissas || "",
     personas: (s.personas || []).map(p => ({ id: p.id, name: p.name, icon: p.icon, role: p.role })),
-    interactions: (s.interactions || []).map(it => ({ id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work, time_limit_min: it.time_limit_min || null, instruction: it.instruction || "",
-        opener_persona_id: it.opener_persona_id || (it.participants || [])[0]?.persona_id || null,   // p/ a UI mostrar quem abre durante o preparo (#49)
-        // Artefato (PDF) da etapa: só o nome vai ao aluno (o link é uma rota; os ids
-        // da OpenAI ficam no servidor). O aluno precisa confirmar a leitura.
-        artifact: it.artifact ? { filename: it.artifact.filename } : null })),
+    interactions: (s.interactions || []).map(it => {
+        const pbi = Object.fromEntries((s.personas || []).map(p => [p.id, p]));
+        const names = (it.participants || []).map(p => pbi[p.persona_id]).filter(Boolean).map(p => `${p.icon || ""} ${p.name}`.trim());
+        // "meta" igual à do cabeçalho do servidor (interactionHeader), para a UI montar
+        // o cabeçalho estático "Interação X de Y — título · <tipo> · <personas>" já no
+        // preparo, sem depender do transcript. #48/#49
+        const header_meta = `${formLabel(normalizeForm(it))}${it.kind === "persona_exchange" ? " · personas conversam" : ""}${names.length ? ` · ${names.join(names.length === 2 ? " e " : ", ")}` : ""}`;
+        return {
+            id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work,
+            time_limit_min: it.time_limit_min || null, instruction: it.instruction || "",
+            opener_persona_id: it.opener_persona_id || (it.participants || [])[0]?.persona_id || null,   // p/ a UI mostrar quem abre durante o preparo (#49)
+            header_meta,
+            // Artefato (PDF) da etapa: só o nome vai ao aluno (o link é uma rota; os ids
+            // da OpenAI ficam no servidor). O aluno precisa confirmar a leitura.
+            artifact: it.artifact ? { filename: it.artifact.filename } : null,
+        };
+    }),
 });
 const personasById = (s) => { const b = {}; for (const p of s.personas || []) b[p.id] = p; return b; };
 // Trabalho do aluno (por interação) já anexado neste run? Devolve o vector store id.

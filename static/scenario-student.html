@@ -91,18 +91,17 @@ async function boot() {
     // temos (o /state traz o cenário e, em resume, o run). Só a abertura da persona
     // fica em estado de carregamento — o /start (lento) roda o prep em seguida.
     const firstNeedsWork = !st.run && !!SCEN.interactions?.[0]?.includes_student_work;
+    PREPPING = (!st.run && !firstNeedsWork);   // abertura sendo preparada → esqueleto + controles travados (render cuida)
     RUN = st.run || { interaction_index: 0, transcript: [], student_work: {}, artifact_acks: {}, done: false };
     SELTAB = RUN.interaction_index ?? 0;
     render();
     let stop = () => {};
-    if (!st.run && !firstNeedsWork) {
+    if (PREPPING) {
       prepWaitBubble(SCEN.interactions[SELTAB]);   // bolha do opener (nome/ícone) + indicador
       stop = cycleStatus(t => { const e = document.getElementById('rn-prep-ind'); if (e) e.textContent = t; }, false);
-      const inp = document.getElementById('rn-input'); if (inp) inp.disabled = true;
-      const sb = document.getElementById('rn-send'); if (sb) sb.disabled = true;
     }
     const j = await api('POST', '/start' + (MODELQ ? '?' + MODELQ : '')); // cria ou resume
-    stop();
+    stop(); PREPPING = false;
     SCEN = j.scenario; RUN = j.run; SELTAB = RUN.interaction_index ?? 0;
     document.getElementById('subtitle').textContent = j.resumed ? 'Você está retomando de onde parou.' : '';
     try { RESULT = await api('GET', '/evaluation'); } catch (e) { RESULT = null; }   // devolutiva/nota, se publicadas
@@ -143,9 +142,17 @@ function render() {
   const seg = segs[SELTAB];
   const entries = (SELTAB === 0 ? intro : []).concat(seg ? [seg.header, ...seg.entries] : []);
   const itAtSel = SCEN.interactions[SELTAB];
-  const isStudentStep = !done && SELTAB === cur && itAtSel && itAtSel.kind === 'student';
-  const isExchangeStep = !done && SELTAB === cur && itAtSel && itAtSel.kind === 'persona_exchange';
+  // Etapa sendo PREPARADA (boot/advance) conta como ATIVA, p/ mostrar o esqueleto
+  // completo (cabeçalho/tarefa/controles) já durante o preparo. #48/#49
+  const activeIdx = (PREPPING && SELTAB > cur && SELTAB < total) ? SELTAB : cur;
+  const isStudentStep = !done && SELTAB === activeIdx && itAtSel && itAtSel.kind === 'student';
+  const isExchangeStep = !done && SELTAB === activeIdx && itAtSel && itAtSel.kind === 'persona_exchange';
   const viewingPast = SELTAB < cur;
+  // Cabeçalho/contexto ESTÁTICOS quando a etapa ainda não abriu (transcript sem o
+  // segmento): "Interação X de Y — título · tipo · personas" + (na 1ª) o contexto. #48
+  const staticHeader = (!seg && !done && itAtSel)
+    ? `${SELTAB === 0 && SCEN.description ? `<div class="t-scenario">${esc(SCEN.description)}</div>` : ''}<div class="t-interaction"><strong>Interação ${SELTAB+1} de ${total} — ${esc(itAtSel.title)}</strong>${itAtSel.header_meta ? `<div class="meta">${esc(itAtSel.header_meta)}</div>` : ''}</div>`
+    : '';
   // Trabalho do aluno por interação: se a etapa pede e ainda não anexou, mostra o upload ANTES de liberar a resposta.
   const needsWork = isStudentStep && itAtSel.includes_student_work && !hasWork(itAtSel);
   // Material (artefato PDF) da etapa: o aluno LÊ (link) e confirma ("li o material")
@@ -220,7 +227,7 @@ function render() {
     <div class="rn-tabs">${tabs}</div>
     ${showConclusion ? finalPanel : `
     ${isStudentStep ? workNote : ''}
-    <div class="transcript" id="rn-transcript">${entries.map(bubbleHtml).join('') || (PREPPING ? '' : '<div class="empty">—</div>')}</div>
+    <div class="transcript" id="rn-transcript">${staticHeader}${entries.map(bubbleHtml).join('') || (staticHeader || PREPPING ? '' : '<div class="empty">—</div>')}</div>
     ${isStudentStep ? taskNote : ''}
     ${isStudentStep ? (needsWork ? workBox : (needsArtifact ? materialGate : (overTime ? `
       <div class="rn-controls"><span class="hint">⏰ O tempo desta etapa terminou — a persona não responde mais.</span><button class="btn btn-primary" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : `
@@ -239,7 +246,10 @@ function render() {
   const aack = document.getElementById('rn-art-ack'); if (aack) aack.onclick = () => ackArtifact(itAtSel.id);
   const aig = document.getElementById('rn-aigen'); if (aig) aig.onclick = aiGen;
   clearTimer();
-  if (isStudentStep && limitMin && !needsWork && !needsArtifact && !overTime) startTimer(seg.header, limitMin);
+  if (isStudentStep && seg && !PREPPING && limitMin && !needsWork && !needsArtifact && !overTime) startTimer(seg.header, limitMin);
+  // Durante o preparo da abertura, o esqueleto aparece mas os controles ficam
+  // travados (ainda não há fala da persona). #48/#49
+  if (PREPPING) { const i2 = document.getElementById('rn-input'); if (i2) i2.disabled = true; const s2 = document.getElementById('rn-send'); if (s2) s2.disabled = true; const av = document.getElementById('rn-advance'); if (av) av.disabled = true; }
 }
 // "Li o material": registra o aceite (libera responder na etapa) e re-renderiza.
 async function ackArtifact(iid) {
