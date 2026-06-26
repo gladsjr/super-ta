@@ -8,26 +8,21 @@
     :root { --ink:#1c2530; --ink-soft:#5b6675; --line:#e1e6ec; --bg:#f6f8fa; --accent:#2a6df4; --ok:#1a8a4a; --danger:#c0392b; }
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px; }
-    .wrap { max-width: 680px; margin: 0 auto; }
+    .wrap { max-width: 600px; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0 0 6px; }
     .sub { color: var(--ink-soft); margin: 0 0 20px; }
-    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 22px; }
-    .btn { font: inherit; padding: 12px 20px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 24px; }
+    .btn { font: inherit; padding: 12px 22px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
     .btn.danger { background:#fff; color: var(--danger); border-color: var(--danger); }
     .btn:disabled { opacity:.5; cursor: default; }
-    .status { display:flex; align-items:center; gap:8px; font-size:14px; color: var(--ink-soft); margin: 14px 0; }
-    .dot { width:10px; height:10px; border-radius:50%; background:#bbb; }
+    .status { display:flex; align-items:center; gap:10px; font-size:16px; margin: 18px 0; }
+    .dot { width:12px; height:12px; border-radius:50%; background:#bbb; flex:none; }
     .dot.live { background: var(--ok); animation: pulse 1.4s infinite; }
     .dot.err { background: var(--danger); }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-    .captions { margin-top: 16px; max-height: 320px; overflow:auto; }
-    .cap { padding: 8px 0; border-top: 1px solid var(--line); }
-    .cap:first-child { border-top:0; }
-    .cap .who { font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing:.04em; }
-    .cap.you .who { color: var(--accent); }
-    .cap .txt { margin-top: 2px; white-space: pre-wrap; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
     .hint { font-size: 13px; color: var(--ink-soft); }
     .err { color: var(--danger); font-size: 14px; margin-top: 10px; white-space: pre-wrap; }
+    .big { font-size: 18px; text-align:center; padding: 10px 0; }
   </style>
 </head>
 <body>
@@ -35,176 +30,113 @@
     <h1>Prova oral</h1>
     <p class="sub">Uma conversa por voz: o examinador faz as perguntas e você responde falando.</p>
 
-    <div class="card" id="card">
+    <div class="card">
       <div id="pre">
-        <p>Quando você clicar em <strong>Iniciar</strong>, o navegador vai pedir acesso ao seu <strong>microfone</strong>. O examinador vai se apresentar e começar as perguntas. Responda falando normalmente; ele espera você terminar.</p>
-        <p class="hint">Use fones de ouvido se puder (evita eco). É uma conversa ao vivo.</p>
+        <p>Ao clicar em <strong>Iniciar</strong>, o navegador vai pedir acesso ao seu <strong>microfone</strong>. O examinador vai se apresentar e começar. Responda falando normalmente — ele espera você terminar, e você pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</p>
+        <p class="hint">Use fones de ouvido se puder (evita eco).</p>
         <button class="btn" id="start-btn">Iniciar prova oral</button>
         <div class="err" id="pre-err"></div>
       </div>
 
       <div id="live" style="display:none">
         <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
+        <p class="hint" id="qinfo"></p>
         <button class="btn danger" id="end-btn">Encerrar prova</button>
-        <div class="captions" id="captions"></div>
       </div>
 
       <div id="done" style="display:none">
-        <h1>✓ Prova encerrada</h1>
-        <p class="sub">Você pode fechar esta página. Obrigado.</p>
+        <div class="big">✓ Prova encerrada</div>
+        <p class="sub" style="text-align:center">Você pode fechar esta página. Obrigado.</p>
       </div>
     </div>
   </div>
 
   <script>
     const SUB = (location.pathname.match(/\/s\/([0-9a-f]{12})/) || [])[1];
-    let pc = null, dc = null, micStream = null, audioEl = null, ended = false;
-
     const $ = id => document.getElementById(id);
+    const SR = 24000;
+    let ws = null, ctx = null, micStream = null, srcNode = null, procNode = null;
+    let playHead = 0, ended = false;
+
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
-    function show(id) { for (const s of ['pre','live','done']) $(s).style.display = s === id ? '' : 'none'; }
+    function show(id) { for (const s of ['pre', 'live', 'done']) $(s).style.display = s === id ? '' : 'none'; }
 
-    // Legendas indexadas por item_id (cada fala tem um id). TANTO o examinador
-    // QUANTO o aluno são transmitidos em deltas (cresce ao vivo). A transcrição
-    // do aluno costuma "alcançar" com atraso, intercalada com a fala do
-    // examinador — por isso NÃO dá para usar uma única "bolha corrente": cada
-    // fala mantém seu próprio balão pelo item_id, sem se misturar. Os eventos
-    // *.done/*.completed trazem o texto final autoritativo (substitui o
-    // acumulado dos deltas).
-    // EXAMINADOR: um balão por resposta, indexado por item_id (cresce ao vivo).
-    const bubbles = {};
-    function bubbleFor(itemId, who, you) {
-      const key = itemId || ('anon_' + who);
-      if (!bubbles[key]) bubbles[key] = addCap(who, '', you);
-      return bubbles[key];
+    // --- Reprodução: PCM16 (do relay) → toca sem emendas ---
+    function playPcm(arrayBuf) {
+      if (!ctx || ended) return;
+      const i16 = new Int16Array(arrayBuf);
+      if (!i16.length) return;
+      const buf = ctx.createBuffer(1, i16.length, SR);
+      const f32 = buf.getChannelData(0);
+      for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+      const node = ctx.createBufferSource();
+      node.buffer = buf; node.connect(ctx.destination);
+      const t = Math.max(ctx.currentTime + 0.02, playHead);
+      node.start(t);
+      playHead = t + buf.duration;
     }
-    function examinerDelta(itemId, t) { closeStudentGroup(); const b = bubbleFor(itemId, 'Examinador', false); b.txt.textContent += t; b.scroll(); }
-    function examinerDone(itemId, full) { if (full) { const b = bubbleFor(itemId, 'Examinador', false); b.txt.textContent = full; b.scroll(); } }
 
-    // ALUNO: o VAD pode quebrar UMA resposta em vários "itens" quando você faz
-    // uma pausa (toma fôlego). Agrupamos itens consecutivos do aluno num ÚNICO
-    // balão; ele só fecha quando o EXAMINADOR fala. Cada item cresce pelos
-    // deltas; o .completed fixa o texto final daquele item.
-    let sBubble = null, sPrev = '', sCur = '', sCurId = null;
-    function sRender() { if (sBubble) { sBubble.txt.textContent = (sPrev + ' ' + sCur).trim(); sBubble.scroll(); } }
-    function sEnsure() { if (!sBubble) { sBubble = addCap('Você', '', true); sPrev = ''; sCur = ''; sCurId = null; } }
-    function sSwitchItem(itemId) { if (sCurId && itemId !== sCurId) { sPrev = (sPrev + ' ' + sCur).trim(); sCur = ''; } sCurId = itemId; }
-    function studentDelta(itemId, t) { sEnsure(); sSwitchItem(itemId); sCur += t; sRender(); }
-    function studentDone(itemId, full) { sEnsure(); sSwitchItem(itemId); if (full) sCur = full; sRender(); }
-    function closeStudentGroup() { sBubble = null; sPrev = ''; sCur = ''; sCurId = null; }
-    function addCap(who, txt, you) {
-      const wrap = $('captions');
-      const el = document.createElement('div'); el.className = 'cap' + (you ? ' you' : '');
-      el.innerHTML = `<div class="who"></div><div class="txt"></div>`;
-      el.querySelector('.who').textContent = who;
-      el.querySelector('.txt').textContent = txt;
-      wrap.appendChild(el); wrap.scrollTop = wrap.scrollHeight;
-      return { txt: el.querySelector('.txt'), scroll: () => { wrap.scrollTop = wrap.scrollHeight; } };
+    // --- Captura: microfone → PCM16 → WebSocket ---
+    function startCapture() {
+      srcNode = ctx.createMediaStreamSource(micStream);
+      procNode = ctx.createScriptProcessor(4096, 1, 1);
+      procNode.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const f32 = e.inputBuffer.getChannelData(0);
+        const i16 = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) { let s = Math.max(-1, Math.min(1, f32[i])); i16[i] = s < 0 ? s * 32768 : s * 32767; }
+        ws.send(i16.buffer);
+      };
+      srcNode.connect(procNode);
+      // ScriptProcessor precisa estar conectado para rodar; ganho 0 evita ouvir o próprio mic.
+      const sink = ctx.createGain(); sink.gain.value = 0;
+      procNode.connect(sink); sink.connect(ctx.destination);
     }
 
     async function start() {
       $('pre-err').textContent = '';
       $('start-btn').disabled = true;
       try {
-        // 1) microfone (com cancelamento de eco/ruído — reduz o modelo "se ouvir")
-        micStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       } catch (e) {
         $('start-btn').disabled = false;
         $('pre-err').textContent = 'Não foi possível acessar o microfone. Autorize o acesso e tente de novo.';
         return;
       }
-      let sess;
-      try {
-        // 2) segredo efêmero (servidor monta a sessão com as perguntas)
-        const r = await fetch(`/s/${SUB}/oral/session`, { method: 'POST' });
-        sess = await r.json();
-        if (!r.ok) throw new Error(sess.detail || sess.error || ('HTTP ' + r.status));
-      } catch (e) {
-        $('start-btn').disabled = false;
-        $('pre-err').textContent = 'Falha ao iniciar a sessão: ' + e.message;
-        return;
-      }
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
+      playHead = ctx.currentTime;
       show('live'); setStatus('Conectando…');
-      try {
-        await connect(sess);
-      } catch (e) {
-        setStatus('Erro de conexão', 'err');
-        $('captions').insertAdjacentHTML('beforeend', `<div class="err">Falha ao conectar à voz: ${e.message}</div>`);
-      }
-    }
 
-    async function connect(sess) {
-      pc = new RTCPeerConnection();
-      // áudio do examinador
-      audioEl = document.createElement('audio'); audioEl.autoplay = true;
-      pc.ontrack = e => { audioEl.srcObject = e.streams[0]; };
-      // microfone do aluno
-      pc.addTrack(micStream.getAudioTracks()[0], micStream);
-      // canal de eventos (legendas, sinais)
-      dc = pc.createDataChannel('oai-events');
-      dc.onmessage = onEvent;
-      // O modelo Realtime NÃO inicia sozinho — espera um input. Assim que o
-      // canal abre, pedimos a primeira resposta para o examinador se apresentar
-      // e fazer a 1ª pergunta ANTES de o aluno falar (senão a 1ª fala do aluno
-      // dispara tudo e os turnos ficam embolados).
-      dc.onopen = () => {
-        setStatus('Prova em andamento — ouça a pergunta e responda', 'live');
-        try { dc.send(JSON.stringify({ type: 'response.create' })); } catch (e) {}
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}/s/${SUB}/oral/relay`);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => { setStatus('Conectando ao examinador…'); startCapture(); };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data !== 'string') { playPcm(ev.data); return; }
+        let m; try { m = JSON.parse(ev.data); } catch { return; }
+        if (m.type === 'status') {
+          if (m.state === 'connected') { setStatus('Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
+          else if (m.state === 'listening') setStatus('🎤 Ouvindo você…', 'live');
+          else if (m.state === 'thinking') setStatus('…', 'live');
+        } else if (m.type === 'ended') { finish(); }
       };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') setStatus('Prova em andamento — fale ao responder', 'live');
-        if (['failed', 'disconnected', 'closed'].includes(pc.connectionState) && !ended) setStatus('Conexão encerrada', 'err');
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      const resp = await fetch(`https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(sess.model)}`, {
-        method: 'POST',
-        body: offer.sdp,
-        headers: { Authorization: `Bearer ${sess.client_secret}`, 'Content-Type': 'application/sdp' },
-      });
-      if (!resp.ok) throw new Error('SDP ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
-      const answer = { type: 'answer', sdp: await resp.text() };
-      await pc.setRemoteDescription(answer);
+      ws.onerror = () => setStatus('Erro de conexão', 'err');
+      ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
     }
 
-    function onEvent(e) {
-      let msg; try { msg = JSON.parse(e.data); } catch { return; }
-      // Diagnóstico: tipo do evento + tempo (filtre por "rt" no console). Ajuda
-      // a ver se a transcrição do aluno chega em deltas (ao vivo) ou só no fim.
-      try { console.log('[rt]', Math.round(performance.now()), msg.type, msg.item_id || '', JSON.stringify(msg.delta || msg.transcript || '').slice(0, 60)); } catch (e2) {}
-      switch (msg.type) {
-        case 'response.audio_transcript.delta':
-        case 'response.output_audio_transcript.delta':
-          if (msg.delta) examinerDelta(msg.item_id, msg.delta); break;
-        case 'response.audio_transcript.done':
-        case 'response.output_audio_transcript.done':
-          examinerDone(msg.item_id, msg.transcript || ''); break;
-        case 'input_audio_buffer.speech_started':
-          setStatus('🎤 Ouvindo você…', 'live'); break;
-        case 'input_audio_buffer.speech_stopped':
-          setStatus('Transcrevendo / aguarde o examinador…', 'live'); break;
-        case 'conversation.item.input_audio_transcription.delta':
-          if (msg.delta) studentDelta(msg.item_id, msg.delta); break;
-        case 'conversation.item.input_audio_transcription.completed':
-          setStatus('Prova em andamento — responda quando o examinador terminar', 'live');
-          studentDone(msg.item_id, msg.transcript || ''); break;
-      }
-    }
-
-    function end() {
+    function finish() {
       ended = true;
-      try { dc && dc.close(); } catch {}
-      try { pc && pc.close(); } catch {}
+      try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'bye' })); } catch {}
+      try { ws && ws.close(); } catch {}
+      try { procNode && (procNode.onaudioprocess = null, procNode.disconnect()); } catch {}
+      try { srcNode && srcNode.disconnect(); } catch {}
       try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { ctx && ctx.close(); } catch {}
       show('done');
     }
 
     $('start-btn').onclick = start;
-    $('end-btn').onclick = end;
+    $('end-btn').onclick = finish;
     if (!SUB) { $('pre-err').textContent = 'Link inválido.'; $('start-btn').disabled = true; }
   </script>
 </body>
