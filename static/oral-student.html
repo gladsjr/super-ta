@@ -64,41 +64,33 @@
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
     function show(id) { for (const s of ['pre','live','done']) $(s).style.display = s === id ? '' : 'none'; }
 
-    // Legendas: uma bolha por "fala", que cresce com os deltas. Examinador e
-    // aluno têm bolhas correntes separadas; ao começar a falar um, fecha a do
-    // outro (mantém a ordem cronológica).
-    // A fala do ALUNO de um mesmo turno vira UM balão só, mesmo que a API
-    // transcreva em vários segmentos: acumulamos os segmentos (committed) e os
-    // deltas ao vivo (pending) no mesmo balão; ele só fecha quando o EXAMINADOR
-    // volta a falar. Assim não pica em várias linhas nem fica "tudo no fim
-    // separado".
-    let curExaminer = null, curStudent = null, sCommitted = '', sPending = '';
-    function renderStudent() {
-      if (!curStudent) return;
-      curStudent.txt.textContent = (sCommitted + ' ' + sPending).trim() || '🎤 …';
-      curStudent.scroll();
-    }
-    function openStudent() {
-      if (!curStudent) { curExaminer = null; curStudent = addCap('Você', '🎤 …', true); sCommitted = ''; sPending = ''; curStudent.scroll(); }
-    }
-    function closeStudent() { curStudent = null; sCommitted = ''; sPending = ''; }
-    function studentStarted() { openStudent(); }                       // feedback imediato (balão "🎤 …")
-    function studentDelta(t) { openStudent(); sPending += t; renderStudent(); }   // crescimento ao vivo (se a API mandar deltas)
-    function studentSegment(t) { openStudent(); sCommitted = (sCommitted + ' ' + (t || sPending)).trim(); sPending = ''; renderStudent(); }
+    // Legendas. Fato medido nos eventos: o EXAMINADOR é transmitido ao vivo
+    // (response.output_audio_transcript.delta), mas a fala do ALUNO NÃO — a
+    // OpenAI manda só um .completed com o texto inteiro quando você termina.
+    // Então: examinador cresce ao vivo num balão; aluno vira UM balão por
+    // resposta quando o .completed chega (com dedup, porque a API às vezes
+    // reemite a mesma fala). O "ao vivo" do aluno fica no STATUS, não em balão.
+    let curExaminer = null, lastStudentText = '';
     function examinerDelta(t) {
-      closeStudent();                                                  // examinador falou → fecha o balão do aluno
       if (!curExaminer) curExaminer = addCap('Examinador', '');
       curExaminer.txt.textContent += t;
       curExaminer.scroll();
     }
     function examinerDone() { curExaminer = null; }
+    function studentCompleted(t) {
+      t = (t || '').trim();
+      if (!t || t === lastStudentText) return;   // ignora vazio ou reemissão da mesma fala
+      lastStudentText = t;
+      curExaminer = null;
+      addCap('Você', t, true);
+    }
     function addCap(who, txt, you) {
       const wrap = $('captions');
       const el = document.createElement('div'); el.className = 'cap' + (you ? ' you' : '');
       el.innerHTML = `<div class="who"></div><div class="txt"></div>`;
       el.querySelector('.who').textContent = who;
       el.querySelector('.txt').textContent = txt;
-      wrap.appendChild(el);
+      wrap.appendChild(el); wrap.scrollTop = wrap.scrollHeight;
       return { txt: el.querySelector('.txt'), scroll: () => { wrap.scrollTop = wrap.scrollHeight; } };
     }
 
@@ -185,11 +177,12 @@
         case 'response.done':
           examinerDone(); break;
         case 'input_audio_buffer.speech_started':
-          studentStarted(); break;
-        case 'conversation.item.input_audio_transcription.delta':
-          if (msg.delta) studentDelta(msg.delta); break;
+          setStatus('🎤 Ouvindo você…', 'live'); break;
+        case 'input_audio_buffer.speech_stopped':
+          setStatus('Transcrevendo / aguarde o examinador…', 'live'); break;
         case 'conversation.item.input_audio_transcription.completed':
-          studentSegment(msg.transcript || ''); break;
+          setStatus('Prova em andamento — responda quando o examinador terminar', 'live');
+          studentCompleted(msg.transcript || ''); break;
       }
     }
 
