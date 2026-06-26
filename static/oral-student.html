@@ -87,8 +87,10 @@
       $('pre-err').textContent = '';
       $('start-btn').disabled = true;
       try {
-        // 1) microfone
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // 1) microfone (com cancelamento de eco/ruído — reduz o modelo "se ouvir")
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
       } catch (e) {
         $('start-btn').disabled = false;
         $('pre-err').textContent = 'Não foi possível acessar o microfone. Autorize o acesso e tente de novo.';
@@ -124,6 +126,14 @@
       // canal de eventos (legendas, sinais)
       dc = pc.createDataChannel('oai-events');
       dc.onmessage = onEvent;
+      // O modelo Realtime NÃO inicia sozinho — espera um input. Assim que o
+      // canal abre, pedimos a primeira resposta para o examinador se apresentar
+      // e fazer a 1ª pergunta ANTES de o aluno falar (senão a 1ª fala do aluno
+      // dispara tudo e os turnos ficam embolados).
+      dc.onopen = () => {
+        setStatus('Prova em andamento — ouça a pergunta e responda', 'live');
+        try { dc.send(JSON.stringify({ type: 'response.create' })); } catch (e) {}
+      };
 
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected') setStatus('Prova em andamento — fale ao responder', 'live');
