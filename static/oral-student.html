@@ -71,16 +71,27 @@
     // fala mantém seu próprio balão pelo item_id, sem se misturar. Os eventos
     // *.done/*.completed trazem o texto final autoritativo (substitui o
     // acumulado dos deltas).
+    // EXAMINADOR: um balão por resposta, indexado por item_id (cresce ao vivo).
     const bubbles = {};
     function bubbleFor(itemId, who, you) {
       const key = itemId || ('anon_' + who);
       if (!bubbles[key]) bubbles[key] = addCap(who, '', you);
       return bubbles[key];
     }
-    function examinerDelta(itemId, t) { const b = bubbleFor(itemId, 'Examinador', false); b.txt.textContent += t; b.scroll(); }
+    function examinerDelta(itemId, t) { closeStudentGroup(); const b = bubbleFor(itemId, 'Examinador', false); b.txt.textContent += t; b.scroll(); }
     function examinerDone(itemId, full) { if (full) { const b = bubbleFor(itemId, 'Examinador', false); b.txt.textContent = full; b.scroll(); } }
-    function studentDelta(itemId, t) { const b = bubbleFor(itemId, 'Você', true); b.txt.textContent += t; b.scroll(); }
-    function studentDone(itemId, full) { if (full) { const b = bubbleFor(itemId, 'Você', true); b.txt.textContent = full; b.scroll(); } }
+
+    // ALUNO: o VAD pode quebrar UMA resposta em vários "itens" quando você faz
+    // uma pausa (toma fôlego). Agrupamos itens consecutivos do aluno num ÚNICO
+    // balão; ele só fecha quando o EXAMINADOR fala. Cada item cresce pelos
+    // deltas; o .completed fixa o texto final daquele item.
+    let sBubble = null, sPrev = '', sCur = '', sCurId = null;
+    function sRender() { if (sBubble) { sBubble.txt.textContent = (sPrev + ' ' + sCur).trim(); sBubble.scroll(); } }
+    function sEnsure() { if (!sBubble) { sBubble = addCap('Você', '', true); sPrev = ''; sCur = ''; sCurId = null; } }
+    function sSwitchItem(itemId) { if (sCurId && itemId !== sCurId) { sPrev = (sPrev + ' ' + sCur).trim(); sCur = ''; } sCurId = itemId; }
+    function studentDelta(itemId, t) { sEnsure(); sSwitchItem(itemId); sCur += t; sRender(); }
+    function studentDone(itemId, full) { sEnsure(); sSwitchItem(itemId); if (full) sCur = full; sRender(); }
+    function closeStudentGroup() { sBubble = null; sPrev = ''; sCur = ''; sCurId = null; }
     function addCap(who, txt, you) {
       const wrap = $('captions');
       const el = document.createElement('div'); el.className = 'cap' + (you ? ' you' : '');
