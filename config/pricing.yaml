@@ -70,14 +70,15 @@ tts:
 # (áudio é muito mais caro que texto) e direção (input/output), com input
 # cacheado à parte. O `usage` de cada response.done traz esse desdobramento.
 #
-# ⚠️ PLACEHOLDERS — CONFIRMAR com a tabela oficial do gpt-realtime antes de
-#    confiar no valor em USD. Os TOKENS gravados em work_cost_events são REAIS
-#    (vêm do usage da OpenAI); só os multiplicadores abaixo são provisórios.
+# Fonte: tabela oficial da OpenAI (developers.openai.com/api/docs/pricing),
+# consultada em jun/2026. `gpt-realtime` é alias do snapshot `gpt-realtime-2`
+# (text in $4 / cache $0,40 / out $24; audio in $32 / cache $0,40 / out $64).
+# Reconferir ao trocar de snapshot.
 # ---------------------------------------------------------------------------
 realtime:
   gpt-realtime:
-    text_input_per_mtok: 4.00     # PLACEHOLDER
-    text_output_per_mtok: 16.00   # PLACEHOLDER
-    audio_input_per_mtok: 32.00   # PLACEHOLDER
-    audio_output_per_mtok: 64.00  # PLACEHOLDER
-    cached_per_mtok: 0.40         # PLACEHOLDER (input cacheado, áudio+texto)
+    text_input_per_mtok: 4.00
+    text_output_per_mtok: 24.00
+    audio_input_per_mtok: 32.00
+    audio_output_per_mtok: 64.00
+    cached_per_mtok: 0.40         # input cacheado (áudio e texto ambos a 0,40)
