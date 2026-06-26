@@ -72,7 +72,7 @@
       curExaminer.scroll();
     }
     function examinerDone() { curExaminer = null; }
-    function youSaid(t) { const c = addCap('Você', t, true); c.scroll(); }
+    function youSaid(t) { curExaminer = null; const c = addCap('Você', t, true); c.scroll(); }
     function addCap(who, txt, you) {
       const wrap = $('captions');
       const el = document.createElement('div'); el.className = 'cap' + (you ? ' you' : '');

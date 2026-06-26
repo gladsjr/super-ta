@@ -116,6 +116,7 @@ function buildExamInstructions(questions, examName) {
 PROTOCOLO (siga à risca):
 - Comece se apresentando em 1 frase ("Olá, vou conduzir sua prova oral. Vamos começar.") e já faça a PRIMEIRA pergunta.
 - Faça UMA pergunta por vez, EXATAMENTE como listadas e na ORDEM. Espere o aluno terminar de responder antes de seguir.
+- DÊ TEMPO ao aluno: ele pode pausar para pensar NO MEIO da resposta — espere ele CLARAMENTE terminar antes de falar. NUNCA o interrompa, NUNCA o apresse, não complete a fala dele nem emende a próxima pergunta em cima da resposta. Se houver silêncio curto, aguarde mais um pouco.
 - Após cada resposta, faça apenas um reconhecimento NEUTRO e curto ("Entendi.", "Certo.", "Obrigado.") e passe à próxima. NÃO diga se está certo ou errado. NÃO corrija, NÃO ensine, NÃO dê dicas, NÃO complete a resposta do aluno.
 - Se o aluno pedir para repetir, repita a pergunta. Se ele fugir do tema, reconduza com gentileza à pergunta atual.
 - NUNCA invente perguntas novas, NUNCA pule perguntas, NUNCA revele respostas ou gabarito.
@@ -139,7 +140,10 @@ async function mintRealtimeSecret({ instructions, voice }) {
             audio: {
                 input: {
                     transcription: { model: "gpt-4o-transcribe" },
-                    turn_detection: { type: "server_vad" },
+                    // VAD semântico com baixa pressa: entende quando o aluno DE
+                    // FATO terminou e tolera pausas para pensar — evita cortar a
+                    // fala em pedaços e o examinador responder cedo demais.
+                    turn_detection: { type: "semantic_vad", eagerness: "low" },
                 },
                 output: { voice },
             },
