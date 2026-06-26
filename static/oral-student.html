@@ -173,9 +173,9 @@
 
     function onEvent(e) {
       let msg; try { msg = JSON.parse(e.data); } catch { return; }
-      // Diagnóstico: tipo do evento + tempo (abra o console do navegador). Ajuda
+      // Diagnóstico: tipo do evento + tempo (filtre por "rt" no console). Ajuda
       // a ver se a transcrição do aluno chega em deltas (ao vivo) ou só no fim.
-      try { console.debug('[rt]', Math.round(performance.now()), msg.type, msg.delta || msg.transcript || ''); } catch (e2) {}
+      try { console.log('[rt]', Math.round(performance.now()), msg.type, JSON.stringify(msg.delta || msg.transcript || '').slice(0, 80)); } catch (e2) {}
       switch (msg.type) {
         case 'response.audio_transcript.delta':
         case 'response.output_audio_transcript.delta':
