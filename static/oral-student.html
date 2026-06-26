@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Prova oral</title>
+  <style>
+    :root { --ink:#1c2530; --ink-soft:#5b6675; --line:#e1e6ec; --bg:#f6f8fa; --accent:#2a6df4; --ok:#1a8a4a; --danger:#c0392b; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px; }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: var(--ink-soft); margin: 0 0 20px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 22px; }
+    .btn { font: inherit; padding: 12px 20px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
+    .btn.danger { background:#fff; color: var(--danger); border-color: var(--danger); }
+    .btn:disabled { opacity:.5; cursor: default; }
+    .status { display:flex; align-items:center; gap:8px; font-size:14px; color: var(--ink-soft); margin: 14px 0; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#bbb; }
+    .dot.live { background: var(--ok); animation: pulse 1.4s infinite; }
+    .dot.err { background: var(--danger); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    .captions { margin-top: 16px; max-height: 320px; overflow:auto; }
+    .cap { padding: 8px 0; border-top: 1px solid var(--line); }
+    .cap:first-child { border-top:0; }
+    .cap .who { font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing:.04em; }
+    .cap.you .who { color: var(--accent); }
+    .cap .txt { margin-top: 2px; white-space: pre-wrap; }
+    .hint { font-size: 13px; color: var(--ink-soft); }
+    .err { color: var(--danger); font-size: 14px; margin-top: 10px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Prova oral</h1>
+    <p class="sub">Uma conversa por voz: o examinador faz as perguntas e você responde falando.</p>
+
+    <div class="card" id="card">
+      <div id="pre">
+        <p>Quando você clicar em <strong>Iniciar</strong>, o navegador vai pedir acesso ao seu <strong>microfone</strong>. O examinador vai se apresentar e começar as perguntas. Responda falando normalmente; ele espera você terminar.</p>
+        <p class="hint">Use fones de ouvido se puder (evita eco). É uma conversa ao vivo.</p>
+        <button class="btn" id="start-btn">Iniciar prova oral</button>
+        <div class="err" id="pre-err"></div>
+      </div>
+
+      <div id="live" style="display:none">
+        <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
+        <button class="btn danger" id="end-btn">Encerrar prova</button>
+        <div class="captions" id="captions"></div>
+      </div>
+
+      <div id="done" style="display:none">
+        <h1>✓ Prova encerrada</h1>
+        <p class="sub">Você pode fechar esta página. Obrigado.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUB = (location.pathname.match(/\/s\/([0-9a-f]{12})/) || [])[1];
+    let pc = null, dc = null, micStream = null, audioEl = null, ended = false;
+
+    const $ = id => document.getElementById(id);
+    function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
+    function show(id) { for (const s of ['pre','live','done']) $(s).style.display = s === id ? '' : 'none'; }
+
+    // Legendas: agrupa deltas por "fala". Uma bolha do examinador e uma sua.
+    let curExaminer = null;
+    function examinerDelta(t) {
+      if (!curExaminer) { curExaminer = addCap('Examinador', ''); }
+      curExaminer.txt.textContent += t;
+      curExaminer.scroll();
+    }
+    function examinerDone() { curExaminer = null; }
+    function youSaid(t) { const c = addCap('Você', t, true); c.scroll(); }
+    function addCap(who, txt, you) {
+      const wrap = $('captions');
+      const el = document.createElement('div'); el.className = 'cap' + (you ? ' you' : '');
+      el.innerHTML = `<div class="who"></div><div class="txt"></div>`;
+      el.querySelector('.who').textContent = who;
+      el.querySelector('.txt').textContent = txt;
+      wrap.appendChild(el);
+      return { txt: el.querySelector('.txt'), scroll: () => { wrap.scrollTop = wrap.scrollHeight; } };
+    }
+
+    async function start() {
+      $('pre-err').textContent = '';
+      $('start-btn').disabled = true;
+      try {
+        // 1) microfone
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        $('start-btn').disabled = false;
+        $('pre-err').textContent = 'Não foi possível acessar o microfone. Autorize o acesso e tente de novo.';
+        return;
+      }
+      let sess;
+      try {
+        // 2) segredo efêmero (servidor monta a sessão com as perguntas)
+        const r = await fetch(`/s/${SUB}/oral/session`, { method: 'POST' });
+        sess = await r.json();
+        if (!r.ok) throw new Error(sess.detail || sess.error || ('HTTP ' + r.status));
+      } catch (e) {
+        $('start-btn').disabled = false;
+        $('pre-err').textContent = 'Falha ao iniciar a sessão: ' + e.message;
+        return;
+      }
+      show('live'); setStatus('Conectando…');
+      try {
+        await connect(sess);
+      } catch (e) {
+        setStatus('Erro de conexão', 'err');
+        $('captions').insertAdjacentHTML('beforeend', `<div class="err">Falha ao conectar à voz: ${e.message}</div>`);
+      }
+    }
+
+    async function connect(sess) {
+      pc = new RTCPeerConnection();
+      // áudio do examinador
+      audioEl = document.createElement('audio'); audioEl.autoplay = true;
+      pc.ontrack = e => { audioEl.srcObject = e.streams[0]; };
+      // microfone do aluno
+      pc.addTrack(micStream.getAudioTracks()[0], micStream);
+      // canal de eventos (legendas, sinais)
+      dc = pc.createDataChannel('oai-events');
+      dc.onmessage = onEvent;
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') setStatus('Prova em andamento — fale ao responder', 'live');
+        if (['failed', 'disconnected', 'closed'].includes(pc.connectionState) && !ended) setStatus('Conexão encerrada', 'err');
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      const resp = await fetch(`https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(sess.model)}`, {
+        method: 'POST',
+        body: offer.sdp,
+        headers: { Authorization: `Bearer ${sess.client_secret}`, 'Content-Type': 'application/sdp' },
+      });
+      if (!resp.ok) throw new Error('SDP ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
+      const answer = { type: 'answer', sdp: await resp.text() };
+      await pc.setRemoteDescription(answer);
+    }
+
+    function onEvent(e) {
+      let msg; try { msg = JSON.parse(e.data); } catch { return; }
+      switch (msg.type) {
+        case 'response.audio_transcript.delta':
+        case 'response.output_audio_transcript.delta':
+          if (msg.delta) examinerDelta(msg.delta); break;
+        case 'response.audio_transcript.done':
+        case 'response.output_audio_transcript.done':
+        case 'response.done':
+          examinerDone(); break;
+        case 'conversation.item.input_audio_transcription.completed':
+          if (msg.transcript) youSaid(msg.transcript); break;
+      }
+    }
+
+    function end() {
+      ended = true;
+      try { dc && dc.close(); } catch {}
+      try { pc && pc.close(); } catch {}
+      try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {}
+      show('done');
+    }
+
+    $('start-btn').onclick = start;
+    $('end-btn').onclick = end;
+    if (!SUB) { $('pre-err').textContent = 'Link inválido.'; $('start-btn').disabled = true; }
+  </script>
+</body>
+</html>

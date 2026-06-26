@@ -2,6 +2,7 @@
 
 import path from "path";
 import express from "express";
+import * as db from "../lib/db.js";
 import { PROJECT_ROOT } from "../lib/config.js";
 import {
     CONSENT_VERSION,
@@ -20,7 +21,17 @@ router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "p
 // Página do professor para PROVA ORAL (Realtime). O admin abre /w/:token/oral.
 router.get("/w/:workToken/oral", (_req, res) => res.sendFile(path.join(STATIC_DIR, "oral-professor.html")));
 router.get("/w/:workToken/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "conversation.html")));
-router.get("/s/:submissionToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "student.html")));
+// Entrada do aluno: a MESMA URL serve a página certa pelo tipo do trabalho —
+// prova oral (Realtime) → oral-student.html; senão → student.html (entrevista).
+router.get("/s/:submissionToken", async (req, res) => {
+    try {
+        const found = await db.findSubmissionByToken(String(req.params.submissionToken || "").toLowerCase());
+        if (found && found.work_kind === "oral_realtime") {
+            return res.sendFile(path.join(STATIC_DIR, "oral-student.html"));
+        }
+    } catch { /* qualquer erro → cai no padrão (entrevista) */ }
+    res.sendFile(path.join(STATIC_DIR, "student.html"));
+});
 
 // Termo de consentimento (texto + versão). Servido como JSON para o
 // frontend renderizar dentro do modal antes do upload. Sem estado por aluno
