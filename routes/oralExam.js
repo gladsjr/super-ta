@@ -140,10 +140,10 @@ async function mintRealtimeSecret({ instructions, voice }) {
             audio: {
                 input: {
                     transcription: { model: "gpt-4o-transcribe" },
-                    // VAD semântico com baixa pressa: entende quando o aluno DE
-                    // FATO terminou e tolera pausas para pensar — evita cortar a
-                    // fala em pedaços e o examinador responder cedo demais.
-                    turn_detection: { type: "semantic_vad", eagerness: "low" },
+                    // VAD semântico, pressa MÉDIA: tolera pausas para pensar sem
+                    // picotar a fala, mas sem demorar demais para perceber o fim.
+                    // (low = paciente demais; high = corta cedo.)
+                    turn_detection: { type: "semantic_vad", eagerness: "medium" },
                 },
                 output: { voice },
             },

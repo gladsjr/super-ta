@@ -64,15 +64,27 @@
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
     function show(id) { for (const s of ['pre','live','done']) $(s).style.display = s === id ? '' : 'none'; }
 
-    // Legendas: agrupa deltas por "fala". Uma bolha do examinador e uma sua.
-    let curExaminer = null;
+    // Legendas: uma bolha por "fala", que cresce com os deltas. Examinador e
+    // aluno têm bolhas correntes separadas; ao começar a falar um, fecha a do
+    // outro (mantém a ordem cronológica).
+    let curExaminer = null, curStudent = null;
     function examinerDelta(t) {
-      if (!curExaminer) { curExaminer = addCap('Examinador', ''); }
+      curStudent = null;
+      if (!curExaminer) curExaminer = addCap('Examinador', '');
       curExaminer.txt.textContent += t;
       curExaminer.scroll();
     }
     function examinerDone() { curExaminer = null; }
-    function youSaid(t) { curExaminer = null; const c = addCap('Você', t, true); c.scroll(); }
+    function studentDelta(t) {
+      curExaminer = null;
+      if (!curStudent) curStudent = addCap('Você', '', true);
+      curStudent.txt.textContent += t;
+      curStudent.scroll();
+    }
+    function studentDone(t) {
+      if (curStudent) { if (t) curStudent.txt.textContent = t; curStudent.scroll(); curStudent = null; }
+      else if (t) { addCap('Você', t, true).scroll(); }
+    }
     function addCap(who, txt, you) {
       const wrap = $('captions');
       const el = document.createElement('div'); el.className = 'cap' + (you ? ' you' : '');
@@ -162,8 +174,10 @@
         case 'response.output_audio_transcript.done':
         case 'response.done':
           examinerDone(); break;
+        case 'conversation.item.input_audio_transcription.delta':
+          if (msg.delta) studentDelta(msg.delta); break;
         case 'conversation.item.input_audio_transcription.completed':
-          if (msg.transcript) youSaid(msg.transcript); break;
+          studentDone(msg.transcript || ''); break;
       }
     }
 
