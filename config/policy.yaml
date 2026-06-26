@@ -9,6 +9,8 @@ models:
   # Audio (modo de interação áudio com o aluno; ver replit.md)
   stt_model: "gpt-4o-transcribe"
   tts_model: "gpt-4o-mini-tts"
+  # Realtime (fala-a-fala) — usado só pelo tipo de trabalho "prova oral".
+  realtime_model: "gpt-realtime"
   # Future context-specific models can be configured here
   # comprehension_evaluator_model: "gpt-5.3"
   # clarification_evaluator_model: "gpt-5.3"
