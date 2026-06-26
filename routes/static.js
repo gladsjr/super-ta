@@ -8,6 +8,7 @@ import {
     CONSENT_VERSION,
     CONSENT_TEXT_HTML,
     CONSENT_AUDIO_ADDITION_HTML,
+    CONSENT_ORAL_HTML,
 } from "../config/consent.js";
 
 const router = express.Router();
@@ -41,6 +42,7 @@ router.get("/api/consent", (_req, res) => {
         version: CONSENT_VERSION,
         textHtml: CONSENT_TEXT_HTML,
         audioAdditionHtml: CONSENT_AUDIO_ADDITION_HTML,
+        oralHtml: CONSENT_ORAL_HTML,
     });
 });
 

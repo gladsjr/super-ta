@@ -104,7 +104,8 @@
     function renderLinks(subs) {
       document.getElementById('links').innerHTML = (subs || []).map(s => {
         const url = `${location.origin}/s/${s.submission_token}`;
-        return `<div class="link-row"><span class="hint" style="width:120px">${esc(s.student_label || '')}</span><code>${url}</code> <a href="${url}" target="_blank">abrir ↗</a></div>`;
+        const vid = s.has_oral_video ? ` <a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado da prova">🎥 vídeo</a>` : '';
+        return `<div class="link-row"><span class="hint" style="width:120px">${esc(s.student_label || '')}</span><code>${url}</code> <a href="${url}" target="_blank">abrir ↗</a>${vid}</div>`;
       }).join('') || '<p class="hint">Nenhum link ainda.</p>';
     }
 

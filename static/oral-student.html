@@ -8,14 +8,14 @@
     :root { --ink:#1c2530; --ink-soft:#5b6675; --line:#e1e6ec; --bg:#f6f8fa; --accent:#2a6df4; --ok:#1a8a4a; --danger:#c0392b; }
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px; }
-    .wrap { max-width: 600px; margin: 0 auto; }
+    .wrap { max-width: 620px; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0 0 6px; }
     .sub { color: var(--ink-soft); margin: 0 0 20px; }
     .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 24px; }
     .btn { font: inherit; padding: 12px 22px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
     .btn.danger { background:#fff; color: var(--danger); border-color: var(--danger); }
     .btn:disabled { opacity:.5; cursor: default; }
-    .status { display:flex; align-items:center; gap:10px; font-size:16px; margin: 18px 0; }
+    .status { display:flex; align-items:center; gap:10px; font-size:16px; margin: 16px 0; }
     .dot { width:12px; height:12px; border-radius:50%; background:#bbb; flex:none; }
     .dot.live { background: var(--ok); animation: pulse 1.4s infinite; }
     .dot.err { background: var(--danger); }
@@ -23,30 +23,39 @@
     .hint { font-size: 13px; color: var(--ink-soft); }
     .err { color: var(--danger); font-size: 14px; margin-top: 10px; white-space: pre-wrap; }
     .big { font-size: 18px; text-align:center; padding: 10px 0; }
+    .consent { border:1px solid var(--line); border-radius:10px; padding: 14px 16px; max-height: 260px; overflow:auto; background:#fbfcfd; font-size: 14px; margin: 14px 0; }
+    .consent h4 { margin: 12px 0 4px; font-size: 14px; }
+    .consent p, .consent li { line-height: 1.45; }
+    .accept { display:flex; align-items:flex-start; gap:10px; margin: 6px 0 14px; cursor:pointer; }
+    .accept input { margin-top: 3px; }
+    video { width: 100%; max-width: 320px; border-radius: 10px; background:#000; transform: scaleX(-1); display:block; margin: 0 auto 14px; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Prova oral</h1>
-    <p class="sub">Uma conversa por voz: o examinador faz as perguntas e você responde falando.</p>
+    <p class="sub">Uma conversa por voz, com a câmera ligada. O examinador faz as perguntas e você responde falando.</p>
 
     <div class="card">
       <div id="pre">
-        <p>Ao clicar em <strong>Iniciar</strong>, o navegador vai pedir acesso ao seu <strong>microfone</strong>. O examinador vai se apresentar e começar. Responda falando normalmente — ele espera você terminar, e você pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</p>
+        <p>Ao iniciar, o navegador vai pedir acesso ao seu <strong>microfone</strong> e à sua <strong>câmera</strong>. O examinador vai se apresentar e começar. Você pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</p>
         <p class="hint">Use fones de ouvido se puder (evita eco).</p>
-        <button class="btn" id="start-btn">Iniciar prova oral</button>
+        <div class="consent" id="consent-text">Carregando o termo…</div>
+        <label class="accept"><input type="checkbox" id="accept"/> <span>Li e <strong>concordo</strong> com a gravação de voz e vídeo e com o uso descrito acima.</span></label>
+        <button class="btn" id="start-btn" disabled>Iniciar prova oral</button>
         <div class="err" id="pre-err"></div>
       </div>
 
       <div id="live" style="display:none">
+        <video id="selfview" autoplay muted playsinline></video>
         <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
         <p class="hint" id="qinfo"></p>
         <button class="btn danger" id="end-btn">Encerrar prova</button>
       </div>
 
       <div id="done" style="display:none">
-        <div class="big">✓ Prova encerrada</div>
-        <p class="sub" style="text-align:center">Você pode fechar esta página. Obrigado.</p>
+        <div class="big" id="done-msg">Encerrando…</div>
+        <p class="sub" style="text-align:center" id="done-sub"></p>
       </div>
     </div>
   </div>
@@ -56,10 +65,19 @@
     const $ = id => document.getElementById(id);
     const SR = 24000;
     let ws = null, ctx = null, micStream = null, srcNode = null, procNode = null;
-    let playHead = 0, ended = false;
+    let recorder = null, recChunks = [], playHead = 0, ended = false;
 
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
     function show(id) { for (const s of ['pre', 'live', 'done']) $(s).style.display = s === id ? '' : 'none'; }
+
+    // Termo de consentimento (voz + vídeo) — habilita o Iniciar só após o aceite.
+    (async () => {
+      try {
+        const j = await (await fetch('/api/consent')).json();
+        $('consent-text').innerHTML = j.oralHtml || '(termo indisponível)';
+      } catch { $('consent-text').textContent = 'Não foi possível carregar o termo. Recarregue a página.'; }
+    })();
+    $('accept').onchange = () => { $('start-btn').disabled = !$('accept').checked; };
 
     // --- Reprodução: PCM16 (do relay) → toca sem emendas ---
     function playPcm(arrayBuf) {
@@ -72,8 +90,7 @@
       const node = ctx.createBufferSource();
       node.buffer = buf; node.connect(ctx.destination);
       const t = Math.max(ctx.currentTime + 0.02, playHead);
-      node.start(t);
-      playHead = t + buf.duration;
+      node.start(t); playHead = t + buf.duration;
     }
 
     // --- Captura: microfone → PCM16 → WebSocket ---
@@ -88,7 +105,6 @@
         ws.send(i16.buffer);
       };
       srcNode.connect(procNode);
-      // ScriptProcessor precisa estar conectado para rodar; ganho 0 evita ouvir o próprio mic.
       const sink = ctx.createGain(); sink.gain.value = 0;
       procNode.connect(sink); sink.connect(ctx.destination);
     }
@@ -96,17 +112,32 @@
     async function start() {
       $('pre-err').textContent = '';
       $('start-btn').disabled = true;
+      // 1) registra o consentimento no servidor
+      try { await fetch(`/s/${SUB}/oral/consent`, { method: 'POST' }); } catch {}
+      // 2) microfone + câmera
       try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        });
       } catch (e) {
         $('start-btn').disabled = false;
-        $('pre-err').textContent = 'Não foi possível acessar o microfone. Autorize o acesso e tente de novo.';
+        $('pre-err').textContent = 'Não foi possível acessar microfone/câmera. Autorize o acesso e tente de novo.';
         return;
       }
+      show('live');
+      $('selfview').srcObject = micStream;
+      setStatus('Conectando…');
+      // 3) grava o vídeo (áudio do aluno + câmera) para avaliação posterior
+      try {
+        recorder = new MediaRecorder(micStream);
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+        recorder.onstop = uploadVideo;
+        recorder.start(1000);
+      } catch (e) { /* sem gravação se o navegador não suportar — não bloqueia a prova */ }
+      // 4) áudio em PCM via Web Audio + conexão ao relay
       ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
       playHead = ctx.currentTime;
-      show('live'); setStatus('Conectando…');
-
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/s/${SUB}/oral/relay`);
       ws.binaryType = 'arraybuffer';
@@ -124,15 +155,36 @@
       ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
     }
 
+    async function uploadVideo() {
+      // chamado quando o MediaRecorder para; envia o vídeo e finaliza a UI
+      const stopTracks = () => { try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} };
+      if (!recChunks.length) { stopTracks(); $('done-msg').textContent = '✓ Prova encerrada'; $('done-sub').textContent = 'Você pode fechar esta página.'; return; }
+      $('done-msg').textContent = 'Enviando o vídeo…';
+      $('done-sub').textContent = 'Não feche a página até concluir.';
+      try {
+        const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
+        const form = new FormData(); form.append('file', blob, 'prova.webm');
+        const r = await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form });
+        $('done-msg').textContent = '✓ Prova encerrada';
+        $('done-sub').textContent = r.ok ? 'Vídeo enviado. Você pode fechar esta página.' : 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
+      } catch {
+        $('done-msg').textContent = '✓ Prova encerrada';
+        $('done-sub').textContent = 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
+      } finally { stopTracks(); }
+    }
+
     function finish() {
+      if (ended) return;
       ended = true;
       try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'bye' })); } catch {}
       try { ws && ws.close(); } catch {}
       try { procNode && (procNode.onaudioprocess = null, procNode.disconnect()); } catch {}
       try { srcNode && srcNode.disconnect(); } catch {}
-      try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {}
       try { ctx && ctx.close(); } catch {}
       show('done');
+      // para a gravação → onstop dispara o upload (e só então paramos a câmera)
+      if (recorder && recorder.state !== 'inactive') { try { recorder.stop(); } catch { uploadVideo(); } }
+      else { uploadVideo(); }
     }
 
     $('start-btn').onclick = start;

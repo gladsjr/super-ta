@@ -9,17 +9,20 @@
 import express from "express";
 import multer from "multer";
 import OpenAI from "openai";
-import { requireWorkToken, requireSubmissionToken } from "../lib/middleware.js";
+import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent } from "../lib/agents.js";
+import { putAudio, streamAudio, extFromMimetype } from "../lib/audioStore.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
+import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
 const examUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const videoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 300 * 1024 * 1024 } }); // vídeo da prova (até 300MB)
 
 // Garante que o trabalho é uma prova oral antes de seguir.
 function requireOral(req, res, next) {
@@ -47,7 +50,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 voice: req.work.voice,
             },
             questions,
-            submissions: (subs || []).map(s => ({ submission_token: s.submission_token, student_label: s.student_label, status: s.status })),
+            submissions: (subs || []).map(s => ({ submission_token: s.submission_token, student_label: s.student_label, status: s.status, has_oral_video: !!s.has_oral_video })),
             voices: VOICES,
         });
     } catch (err) {
@@ -162,6 +165,58 @@ router.post("/s/:submissionToken/oral/session", requireSubmissionToken, async (r
     } catch (err) {
         log.error("ORAL", `session failed: ${err.message}`);
         res.status(502).json({ error: "falha ao iniciar a sessão de voz", detail: err.message });
+    }
+});
+
+// Registra o aceite do consentimento (voz + vídeo) ANTES de começar a prova.
+router.post("/s/:submissionToken/oral/consent", requireSubmissionToken, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        await db.setSubmissionConsentVersion(req.submission.id, CONSENT_VERSION);
+        log.info("ORAL", `consent registrado submission=${req.submission.submission_token} v=${CONSENT_VERSION}`);
+        res.json({ ok: true, version: CONSENT_VERSION });
+    } catch (err) {
+        log.error("ORAL", `consent failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao registrar consentimento" });
+    }
+});
+
+// Recebe o vídeo gravado da prova e guarda no object storage (não vai à OpenAI).
+router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    if (!req.file) return res.status(400).json({ error: "file required" });
+    try {
+        const ext = extFromMimetype(req.file.mimetype);
+        const key = `oral-video/${req.submission.submission_token}.${ext}`;
+        const r = await putAudio({ key, buffer: req.file.buffer, mimetype: req.file.mimetype });
+        if (!r.stored) {
+            log.error("ORAL", `vídeo não armazenado submission=${req.submission.submission_token}: ${r.reason}`);
+            return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
+        }
+        await db.setOralVideoKey(req.submission.id, key);
+        log.info("ORAL", `vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${req.file.buffer.length}`);
+        res.json({ ok: true });
+    } catch (err) {
+        log.error("ORAL", `video upload failed: ${err.message}`);
+        res.status(500).json({ error: "falha no upload do vídeo", detail: err.message });
+    }
+});
+
+// Professor assiste ao vídeo gravado (avaliação posterior). Auth por token do
+// trabalho + submissão pertencente a ele.
+router.get("/w/:workToken/oral/video/:subToken", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    try {
+        const key = await db.getOralVideoKey(req.submission.id);
+        if (!key) return res.status(404).json({ error: "sem vídeo para esta submissão" });
+        const stream = await streamAudio(key);
+        if (!stream) return res.status(404).json({ error: "vídeo indisponível no armazenamento" });
+        const ext = key.split(".").pop();
+        res.set("Content-Type", ext === "mp4" || ext === "m4a" ? "video/mp4" : "video/webm");
+        stream.on("error", () => { if (!res.headersSent) res.status(500).end(); });
+        stream.pipe(res);
+    } catch (err) {
+        log.error("ORAL", `video serve failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao servir o vídeo" });
     }
 });
 
