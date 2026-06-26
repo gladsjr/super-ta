@@ -9,12 +9,12 @@
 import express from "express";
 import multer from "multer";
 import OpenAI from "openai";
-import { requireWorkToken } from "../lib/middleware.js";
+import { requireWorkToken, requireSubmissionToken } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent } from "../lib/agents.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
-import { isValidQuestionCount } from "../lib/config.js";
+import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -91,6 +91,102 @@ router.post("/w/:workToken/oral/config", requireWorkToken, requireOral, async (r
     } catch (err) {
         log.error("ORAL", `config failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar a configuração" });
+    }
+});
+
+// --- Lado do ALUNO (Realtime) ---
+
+// Sorteia N itens do array mantendo a ORDEM original entre os escolhidos.
+function sampleKeepingOrder(arr, n) {
+    if (n >= arr.length) return arr.slice();
+    const idx = arr.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    return idx.slice(0, n).sort((a, b) => a - b).map(i => arr[i]);
+}
+
+// Instruções da sessão Realtime: persona fixa de examinador + protocolo +
+// SÓ as perguntas (sem o gabarito — as respostas nunca saem do servidor).
+function buildExamInstructions(questions, examName) {
+    const list = questions.map((q, i) => `${i + 1}. ${q}`).join("\n");
+    return `Você é um EXAMINADOR conduzindo uma PROVA ORAL por voz, em português do Brasil${examName ? ` ("${examName}")` : ""}. Seu ÚNICO papel é aplicar a prova abaixo.
+
+PROTOCOLO (siga à risca):
+- Comece se apresentando em 1 frase ("Olá, vou conduzir sua prova oral. Vamos começar.") e já faça a PRIMEIRA pergunta.
+- Faça UMA pergunta por vez, EXATAMENTE como listadas e na ORDEM. Espere o aluno terminar de responder antes de seguir.
+- Após cada resposta, faça apenas um reconhecimento NEUTRO e curto ("Entendi.", "Certo.", "Obrigado.") e passe à próxima. NÃO diga se está certo ou errado. NÃO corrija, NÃO ensine, NÃO dê dicas, NÃO complete a resposta do aluno.
+- Se o aluno pedir para repetir, repita a pergunta. Se ele fugir do tema, reconduza com gentileza à pergunta atual.
+- NUNCA invente perguntas novas, NUNCA pule perguntas, NUNCA revele respostas ou gabarito.
+- Depois da resposta à ÚLTIMA pergunta, agradeça em 1 frase e ENCERRE ("Era isso. Obrigado, a prova está encerrada.").
+- Fale de forma clara, pausada e cordial. Mantenha suas falas curtas.
+
+PERGUNTAS DA PROVA (na ordem):
+${list}`;
+}
+
+// Cria um client secret EFÊMERO da OpenAI Realtime, com a sessão já configurada
+// (modelo, voz, instruções com as perguntas, VAD de servidor, transcrição da
+// fala do aluno). A nossa OPENAI_API_KEY nunca vai ao navegador — só o segredo
+// efêmero de ~1 min. Usamos fetch cru para não acoplar à versão do SDK.
+async function mintRealtimeSecret({ instructions, voice }) {
+    const body = {
+        session: {
+            type: "realtime",
+            model: REALTIME_MODEL,
+            instructions,
+            audio: {
+                input: {
+                    transcription: { model: "gpt-4o-transcribe" },
+                    turn_detection: { type: "server_vad" },
+                },
+                output: { voice },
+            },
+        },
+    };
+    const r = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`realtime client_secret ${r.status}: ${text.slice(0, 400)}`);
+    let j; try { j = JSON.parse(text); } catch { throw new Error("realtime client_secret: resposta não-JSON"); }
+    // Defensivo quanto ao shape entre versões da API.
+    const value = j.value || j.client_secret?.value || j.client_secret;
+    if (!value) throw new Error("realtime client_secret: sem 'value' na resposta");
+    return { value, expires_at: j.expires_at || j.client_secret?.expires_at || null };
+}
+
+// Inicia uma prova: sorteia N perguntas, monta a sessão e devolve o segredo
+// efêmero para o navegador abrir o WebRTC direto com a OpenAI.
+router.post("/s/:submissionToken/oral/session", requireSubmissionToken, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") {
+        return res.status(400).json({ error: "este trabalho não é uma prova oral" });
+    }
+    try {
+        const all = await db.getOralQuestions(req.work.id);
+        if (!all.length) return res.status(409).json({ error: "a prova ainda não foi preparada pelo professor (sem perguntas)" });
+        const n = Math.min(req.work.question_count || all.length, all.length);
+        const sampled = sampleKeepingOrder(all, n);
+        const voice = isValidVoice(req.work.voice) ? req.work.voice : "verse";
+        const instructions = buildExamInstructions(sampled.map(q => q.question), req.work.name);
+        const secret = await mintRealtimeSecret({ instructions, voice });
+        log.info("ORAL", `session minted submission=${req.submission.submission_token} n=${n}/${all.length} voice=${voice}`);
+        res.json({
+            client_secret: secret.value,
+            expires_at: secret.expires_at,
+            model: REALTIME_MODEL,
+            voice,
+            total_questions: n,
+        });
+    } catch (err) {
+        log.error("ORAL", `session failed: ${err.message}`);
+        res.status(502).json({ error: "falha ao iniciar a sessão de voz", detail: err.message });
     }
 });
 
