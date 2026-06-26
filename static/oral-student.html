@@ -75,15 +75,26 @@
       curExaminer.scroll();
     }
     function examinerDone() { curExaminer = null; }
+    // Feedback IMEDIATO: ao detectar que o aluno começou a falar, mostra já um
+    // balão "🎤 …" (a transcrição do aluno vem com algum atraso — é gerada pela
+    // API após o trecho de fala, não letra a letra ao vivo).
+    function studentStarted() {
+      curExaminer = null;
+      if (!curStudent) { curStudent = addCap('Você', '🎤 …', true); curStudent.placeholder = true; curStudent.scroll(); }
+    }
     function studentDelta(t) {
       curExaminer = null;
       if (!curStudent) curStudent = addCap('Você', '', true);
+      if (curStudent.placeholder) { curStudent.txt.textContent = ''; curStudent.placeholder = false; }
       curStudent.txt.textContent += t;
       curStudent.scroll();
     }
     function studentDone(t) {
-      if (curStudent) { if (t) curStudent.txt.textContent = t; curStudent.scroll(); curStudent = null; }
-      else if (t) { addCap('Você', t, true).scroll(); }
+      if (curStudent) {
+        if (t) curStudent.txt.textContent = t;
+        else if (curStudent.placeholder) curStudent.txt.textContent = '(fala não captada)';
+        curStudent.scroll(); curStudent = null;
+      } else if (t) { addCap('Você', t, true).scroll(); }
     }
     function addCap(who, txt, you) {
       const wrap = $('captions');
@@ -174,6 +185,8 @@
         case 'response.output_audio_transcript.done':
         case 'response.done':
           examinerDone(); break;
+        case 'input_audio_buffer.speech_started':
+          studentStarted(); break;
         case 'conversation.item.input_audio_transcription.delta':
           if (msg.delta) studentDelta(msg.delta); break;
         case 'conversation.item.input_audio_transcription.completed':
