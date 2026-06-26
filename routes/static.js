@@ -17,6 +17,8 @@ router.get("/admin", (_req, res) => res.sendFile(path.join(STATIC_DIR, "admin.ht
 router.get("/trabalho", (_req, res) => res.sendFile(path.join(STATIC_DIR, "trabalho.html")));
 router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.html")));
 router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "professor.html")));
+// Página do professor para PROVA ORAL (Realtime). O admin abre /w/:token/oral.
+router.get("/w/:workToken/oral", (_req, res) => res.sendFile(path.join(STATIC_DIR, "oral-professor.html")));
 router.get("/w/:workToken/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "conversation.html")));
 router.get("/s/:submissionToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "student.html")));
 
