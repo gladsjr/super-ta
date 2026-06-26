@@ -65,7 +65,7 @@
     const $ = id => document.getElementById(id);
     const SR = 24000;
     let ws = null, ctx = null, micStream = null, srcNode = null, procNode = null;
-    let recorder = null, recChunks = [], playHead = 0, ended = false;
+    let recorder = null, recChunks = [], playHead = 0, ended = false, activeSources = [];
 
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
     function show(id) { for (const s of ['pre', 'live', 'done']) $(s).style.display = s === id ? '' : 'none'; }
@@ -91,6 +91,15 @@
       node.buffer = buf; node.connect(ctx.destination);
       const t = Math.max(ctx.currentTime + 0.02, playHead);
       node.start(t); playHead = t + buf.duration;
+      activeSources.push(node);
+      node.onended = () => { const i = activeSources.indexOf(node); if (i >= 0) activeSources.splice(i, 1); };
+    }
+    // Barge-in: descarta TODO o áudio do examinador já agendado, para ele calar
+    // na hora quando o aluno começa a falar.
+    function flushPlayback() {
+      for (const n of activeSources) { try { n.onended = null; n.stop(); } catch {} }
+      activeSources = [];
+      if (ctx) playHead = ctx.currentTime;
     }
 
     // --- Captura: microfone → PCM16 → WebSocket ---
@@ -147,7 +156,7 @@
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === 'status') {
           if (m.state === 'connected') { setStatus('Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
-          else if (m.state === 'listening') setStatus('🎤 Ouvindo você…', 'live');
+          else if (m.state === 'listening') { flushPlayback(); setStatus('🎤 Ouvindo você…', 'live'); }
           else if (m.state === 'thinking') setStatus('…', 'live');
         } else if (m.type === 'ended') { finish(); }
       };
