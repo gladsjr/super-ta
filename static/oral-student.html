@@ -64,26 +64,23 @@
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
     function show(id) { for (const s of ['pre','live','done']) $(s).style.display = s === id ? '' : 'none'; }
 
-    // Legendas. Fato medido nos eventos: o EXAMINADOR é transmitido ao vivo
-    // (response.output_audio_transcript.delta), mas a fala do ALUNO NÃO — a
-    // OpenAI manda só um .completed com o texto inteiro quando você termina.
-    // Então: examinador cresce ao vivo num balão; aluno vira UM balão por
-    // resposta quando o .completed chega (com dedup, porque a API às vezes
-    // reemite a mesma fala). O "ao vivo" do aluno fica no STATUS, não em balão.
-    let curExaminer = null, lastStudentText = '';
-    function examinerDelta(t) {
-      if (!curExaminer) curExaminer = addCap('Examinador', '');
-      curExaminer.txt.textContent += t;
-      curExaminer.scroll();
+    // Legendas indexadas por item_id (cada fala tem um id). TANTO o examinador
+    // QUANTO o aluno são transmitidos em deltas (cresce ao vivo). A transcrição
+    // do aluno costuma "alcançar" com atraso, intercalada com a fala do
+    // examinador — por isso NÃO dá para usar uma única "bolha corrente": cada
+    // fala mantém seu próprio balão pelo item_id, sem se misturar. Os eventos
+    // *.done/*.completed trazem o texto final autoritativo (substitui o
+    // acumulado dos deltas).
+    const bubbles = {};
+    function bubbleFor(itemId, who, you) {
+      const key = itemId || ('anon_' + who);
+      if (!bubbles[key]) bubbles[key] = addCap(who, '', you);
+      return bubbles[key];
     }
-    function examinerDone() { curExaminer = null; }
-    function studentCompleted(t) {
-      t = (t || '').trim();
-      if (!t || t === lastStudentText) return;   // ignora vazio ou reemissão da mesma fala
-      lastStudentText = t;
-      curExaminer = null;
-      addCap('Você', t, true);
-    }
+    function examinerDelta(itemId, t) { const b = bubbleFor(itemId, 'Examinador', false); b.txt.textContent += t; b.scroll(); }
+    function examinerDone(itemId, full) { if (full) { const b = bubbleFor(itemId, 'Examinador', false); b.txt.textContent = full; b.scroll(); } }
+    function studentDelta(itemId, t) { const b = bubbleFor(itemId, 'Você', true); b.txt.textContent += t; b.scroll(); }
+    function studentDone(itemId, full) { if (full) { const b = bubbleFor(itemId, 'Você', true); b.txt.textContent = full; b.scroll(); } }
     function addCap(who, txt, you) {
       const wrap = $('captions');
       const el = document.createElement('div'); el.className = 'cap' + (you ? ' you' : '');
@@ -167,22 +164,23 @@
       let msg; try { msg = JSON.parse(e.data); } catch { return; }
       // Diagnóstico: tipo do evento + tempo (filtre por "rt" no console). Ajuda
       // a ver se a transcrição do aluno chega em deltas (ao vivo) ou só no fim.
-      try { console.log('[rt]', Math.round(performance.now()), msg.type, JSON.stringify(msg.delta || msg.transcript || '').slice(0, 80)); } catch (e2) {}
+      try { console.log('[rt]', Math.round(performance.now()), msg.type, msg.item_id || '', JSON.stringify(msg.delta || msg.transcript || '').slice(0, 60)); } catch (e2) {}
       switch (msg.type) {
         case 'response.audio_transcript.delta':
         case 'response.output_audio_transcript.delta':
-          if (msg.delta) examinerDelta(msg.delta); break;
+          if (msg.delta) examinerDelta(msg.item_id, msg.delta); break;
         case 'response.audio_transcript.done':
         case 'response.output_audio_transcript.done':
-        case 'response.done':
-          examinerDone(); break;
+          examinerDone(msg.item_id, msg.transcript || ''); break;
         case 'input_audio_buffer.speech_started':
           setStatus('🎤 Ouvindo você…', 'live'); break;
         case 'input_audio_buffer.speech_stopped':
           setStatus('Transcrevendo / aguarde o examinador…', 'live'); break;
+        case 'conversation.item.input_audio_transcription.delta':
+          if (msg.delta) studentDelta(msg.item_id, msg.delta); break;
         case 'conversation.item.input_audio_transcription.completed':
           setStatus('Prova em andamento — responda quando o examinador terminar', 'live');
-          studentCompleted(msg.transcript || ''); break;
+          studentDone(msg.item_id, msg.transcript || ''); break;
       }
     }
 
