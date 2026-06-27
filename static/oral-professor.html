@@ -103,6 +103,41 @@
     </div>
   </div>
 
+  <!-- Painel de avaliação por aluno (modal) -->
+  <div id="panel-bg" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; overflow:auto; padding:24px">
+    <div class="card" style="max-width:760px; margin:0 auto">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <h2 id="p-name" style="margin:0">Aluno</h2>
+        <button class="btn sec" id="p-close">fechar ✕</button>
+      </div>
+      <p class="hint" id="p-status" style="margin:6px 0 0"></p>
+
+      <h3 style="margin:16px 0 6px; font-size:14px">Avaliação (comparação com o gabarito)</h3>
+      <div class="row"><button class="btn" id="p-eval">Avaliar / reavaliar</button> <span class="msg" id="p-eval-msg"></span></div>
+      <div id="p-report" style="margin-top:10px"></div>
+
+      <h3 style="margin:16px 0 6px; font-size:14px">Devolutiva (manual)</h3>
+      <textarea id="p-devolutiva" rows="5" style="width:100%; font:inherit; padding:8px; border:1px solid var(--line); border-radius:8px" placeholder="Escreva a devolutiva para o aluno…"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button class="btn sec" id="p-dev-save">Salvar devolutiva</button>
+        <label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="p-dev-pub"/> <span class="hint">publicar devolutiva</span></label>
+        <span class="msg" id="p-dev-msg"></span>
+      </div>
+
+      <h3 style="margin:16px 0 6px; font-size:14px">Nota (manual, 0–10)</h3>
+      <div class="row">
+        <input type="number" id="p-grade" min="0" max="10" step="0.1" style="width:90px"/>
+        <button class="btn sec" id="p-grade-save">Salvar nota</button>
+        <label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="p-grade-pub"/> <span class="hint">publicar nota</span></label>
+        <span class="msg" id="p-grade-msg"></span>
+      </div>
+
+      <h3 style="margin:16px 0 6px; font-size:14px">Transcrição da prova</h3>
+      <div id="p-transcript" style="max-height:240px; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:13px; white-space:pre-wrap"></div>
+      <p class="hint" id="p-video" style="margin-top:8px"></p>
+    </div>
+  </div>
+
   <script>
     const WORK = (location.pathname.match(/\/w\/([0-9a-f]{12})\/oral/) || [])[1];
     const API = `/w/${WORK}`;
@@ -132,7 +167,9 @@
         const url = `${location.origin}/s/${s.submission_token}`;
         const vid = s.has_oral_video ? ` <a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado da prova">🎥 vídeo</a>` : '';
         const test = s.is_test ? ' <span class="pill" style="background:#fff7e6;border-color:#f0c890">teste</span>' : '';
-        return `<div class="link-row"><span class="hint" style="width:140px">${esc(s.student_label || '')}${test}</span><code>${url}</code> <a href="${url}" target="_blank">abrir ↗</a>${vid}</div>`;
+        const done = s.status === 'completed' ? ' <span class="pill" style="background:#eaf7ee;border-color:#9fd4af">realizada</span>' : '';
+        const manage = ` <button class="btn sec" style="padding:2px 8px;font-size:12px" onclick="openStudent('${s.submission_token}','${esc(s.student_label || '').replace(/'/g, '')}')">avaliar ▸</button>`;
+        return `<div class="link-row"><span class="hint" style="width:140px">${esc(s.student_label || '')}${test}${done}</span><code>${url}</code> <a href="${url}" target="_blank">abrir ↗</a>${vid}${manage}</div>`;
       }).join('') || '<p class="hint">Nenhum link ainda.</p>';
     }
 
@@ -209,6 +246,65 @@
         msg.textContent = `${j.count} pergunta(s) salva(s).`;
         document.getElementById('exam-status').textContent = 'Perguntas definidas.';
       } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+    };
+
+    // --- Painel de avaliação por aluno ---
+    let PSUB = null;
+    const ASSESS = { correct: '✓ correta', partial: '~ parcial', incorrect: '✗ incorreta', not_answered: '— não respondeu' };
+    function renderReport(ev) {
+      const el = document.getElementById('p-report');
+      if (!ev || !Array.isArray(ev.per_question)) { el.innerHTML = '<p class="hint">Ainda não avaliado.</p>'; return; }
+      el.innerHTML = ev.per_question.map(q =>
+        `<div class="q"><div class="qt">${q.id}. ${esc(q.question)} <span class="pill">${ASSESS[q.assessment] || esc(q.assessment)}</span></div>` +
+        `<div class="qa"><strong>Aluno:</strong> ${esc(q.student_answer || '(sem resposta)')}</div>` +
+        `<div class="qa" style="color:var(--ink-soft)">${esc(q.comment || '')}</div></div>`
+      ).join('') + (ev.summary ? `<p style="margin-top:8px"><strong>Resumo:</strong> ${esc(ev.summary)}</p>` : '');
+    }
+    async function openStudent(token, name) {
+      PSUB = token;
+      document.getElementById('panel-bg').style.display = 'block';
+      document.getElementById('p-name').textContent = name || token;
+      document.getElementById('p-status').textContent = 'Carregando…';
+      ['p-eval-msg', 'p-dev-msg', 'p-grade-msg'].forEach(i => document.getElementById(i).textContent = '');
+      try {
+        const d = await (await fetch(`${API}/oral/submissions/${token}`)).json();
+        document.getElementById('p-status').textContent = (d.completion_reason ? 'Prova realizada.' : 'Ainda não realizada.') + (d.has_oral_video ? '' : ' (sem vídeo)');
+        renderReport(d.evaluation);
+        document.getElementById('p-devolutiva').value = d.devolutiva || '';
+        document.getElementById('p-grade').value = d.grade ?? '';
+        document.getElementById('p-dev-pub').checked = !!d.devolutiva_published;
+        document.getElementById('p-grade-pub').checked = !!d.grade_published;
+        document.getElementById('p-transcript').textContent = (d.transcript || []).map(t => `${t.role === 'examiner' ? 'EXAMINADOR' : 'ALUNO'}: ${t.text}`).join('\n\n') || '(sem transcrição)';
+        document.getElementById('p-video').innerHTML = d.has_oral_video ? `<a href="${API}/oral/video/${token}" target="_blank">🎥 assistir ao vídeo</a>` : '';
+      } catch { document.getElementById('p-status').textContent = 'Falha ao carregar.'; }
+    }
+    document.getElementById('p-close').onclick = () => { document.getElementById('panel-bg').style.display = 'none'; load(); };
+    document.getElementById('p-eval').onclick = async () => {
+      const msg = document.getElementById('p-eval-msg'); msg.textContent = 'Avaliando…';
+      try {
+        const r = await fetch(`${API}/oral/submissions/${PSUB}/evaluate`, { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+        msg.textContent = 'Avaliado.'; renderReport(j.evaluation);
+      } catch { msg.textContent = 'Falha de comunicação.'; }
+    };
+    document.getElementById('p-dev-save').onclick = async () => {
+      const msg = document.getElementById('p-dev-msg'); msg.textContent = 'Salvando…';
+      try {
+        await fetch(`${API}/oral/submissions/${PSUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('p-devolutiva').value }) });
+        await fetch(`${API}/oral/submissions/${PSUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ devolutiva: document.getElementById('p-dev-pub').checked }) });
+        msg.textContent = document.getElementById('p-dev-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
+      } catch { msg.textContent = 'Falha de comunicação.'; }
+    };
+    document.getElementById('p-grade-save').onclick = async () => {
+      const msg = document.getElementById('p-grade-msg'); msg.textContent = 'Salvando…';
+      try {
+        const r = await fetch(`${API}/oral/submissions/${PSUB}/grade`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('p-grade').value }) });
+        const j = await r.json();
+        if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+        await fetch(`${API}/oral/submissions/${PSUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('p-grade-pub').checked }) });
+        msg.textContent = document.getElementById('p-grade-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
+      } catch { msg.textContent = 'Falha de comunicação.'; }
     };
 
     load();

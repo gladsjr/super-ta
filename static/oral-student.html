@@ -61,6 +61,7 @@
       <div id="blocked" style="display:none">
         <div class="big">Prova já realizada</div>
         <p class="sub" style="text-align:center">Esta prova oral já foi realizada com este link e <strong>não pode ser refeita</strong>. Se precisar, fale com o(a) professor(a) para um novo link.</p>
+        <div id="result" style="margin-top:16px"></div>
       </div>
     </div>
   </div>
@@ -80,7 +81,17 @@
     (async () => {
       try {
         const st = await (await fetch(`/s/${SUB}/oral/status`)).json();
-        if (st.done) { blocked = true; show('blocked'); }
+        if (st.done) {
+          blocked = true; show('blocked');
+          // mostra devolutiva/nota se já publicadas pelo professor
+          try {
+            const rr = await (await fetch(`/s/${SUB}/oral/result`)).json();
+            const parts = [];
+            if (rr.grade != null) parts.push(`<div class="big">Nota: ${rr.grade}</div>`);
+            if (rr.devolutiva) parts.push(`<div class="card" style="margin-top:10px; text-align:left; white-space:pre-wrap">${rr.devolutiva.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</div>`);
+            if (parts.length) document.getElementById('result').innerHTML = '<h3 style="text-align:center">Resultado</h3>' + parts.join('');
+          } catch {}
+        }
       } catch {}
     })();
 
