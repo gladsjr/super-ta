@@ -176,18 +176,19 @@
     const L = v.latency;
     let html = '';
     if (!L.turns || !L.turns.length) {
-      html += '<p class="hint">Latência: nenhum turno medido.</p>';
+      html += '<p class="hint">Nenhuma resposta substancial medida.</p>';
     } else {
       const head = L.flagged_count
-        ? `<strong style="color:#8a1c1c">${L.flagged_count} pausa(s) longa(s)</strong> antes de resposta substancial (limiar ${L.threshold_sec}s · maior pausa ${L.max_gap_sec}s)`
-        : `Nenhuma pausa longa suspeita (limiar ${L.threshold_sec}s · maior pausa ${L.max_gap_sec}s)`;
-      html += `<p style="margin:0 0 var(--sp-2)"><strong>Latência de resposta</strong> — ${head}</p>`;
-      html += L.turns.map(t => {
-        const flag = t.gap_sec >= L.threshold_sec && t.answer_words >= 5;
+        ? `<strong style="color:#8a1c1c">${L.flagged_count}</strong> de ${L.turns.length} respostas começaram após espera longa (≥ ${L.threshold_sec}s; maior: ${L.max_gap_sec}s)`
+        : `nenhuma espera longa (≥ ${L.threshold_sec}s; maior: ${L.max_gap_sec}s)`;
+      html += `<p style="margin:0 0 var(--sp-1)"><strong>Tempo até começar a responder</strong> — ${head}</p>`;
+      html += `<p class="hint" style="margin:0 0 var(--sp-2)">Apenas tempo, para você interpretar — pode ser reflexão, nervosismo ou barulho ambiente, não necessariamente consulta. Conta só respostas substanciais (≥ ${L.min_words || 8} palavras).</p>`;
+      html += L.turns.map((t, i) => {
+        const flag = t.gap_sec >= L.threshold_sec;
         const bg = flag ? '#fdeaea' : 'var(--bg-muted)', bd = flag ? '#e7b3b3' : 'var(--ink-200)';
         return `<div style="display:flex;align-items:baseline;gap:var(--sp-2);padding:6px 10px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:4px">
-          <span style="flex:1">Pergunta ${t.q} — pausa de <strong>${t.gap_sec}s</strong> antes de responder</span>
-          <span class="hint" style="margin:0">resposta de ${t.answer_words} palavra(s)</span>
+          <span style="flex:1">Resposta ${i + 1} — começou após <strong>${t.gap_sec}s</strong></span>
+          <span class="hint" style="margin:0">${t.answer_words} palavra(s)</span>
         </div>`;
       }).join('');
     }
@@ -201,6 +202,19 @@
     hands_hidden: 'Mãos não visíveis',
   };
   const mmss = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  // Leva o vídeo direto ao segundo indicado (clique nos trechos do proctoring).
+  window.seekVideo = function (sec) {
+    const vid = document.querySelector('#video-wrap video');
+    if (!vid) return;
+    const go = () => {
+      try { vid.currentTime = sec; } catch (e) {}
+      if (vid.play) { const pr = vid.play(); if (pr && pr.catch) pr.catch(() => {}); }
+    };
+    // currentTime só "pega" depois que os metadados carregam (duração conhecida).
+    if (vid.readyState >= 1) go();
+    else { vid.addEventListener('loadedmetadata', go, { once: true }); vid.load(); }
+    vid.scrollIntoView({ block: 'center' });
+  };
   function renderProctor(p) {
     const el = document.getElementById('proctor-result');
     if (!p || !p.flags) { el.innerHTML = '<p class="hint">Ainda não analisado.</p>'; return; }
@@ -209,7 +223,7 @@
       const fired = f.count > 0;
       const color = fired ? (f.pct >= 30 ? '#fdeaea' : '#fff6e0') : '#eaf7ee';
       const border = fired ? (f.pct >= 30 ? '#e7b3b3' : '#ecc874') : '#9fd4af';
-      const stamps = (f.at || []).length ? ` · trechos: ${f.at.map(mmss).join(', ')}` : '';
+      const stamps = (f.at || []).length ? ` · trechos: ${f.at.map(s => `<a href="#" onclick="seekVideo(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}` : '';
       return `<div style="padding:8px 12px;border:1px solid ${border};background:${color};border-radius:var(--r-sm);margin-bottom:6px">
         <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
           <span style="flex:1;font-weight:600">${FLAG_LABELS[k]}</span>

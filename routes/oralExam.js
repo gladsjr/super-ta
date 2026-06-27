@@ -13,7 +13,7 @@ import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, r
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralExamAspectsAgent } from "../lib/agents.js";
-import { putAudio, streamAudio, extFromMimetype } from "../lib/audioStore.js";
+import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
@@ -411,12 +411,29 @@ router.get("/w/:workToken/oral/video/:subToken", requireWorkToken, requireProfes
     try {
         const key = await db.getOralVideoKey(req.submission.id);
         if (!key) return res.status(404).json({ error: "sem vídeo para esta submissão" });
-        const stream = await streamAudio(key);
-        if (!stream) return res.status(404).json({ error: "vídeo indisponível no armazenamento" });
         const ext = key.split(".").pop();
-        res.set("Content-Type", ext === "mp4" || ext === "m4a" ? "video/mp4" : "video/webm");
-        stream.on("error", () => { if (!res.headersSent) res.status(500).end(); });
-        stream.pipe(res);
+        const type = (ext === "mp4" || ext === "m4a") ? "video/mp4" : "video/webm";
+        // Backend local: sendFile resolve HTTP Range / seek do vídeo nativamente.
+        const local = await localFilePath(key);
+        if (local) { res.type(type); return res.sendFile(local); }
+        // Fallback (ex.: replit): Range manual sobre o buffer, para permitir seek.
+        const buf = await readAllBytes(key);
+        if (!buf) return res.status(404).json({ error: "vídeo indisponível no armazenamento" });
+        const total = buf.length;
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Content-Type", type);
+        const range = req.headers.range;
+        if (!range) { res.setHeader("Content-Length", total); return res.end(buf); }
+        const m = /bytes=(\d*)-(\d*)/.exec(range);
+        let start = m && m[1] ? parseInt(m[1], 10) : 0;
+        let end = m && m[2] ? parseInt(m[2], 10) : total - 1;
+        if (!Number.isFinite(start) || start < 0) start = 0;
+        if (!Number.isFinite(end) || end >= total) end = total - 1;
+        if (start > end) { res.status(416).setHeader("Content-Range", `bytes */${total}`); return res.end(); }
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+        res.setHeader("Content-Length", end - start + 1);
+        return res.end(buf.subarray(start, end + 1));
     } catch (err) {
         log.error("ORAL", `video serve failed: ${err.message}`);
         res.status(500).json({ error: "falha ao servir o vídeo" });
