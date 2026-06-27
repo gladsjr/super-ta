@@ -21,6 +21,8 @@ router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.ht
 router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "professor.html")));
 // Página do professor para PROVA ORAL (Realtime). O admin abre /w/:token/oral.
 router.get("/w/:workToken/oral", (_req, res) => res.sendFile(path.join(STATIC_DIR, "oral-professor.html")));
+// Detalhe por aluno da PROVA ORAL (transcrição, avaliação, devolutiva, nota, vídeo).
+router.get("/w/:workToken/oral/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "oral-conversation.html")));
 router.get("/w/:workToken/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "conversation.html")));
 // Entrada do aluno: a MESMA URL serve a página certa pelo tipo do trabalho —
 // prova oral (Realtime) → oral-student.html; senão → student.html (entrevista).

@@ -3,326 +3,499 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Prova oral — professor</title>
+  <title>ORATIA — Prova oral (professor)</title>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
   <style>
-    :root { --ink:#1c2530; --ink-soft:#5b6675; --line:#e1e6ec; --bg:#f6f8fa; --accent:#2a6df4; --ok:#1a8a4a; --warn:#b8732a; }
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px; }
-    .wrap { max-width: 860px; margin: 0 auto; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    h2 { font-size: 16px; margin: 0 0 12px; }
-    .sub { color: var(--ink-soft); margin: 0 0 20px; }
-    .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
-    label { display:block; font-size: 13px; color: var(--ink-soft); margin: 0 0 4px; }
-    input, select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background:#fff; }
-    input[type=number] { width: 90px; }
-    .row { display:flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
-    .btn { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; }
-    .btn.sec { background:#fff; color: var(--accent); }
-    .btn:disabled { opacity:.5; cursor: default; }
-    .msg { font-size: 13px; margin-left: 8px; }
-    .qrow { display:grid; grid-template-columns: 1fr 1fr auto; gap:8px; align-items:start; border-top:1px solid var(--line); padding:10px 0; }
-    .qrow:first-child { border-top:0; }
-    .qrow textarea { width:100%; min-height:54px; resize:vertical; font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; }
-    .qx { border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; padding:6px 10px; height:fit-content; }
-    .q { border-top: 1px solid var(--line); padding: 10px 0; }
-    .q:first-child { border-top: 0; }
-    .q .qt { font-weight: 600; }
-    .q .qa { color: var(--ink-soft); font-size: 14px; margin-top: 4px; white-space: pre-wrap; }
-    .pill { display:inline-block; background: var(--bg); border:1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--ink-soft); }
-    .link-row { display:flex; gap:8px; align-items:center; padding: 6px 0; border-top: 1px dashed var(--line); }
-    .link-row:first-child { border-top: 0; }
-    code { background: var(--bg); padding: 2px 6px; border-radius: 6px; font-size: 13px; }
-    a { color: var(--accent); }
-    .hint { font-size: 12px; color: var(--ink-soft); }
+    .meta-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-sm); }
+    .table-toolbar { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-2); flex-wrap: wrap; }
+    .table-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
+    .table-toolbar .spacer { flex: 1; }
+    .create-panel { border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); background: var(--bg-muted); }
+    .create-actions { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); flex-wrap: wrap; }
+    .create-actions .spacer { flex: 1; }
+
+    /* Abas */
+    .tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--ink-200); margin-bottom: var(--sp-4); flex-wrap: wrap; }
+    .tab-btn { border: none; background: transparent; cursor: pointer; padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); font-weight: 600; color: var(--ink-500); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn:hover { color: var(--ink-900); }
+    .tab-btn.is-active { color: var(--ink-900); border-bottom-color: var(--gold-500); font-weight: 700; }
+
+    /* Lista recolhível de perguntas */
+    .q-list { margin-top: var(--sp-2); }
+    .q-item { border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px); margin-bottom: var(--sp-2); background: #fff; }
+    .q-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; }
+    .q-head .q-chevron { color: var(--ink-500); transition: transform .15s ease; font-size: 12px; }
+    .q-item.open .q-chevron { transform: rotate(90deg); }
+    .q-head .q-num { font-weight: 700; color: var(--ink-500); min-width: 1.6em; text-align: right; }
+    .q-head .q-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-900); }
+    .q-item.open .q-head .q-text { white-space: normal; font-weight: 600; }
+    .q-head .q-empty { color: var(--ink-500); font-style: italic; }
+    .q-del { border: none; background: transparent; color: var(--ink-500); cursor: pointer; padding: 2px 6px; border-radius: var(--r-sm); font-size: 14px; }
+    .q-del:hover { background: #fde2e2; color: #8a1c1c; }
+    .q-body { display: none; padding: 0 var(--sp-3) var(--sp-3) var(--sp-3); }
+    .q-item.open .q-body { display: block; }
+    .q-body label { display: block; font-size: var(--fs-xs); color: var(--ink-500); margin: var(--sp-2) 0 2px; }
+    .q-body textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--ink-200); border-radius: var(--r-sm); }
+
+    .pill-test { background: #fff7e6; border: 1px solid #f0c890; }
+    .pill-done { background: #eaf7ee; border: 1px solid #9fd4af; }
+    .pill-pub  { background: #e9f0fe; border: 1px solid #b9cdf6; }
+    .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--ink-700); }
+    code.tok { background: var(--bg-muted); padding: 1px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1 id="work-name">Prova oral</h1>
-    <p class="sub">Suba a prova (PDF com perguntas e respostas), confira as perguntas, defina quantas serão sorteadas e a voz, e gere os links dos alunos.</p>
 
-    <div class="card">
-      <h2>1. Configuração</h2>
-      <div class="row">
-        <div>
-          <label for="cfg-n">Nº de perguntas na prova</label>
-          <input type="number" id="cfg-n" min="3" max="20" value="6"/>
-        </div>
-        <div>
-          <label for="cfg-voice">Voz do examinador</label>
-          <select id="cfg-voice"></select>
-        </div>
-        <button class="btn" id="cfg-btn">Salvar</button>
-        <span class="msg" id="cfg-msg"></span>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""> ORATIA</a>
+    <span class="topbar-context">Prova oral · painel do professor</span>
+  </div>
+</header>
+
+<main class="page">
+
+  <div id="notfound" class="notice notice-error hidden">Trabalho não encontrado, ou não é uma prova oral. Confira o link.</div>
+
+  <div id="main" class="hidden">
+    <div class="page-header">
+      <div class="row" style="gap: var(--sp-2); align-items: center">
+        <h1 id="work-name" style="margin: 0">—</h1>
       </div>
-      <p class="hint" id="cfg-hint" style="margin-top:8px"></p>
+      <div class="meta-row" id="meta"></div>
     </div>
 
-    <div class="card">
-      <h2>2. Prova (PDF de perguntas e respostas)</h2>
-      <div class="row">
-        <input type="file" id="exam-file" accept="application/pdf"/>
-        <button class="btn" id="upload-btn">Enviar e extrair</button>
-        <span class="msg" id="upload-msg"></span>
+    <nav class="tabs" role="tablist" aria-label="Seções da prova">
+      <button class="tab-btn is-active" type="button" id="tab-btn-prova" data-tab="prova" role="tab" aria-selected="true">Prova</button>
+      <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
+      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; notas</button>
+    </nav>
+
+    <!-- ABA: PROVA (config + PDF + perguntas) -->
+    <div class="tab-panel" id="tab-prova" role="tabpanel" aria-labelledby="tab-btn-prova">
+      <div class="card">
+        <h3 class="card-title">Configuração</h3>
+        <p class="card-sub">A voz do examinador e quantas perguntas cada aluno recebe (sorteadas do gabarito).</p>
+        <div class="row" style="align-items: flex-end; gap: var(--sp-4)">
+          <div class="field" style="margin: 0">
+            <label class="label" for="cfg-voice">Voz do examinador</label>
+            <select id="cfg-voice" class="select"></select>
+          </div>
+          <div class="field" style="margin: 0">
+            <label class="label" for="cfg-n">Nº de perguntas por aluno</label>
+            <input type="number" id="cfg-n" class="input" min="3" max="20" value="6" style="width: 110px"/>
+          </div>
+          <button class="btn btn-primary" id="cfg-btn" type="button">Salvar</button>
+          <span class="hint" id="cfg-msg"></span>
+        </div>
+        <p class="hint" id="cfg-hint" style="margin-top: var(--sp-3)"></p>
       </div>
-      <p class="hint" id="exam-status" style="margin-top:8px"></p>
+
+      <div class="card">
+        <h3 class="card-title">Prova (PDF de perguntas e respostas)</h3>
+        <p class="card-sub" id="exam-status">—</p>
+        <div class="row" style="align-items: center">
+          <input type="file" id="exam-file" class="input" accept="application/pdf"/>
+          <button class="btn" id="upload-btn" type="button">Enviar e extrair</button>
+          <span class="hint" id="upload-msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Perguntas <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
+        <p class="card-sub">Digite as perguntas e o gabarito, ou edite o que veio do PDF. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
+        <div id="questions" class="q-list"></div>
+        <div class="row" style="margin-top: var(--sp-3)">
+          <button class="btn btn-ghost btn-sm" id="q-add" type="button">+ adicionar pergunta</button>
+          <span class="spacer"></span>
+          <button class="btn btn-primary" id="q-save" type="button">Salvar perguntas</button>
+          <span class="hint" id="q-msg"></span>
+        </div>
+      </div>
     </div>
 
-    <div class="card" id="questions-card">
-      <h2>3. Perguntas da prova <span class="pill" id="q-count">0</span></h2>
-      <p class="hint">Digite as perguntas e o gabarito, ou edite o que veio do PDF. O <strong>gabarito fica só no servidor</strong> (não vai à voz do aluno; serve para a avaliação). Clique em <strong>Salvar perguntas</strong>.</p>
-      <div id="questions"></div>
-      <div class="row" style="margin-top:10px">
-        <button class="btn sec" id="q-add">+ adicionar pergunta</button>
-        <button class="btn" id="q-save">Salvar perguntas</button>
-        <span class="msg" id="q-msg"></span>
+    <!-- ABA: ALUNOS & PROGRESSO (gerar tokens + tabela) -->
+    <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
+      <div class="card">
+        <h3 class="card-title">Tokens de envio para alunos</h3>
+        <p class="card-sub">Cada token é um link individual de prova. Tokens de teste servem para experimentar e não contam como prova real do aluno.</p>
+        <div class="create-bar">
+          <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar tokens</button>
+        </div>
+        <div id="create-panel" class="create-panel hidden">
+          <div class="row" style="align-items: flex-end; gap: var(--sp-3)">
+            <div class="field" style="margin: 0; flex: 1; min-width: 160px">
+              <label class="label" for="lk-label">Rótulo (ex.: Turma A)</label>
+              <input type="text" id="lk-label" class="input" value="Aluno" style="width: 100%"/>
+            </div>
+            <div class="field" style="margin: 0">
+              <label class="label" for="lk-count">Quantos</label>
+              <input type="number" id="lk-count" class="input" min="1" max="50" value="1" style="width: 90px"/>
+            </div>
+          </div>
+          <div class="field" style="margin-top: var(--sp-3)">
+            <label class="label" for="lk-names">…ou um nome por linha (cada nome vira um link próprio)</label>
+            <textarea id="lk-names" class="textarea" rows="3" placeholder="Maria Silva&#10;João Souza"></textarea>
+          </div>
+          <div class="create-actions">
+            <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
+              <input type="checkbox" id="lk-test"/> Marcar como <strong>teste</strong>
+            </label>
+            <span class="spacer"></span>
+            <button class="btn btn-primary" id="lk-btn" type="button">Gerar</button>
+            <span class="hint" id="lk-msg"></span>
+          </div>
+        </div>
+
+        <div class="table-toolbar">
+          <label class="filter-label" for="sub-filter">Mostrar:</label>
+          <select id="sub-filter" class="select">
+            <option value="all" selected>Todos</option>
+            <option value="done">Realizadas</option>
+            <option value="pending">Não realizadas</option>
+            <option value="test">De teste</option>
+            <option value="real">Reais</option>
+          </select>
+          <span class="spacer"></span>
+          <button id="download-csv" class="btn btn-sm" type="button" title="Baixar lista (rótulo, token, URL) em CSV">⬇ Baixar CSV</button>
+        </div>
+        <table id="sub-table" class="table hidden">
+          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Vídeo</th><th>Ações</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
+        <div id="sub-filtered-empty" class="table-empty hidden">Nenhum aluno neste filtro.</div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>4. Links dos alunos</h2>
-      <div class="row">
-        <div>
-          <label for="lk-label">Rótulo (ex.: Turma A)</label>
-          <input type="text" id="lk-label" value="Aluno" style="width:180px"/>
+    <!-- ABA: AVALIAÇÃO & NOTAS (lote + tabela de alunos) -->
+    <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
+      <div class="card">
+        <h3 class="card-title" data-help="A avaliação compara, pergunta a pergunta, as respostas do aluno (transcrição) com o gabarito. É um relatório interno, só você vê. A devolutiva e a nota são MANUAIS — não há geração por IA: você escreve a devolutiva e atribui a nota na página de cada aluno.">Avaliação em lote</h3>
+        <p class="card-sub">Gera o relatório de comparação com o gabarito das provas realizadas. Relatório interno — o aluno não vê.</p>
+        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
+          <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">Avaliar provas</button>
+          <button id="eval-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reavalia TODAS as provas realizadas, inclusive as já avaliadas">Reavaliar todas</button>
         </div>
-        <div>
-          <label for="lk-count">Quantos</label>
-          <input type="number" id="lk-count" min="1" max="50" value="1"/>
+        <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Publicação em lote</h3>
+        <p class="card-sub">Devolutivas e notas são escritas aluno a aluno (sem geração por IA). Aqui você só publica/despublica em massa o que já foi escrito.</p>
+        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
+          <button id="pub-dev-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já escritas">Publicar devolutivas</button>
+          <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
+          <span class="spacer"></span>
+          <button id="unpub-dev-btn" class="btn btn-ghost btn-sm" type="button">Despublicar devolutivas</button>
+          <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
         </div>
-        <button class="btn sec" id="lk-btn">Gerar links</button>
-        <span class="msg" id="lk-msg"></span>
+        <div id="pub-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
       </div>
-      <div style="margin-top:10px">
-        <label for="lk-names">…ou um nome por linha (cada nome vira um link próprio):</label>
-        <textarea id="lk-names" rows="3" style="width:100%; font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px" placeholder="Maria Silva&#10;João Souza"></textarea>
+
+      <div class="card">
+        <h3 class="card-title">Alunos</h3>
+        <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, escrever a devolutiva e atribuir a nota.</p>
+        <table id="eval-table" class="table hidden">
+          <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Publicado</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
       </div>
-      <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer"><input type="checkbox" id="lk-test"/> <span class="hint">Marcar como <strong>teste</strong> (para experimentar; não conta como prova real do aluno)</span></label>
-      <div id="links" style="margin-top:12px"></div>
     </div>
   </div>
 
-  <!-- Painel de avaliação por aluno (modal) -->
-  <div id="panel-bg" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; overflow:auto; padding:24px">
-    <div class="card" style="max-width:760px; margin:0 auto">
-      <div style="display:flex; justify-content:space-between; align-items:center">
-        <h2 id="p-name" style="margin:0">Aluno</h2>
-        <button class="btn sec" id="p-close">fechar ✕</button>
-      </div>
-      <p class="hint" id="p-status" style="margin:6px 0 0"></p>
+</main>
 
-      <h3 style="margin:16px 0 6px; font-size:14px">Avaliação (comparação com o gabarito)</h3>
-      <div class="row"><button class="btn" id="p-eval">Avaliar / reavaliar</button> <span class="msg" id="p-eval-msg"></span></div>
-      <div id="p-report" style="margin-top:10px"></div>
+<script>
+  const WORK = (location.pathname.match(/\/w\/([0-9a-f]{12})\/oral/) || [])[1];
+  const API = `/w/${WORK}`;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  let SUBS = [];   // cache da última listagem
 
-      <h3 style="margin:16px 0 6px; font-size:14px">Devolutiva (manual)</h3>
-      <textarea id="p-devolutiva" rows="5" style="width:100%; font:inherit; padding:8px; border:1px solid var(--line); border-radius:8px" placeholder="Escreva a devolutiva para o aluno…"></textarea>
-      <div class="row" style="margin-top:6px">
-        <button class="btn sec" id="p-dev-save">Salvar devolutiva</button>
-        <label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="p-dev-pub"/> <span class="hint">publicar devolutiva</span></label>
-        <span class="msg" id="p-dev-msg"></span>
-      </div>
+  // ---------- Abas ----------
+  const TAB_NAMES = ['prova', 'alunos', 'avaliacao'];
+  function setTab(name) {
+    if (!TAB_NAMES.includes(name)) name = 'prova';
+    TAB_NAMES.forEach(t => {
+      const panel = document.getElementById('tab-' + t);
+      const btn = document.getElementById('tab-btn-' + t);
+      const active = t === name;
+      if (panel) panel.classList.toggle('hidden', !active);
+      if (btn) { btn.classList.toggle('is-active', active); btn.setAttribute('aria-selected', String(active)); }
+    });
+    if (history.replaceState) history.replaceState(null, '', '#' + name);
+  }
+  TAB_NAMES.forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.onclick = () => setTab(t); });
+  (function initTab() {
+    const h = (location.hash || '').replace('#', '');
+    setTab(TAB_NAMES.includes(h) ? h : 'prova');
+  })();
 
-      <h3 style="margin:16px 0 6px; font-size:14px">Nota (manual, 0–10)</h3>
-      <div class="row">
-        <input type="number" id="p-grade" min="0" max="10" step="0.1" style="width:90px"/>
-        <button class="btn sec" id="p-grade-save">Salvar nota</button>
-        <label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="p-grade-pub"/> <span class="hint">publicar nota</span></label>
-        <span class="msg" id="p-grade-msg"></span>
-      </div>
-
-      <h3 style="margin:16px 0 6px; font-size:14px">Transcrição da prova</h3>
-      <div id="p-transcript" style="max-height:240px; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:13px; white-space:pre-wrap"></div>
-      <p class="hint" id="p-video" style="margin-top:8px"></p>
-    </div>
-  </div>
-
-  <script>
-    const WORK = (location.pathname.match(/\/w\/([0-9a-f]{12})\/oral/) || [])[1];
-    const API = `/w/${WORK}`;
-    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
-
-    function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .qrow').length; cfgWarn(); }
-    // Aviso (#55): N configurado > nº de perguntas cadastradas → a prova fica menor.
-    function cfgWarn() {
-      const total = collectQuestions().length;
-      const n = Number(document.getElementById('cfg-n').value) || 0;
-      const el = document.getElementById('cfg-hint'); if (!el) return;
-      if (!total) { el.textContent = ''; el.style.color = ''; return; }
-      if (n > total) {
-        el.innerHTML = `⚠️ <strong>N = ${n}, mas há só ${total} pergunta(s) cadastrada(s)</strong> — a prova terá ${total}. Adicione perguntas ou reduza o N.`;
-        el.style.color = 'var(--warn)';
-      } else {
-        el.textContent = n < total ? `${total} perguntas cadastradas; cada aluno recebe ${n} sorteada(s).` : `${total} pergunta(s) · N = ${n}.`;
-        el.style.color = '';
-      }
+  // ---------- Editor de perguntas (lista recolhível) ----------
+  function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .q-item').length; cfgWarn(); }
+  function cfgWarn() {
+    const total = collectQuestions().length;
+    const n = Number(document.getElementById('cfg-n').value) || 0;
+    const el = document.getElementById('cfg-hint'); if (!el) return;
+    if (!total) { el.textContent = ''; el.style.color = ''; return; }
+    if (n > total) {
+      el.innerHTML = `⚠️ <strong>N = ${n}, mas há só ${total} pergunta(s) cadastrada(s)</strong> — a prova terá ${total}. Adicione perguntas ou reduza o N.`;
+      el.style.color = 'var(--warn, #b8732a)';
+    } else {
+      el.textContent = n < total ? `${total} perguntas cadastradas; cada aluno recebe ${n} sorteada(s).` : `${total} pergunta(s) · N = ${n}.`;
+      el.style.color = '';
     }
-    function addRow(q = '', a = '') {
-      const div = document.createElement('div'); div.className = 'qrow';
-      div.innerHTML = '<textarea class="q-q" placeholder="Pergunta"></textarea><textarea class="q-a" placeholder="Resposta / gabarito (só o professor vê)"></textarea><button class="qx" title="remover">✕</button>';
-      div.querySelector('.q-q').value = q; div.querySelector('.q-a').value = a;
-      div.querySelector('.qx').onclick = () => { div.remove(); updateQCount(); };
-      document.getElementById('questions').appendChild(div);
-      updateQCount();
-    }
-    function renderQuestions(qs) {
-      const c = document.getElementById('questions'); c.innerHTML = '';
-      (qs || []).forEach(q => addRow(q.question || '', q.answer || ''));
-      if (!(qs || []).length) addRow('', '');   // uma linha vazia para começar do zero
-    }
-    function collectQuestions() {
-      return [...document.querySelectorAll('#questions .qrow')]
-        .map(r => ({ question: r.querySelector('.q-q').value.trim(), answer: r.querySelector('.q-a').value.trim() }))
-        .filter(q => q.question);
-    }
-    function renderLinks(subs) {
-      document.getElementById('links').innerHTML = (subs || []).map(s => {
-        const url = `${location.origin}/s/${s.submission_token}`;
-        const vid = s.has_oral_video ? ` <a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado da prova">🎥 vídeo</a>` : '';
-        const test = s.is_test ? ' <span class="pill" style="background:#fff7e6;border-color:#f0c890">teste</span>' : '';
-        const done = s.status === 'completed' ? ' <span class="pill" style="background:#eaf7ee;border-color:#9fd4af">realizada</span>' : '';
-        const manage = ` <button class="btn sec" style="padding:2px 8px;font-size:12px" onclick="openStudent('${s.submission_token}','${esc(s.student_label || '').replace(/'/g, '')}')">avaliar ▸</button>`;
-        return `<div class="link-row"><span class="hint" style="width:140px">${esc(s.student_label || '')}${test}${done}</span><code>${url}</code> <a href="${url}" target="_blank">abrir ↗</a>${vid}${manage}</div>`;
-      }).join('') || '<p class="hint">Nenhum link ainda.</p>';
-    }
+  }
+  function syncHead(item) {
+    const q = item.querySelector('.q-q').value.trim();
+    const txt = item.querySelector('.q-text');
+    if (q) { txt.textContent = q; txt.classList.remove('q-empty'); }
+    else { txt.textContent = '(pergunta vazia)'; txt.classList.add('q-empty'); }
+  }
+  function renumber() {
+    [...document.querySelectorAll('#questions .q-item')].forEach((it, i) => { it.querySelector('.q-num').textContent = (i + 1) + '.'; });
+  }
+  function makeItem(q = '', a = '', open = false) {
+    const div = document.createElement('div');
+    div.className = 'q-item' + (open ? ' open' : '');
+    div.innerHTML =
+      '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num"></span>' +
+      '<span class="q-text"></span><button class="q-del" title="remover">✕</button></div>' +
+      '<div class="q-body">' +
+      '<label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
+      '<label>Resposta / gabarito (só o professor vê)</label><textarea class="q-a" placeholder="Resposta esperada"></textarea>' +
+      '</div>';
+    div.querySelector('.q-q').value = q;
+    div.querySelector('.q-a').value = a;
+    div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; div.classList.toggle('open'); };
+    div.querySelector('.q-del').onclick = () => { div.remove(); renumber(); updateQCount(); };
+    div.querySelector('.q-q').addEventListener('input', () => { syncHead(div); cfgWarn(); });
+    document.getElementById('questions').appendChild(div);
+    syncHead(div); renumber();
+    return div;
+  }
+  function renderQuestions(qs) {
+    const c = document.getElementById('questions'); c.innerHTML = '';
+    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', false));
+    if (!(qs || []).length) makeItem('', '', true);
+    updateQCount();
+  }
+  function collectQuestions() {
+    return [...document.querySelectorAll('#questions .q-item')]
+      .map(r => ({ question: r.querySelector('.q-q').value.trim(), answer: r.querySelector('.q-a').value.trim() }))
+      .filter(q => q.question);
+  }
 
-    async function load() {
-      const r = await fetch(`${API}/oral/info`);
-      if (!r.ok) { document.body.innerHTML = '<div class="wrap"><div class="card">Não foi possível carregar (' + r.status + '). Confira se o trabalho é do tipo prova oral.</div></div>'; return; }
+  // ---------- Status helpers ----------
+  const STATUS_PILL = {
+    completed: '<span class="pill pill-done">realizada</span>',
+    gave_up: '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">desistiu</span>',
+    pending: '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">aguardando</span>',
+    in_progress: '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">aguardando</span>',
+  };
+
+  // ---------- Tabela de alunos (aba Alunos) ----------
+  function filterSubs() {
+    const f = document.getElementById('sub-filter').value;
+    return SUBS.filter(s => {
+      if (f === 'done') return s.status === 'completed';
+      if (f === 'pending') return s.status !== 'completed';
+      if (f === 'test') return s.is_test;
+      if (f === 'real') return !s.is_test;
+      return true;
+    });
+  }
+  function renderSubsTable() {
+    const tbody = document.querySelector('#sub-table tbody');
+    const tableEl = document.getElementById('sub-table');
+    const empty = document.getElementById('sub-empty');
+    const fEmpty = document.getElementById('sub-filtered-empty');
+    if (!SUBS.length) { tableEl.classList.add('hidden'); fEmpty.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    const rows = filterSubs();
+    if (!rows.length) { tableEl.classList.add('hidden'); fEmpty.classList.remove('hidden'); return; }
+    fEmpty.classList.add('hidden'); tableEl.classList.remove('hidden');
+    tbody.innerHTML = rows.map(s => {
+      const url = `${location.origin}/s/${s.submission_token}`;
+      const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
+      const vid = s.has_oral_video
+        ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
+        : '<span class="hint">—</span>';
+      return `<tr>
+        <td>${esc(s.student_label || '')}${test}</td>
+        <td><code class="tok">${s.submission_token}</code></td>
+        <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
+        <td>${vid}</td>
+        <td><a href="${url}" target="_blank">abrir ↗</a> · <a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+      </tr>`;
+    }).join('');
+  }
+  document.getElementById('sub-filter').onchange = renderSubsTable;
+  document.getElementById('download-csv').onclick = () => {
+    const lines = [['rotulo', 'token', 'url'].join(',')].concat(
+      SUBS.map(s => [`"${(s.student_label || '').replace(/"/g, '""')}"`, s.submission_token, `${location.origin}/s/${s.submission_token}`].join(','))
+    );
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'provas-oral.csv'; a.click();
+  };
+
+  // ---------- Tabela de avaliação (aba Avaliação) ----------
+  function renderEvalTable() {
+    const tbody = document.querySelector('#eval-table tbody');
+    const tableEl = document.getElementById('eval-table');
+    const empty = document.getElementById('eval-empty');
+    const rows = SUBS.filter(s => !s.is_test || s.status === 'completed'); // mostra reais + testes já realizados
+    if (!rows.length) { tableEl.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden'); tableEl.classList.remove('hidden');
+    tbody.innerHTML = rows.map(s => {
+      const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
+      const evalPill = s.has_oral_eval ? '<span class="pill pill-done">avaliada</span>' : '<span class="hint">—</span>';
+      const grade = (s.grade ?? null) === null ? '<span class="hint">—</span>' : `<strong>${Number(s.grade).toFixed(1)}</strong>`;
+      const pub = [
+        s.devolutiva_published ? '<span class="pill pill-pub">devolutiva</span>' : '',
+        s.grade_published ? '<span class="pill pill-pub">nota</span>' : '',
+      ].filter(Boolean).join(' ') || '<span class="hint">—</span>';
+      return `<tr>
+        <td>${esc(s.student_label || '')}${test}</td>
+        <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
+        <td>${evalPill}</td>
+        <td style="text-align:right">${grade}</td>
+        <td>${pub}</td>
+        <td><a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ---------- Carga ----------
+  async function load() {
+    const r = await fetch(`${API}/oral/info`);
+    if (!r.ok) { document.getElementById('notfound').classList.remove('hidden'); return; }
+    const j = await r.json();
+    document.getElementById('main').classList.remove('hidden');
+    document.getElementById('work-name').textContent = j.work.name;
+    SUBS = j.submissions || [];
+    const done = SUBS.filter(s => s.status === 'completed').length;
+    document.getElementById('meta').innerHTML =
+      `<span>Prova oral</span><span>·</span><span>${SUBS.length} aluno(s)</span><span>·</span><span>${done} realizada(s)</span>` +
+      (j.work.has_exam ? '<span>·</span><span>prova enviada</span>' : '');
+    document.getElementById('exam-status').textContent = j.work.has_exam ? 'Prova enviada. As perguntas abaixo podem ser editadas.' : 'Nenhuma prova enviada ainda — suba um PDF ou digite as perguntas abaixo.';
+    document.getElementById('cfg-n').value = j.work.question_count || 6;
+    const vs = document.getElementById('cfg-voice');
+    vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
+    renderQuestions(j.questions || []);
+    renderSubsTable();
+    renderEvalTable();
+    cfgWarn();
+  }
+  document.getElementById('cfg-n').addEventListener('input', cfgWarn);
+
+  // ---------- Ações: PROVA ----------
+  document.getElementById('upload-btn').onclick = async () => {
+    const f = document.getElementById('exam-file').files[0];
+    const msg = document.getElementById('upload-msg');
+    if (!f) { msg.textContent = 'Escolha um PDF.'; return; }
+    const btn = document.getElementById('upload-btn'); btn.disabled = true; msg.textContent = 'Enviando e extraindo…';
+    try {
+      const form = new FormData(); form.append('file', f);
+      const r = await fetch(`${API}/oral/exam-pdf`, { method: 'POST', body: form });
       const j = await r.json();
-      document.getElementById('work-name').textContent = j.work.name + ' — prova oral';
-      document.getElementById('exam-status').textContent = j.work.has_exam ? 'Prova enviada.' : 'Nenhuma prova enviada ainda.';
-      document.getElementById('cfg-n').value = j.work.question_count || 6;
-      const vs = document.getElementById('cfg-voice');
-      vs.innerHTML = '<option value="">(escolha uma voz)</option>' + j.voices.map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
+      msg.textContent = `${j.count} pergunta(s) extraída(s).`;
+      document.getElementById('exam-status').textContent = 'Prova enviada. As perguntas abaixo podem ser editadas.';
       renderQuestions(j.questions || []);
-      renderLinks(j.submissions || []);
-      cfgWarn();
-    }
-    document.getElementById('cfg-n').addEventListener('input', cfgWarn);
-    document.getElementById('questions').addEventListener('input', cfgWarn);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
+  };
+  document.getElementById('cfg-btn').onclick = async () => {
+    const msg = document.getElementById('cfg-msg');
+    const body = { question_count: Number(document.getElementById('cfg-n').value), voice: document.getElementById('cfg-voice').value };
+    msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/oral/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
+  document.getElementById('q-save').onclick = async () => {
+    const qs = collectQuestions(); const msg = document.getElementById('q-msg');
+    if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
+    msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      msg.textContent = `${j.count} pergunta(s) salva(s).`;
+      document.getElementById('exam-status').textContent = 'Perguntas definidas.';
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
 
-    document.getElementById('upload-btn').onclick = async () => {
-      const f = document.getElementById('exam-file').files[0];
-      const msg = document.getElementById('upload-msg');
-      if (!f) { msg.textContent = 'Escolha um PDF.'; return; }
-      const btn = document.getElementById('upload-btn'); btn.disabled = true; msg.textContent = 'Enviando e extraindo…';
-      try {
-        const form = new FormData(); form.append('file', f);
-        const r = await fetch(`${API}/oral/exam-pdf`, { method: 'POST', body: form });
-        const j = await r.json();
-        if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
-        msg.textContent = `${j.count} pergunta(s) extraída(s).`;
-        document.getElementById('exam-status').textContent = 'Prova enviada.';
-        renderQuestions(j.questions || []);
-      } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-      finally { btn.disabled = false; }
-    };
+  // ---------- Ações: ALUNOS ----------
+  document.getElementById('toggle-create').onclick = () => {
+    const panel = document.getElementById('create-panel');
+    const open = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !open);
+    document.getElementById('toggle-create').setAttribute('aria-expanded', String(open));
+  };
+  document.getElementById('lk-btn').onclick = async () => {
+    const msg = document.getElementById('lk-msg');
+    const is_test = document.getElementById('lk-test').checked;
+    const names = document.getElementById('lk-names').value.split('\n').map(s => s.trim()).filter(Boolean);
+    const body = names.length
+      ? { labels: names, is_test }
+      : { label: document.getElementById('lk-label').value.trim() || 'Aluno', count: Number(document.getElementById('lk-count').value), is_test };
+    msg.textContent = 'Gerando…';
+    try {
+      const r = await fetch(`${API}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      msg.textContent = `${j.submissions.length} link(s) gerado(s).`;
+      document.getElementById('lk-names').value = '';
+      await load();
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
 
-    document.getElementById('cfg-btn').onclick = async () => {
-      const msg = document.getElementById('cfg-msg');
-      const body = { question_count: Number(document.getElementById('cfg-n').value), voice: document.getElementById('cfg-voice').value };
-      msg.textContent = 'Salvando…';
-      try {
-        const r = await fetch(`${API}/oral/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const j = await r.json();
-        msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
-      } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-    };
+  // ---------- Ações: AVALIAÇÃO (lote) ----------
+  function batchStatus(id, txt, busy) {
+    const el = document.getElementById(id); el.classList.remove('hidden'); el.textContent = txt;
+  }
+  async function runEvalAll(force) {
+    const btnIds = ['eval-all-btn', 'eval-all-force-btn'];
+    btnIds.forEach(i => document.getElementById(i).disabled = true);
+    batchStatus('eval-batch-status', force ? 'Reavaliando todas as provas…' : 'Avaliando as provas realizadas…');
+    try {
+      const r = await fetch(`${API}/oral/evaluate-all${force ? '?force=1' : ''}`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) { batchStatus('eval-batch-status', 'Falha: ' + (j.error || r.status)); return; }
+      let t = `${j.evaluated} avaliada(s) de ${j.candidates} candidata(s).`;
+      if (j.errors && j.errors.length) t += ` ${j.errors.length} com erro.`;
+      batchStatus('eval-batch-status', t);
+      await load();
+    } catch (e) { batchStatus('eval-batch-status', 'Falha de comunicação.'); }
+    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
+  }
+  document.getElementById('eval-all-btn').onclick = () => runEvalAll(false);
+  document.getElementById('eval-all-force-btn').onclick = () => { if (confirm('Reavaliar TODAS as provas, inclusive as já avaliadas?')) runEvalAll(true); };
 
-    document.getElementById('lk-btn').onclick = async () => {
-      const msg = document.getElementById('lk-msg');
-      const is_test = document.getElementById('lk-test').checked;
-      const names = document.getElementById('lk-names').value.split('\n').map(s => s.trim()).filter(Boolean);
-      // por nomes (um link cada) OU por rótulo + quantidade — como na entrevista.
-      const body = names.length
-        ? { labels: names, is_test }
-        : { label: document.getElementById('lk-label').value.trim() || 'Aluno', count: Number(document.getElementById('lk-count').value), is_test };
-      msg.textContent = 'Gerando…';
-      try {
-        const r = await fetch(`${API}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const j = await r.json();
-        if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-        msg.textContent = `${j.submissions.length} link(s) gerado(s).`;
-        load();
-      } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-    };
+  async function runPublishAll(target, on) {
+    batchStatus('pub-batch-status', (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));
+    try {
+      const r = await fetch(`${API}/oral/publish-all`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target, on }) });
+      const j = await r.json();
+      if (!r.ok) { batchStatus('pub-batch-status', 'Falha: ' + (j.error || r.status)); return; }
+      batchStatus('pub-batch-status', `${j.affected} ${target === 'devolutiva' ? 'devolutiva(s)' : 'nota(s)'} ${on ? 'publicada(s)' : 'despublicada(s)'}.`);
+      await load();
+    } catch (e) { batchStatus('pub-batch-status', 'Falha de comunicação.'); }
+  }
+  document.getElementById('pub-dev-btn').onclick = () => runPublishAll('devolutiva', true);
+  document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true);
+  document.getElementById('unpub-dev-btn').onclick = () => { if (confirm('Despublicar TODAS as devolutivas?')) runPublishAll('devolutiva', false); };
+  document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false); };
 
-    document.getElementById('q-add').onclick = () => addRow('', '');
-    document.getElementById('q-save').onclick = async () => {
-      const qs = collectQuestions(); const msg = document.getElementById('q-msg');
-      if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
-      msg.textContent = 'Salvando…';
-      try {
-        const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
-        const j = await r.json();
-        if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-        msg.textContent = `${j.count} pergunta(s) salva(s).`;
-        document.getElementById('exam-status').textContent = 'Perguntas definidas.';
-      } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-    };
-
-    // --- Painel de avaliação por aluno ---
-    let PSUB = null;
-    const ASSESS = { correct: '✓ correta', partial: '~ parcial', incorrect: '✗ incorreta', not_answered: '— não respondeu' };
-    function renderReport(ev) {
-      const el = document.getElementById('p-report');
-      if (!ev || !Array.isArray(ev.per_question)) { el.innerHTML = '<p class="hint">Ainda não avaliado.</p>'; return; }
-      el.innerHTML = ev.per_question.map(q =>
-        `<div class="q"><div class="qt">${q.id}. ${esc(q.question)} <span class="pill">${ASSESS[q.assessment] || esc(q.assessment)}</span></div>` +
-        `<div class="qa"><strong>Aluno:</strong> ${esc(q.student_answer || '(sem resposta)')}</div>` +
-        `<div class="qa" style="color:var(--ink-soft)">${esc(q.comment || '')}</div></div>`
-      ).join('') + (ev.summary ? `<p style="margin-top:8px"><strong>Resumo:</strong> ${esc(ev.summary)}</p>` : '');
-    }
-    async function openStudent(token, name) {
-      PSUB = token;
-      document.getElementById('panel-bg').style.display = 'block';
-      document.getElementById('p-name').textContent = name || token;
-      document.getElementById('p-status').textContent = 'Carregando…';
-      ['p-eval-msg', 'p-dev-msg', 'p-grade-msg'].forEach(i => document.getElementById(i).textContent = '');
-      try {
-        const d = await (await fetch(`${API}/oral/submissions/${token}`)).json();
-        document.getElementById('p-status').textContent = (d.completion_reason ? 'Prova realizada.' : 'Ainda não realizada.') + (d.has_oral_video ? '' : ' (sem vídeo)');
-        renderReport(d.evaluation);
-        document.getElementById('p-devolutiva').value = d.devolutiva || '';
-        document.getElementById('p-grade').value = d.grade ?? '';
-        document.getElementById('p-dev-pub').checked = !!d.devolutiva_published;
-        document.getElementById('p-grade-pub').checked = !!d.grade_published;
-        document.getElementById('p-transcript').textContent = (d.transcript || []).map(t => `${t.role === 'examiner' ? 'EXAMINADOR' : 'ALUNO'}: ${t.text}`).join('\n\n') || '(sem transcrição)';
-        document.getElementById('p-video').innerHTML = d.has_oral_video ? `<a href="${API}/oral/video/${token}" target="_blank">🎥 assistir ao vídeo</a>` : '';
-      } catch { document.getElementById('p-status').textContent = 'Falha ao carregar.'; }
-    }
-    document.getElementById('p-close').onclick = () => { document.getElementById('panel-bg').style.display = 'none'; load(); };
-    document.getElementById('p-eval').onclick = async () => {
-      const msg = document.getElementById('p-eval-msg'); msg.textContent = 'Avaliando…';
-      try {
-        const r = await fetch(`${API}/oral/submissions/${PSUB}/evaluate`, { method: 'POST' });
-        const j = await r.json();
-        if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-        msg.textContent = 'Avaliado.'; renderReport(j.evaluation);
-      } catch { msg.textContent = 'Falha de comunicação.'; }
-    };
-    document.getElementById('p-dev-save').onclick = async () => {
-      const msg = document.getElementById('p-dev-msg'); msg.textContent = 'Salvando…';
-      try {
-        await fetch(`${API}/oral/submissions/${PSUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('p-devolutiva').value }) });
-        await fetch(`${API}/oral/submissions/${PSUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ devolutiva: document.getElementById('p-dev-pub').checked }) });
-        msg.textContent = document.getElementById('p-dev-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
-      } catch { msg.textContent = 'Falha de comunicação.'; }
-    };
-    document.getElementById('p-grade-save').onclick = async () => {
-      const msg = document.getElementById('p-grade-msg'); msg.textContent = 'Salvando…';
-      try {
-        const r = await fetch(`${API}/oral/submissions/${PSUB}/grade`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('p-grade').value }) });
-        const j = await r.json();
-        if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-        await fetch(`${API}/oral/submissions/${PSUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('p-grade-pub').checked }) });
-        msg.textContent = document.getElementById('p-grade-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
-      } catch { msg.textContent = 'Falha de comunicação.'; }
-    };
-
-    load();
-  </script>
+  load();
+</script>
 </body>
 </html>

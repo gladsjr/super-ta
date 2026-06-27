@@ -50,7 +50,17 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 voice: req.work.voice,
             },
             questions,
-            submissions: (subs || []).map(s => ({ submission_token: s.submission_token, student_label: s.student_label, status: s.status, has_oral_video: !!s.has_oral_video, is_test: !!s.is_test })),
+            submissions: (subs || []).map(s => ({
+                submission_token: s.submission_token,
+                student_label: s.student_label,
+                status: s.status,
+                is_test: !!s.is_test,
+                has_oral_video: !!s.has_oral_video,
+                has_oral_eval: !!s.has_oral_eval,
+                grade: s.grade_final ?? null,
+                devolutiva_published: !!s.evaluation_published_at,
+                grade_published: !!s.grade_published_at,
+            })),
             voices: VOICES,
         });
     } catch (err) {
@@ -185,6 +195,58 @@ router.post("/w/:workToken/oral/submissions/:subToken/publish", requireWorkToken
         if (typeof req.body?.grade === "boolean") await db.publishOralGrade(req.submission.id, req.body.grade);
         res.json({ ok: true });
     } catch (err) { log.error("ORAL", `publish failed: ${err.message}`); res.status(500).json({ error: "falha ao publicar" }); }
+});
+
+// --- Lote (professor): avaliar todas + publicar/despublicar em massa ---
+
+// Avalia todas as provas realizadas. Sem ?force, pula as que já têm relatório;
+// com ?force=1, reavalia todas. Sequencial (uma chamada de LLM por aluno).
+router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, requireWithinBudget, async (req, res) => {
+    try {
+        const force = req.query.force === "1" || req.body?.force === true;
+        const questions = await db.getOralQuestions(req.work.id);
+        if (!questions.length) return res.status(409).json({ error: "a prova não tem gabarito (perguntas)" });
+        const subs = await db.listOralSubmissionsForEval(req.work.id, force);
+        let evaluated = 0;
+        const errors = [];
+        for (const s of subs) {
+            try {
+                const detail = await db.getOralSubmissionDetail(s.id);
+                const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
+                if (!transcript.length) continue;
+                const report = await oralExamEvaluatorAgent.evaluate({
+                    questions, transcript, meterCtx: { workId: req.work.id, submissionId: s.id },
+                });
+                await db.setOralEvaluation(s.id, report);
+                evaluated++;
+            } catch (e) {
+                errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
+                log.error("ORAL", `evaluate-all item failed sub=${s.submission_token}: ${e.message}`);
+            }
+        }
+        log.info("ORAL", `evaluate-all work=${req.work.work_token} avaliadas=${evaluated}/${subs.length} force=${force}`);
+        res.json({ ok: true, evaluated, candidates: subs.length, errors });
+    } catch (err) {
+        log.error("ORAL", `evaluate-all failed: ${err.message}`);
+        res.status(500).json({ error: "falha na avaliação em lote", detail: err.message });
+    }
+});
+
+// Publica/despublica devolutivas ou notas em massa. Corpo: {target:'devolutiva'|'grade', on:bool}.
+router.post("/w/:workToken/oral/publish-all", requireWorkToken, requireOral, express.json({ limit: "8kb" }), async (req, res) => {
+    const target = req.body?.target;
+    const on = req.body?.on === true;
+    if (target !== "devolutiva" && target !== "grade") return res.status(400).json({ error: "target inválido (devolutiva|grade)" });
+    try {
+        const affected = target === "devolutiva"
+            ? await db.publishAllOralDevolutiva(req.work.id, on)
+            : await db.publishAllOralGrade(req.work.id, on);
+        log.info("ORAL", `publish-all work=${req.work.work_token} target=${target} on=${on} affected=${affected}`);
+        res.json({ ok: true, affected });
+    } catch (err) {
+        log.error("ORAL", `publish-all failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao publicar em lote" });
+    }
 });
 
 // --- Lado do ALUNO (Realtime) ---
