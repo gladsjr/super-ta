@@ -102,6 +102,12 @@
       </div>
       <div id="proctor-result" style="margin-top: var(--sp-3)"></div>
     </div>
+
+    <div class="card" id="voice-card">
+      <h3 class="card-title" data-help="Sinais extraídos da conversa, para SUA revisão — nunca acusação. Latência: pausa entre a pergunta e o início da resposta (capturada ao vivo). Pausa longa antes de resposta substancial pode indicar consulta. A câmera/áudio não provam uso de IA.">Análise da voz</h3>
+      <p class="card-sub">Sinais de "cola" por voz, para revisão humana. A latência é capturada automaticamente durante a prova.</p>
+      <div id="voice-result"></div>
+    </div>
   </div>
 </main>
 
@@ -161,6 +167,32 @@
     }
     document.getElementById('proctor-btn').disabled = !d.has_oral_video;
     renderProctor(d.proctor);
+    renderVoice(d.voice);
+  }
+
+  function renderVoice(v) {
+    const el = document.getElementById('voice-result');
+    if (!v || !v.latency) { el.innerHTML = '<p class="hint">Sem sinais de voz ainda (capturados automaticamente durante a prova).</p>'; return; }
+    const L = v.latency;
+    let html = '';
+    if (!L.turns || !L.turns.length) {
+      html += '<p class="hint">Latência: nenhum turno medido.</p>';
+    } else {
+      const head = L.flagged_count
+        ? `<strong style="color:#8a1c1c">${L.flagged_count} pausa(s) longa(s)</strong> antes de resposta substancial (limiar ${L.threshold_sec}s · maior pausa ${L.max_gap_sec}s)`
+        : `Nenhuma pausa longa suspeita (limiar ${L.threshold_sec}s · maior pausa ${L.max_gap_sec}s)`;
+      html += `<p style="margin:0 0 var(--sp-2)"><strong>Latência de resposta</strong> — ${head}</p>`;
+      html += L.turns.map(t => {
+        const flag = t.gap_sec >= L.threshold_sec && t.answer_words >= 5;
+        const bg = flag ? '#fdeaea' : 'var(--bg-muted)', bd = flag ? '#e7b3b3' : 'var(--ink-200)';
+        return `<div style="display:flex;align-items:baseline;gap:var(--sp-2);padding:6px 10px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:4px">
+          <span style="flex:1">Pergunta ${t.q} — pausa de <strong>${t.gap_sec}s</strong> antes de responder</span>
+          <span class="hint" style="margin:0">resposta de ${t.answer_words} palavra(s)</span>
+        </div>`;
+      }).join('');
+    }
+    html += `<p class="hint" style="margin-top:var(--sp-2)">Segunda voz e voz sintética: análise de áudio (em desenvolvimento).</p>`;
+    el.innerHTML = html;
   }
 
   const FLAG_LABELS = {

@@ -170,6 +170,7 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             devolutiva_published: !!d?.evaluation_published_at,
             grade_published: !!d?.grade_published_at,
             proctor: d?.oral_proctor_json || null,
+            voice: d?.oral_voice_json || null,
         });
     } catch (err) { log.error("ORAL", `detail failed: ${err.message}`); res.status(500).json({ error: "falha ao carregar" }); }
 });
