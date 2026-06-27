@@ -188,6 +188,13 @@ router.post("/s/:submissionToken/oral/session", requireSubmissionToken, async (r
     }
 });
 
+// Status para a página do aluno: já realizou a prova? (teste nunca trava).
+router.get("/s/:submissionToken/oral/status", requireSubmissionToken, (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    const done = !!req.submission.completion_reason && !req.submission.is_test;
+    res.json({ done, is_test: !!req.submission.is_test });
+});
+
 // Registra o aceite do consentimento (voz + vídeo) ANTES de começar a prova.
 router.post("/s/:submissionToken/oral/consent", requireSubmissionToken, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
