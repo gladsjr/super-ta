@@ -94,6 +94,11 @@
         <button class="btn sec" id="lk-btn">Gerar links</button>
         <span class="msg" id="lk-msg"></span>
       </div>
+      <div style="margin-top:10px">
+        <label for="lk-names">…ou um nome por linha (cada nome vira um link próprio):</label>
+        <textarea id="lk-names" rows="3" style="width:100%; font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px" placeholder="Maria Silva&#10;João Souza"></textarea>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer"><input type="checkbox" id="lk-test"/> <span class="hint">Marcar como <strong>teste</strong> (para experimentar; não conta como prova real do aluno)</span></label>
       <div id="links" style="margin-top:12px"></div>
     </div>
   </div>
@@ -126,7 +131,8 @@
       document.getElementById('links').innerHTML = (subs || []).map(s => {
         const url = `${location.origin}/s/${s.submission_token}`;
         const vid = s.has_oral_video ? ` <a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado da prova">🎥 vídeo</a>` : '';
-        return `<div class="link-row"><span class="hint" style="width:120px">${esc(s.student_label || '')}</span><code>${url}</code> <a href="${url}" target="_blank">abrir ↗</a>${vid}</div>`;
+        const test = s.is_test ? ' <span class="pill" style="background:#fff7e6;border-color:#f0c890">teste</span>' : '';
+        return `<div class="link-row"><span class="hint" style="width:140px">${esc(s.student_label || '')}${test}</span><code>${url}</code> <a href="${url}" target="_blank">abrir ↗</a>${vid}</div>`;
       }).join('') || '<p class="hint">Nenhum link ainda.</p>';
     }
 
@@ -175,7 +181,12 @@
 
     document.getElementById('lk-btn').onclick = async () => {
       const msg = document.getElementById('lk-msg');
-      const body = { label: document.getElementById('lk-label').value.trim() || 'Aluno', count: Number(document.getElementById('lk-count').value) };
+      const is_test = document.getElementById('lk-test').checked;
+      const names = document.getElementById('lk-names').value.split('\n').map(s => s.trim()).filter(Boolean);
+      // por nomes (um link cada) OU por rótulo + quantidade — como na entrevista.
+      const body = names.length
+        ? { labels: names, is_test }
+        : { label: document.getElementById('lk-label').value.trim() || 'Aluno', count: Number(document.getElementById('lk-count').value), is_test };
       msg.textContent = 'Gerando…';
       try {
         const r = await fetch(`${API}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

@@ -50,7 +50,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 voice: req.work.voice,
             },
             questions,
-            submissions: (subs || []).map(s => ({ submission_token: s.submission_token, student_label: s.student_label, status: s.status, has_oral_video: !!s.has_oral_video })),
+            submissions: (subs || []).map(s => ({ submission_token: s.submission_token, student_label: s.student_label, status: s.status, has_oral_video: !!s.has_oral_video, is_test: !!s.is_test })),
             voices: VOICES,
         });
     } catch (err) {
