@@ -9,10 +9,10 @@
 import express from "express";
 import multer from "multer";
 import OpenAI from "openai";
-import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission } from "../lib/middleware.js";
+import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
-import { oralExamExtractorAgent } from "../lib/agents.js";
+import { oralExamExtractorAgent, oralExamEvaluatorAgent } from "../lib/agents.js";
 import { putAudio, streamAudio, extFromMimetype } from "../lib/audioStore.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
@@ -118,6 +118,75 @@ router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async
     }
 });
 
+// --- Avaliação por aluno (professor) — espelha a entrevista, mas a devolutiva
+// e a nota são MANUAIS (sem geração por IA). A avaliação compara a transcrição
+// das respostas do aluno com o gabarito. ---
+
+router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToken, requireProfessorSubmission, requireWithinBudget, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        const [questions, detail] = await Promise.all([
+            db.getOralQuestions(req.work.id),
+            db.getOralSubmissionDetail(req.submission.id),
+        ]);
+        const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
+        if (!questions.length) return res.status(409).json({ error: "a prova não tem gabarito (perguntas)" });
+        if (!transcript.length) return res.status(409).json({ error: "sem transcrição — o aluno ainda não realizou a prova" });
+        const report = await oralExamEvaluatorAgent.evaluate({
+            questions, transcript, meterCtx: { workId: req.work.id, submissionId: req.submission.id },
+        });
+        await db.setOralEvaluation(req.submission.id, report);
+        res.json({ ok: true, evaluation: report });
+    } catch (err) {
+        log.error("ORAL", `evaluate failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao avaliar", detail: err.message });
+    }
+});
+
+router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        const d = await db.getOralSubmissionDetail(req.submission.id);
+        res.set("Cache-Control", "no-store");
+        res.json({
+            student_label: req.submission.student_label,
+            completion_reason: d?.completion_reason || null,
+            has_oral_video: !!d?.has_oral_video,
+            transcript: Array.isArray(d?.oral_transcript) ? d.oral_transcript : [],
+            evaluation: d?.oral_eval_json || null,
+            devolutiva: d?.oral_devolutiva || "",
+            grade: d?.grade_final ?? null,
+            devolutiva_published: !!d?.evaluation_published_at,
+            grade_published: !!d?.grade_published_at,
+        });
+    } catch (err) { log.error("ORAL", `detail failed: ${err.message}`); res.status(500).json({ error: "falha ao carregar" }); }
+});
+
+router.put("/w/:workToken/oral/submissions/:subToken/devolutiva", requireWorkToken, requireProfessorSubmission, express.json({ limit: "64kb" }), async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try { await db.setOralDevolutiva(req.submission.id, String(req.body?.text ?? "")); res.json({ ok: true }); }
+    catch (err) { log.error("ORAL", `devolutiva failed: ${err.message}`); res.status(500).json({ error: "falha ao salvar devolutiva" }); }
+});
+
+router.put("/w/:workToken/oral/submissions/:subToken/grade", requireWorkToken, requireProfessorSubmission, express.json({ limit: "8kb" }), async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    const g = req.body?.grade;
+    if (g != null && g !== "" && (!Number.isFinite(Number(g)) || Number(g) < 0 || Number(g) > 10)) {
+        return res.status(400).json({ error: "nota inválida (0 a 10)" });
+    }
+    try { await db.setOralGrade(req.submission.id, g == null || g === "" ? null : Number(g)); res.json({ ok: true }); }
+    catch (err) { log.error("ORAL", `grade failed: ${err.message}`); res.status(500).json({ error: "falha ao salvar nota" }); }
+});
+
+router.post("/w/:workToken/oral/submissions/:subToken/publish", requireWorkToken, requireProfessorSubmission, express.json({ limit: "8kb" }), async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        if (typeof req.body?.devolutiva === "boolean") await db.publishOralDevolutiva(req.submission.id, req.body.devolutiva);
+        if (typeof req.body?.grade === "boolean") await db.publishOralGrade(req.submission.id, req.body.grade);
+        res.json({ ok: true });
+    } catch (err) { log.error("ORAL", `publish failed: ${err.message}`); res.status(500).json({ error: "falha ao publicar" }); }
+});
+
 // --- Lado do ALUNO (Realtime) ---
 
 
@@ -193,6 +262,19 @@ router.get("/s/:submissionToken/oral/status", requireSubmissionToken, (req, res)
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     const done = !!req.submission.completion_reason && !req.submission.is_test;
     res.json({ done, is_test: !!req.submission.is_test });
+});
+
+// Aluno lê o que foi PUBLICADO (devolutiva e/ou nota). O relatório de
+// comparação ao gabarito é professor-only e nunca é exposto aqui.
+router.get("/s/:submissionToken/oral/result", requireSubmissionToken, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        const d = await db.getOralSubmissionDetail(req.submission.id);
+        res.json({
+            devolutiva: d?.evaluation_published_at ? (d.oral_devolutiva || "") : null,
+            grade: d?.grade_published_at ? (d.grade_final ?? null) : null,
+        });
+    } catch (err) { log.error("ORAL", `result failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
 
 // Registra o aceite do consentimento (voz + vídeo) ANTES de começar a prova.
