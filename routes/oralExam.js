@@ -18,6 +18,7 @@ import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
+import { analyzeOralVideo } from "../lib/proctor.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -168,6 +169,7 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             grade: d?.grade_final ?? null,
             devolutiva_published: !!d?.evaluation_published_at,
             grade_published: !!d?.grade_published_at,
+            proctor: d?.oral_proctor_json || null,
         });
     } catch (err) { log.error("ORAL", `detail failed: ${err.message}`); res.status(500).json({ error: "falha ao carregar" }); }
 });
@@ -195,6 +197,23 @@ router.post("/w/:workToken/oral/submissions/:subToken/publish", requireWorkToken
         if (typeof req.body?.grade === "boolean") await db.publishOralGrade(req.submission.id, req.body.grade);
         res.json({ ok: true });
     } catch (err) { log.error("ORAL", `publish failed: ${err.message}`); res.status(500).json({ error: "falha ao publicar" }); }
+});
+
+// Proctoring local por vídeo (pós-prova): amostra frames e gera flags para
+// revisão humana (ausência / mais de uma pessoa / celular / mãos não visíveis).
+// Roda local (onnxruntime + ffmpeg); o vídeo não vai a serviço externo.
+router.post("/w/:workToken/oral/submissions/:subToken/proctor", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        const key = await db.getOralVideoKey(req.submission.id);
+        if (!key) return res.status(409).json({ error: "esta prova não tem vídeo gravado" });
+        const report = await analyzeOralVideo(key);
+        await db.setOralProctor(req.submission.id, report);
+        res.json({ ok: true, proctor: report });
+    } catch (err) {
+        log.error("ORAL", `proctor failed: ${err.message}`);
+        res.status(500).json({ error: "falha na análise do vídeo", detail: err.message });
+    }
 });
 
 // --- Lote (professor): avaliar todas + publicar/despublicar em massa ---

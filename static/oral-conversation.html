@@ -92,6 +92,16 @@
       <h3 class="card-title">Vídeo da prova</h3>
       <div id="video-wrap"></div>
     </div>
+
+    <div class="card" id="proctor-card">
+      <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo). Sinaliza indícios para a SUA revisão — ausência, mais de uma pessoa, celular à vista, mãos fora do quadro. Nunca é acusação automática; a câmera não vê a tela do aluno nem prova uso de IA.">Análise do vídeo (proctoring)</h3>
+      <p class="card-sub">Sinais para revisão humana, gerados localmente. Não é prova de irregularidade — apenas indícios para você assistir aos trechos marcados.</p>
+      <div class="row">
+        <button class="btn btn-primary" id="proctor-btn" type="button">Analisar vídeo</button>
+        <span class="hint" id="proctor-msg"></span>
+      </div>
+      <div id="proctor-result" style="margin-top: var(--sp-3)"></div>
+    </div>
   </div>
 </main>
 
@@ -149,6 +159,35 @@
     } else {
       vw.innerHTML = '<p class="hint">Sem vídeo gravado para esta prova.</p>';
     }
+    document.getElementById('proctor-btn').disabled = !d.has_oral_video;
+    renderProctor(d.proctor);
+  }
+
+  const FLAG_LABELS = {
+    absent: 'Ausência (ninguém no quadro)',
+    multiple_people: 'Mais de uma pessoa',
+    phone: 'Celular detectado',
+    hands_hidden: 'Mãos não visíveis',
+  };
+  const mmss = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  function renderProctor(p) {
+    const el = document.getElementById('proctor-result');
+    if (!p || !p.flags) { el.innerHTML = '<p class="hint">Ainda não analisado.</p>'; return; }
+    const rows = Object.keys(FLAG_LABELS).map(k => {
+      const f = p.flags[k] || { count: 0, pct: 0, at: [] };
+      const fired = f.count > 0;
+      const color = fired ? (f.pct >= 30 ? '#fdeaea' : '#fff6e0') : '#eaf7ee';
+      const border = fired ? (f.pct >= 30 ? '#e7b3b3' : '#ecc874') : '#9fd4af';
+      const stamps = (f.at || []).length ? ` · trechos: ${f.at.map(mmss).join(', ')}` : '';
+      return `<div style="padding:8px 12px;border:1px solid ${border};background:${color};border-radius:var(--r-sm);margin-bottom:6px">
+        <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
+          <span style="flex:1;font-weight:600">${FLAG_LABELS[k]}</span>
+          <strong style="white-space:nowrap">${fired ? f.pct + '% dos frames' : 'ok'}</strong>
+        </div>
+        ${fired ? `<div class="hint" style="margin-top:3px">${f.count} frame(s)${stamps}</div>` : ''}
+      </div>`;
+    }).join('');
+    el.innerHTML = rows + `<p class="hint" style="margin-top:var(--sp-2)">${p.frames} frames (1 a cada ${p.interval_sec}s) · ${p.model} · ${p.analyzed_at ? new Date(p.analyzed_at).toLocaleString('pt-BR') : ''}</p>`;
   }
 
   document.getElementById('eval-btn').onclick = async () => {
@@ -179,6 +218,19 @@
       await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('grade-pub').checked }) });
       msg.textContent = document.getElementById('grade-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
     } catch { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  document.getElementById('proctor-btn').onclick = async () => {
+    const msg = document.getElementById('proctor-msg'); const btn = document.getElementById('proctor-btn');
+    btn.disabled = true; msg.textContent = 'Analisando o vídeo (pode levar alguns segundos)…';
+    try {
+      const r = await fetch(`${API}/oral/submissions/${SUB}/proctor`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
+      msg.textContent = `Analisado (${j.proctor.frames} frames, ${j.proctor.ms} ms).`;
+      renderProctor(j.proctor);
+    } catch { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
   };
 
   load();
