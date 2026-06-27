@@ -21,6 +21,10 @@
     .btn.sec { background:#fff; color: var(--accent); }
     .btn:disabled { opacity:.5; cursor: default; }
     .msg { font-size: 13px; margin-left: 8px; }
+    .qrow { display:grid; grid-template-columns: 1fr 1fr auto; gap:8px; align-items:start; border-top:1px solid var(--line); padding:10px 0; }
+    .qrow:first-child { border-top:0; }
+    .qrow textarea { width:100%; min-height:54px; resize:vertical; font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; }
+    .qx { border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; padding:6px 10px; height:fit-content; }
     .q { border-top: 1px solid var(--line); padding: 10px 0; }
     .q:first-child { border-top: 0; }
     .q .qt { font-weight: 600; }
@@ -65,14 +69,19 @@
       <p class="hint" id="exam-status" style="margin-top:8px"></p>
     </div>
 
-    <div class="card" id="questions-card" style="display:none">
-      <h2>Perguntas extraídas <span class="pill" id="q-count">0</span></h2>
-      <p class="hint">As respostas/gabarito ficam só aqui (servidor) — não vão para a sessão de voz do aluno.</p>
+    <div class="card" id="questions-card">
+      <h2>3. Perguntas da prova <span class="pill" id="q-count">0</span></h2>
+      <p class="hint">Digite as perguntas e o gabarito, ou edite o que veio do PDF. O <strong>gabarito fica só no servidor</strong> (não vai à voz do aluno; serve para a avaliação). Clique em <strong>Salvar perguntas</strong>.</p>
       <div id="questions"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sec" id="q-add">+ adicionar pergunta</button>
+        <button class="btn" id="q-save">Salvar perguntas</button>
+        <span class="msg" id="q-msg"></span>
+      </div>
     </div>
 
     <div class="card">
-      <h2>3. Links dos alunos</h2>
+      <h2>4. Links dos alunos</h2>
       <div class="row">
         <div>
           <label for="lk-label">Rótulo (ex.: Turma A)</label>
@@ -94,12 +103,24 @@
     const API = `/w/${WORK}`;
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
+    function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .qrow').length; }
+    function addRow(q = '', a = '') {
+      const div = document.createElement('div'); div.className = 'qrow';
+      div.innerHTML = '<textarea class="q-q" placeholder="Pergunta"></textarea><textarea class="q-a" placeholder="Resposta / gabarito (só o professor vê)"></textarea><button class="qx" title="remover">✕</button>';
+      div.querySelector('.q-q').value = q; div.querySelector('.q-a').value = a;
+      div.querySelector('.qx').onclick = () => { div.remove(); updateQCount(); };
+      document.getElementById('questions').appendChild(div);
+      updateQCount();
+    }
     function renderQuestions(qs) {
-      document.getElementById('q-count').textContent = qs.length;
-      document.getElementById('questions-card').style.display = qs.length ? '' : 'none';
-      document.getElementById('questions').innerHTML = qs.map((q, i) =>
-        `<div class="q"><div class="qt">${i+1}. ${esc(q.question)}</div>${q.answer ? `<div class="qa">↳ ${esc(q.answer)}</div>` : '<div class="qa" style="color:var(--warn)">↳ (sem resposta no PDF)</div>'}</div>`
-      ).join('');
+      const c = document.getElementById('questions'); c.innerHTML = '';
+      (qs || []).forEach(q => addRow(q.question || '', q.answer || ''));
+      if (!(qs || []).length) addRow('', '');   // uma linha vazia para começar do zero
+    }
+    function collectQuestions() {
+      return [...document.querySelectorAll('#questions .qrow')]
+        .map(r => ({ question: r.querySelector('.q-q').value.trim(), answer: r.querySelector('.q-a').value.trim() }))
+        .filter(q => q.question);
     }
     function renderLinks(subs) {
       document.getElementById('links').innerHTML = (subs || []).map(s => {
@@ -162,6 +183,20 @@
         if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
         msg.textContent = `${j.submissions.length} link(s) gerado(s).`;
         load();
+      } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+    };
+
+    document.getElementById('q-add').onclick = () => addRow('', '');
+    document.getElementById('q-save').onclick = async () => {
+      const qs = collectQuestions(); const msg = document.getElementById('q-msg');
+      if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
+      msg.textContent = 'Salvando…';
+      try {
+        const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
+        const j = await r.json();
+        if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+        msg.textContent = `${j.count} pergunta(s) salva(s).`;
+        document.getElementById('exam-status').textContent = 'Perguntas definidas.';
       } catch (e) { msg.textContent = 'Falha de comunicação.'; }
     };
 

@@ -98,6 +98,26 @@ router.post("/w/:workToken/oral/config", requireWorkToken, requireOral, async (r
     }
 });
 
+// Perguntas digitadas/editadas à mão (alternativa ou complemento ao PDF). O
+// corpo é [{question, answer}]; re-indexamos e gravamos em oral_questions.
+router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async (req, res) => {
+    const raw = Array.isArray(req.body?.questions) ? req.body.questions : null;
+    if (!raw) return res.status(400).json({ error: "questions (array) required" });
+    const cleaned = raw
+        .map(q => ({ question: String(q?.question || "").trim(), answer: String(q?.answer || "").trim() }))
+        .filter(q => q.question)
+        .map((q, i) => ({ id: i + 1, ...q }));
+    if (cleaned.length === 0) return res.status(400).json({ error: "nenhuma pergunta válida (cada pergunta precisa de enunciado)" });
+    try {
+        await db.setOralQuestions(req.work.id, cleaned);
+        log.info("ORAL", `perguntas manuais salvas work=${req.work.work_token} n=${cleaned.length}`);
+        res.json({ ok: true, count: cleaned.length, questions: cleaned });
+    } catch (err) {
+        log.error("ORAL", `save questions failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar as perguntas" });
+    }
+});
+
 // --- Lado do ALUNO (Realtime) ---
 
 
