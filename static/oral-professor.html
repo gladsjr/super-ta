@@ -143,7 +143,21 @@
     const API = `/w/${WORK}`;
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
-    function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .qrow').length; }
+    function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .qrow').length; cfgWarn(); }
+    // Aviso (#55): N configurado > nº de perguntas cadastradas → a prova fica menor.
+    function cfgWarn() {
+      const total = collectQuestions().length;
+      const n = Number(document.getElementById('cfg-n').value) || 0;
+      const el = document.getElementById('cfg-hint'); if (!el) return;
+      if (!total) { el.textContent = ''; el.style.color = ''; return; }
+      if (n > total) {
+        el.innerHTML = `⚠️ <strong>N = ${n}, mas há só ${total} pergunta(s) cadastrada(s)</strong> — a prova terá ${total}. Adicione perguntas ou reduza o N.`;
+        el.style.color = 'var(--warn)';
+      } else {
+        el.textContent = n < total ? `${total} perguntas cadastradas; cada aluno recebe ${n} sorteada(s).` : `${total} pergunta(s) · N = ${n}.`;
+        el.style.color = '';
+      }
+    }
     function addRow(q = '', a = '') {
       const div = document.createElement('div'); div.className = 'qrow';
       div.innerHTML = '<textarea class="q-q" placeholder="Pergunta"></textarea><textarea class="q-a" placeholder="Resposta / gabarito (só o professor vê)"></textarea><button class="qx" title="remover">✕</button>';
@@ -184,9 +198,10 @@
       vs.innerHTML = '<option value="">(escolha uma voz)</option>' + j.voices.map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
       renderQuestions(j.questions || []);
       renderLinks(j.submissions || []);
-      const total = (j.questions || []).length, n = j.work.question_count || 6;
-      document.getElementById('cfg-hint').textContent = total ? `O PDF tem ${total} pergunta(s). Se N < ${total}, sorteia-se N por aluno.` : '';
+      cfgWarn();
     }
+    document.getElementById('cfg-n').addEventListener('input', cfgWarn);
+    document.getElementById('questions').addEventListener('input', cfgWarn);
 
     document.getElementById('upload-btn').onclick = async () => {
       const f = document.getElementById('exam-file').files[0];
