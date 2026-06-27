@@ -12,7 +12,7 @@ import OpenAI from "openai";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
-import { oralExamExtractorAgent, oralExamEvaluatorAgent } from "../lib/agents.js";
+import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralExamAspectsAgent } from "../lib/agents.js";
 import { putAudio, streamAudio, extFromMimetype } from "../lib/audioStore.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
@@ -79,10 +79,12 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
             file: await OpenAI.toFile(req.file.buffer, req.file.originalname || "prova.pdf"),
             purpose: "user_data",
         });
-        const questions = await oralExamExtractorAgent.extract({
+        let questions = await oralExamExtractorAgent.extract({
             examFileId: examFile.id,
             meterCtx: { workId: req.work.id },
         });
+        // Aspectos de cobertura (tópicos, não respostas) para o examinador checar completude.
+        questions = await oralExamAspectsAgent.generate(questions, { workId: req.work.id });
         await db.setOralQuestions(req.work.id, questions);
         log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} questions=${questions.length}`);
         res.json({ ok: true, count: questions.length, questions });
@@ -115,14 +117,23 @@ router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async
     const raw = Array.isArray(req.body?.questions) ? req.body.questions : null;
     if (!raw) return res.status(400).json({ error: "questions (array) required" });
     const cleaned = raw
-        .map(q => ({ question: String(q?.question || "").trim(), answer: String(q?.answer || "").trim() }))
+        .map(q => ({
+            question: String(q?.question || "").trim(),
+            answer: String(q?.answer || "").trim(),
+            aspects: Array.isArray(q?.aspects) ? q.aspects.map(a => String(a || "").trim()).filter(Boolean).slice(0, 3) : [],
+        }))
         .filter(q => q.question)
         .map((q, i) => ({ id: i + 1, ...q }));
     if (cleaned.length === 0) return res.status(400).json({ error: "nenhuma pergunta válida (cada pergunta precisa de enunciado)" });
     try {
-        await db.setOralQuestions(req.work.id, cleaned);
-        log.info("ORAL", `perguntas manuais salvas work=${req.work.work_token} n=${cleaned.length}`);
-        res.json({ ok: true, count: cleaned.length, questions: cleaned });
+        // Auto-gera aspectos só para perguntas com gabarito e ainda sem aspectos (preserva edições).
+        let finalQ = cleaned;
+        if (cleaned.some(q => q.answer && q.aspects.length === 0)) {
+            finalQ = await oralExamAspectsAgent.generate(cleaned, { workId: req.work.id });
+        }
+        await db.setOralQuestions(req.work.id, finalQ);
+        log.info("ORAL", `perguntas manuais salvas work=${req.work.work_token} n=${finalQ.length}`);
+        res.json({ ok: true, count: finalQ.length, questions: finalQ });
     } catch (err) {
         log.error("ORAL", `save questions failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar as perguntas" });
@@ -323,7 +334,7 @@ router.post("/s/:submissionToken/oral/session", requireSubmissionToken, async (r
         const n = Math.min(req.work.question_count || all.length, all.length);
         const sampled = sampleKeepingOrder(all, n);
         const voice = isValidVoice(req.work.voice) ? req.work.voice : "verse";
-        const instructions = buildExamInstructions(sampled.map(q => q.question), req.work.name);
+        const instructions = buildExamInstructions(sampled, req.work.name);
         const secret = await mintRealtimeSecret({ instructions, voice });
         log.info("ORAL", `session minted submission=${req.submission.submission_token} n=${n}/${all.length} voice=${voice}`);
         res.json({

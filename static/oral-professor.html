@@ -258,7 +258,7 @@
   function renumber() {
     [...document.querySelectorAll('#questions .q-item')].forEach((it, i) => { it.querySelector('.q-num').textContent = (i + 1) + '.'; });
   }
-  function makeItem(q = '', a = '', open = false) {
+  function makeItem(q = '', a = '', aspects = [], open = false) {
     const div = document.createElement('div');
     div.className = 'q-item' + (open ? ' open' : '');
     div.innerHTML =
@@ -267,9 +267,11 @@
       '<div class="q-body">' +
       '<label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
       '<label>Resposta / gabarito (só o professor vê)</label><textarea class="q-a" placeholder="Resposta esperada"></textarea>' +
+      '<label>Aspectos a cobrir — um por linha (tópicos, não respostas). O examinador usa só para apontar o que o aluno não abordou. Sugeridos automaticamente; edite à vontade.</label><textarea class="q-asp" placeholder="ex.: número de camadas&#10;um exemplo de aplicação"></textarea>' +
       '</div>';
     div.querySelector('.q-q').value = q;
     div.querySelector('.q-a').value = a;
+    div.querySelector('.q-asp').value = (Array.isArray(aspects) ? aspects : []).join('\n');
     div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; div.classList.toggle('open'); };
     div.querySelector('.q-del').onclick = () => { div.remove(); renumber(); updateQCount(); };
     div.querySelector('.q-q').addEventListener('input', () => { syncHead(div); cfgWarn(); });
@@ -279,13 +281,17 @@
   }
   function renderQuestions(qs) {
     const c = document.getElementById('questions'); c.innerHTML = '';
-    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', false));
-    if (!(qs || []).length) makeItem('', '', true);
+    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', q.aspects || [], false));
+    if (!(qs || []).length) makeItem('', '', [], true);
     updateQCount();
   }
   function collectQuestions() {
     return [...document.querySelectorAll('#questions .q-item')]
-      .map(r => ({ question: r.querySelector('.q-q').value.trim(), answer: r.querySelector('.q-a').value.trim() }))
+      .map(r => ({
+        question: r.querySelector('.q-q').value.trim(),
+        answer: r.querySelector('.q-a').value.trim(),
+        aspects: r.querySelector('.q-asp').value.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 3),
+      }))
       .filter(q => q.question);
   }
 
@@ -419,7 +425,7 @@
       msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
-  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
+  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', [], true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
   document.getElementById('q-save').onclick = async () => {
     const qs = collectQuestions(); const msg = document.getElementById('q-msg');
     if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
