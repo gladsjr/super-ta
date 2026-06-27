@@ -39,23 +39,7 @@
     <p class="sub">Suba a prova (PDF com perguntas e respostas), confira as perguntas, defina quantas serão sorteadas e a voz, e gere os links dos alunos.</p>
 
     <div class="card">
-      <h2>1. Prova (PDF de perguntas e respostas)</h2>
-      <div class="row">
-        <input type="file" id="exam-file" accept="application/pdf"/>
-        <button class="btn" id="upload-btn">Enviar e extrair</button>
-        <span class="msg" id="upload-msg"></span>
-      </div>
-      <p class="hint" id="exam-status" style="margin-top:8px"></p>
-    </div>
-
-    <div class="card" id="questions-card" style="display:none">
-      <h2>Perguntas extraídas <span class="pill" id="q-count">0</span></h2>
-      <p class="hint">As respostas/gabarito ficam só aqui (servidor) — não vão para a sessão de voz do aluno.</p>
-      <div id="questions"></div>
-    </div>
-
-    <div class="card">
-      <h2>2. Configuração</h2>
+      <h2>1. Configuração</h2>
       <div class="row">
         <div>
           <label for="cfg-n">Nº de perguntas na prova</label>
@@ -69,6 +53,22 @@
         <span class="msg" id="cfg-msg"></span>
       </div>
       <p class="hint" id="cfg-hint" style="margin-top:8px"></p>
+    </div>
+
+    <div class="card">
+      <h2>2. Prova (PDF de perguntas e respostas)</h2>
+      <div class="row">
+        <input type="file" id="exam-file" accept="application/pdf"/>
+        <button class="btn" id="upload-btn">Enviar e extrair</button>
+        <span class="msg" id="upload-msg"></span>
+      </div>
+      <p class="hint" id="exam-status" style="margin-top:8px"></p>
+    </div>
+
+    <div class="card" id="questions-card" style="display:none">
+      <h2>Perguntas extraídas <span class="pill" id="q-count">0</span></h2>
+      <p class="hint">As respostas/gabarito ficam só aqui (servidor) — não vão para a sessão de voz do aluno.</p>
+      <div id="questions"></div>
     </div>
 
     <div class="card">
