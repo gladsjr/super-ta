@@ -165,7 +165,12 @@
       setStatus('Conectando…');
       // 3) grava o vídeo (áudio do aluno + câmera) para avaliação posterior
       try {
-        recorder = new MediaRecorder(micStream);
+        // Bitrate BAIXO de propósito: o vídeo é só para revisão humana / proctoring
+        // (que reduz para 640px), não precisa de HD. Bitrate alto = upload longo no
+        // fim. ~400kbps de vídeo + 32kbps de áudio deixam o arquivo pequeno e o
+        // envio rápido, sem disputar banda com a voz durante a prova.
+        try { recorder = new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
+        catch (e0) { recorder = new MediaRecorder(micStream); }
         recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
         recorder.onstop = uploadVideo;
         recorder.start(1000);
