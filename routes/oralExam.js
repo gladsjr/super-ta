@@ -295,11 +295,12 @@ async function mintRealtimeSecret({ instructions, voice }) {
             instructions,
             audio: {
                 input: {
+                    // Redução de ruído antes do VAD (barulho ambiente não dispara corte falso).
+                    noise_reduction: { type: "far_field" },
                     transcription: { model: "gpt-4o-transcribe" },
-                    // VAD semântico, pressa MÉDIA: tolera pausas para pensar sem
-                    // picotar a fala, mas sem demorar demais para perceber o fim.
-                    // (low = paciente demais; high = corta cedo.)
-                    turn_detection: { type: "semantic_vad", eagerness: "medium" },
+                    // VAD semântico paciente: tolera pausas para pensar e ignora ruído
+                    // breve antes de assumir fala.
+                    turn_detection: { type: "semantic_vad", eagerness: "low" },
                 },
                 output: { voice },
             },
