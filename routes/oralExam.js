@@ -33,11 +33,45 @@ function proctorAlerts(p) {
     if (f.absent && f.absent.pct >= 20) a.push("ausência");
     if (f.multiple_people && f.multiple_people.pct >= 20) a.push("+1 pessoa");
     if (f.phone && f.phone.pct >= 25) a.push("celular");
-    if (f.hands_hidden && f.hands_hidden.pct >= 60) a.push("mãos ocultas");
     return a;
 }
 // Alerta de VOZ: houve pausa longa antes de resposta substancial.
 function voiceAlert(v) { return !!(v && v.latency && v.latency.flagged_count > 0); }
+
+// Nota (0–10) calculada da avaliação: correta=1, parcial=0,5, incorreta/não
+// respondida=0; média sobre as perguntas FEITAS × 10. Determinística (sem IA).
+function gradeFromEval(report) {
+    const pq = report && Array.isArray(report.per_question) ? report.per_question : [];
+    if (!pq.length) return null;
+    const w = { correct: 1, partial: 0.5, incorrect: 0, not_answered: 0 };
+    const sum = pq.reduce((acc, q) => acc + (w[q.assessment] != null ? w[q.assessment] : 0), 0);
+    return Math.round((sum / pq.length) * 10 * 10) / 10;
+}
+// Devolutiva-padrão derivada da avaliação (texto legível para o aluno). NÃO inclui
+// o gabarito ("expected") por default — o professor pode acrescentar ao editar.
+const ASSESS_LABEL = { correct: "correta", partial: "parcial", incorrect: "incorreta", not_answered: "não respondida" };
+function devolutivaFromEval(report) {
+    if (!report) return "";
+    const pq = Array.isArray(report.per_question) ? report.per_question : [];
+    const blocks = pq.map((q, i) => {
+        const parts = [`${i + 1}. ${q.question}`];
+        if (q.student_answer) parts.push(`   Sua resposta: ${q.student_answer}`);
+        parts.push(`   Avaliação: ${ASSESS_LABEL[q.assessment] || q.assessment}${q.comment ? " — " + q.comment : ""}`);
+        return parts.join("\n");
+    });
+    return (report.summary ? report.summary + "\n\n" : "") + blocks.join("\n\n");
+}
+// Após avaliar: preenche devolutiva e nota como DEFAULT (= avaliação), sem
+// sobrescrever ajustes já feitos pelo professor. Ambos seguem editáveis.
+async function applyEvalDefaults(submissionId, detail, report) {
+    if (!detail || !detail.oral_devolutiva || !String(detail.oral_devolutiva).trim()) {
+        await db.setOralDevolutiva(submissionId, devolutivaFromEval(report));
+    }
+    if (!detail || detail.grade_final == null) {
+        const g = gradeFromEval(report);
+        if (g != null) await db.setOralGrade(submissionId, g);
+    }
+}
 
 // Garante que o trabalho é uma prova oral antes de seguir.
 function requireOral(req, res, next) {
@@ -164,10 +198,12 @@ router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async
 router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToken, requireProfessorSubmission, requireWithinBudget, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
-        const [questions, detail] = await Promise.all([
-            db.getOralQuestions(req.work.id),
+        const [asked, detail] = await Promise.all([
+            db.getOralAsked(req.submission.id),
             db.getOralSubmissionDetail(req.submission.id),
         ]);
+        // Avalia SÓ as perguntas feitas a este aluno (fallback: todas, p/ provas antigas).
+        const questions = asked || await db.getOralQuestions(req.work.id);
         const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
         if (!questions.length) return res.status(409).json({ error: "a prova não tem gabarito (perguntas)" });
         if (!transcript.length) return res.status(409).json({ error: "sem transcrição — o aluno ainda não realizou a prova" });
@@ -175,7 +211,8 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
             questions, transcript, meterCtx: { workId: req.work.id, submissionId: req.submission.id },
         });
         await db.setOralEvaluation(req.submission.id, report);
-        res.json({ ok: true, evaluation: report });
+        await applyEvalDefaults(req.submission.id, detail, report); // devolutiva + nota default
+        res.json({ ok: true, evaluation: report, grade: gradeFromEval(report) });
     } catch (err) {
         log.error("ORAL", `evaluate failed: ${err.message}`);
         res.status(500).json({ error: "falha ao avaliar", detail: err.message });
@@ -252,20 +289,22 @@ router.post("/w/:workToken/oral/submissions/:subToken/proctor", requireWorkToken
 router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, requireWithinBudget, async (req, res) => {
     try {
         const force = req.query.force === "1" || req.body?.force === true;
-        const questions = await db.getOralQuestions(req.work.id);
-        if (!questions.length) return res.status(409).json({ error: "a prova não tem gabarito (perguntas)" });
+        const allQuestions = await db.getOralQuestions(req.work.id);
+        if (!allQuestions.length) return res.status(409).json({ error: "a prova não tem gabarito (perguntas)" });
         const subs = await db.listOralSubmissionsForEval(req.work.id, force);
         let evaluated = 0;
         const errors = [];
         for (const s of subs) {
             try {
-                const detail = await db.getOralSubmissionDetail(s.id);
+                const [asked, detail] = await Promise.all([db.getOralAsked(s.id), db.getOralSubmissionDetail(s.id)]);
+                const questions = asked || allQuestions; // só as perguntas feitas a este aluno
                 const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
                 if (!transcript.length) continue;
                 const report = await oralExamEvaluatorAgent.evaluate({
                     questions, transcript, meterCtx: { workId: req.work.id, submissionId: s.id },
                 });
                 await db.setOralEvaluation(s.id, report);
+                await applyEvalDefaults(s.id, detail, report); // devolutiva + nota default
                 evaluated++;
             } catch (e) {
                 errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
