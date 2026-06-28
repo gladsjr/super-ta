@@ -46,6 +46,34 @@
         <div class="err" id="pre-err"></div>
       </div>
 
+      <div id="setup" style="display:none">
+        <p>Antes de começar, ajuste sua posição como na figura: <strong>rosto e ombros centralizados</strong>, a cerca de <strong>1,5 m</strong> da câmera (do tronco até a cabeça), e <strong>mãos à mostra</strong> (sobre a mesa ou no apoio da cadeira).</p>
+        <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; justify-content:center">
+          <div style="flex:1; min-width:200px; max-width:320px">
+            <div class="hint" style="margin-bottom:4px; text-align:center">Posição desejada</div>
+            <svg viewBox="0 0 200 150" style="width:100%; border:1px solid var(--line); border-radius:10px; background:#fafbfc" xmlns="http://www.w3.org/2000/svg">
+              <line x1="100" y1="8" x2="100" y2="142" stroke="#dfe6ee" stroke-width="1" stroke-dasharray="4 4"/>
+              <line x1="6" y1="118" x2="194" y2="118" stroke="#cfd8e3" stroke-width="3"/>
+              <circle cx="100" cy="44" r="20" fill="#cfe0f5" stroke="#7aa7e0" stroke-width="1.5"/>
+              <path d="M62 118 C62 86 78 72 100 72 C122 72 138 86 138 118 Z" fill="#cfe0f5" stroke="#7aa7e0" stroke-width="1.5"/>
+              <ellipse cx="82" cy="116" rx="9" ry="6" fill="#ecc79a" stroke="#c79a5a" stroke-width="1.2"/>
+              <ellipse cx="118" cy="116" rx="9" ry="6" fill="#ecc79a" stroke="#c79a5a" stroke-width="1.2"/>
+              <text x="100" y="138" text-anchor="middle" font-size="9" fill="#5b6675">mãos sobre a mesa</text>
+            </svg>
+          </div>
+          <div style="flex:1; min-width:200px; max-width:320px">
+            <div class="hint" style="margin-bottom:4px; text-align:center">Sua câmera</div>
+            <video id="setup-cam" autoplay muted playsinline style="margin:0"></video>
+          </div>
+        </div>
+        <div class="status" style="margin-top:10px"><span class="dot" id="pos-dot"></span> <span id="pos-guidance">Posicione-se como na figura e toque em “Verificar”.</span></div>
+        <div class="row" style="margin-top:10px; justify-content:center">
+          <button class="btn" id="pos-check-btn">Verificar minha posição</button>
+          <button class="btn" id="pos-begin-btn" disabled>Começar a prova</button>
+        </div>
+        <div class="err" id="setup-err"></div>
+      </div>
+
       <div id="live" style="display:none">
         <video id="selfview" autoplay muted playsinline></video>
         <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
@@ -74,7 +102,7 @@
     let recorder = null, recChunks = [], playHead = 0, ended = false, activeSources = [];
 
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
-    function show(id) { for (const s of ['pre', 'live', 'done', 'blocked']) $(s).style.display = s === id ? '' : 'none'; }
+    function show(id) { for (const s of ['pre', 'setup', 'live', 'done', 'blocked']) $(s).style.display = s === id ? '' : 'none'; }
 
     // No-retake: se a prova já foi realizada com este link, bloqueia a entrada.
     let blocked = false;
@@ -160,22 +188,49 @@
         $('pre-err').textContent = 'Não foi possível acessar microfone/câmera. Autorize o acesso e tente de novo.';
         return;
       }
+      // 3) portão de SETUP: ajusta a posição antes de começar a prova
+      show('setup');
+      $('setup-cam').srcObject = micStream;
+    }
+
+    // Captura 1 frame da câmera e checa a posição canônica no servidor.
+    async function checkPosition() {
+      const btn = $('pos-check-btn'); btn.disabled = true;
+      $('pos-guidance').textContent = 'Verificando…'; $('setup-err').textContent = '';
+      try {
+        const vid = $('setup-cam');
+        const cv = document.createElement('canvas');
+        cv.width = vid.videoWidth || 640; cv.height = vid.videoHeight || 480;
+        cv.getContext('2d').drawImage(vid, 0, 0, cv.width, cv.height);
+        const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.8));
+        const form = new FormData(); form.append('file', blob, 'pos.jpg');
+        const r = await fetch(`/s/${SUB}/oral/position-check`, { method: 'POST', body: form });
+        const j = await r.json();
+        if (!r.ok) { $('pos-guidance').textContent = j.error || 'Falha ao verificar.'; return; }
+        $('pos-guidance').textContent = j.guidance || (j.ok ? 'Posição ok!' : 'Ajuste a posição.');
+        $('pos-dot').className = 'dot' + (j.ok ? ' live' : '');
+        if (j.ok) $('pos-begin-btn').disabled = false;
+      } catch { $('pos-guidance').textContent = 'Falha de comunicação.'; }
+      finally { btn.disabled = false; }
+    }
+
+    // Começa a prova de fato: grava o vídeo + conecta ao relay.
+    function beginExam() {
       show('live');
       $('selfview').srcObject = micStream;
       setStatus('Conectando…');
-      // 3) grava o vídeo (áudio do aluno + câmera) para avaliação posterior
+      // grava o vídeo (áudio do aluno + câmera) para avaliação posterior. Bitrate
+      // BAIXO de propósito: o vídeo é só para revisão humana / proctoring (que
+      // reduz para 640px), não precisa de HD — envio rápido no fim, sem disputar
+      // banda com a voz durante a prova.
       try {
-        // Bitrate BAIXO de propósito: o vídeo é só para revisão humana / proctoring
-        // (que reduz para 640px), não precisa de HD. Bitrate alto = upload longo no
-        // fim. ~400kbps de vídeo + 32kbps de áudio deixam o arquivo pequeno e o
-        // envio rápido, sem disputar banda com a voz durante a prova.
         try { recorder = new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
         catch (e0) { recorder = new MediaRecorder(micStream); }
         recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
         recorder.onstop = uploadVideo;
         recorder.start(1000);
       } catch (e) { /* sem gravação se o navegador não suportar — não bloqueia a prova */ }
-      // 4) áudio em PCM via Web Audio + conexão ao relay
+      // áudio em PCM via Web Audio + conexão ao relay
       ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
       playHead = ctx.currentTime;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -194,6 +249,8 @@
       ws.onerror = () => setStatus('Erro de conexão', 'err');
       ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
     }
+    $('pos-check-btn').onclick = checkPosition;
+    $('pos-begin-btn').onclick = beginExam;
 
     async function uploadVideo() {
       // chamado quando o MediaRecorder para; envia o vídeo e finaliza a UI
