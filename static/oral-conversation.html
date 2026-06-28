@@ -241,7 +241,10 @@
       const r = await fetch(`${API}/oral/submissions/${SUB}/evaluate`, { method: 'POST' });
       const j = await r.json();
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-      msg.textContent = 'Avaliado.'; renderReport(j.evaluation);
+      // Recarrega o estado: a avaliação preenche devolutiva e nota como default
+      // no banco; sem isso a tela ficava com os campos vazios até dar refresh (#57).
+      await load();
+      msg.textContent = 'Avaliado.';
     } catch { msg.textContent = 'Falha de comunicação.'; }
     finally { btn.disabled = false; }
   };
