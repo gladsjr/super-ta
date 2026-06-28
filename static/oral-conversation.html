@@ -231,7 +231,22 @@
         ${fired ? `<div class="hint" style="margin-top:3px">${f.count} frame(s)${stamps}</div>` : ''}
       </div>`;
     }).join('');
-    el.innerHTML = rows + `<p class="hint" style="margin-top:var(--sp-2)">${p.frames} frames (1 a cada ${p.interval_sec}s) · ${p.model} · ${p.analyzed_at ? new Date(p.analyzed_at).toLocaleString('pt-BR') : ''}</p>`;
+    // Mãos (MediaPipe): mostra presença; só sinaliza (vermelho) com ausência sustentada.
+    let handsHtml = '';
+    const h = p.flags.hands;
+    if (h) {
+      const fired = !!h.flag;
+      const bg = fired ? '#fdeaea' : '#eaf7ee', bd = fired ? '#e7b3b3' : '#9fd4af';
+      const stamps = (fired && (h.at || []).length) ? ` · trechos: ${h.at.map(s => `<a href="#" onclick="seekVideo(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}` : '';
+      handsHtml = `<div style="padding:8px 12px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:6px">
+        <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
+          <span style="flex:1;font-weight:600">Mãos no quadro</span>
+          <strong style="white-space:nowrap">${fired ? 'ausência de ' + h.max_absence_sec + 's' : h.present_pct + '% do tempo'}</strong>
+        </div>
+        ${fired ? `<div class="hint" style="margin-top:3px">mãos fora do quadro por um trecho contínuo${stamps}</div>` : ''}
+      </div>`;
+    }
+    el.innerHTML = rows + handsHtml + `<p class="hint" style="margin-top:var(--sp-2)">${p.frames} frames (1 a cada ${p.interval_sec}s) · ${p.model} · ${p.analyzed_at ? new Date(p.analyzed_at).toLocaleString('pt-BR') : ''}</p>`;
   }
 
   document.getElementById('eval-btn').onclick = async () => {

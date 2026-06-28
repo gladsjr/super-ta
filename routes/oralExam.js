@@ -33,6 +33,7 @@ function proctorAlerts(p) {
     if (f.absent && f.absent.pct >= 20) a.push("ausência");
     if (f.multiple_people && f.multiple_people.pct >= 20) a.push("+1 pessoa");
     if (f.phone && f.phone.pct >= 25) a.push("celular");
+    if (f.hands && f.hands.flag) a.push("mãos fora");
     return a;
 }
 // Alerta de VOZ: houve pausa longa antes de resposta substancial.
