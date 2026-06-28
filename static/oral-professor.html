@@ -196,10 +196,20 @@
       </div>
 
       <div class="card">
+        <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. São indícios para revisão humana, nunca acusação — o professor assiste ao trecho e decide. A latência da voz é capturada automaticamente durante a prova.">Proctoring por vídeo (em lote)</h3>
+        <p class="card-sub">Roda a análise do vídeo das provas realizadas. Os alertas aparecem na lista abaixo; clique em <strong>gerenciar</strong> para ver os trechos.</p>
+        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
+          <button id="proctor-all-btn" class="btn btn-primary" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
+          <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
+        </div>
+        <div id="proctor-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+      </div>
+
+      <div class="card">
         <h3 class="card-title">Alunos</h3>
-        <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, escrever a devolutiva e atribuir a nota.</p>
+        <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
         <table id="eval-table" class="table hidden">
-          <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Publicado</th><th></th></tr></thead>
+          <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
@@ -364,11 +374,16 @@
         s.devolutiva_published ? '<span class="pill pill-pub">devolutiva</span>' : '',
         s.grade_published ? '<span class="pill pill-pub">nota</span>' : '',
       ].filter(Boolean).join(' ') || '<span class="hint">—</span>';
+      const alertPills = (s.proctor_alerts || []).map(a => `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">${esc(a)}</span>`);
+      if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
+      const alerts = alertPills.length ? alertPills.join(' ')
+        : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>' : '<span class="hint">—</span>');
       return `<tr>
         <td>${esc(s.student_label || '')}${test}</td>
         <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
         <td>${evalPill}</td>
         <td style="text-align:right">${grade}</td>
+        <td>${alerts}</td>
         <td>${pub}</td>
         <td><a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
       </tr>`;
@@ -485,6 +500,24 @@
   }
   document.getElementById('eval-all-btn').onclick = () => runEvalAll(false);
   document.getElementById('eval-all-force-btn').onclick = () => { if (confirm('Reavaliar TODAS as provas, inclusive as já avaliadas?')) runEvalAll(true); };
+
+  async function runProctorAll(force) {
+    const btnIds = ['proctor-all-btn', 'proctor-all-force-btn'];
+    btnIds.forEach(i => document.getElementById(i).disabled = true);
+    batchStatus('proctor-batch-status', (force ? 'Reanalisando todos os vídeos' : 'Analisando os vídeos') + '… (pode demorar — cada vídeo leva alguns segundos)');
+    try {
+      const r = await fetch(`${API}/oral/proctor-all${force ? '?force=1' : ''}`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) { batchStatus('proctor-batch-status', 'Falha: ' + (j.error || r.status)); return; }
+      let t = `${j.analyzed} vídeo(s) analisado(s) de ${j.candidates} com gravação.`;
+      if (j.errors && j.errors.length) t += ` ${j.errors.length} com erro.`;
+      batchStatus('proctor-batch-status', t);
+      await load();
+    } catch (e) { batchStatus('proctor-batch-status', 'Falha de comunicação.'); }
+    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
+  }
+  document.getElementById('proctor-all-btn').onclick = () => runProctorAll(false);
+  document.getElementById('proctor-all-force-btn').onclick = () => { if (confirm('Reanalisar TODOS os vídeos, inclusive os já analisados?')) runProctorAll(true); };
 
   async function runPublishAll(target, on) {
     batchStatus('pub-batch-status', (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));

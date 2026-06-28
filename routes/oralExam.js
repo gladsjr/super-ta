@@ -25,6 +25,20 @@ const router = express.Router();
 const examUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 const videoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 300 * 1024 * 1024 } }); // vídeo da prova (até 300MB)
 
+// Alertas de proctoring por VÍDEO para a lista do professor (resumo conservador,
+// calculado dos flags brutos — limiares ajustáveis sem reprocessar o vídeo).
+function proctorAlerts(p) {
+    if (!p || !p.flags) return [];
+    const f = p.flags, a = [];
+    if (f.absent && f.absent.pct >= 20) a.push("ausência");
+    if (f.multiple_people && f.multiple_people.pct >= 20) a.push("+1 pessoa");
+    if (f.phone && f.phone.pct >= 25) a.push("celular");
+    if (f.hands_hidden && f.hands_hidden.pct >= 60) a.push("mãos ocultas");
+    return a;
+}
+// Alerta de VOZ: houve pausa longa antes de resposta substancial.
+function voiceAlert(v) { return !!(v && v.latency && v.latency.flagged_count > 0); }
+
 // Garante que o trabalho é uma prova oral antes de seguir.
 function requireOral(req, res, next) {
     if (req.work.kind !== "oral_realtime") {
@@ -61,6 +75,9 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 grade: s.grade_final ?? null,
                 devolutiva_published: !!s.evaluation_published_at,
                 grade_published: !!s.grade_published_at,
+                has_oral_proctor: !!s.has_oral_proctor,
+                proctor_alerts: proctorAlerts(s.oral_proctor_json),
+                voice_alert: voiceAlert(s.oral_voice_json),
             })),
             voices: VOICES,
         });
@@ -277,6 +294,35 @@ router.post("/w/:workToken/oral/publish-all", requireWorkToken, requireOral, exp
     } catch (err) {
         log.error("ORAL", `publish-all failed: ${err.message}`);
         res.status(500).json({ error: "falha ao publicar em lote" });
+    }
+});
+
+// Lote: proctoring por VÍDEO de todas as provas com vídeo gravado. Sem ?force,
+// pula as já analisadas; com ?force=1, reanalisa todas. Sequencial (cada vídeo:
+// ffmpeg + 2 modelos por frame), tudo local — o vídeo não vai a serviço externo.
+router.post("/w/:workToken/oral/proctor-all", requireWorkToken, requireOral, async (req, res) => {
+    try {
+        const force = req.query.force === "1" || req.body?.force === true;
+        const subs = await db.listOralSubmissionsForProctor(req.work.id, force);
+        let analyzed = 0;
+        const errors = [];
+        for (const s of subs) {
+            try {
+                const key = await db.getOralVideoKey(s.id);
+                if (!key) continue;
+                const report = await analyzeOralVideo(key);
+                await db.setOralProctor(s.id, report);
+                analyzed++;
+            } catch (e) {
+                errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
+                log.error("ORAL", `proctor-all item failed sub=${s.submission_token}: ${e.message}`);
+            }
+        }
+        log.info("ORAL", `proctor-all work=${req.work.work_token} analisados=${analyzed}/${subs.length} force=${force}`);
+        res.json({ ok: true, analyzed, candidates: subs.length, errors });
+    } catch (err) {
+        log.error("ORAL", `proctor-all failed: ${err.message}`);
+        res.status(500).json({ error: "falha no proctoring em lote", detail: err.message });
     }
 });
 
