@@ -300,24 +300,34 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
         const subs = await db.listOralSubmissionsForEval(req.work.id, force);
         let evaluated = 0;
         const errors = [];
-        for (const s of subs) {
-            try {
-                const [asked, detail] = await Promise.all([db.getOralAsked(s.id), db.getOralSubmissionDetail(s.id)]);
-                const questions = asked || allQuestions; // só as perguntas feitas a este aluno
-                const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
-                if (!transcript.length) continue;
-                const report = await oralExamEvaluatorAgent.evaluate({
-                    questions, transcript, meterCtx: { workId: req.work.id, submissionId: s.id },
-                });
-                await db.setOralEvaluation(s.id, report);
-                await applyEvalDefaults(s.id, detail, report); // devolutiva + nota default
-                evaluated++;
-            } catch (e) {
-                errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
-                log.error("ORAL", `evaluate-all item failed sub=${s.submission_token}: ${e.message}`);
+        // Avalia em PARALELO com concorrência limitada: cada avaliação é uma
+        // chamada de raciocínio (gpt-5.5) de dezenas de segundos; em série, N
+        // alunos = N×esse tempo. Pool de workers reduz o tempo de parede ~Nx,
+        // sem disparar todas de uma vez (evita estourar limite de taxa da OpenAI).
+        const ORAL_EVAL_CONCURRENCY = 4;
+        let next = 0;
+        async function evalWorker() {
+            while (next < subs.length) {
+                const s = subs[next++]; // ++ síncrono: sem corrida no modelo single-thread do JS
+                try {
+                    const [asked, detail] = await Promise.all([db.getOralAsked(s.id), db.getOralSubmissionDetail(s.id)]);
+                    const questions = asked || allQuestions; // só as perguntas feitas a este aluno
+                    const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
+                    if (!transcript.length) continue;
+                    const report = await oralExamEvaluatorAgent.evaluate({
+                        questions, transcript, meterCtx: { workId: req.work.id, submissionId: s.id },
+                    });
+                    await db.setOralEvaluation(s.id, report);
+                    await applyEvalDefaults(s.id, detail, report); // devolutiva + nota default
+                    evaluated++;
+                } catch (e) {
+                    errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
+                    log.error("ORAL", `evaluate-all item failed sub=${s.submission_token}: ${e.message}`);
+                }
             }
         }
-        log.info("ORAL", `evaluate-all work=${req.work.work_token} avaliadas=${evaluated}/${subs.length} force=${force}`);
+        await Promise.all(Array.from({ length: Math.min(ORAL_EVAL_CONCURRENCY, subs.length) }, evalWorker));
+        log.info("ORAL", `evaluate-all work=${req.work.work_token} avaliadas=${evaluated}/${subs.length} force=${force} conc=${ORAL_EVAL_CONCURRENCY}`);
         res.json({ ok: true, evaluated, candidates: subs.length, errors });
     } catch (err) {
         log.error("ORAL", `evaluate-all failed: ${err.message}`);
