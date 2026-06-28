@@ -47,26 +47,15 @@
       </div>
 
       <div id="setup" style="display:none">
-        <p>Antes de começar, ajuste sua posição como na figura: <strong>rosto e ombros centralizados</strong>, a cerca de <strong>1,5 m</strong> da câmera (do tronco até a cabeça), e <strong>mãos à mostra</strong> (sobre a mesa ou no apoio da cadeira).</p>
-        <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; justify-content:center">
-          <div style="flex:1; min-width:200px; max-width:320px">
-            <div class="hint" style="margin-bottom:4px; text-align:center">Posição desejada</div>
-            <svg viewBox="0 0 200 150" style="width:100%; border:1px solid var(--line); border-radius:10px; background:#fafbfc" xmlns="http://www.w3.org/2000/svg">
-              <line x1="100" y1="8" x2="100" y2="142" stroke="#dfe6ee" stroke-width="1" stroke-dasharray="4 4"/>
-              <line x1="6" y1="118" x2="194" y2="118" stroke="#cfd8e3" stroke-width="3"/>
-              <circle cx="100" cy="44" r="20" fill="#cfe0f5" stroke="#7aa7e0" stroke-width="1.5"/>
-              <path d="M62 118 C62 86 78 72 100 72 C122 72 138 86 138 118 Z" fill="#cfe0f5" stroke="#7aa7e0" stroke-width="1.5"/>
-              <ellipse cx="82" cy="116" rx="9" ry="6" fill="#ecc79a" stroke="#c79a5a" stroke-width="1.2"/>
-              <ellipse cx="118" cy="116" rx="9" ry="6" fill="#ecc79a" stroke="#c79a5a" stroke-width="1.2"/>
-              <text x="100" y="138" text-anchor="middle" font-size="9" fill="#5b6675">mãos sobre a mesa</text>
-            </svg>
-          </div>
-          <div style="flex:1; min-width:200px; max-width:320px">
-            <div class="hint" style="margin-bottom:4px; text-align:center">Sua câmera</div>
-            <video id="setup-cam" autoplay muted playsinline style="margin:0"></video>
-          </div>
+        <p>Antes de começar, ajuste sua posição como nos exemplos: <strong>rosto e ombros centralizados</strong>, a cerca de <strong>1,5 m</strong> da câmera (do tronco até a cabeça), e <strong>mãos à mostra</strong> (sobre a mesa ou no apoio da cadeira).</p>
+        <div class="hint" style="text-align:center; margin-bottom:4px">Exemplos de posição</div>
+        <div style="display:flex; gap:10px; justify-content:center; margin-bottom:12px">
+          <figure style="margin:0; flex:1; max-width:230px"><img id="pose-a" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a-cap"></figcaption></figure>
+          <figure style="margin:0; flex:1; max-width:230px"><img id="pose-b" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b-cap"></figcaption></figure>
         </div>
-        <div class="status" style="margin-top:10px"><span class="dot" id="pos-dot"></span> <span id="pos-guidance">Posicione-se como na figura e toque em “Verificar”.</span></div>
+        <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
+        <video id="setup-cam" autoplay muted playsinline style="margin:0 auto 0"></video>
+        <div class="status" style="margin-top:10px"><span class="dot" id="pos-dot"></span> <span id="pos-guidance">Toque em “Verificar” e vá se ajustando — a prova começa sozinha quando a posição estiver certa.</span></div>
         <div class="row" style="margin-top:10px; justify-content:center">
           <button class="btn" id="pos-check-btn">Verificar minha posição</button>
           <button class="btn" id="pos-begin-btn" disabled>Começar a prova</button>
@@ -191,31 +180,86 @@
       // 3) portão de SETUP: ajusta a posição antes de começar a prova
       show('setup');
       $('setup-cam').srcObject = micStream;
+      pickAndShowPoses();
     }
 
-    // Captura 1 frame da câmera e checa a posição canônica no servidor.
-    async function checkPosition() {
-      const btn = $('pos-check-btn'); btn.disabled = true;
-      $('pos-guidance').textContent = 'Verificando…'; $('setup-err').textContent = '';
-      try {
-        const vid = $('setup-cam');
-        const cv = document.createElement('canvas');
-        cv.width = vid.videoWidth || 640; cv.height = vid.videoHeight || 480;
-        cv.getContext('2d').drawImage(vid, 0, 0, cv.width, cv.height);
-        const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.8));
-        const form = new FormData(); form.append('file', blob, 'pos.jpg');
-        const r = await fetch(`/s/${SUB}/oral/position-check`, { method: 'POST', body: form });
-        const j = await r.json();
-        if (!r.ok) { $('pos-guidance').textContent = j.error || 'Falha ao verificar.'; return; }
-        $('pos-guidance').textContent = j.guidance || (j.ok ? 'Posição ok!' : 'Ajuste a posição.');
-        $('pos-dot').className = 'dot' + (j.ok ? ' live' : '');
-        if (j.ok) $('pos-begin-btn').disabled = false;
-      } catch { $('pos-guidance').textContent = 'Falha de comunicação.'; }
-      finally { btn.disabled = false; }
+    // Exemplos de posição: 1 com mesa + 1 sem mesa, sorteados garantindo gênero
+    // E raça diferentes entre as duas imagens (diversidade nos exemplos).
+    const POSES = [
+      { f: 'sem-mesa__m__latino.jpg',   s: 'sem', g: 'm', r: 'latino' },
+      { f: 'sem-mesa__f__branca.jpg',   s: 'sem', g: 'f', r: 'branca' },
+      { f: 'sem-mesa__m__asiatico.jpg', s: 'sem', g: 'm', r: 'asiatico' },
+      { f: 'sem-mesa__f__negra.jpg',    s: 'sem', g: 'f', r: 'negra' },
+      { f: 'com-mesa__m__branco.jpg',   s: 'com', g: 'm', r: 'branca' },
+      { f: 'com-mesa__f__latina.jpg',   s: 'com', g: 'f', r: 'latino' },
+      { f: 'com-mesa__m__negro.jpg',    s: 'com', g: 'm', r: 'negra' },
+      { f: 'com-mesa__f__asiatica.jpg', s: 'com', g: 'f', r: 'asiatico' },
+    ];
+    function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
+    function pickAndShowPoses() {
+      const com = shuffle(POSES.filter(p => p.s === 'com'));
+      const sem = shuffle(POSES.filter(p => p.s === 'sem'));
+      let pair = null;
+      for (const c of com) { const m = sem.find(s => s.g !== c.g && s.r !== c.r); if (m) { pair = [c, m]; break; } }
+      if (!pair) pair = [com[0], sem[0]];
+      const base = '/static/oral-poses/';
+      $('pose-a').src = base + pair[0].f; $('pose-a-cap').textContent = 'Com mesa';
+      $('pose-b').src = base + pair[1].f; $('pose-b-cap').textContent = 'Sem mesa';
+    }
+
+    // Uma rodada de checagem: captura 1 frame e pergunta ao servidor. Retorna o
+    // JSON, null (câmera ainda sem quadro) ou lança em erro de rede.
+    async function checkPositionOnce() {
+      const vid = $('setup-cam');
+      if (!vid.videoWidth || !vid.videoHeight) return null;
+      const cv = document.createElement('canvas');
+      cv.width = vid.videoWidth; cv.height = vid.videoHeight;
+      cv.getContext('2d').drawImage(vid, 0, 0, cv.width, cv.height);
+      const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.8));
+      const form = new FormData(); form.append('file', blob, 'pos.jpg');
+      const r = await fetch(`/s/${SUB}/oral/position-check`, { method: 'POST', body: form });
+      if (!r.ok) throw new Error('http ' + r.status);
+      return await r.json();
+    }
+
+    // Verificação CONTÍNUA: toca uma vez e o aluno vai se ajustando; o sistema
+    // avisa ao vivo e INICIA a prova sozinho quando a posição fica boa por 2
+    // checagens seguidas — resolve o "clicar de longe". Auto-pausada (a próxima
+    // só dispara após a anterior responder), então não enfileira chamadas.
+    let posLoop = false, okStreak = 0;
+    async function togglePositionLoop() {
+      if (posLoop) { posLoop = false; $('pos-check-btn').textContent = 'Verificar minha posição'; $('pos-dot').className = 'dot'; $('pos-guidance').textContent = 'Verificação pausada.'; return; }
+      posLoop = true; okStreak = 0; $('setup-err').textContent = '';
+      $('pos-check-btn').textContent = 'Pausar verificação';
+      while (posLoop) {
+        try {
+          const j = await checkPositionOnce();
+          if (!posLoop) break;
+          if (!j) { $('pos-guidance').textContent = 'Aguardando a câmera…'; }
+          else {
+            $('pos-guidance').textContent = j.guidance || (j.ok ? 'Posição ok!' : 'Ajuste a posição.');
+            $('pos-dot').className = 'dot' + (j.ok ? ' live' : '');
+            if (j.ok) { $('pos-begin-btn').disabled = false; okStreak++; } else okStreak = 0;
+            if (okStreak >= 2) {
+              posLoop = false;
+              let n = 3;
+              $('pos-guidance').textContent = `Posição ok! Começando em ${n}…`;
+              const tick = setInterval(() => {
+                n--;
+                if (n <= 0) { clearInterval(tick); beginExam(); }
+                else $('pos-guidance').textContent = `Posição ok! Começando em ${n}…`;
+              }, 1000);
+              return;
+            }
+          }
+        } catch { if (!posLoop) break; $('pos-guidance').textContent = 'Falha ao verificar; tentando de novo…'; }
+        await new Promise(r => setTimeout(r, 900));
+      }
     }
 
     // Começa a prova de fato: grava o vídeo + conecta ao relay.
     function beginExam() {
+      posLoop = false; // garante que o loop de posição parou
       show('live');
       $('selfview').srcObject = micStream;
       setStatus('Conectando…');
@@ -249,7 +293,7 @@
       ws.onerror = () => setStatus('Erro de conexão', 'err');
       ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
     }
-    $('pos-check-btn').onclick = checkPosition;
+    $('pos-check-btn').onclick = togglePositionLoop;
     $('pos-begin-btn').onclick = beginExam;
 
     async function uploadVideo() {
