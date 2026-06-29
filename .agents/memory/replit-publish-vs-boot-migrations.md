@@ -16,3 +16,14 @@ On Replit, the prod schema is touched by TWO systems that conflict:
 **Why:** this is structural, not a one-time legacy artifact. It can recur on every future migration as long as boot-time DDL runs alongside Replit's publish diff. 005/006 already carry `IF EXISTS`/`IF NOT EXISTS` guards documenting the same reality (prod columns created outside the migration regime).
 
 **How to apply:** when prod shows "column already exists" on boot, or Internal Server Error right after a deploy that added a migration, compare `schema_migrations` in prod against the `migrations/` folder and sync the ledger. If hardening is wanted, prefer a pre-flight drift check in the runner over blanket idempotency, or reconsider running boot-time DDL on Replit at all (Replit guidance flags startup-time DDL as an anti-pattern; prod schema is meant to be owned by the Publish diff).
+
+## Atualização (jun/2026): nesta app, migrations SAÍRAM do boot — não sincronize prod à mão
+
+A arquitetura mudou desde o incidente 007/008. Hoje:
+- `server.js` **NÃO** roda migrations no boot; `scripts/migrate.mjs` (→ `lib/migrations.js`) é o ÚNICO migrador e roda só em DEV (workflow `npm run db:migrate && node server.js` e `predev`).
+- O deploy roda `node server.js` (sem `db:migrate`). Logo o boot de PROD nunca reexecuta DDL → o crash "column already exists" **não ocorre mais** nesta arquitetura.
+- O schema de prod é do fluxo de **Publish do Replit** (diff dev→prod aplicado quando o usuário publica). É o caminho sancionado pela skill `database` (ver `references/database-migrations-on-publish.md`).
+
+**Correção do conselho antigo:** NÃO faça mais "sync do ledger" (INSERT em `schema_migrations` de prod) nem rode DDL/scripts contra produção — isso agora CONTRADIZ a skill `database` ("o agente não deve escrever código/scripts para migrar o banco de produção"; queries em prod são read-only). Aquele fix era para a arquitetura antiga (DDL no boot). O `schema_migrations` de prod pode ficar defasado, e tudo bem: nada lê esse ledger em prod.
+
+**How to apply hoje:** mudou schema? Aplique em DEV (`db:migrate`), valide, e diga ao usuário para **republicar** — o Publish faz o diff. Rename/alter destrutivo gera prompt de confirmação no Publish UI; adições puras de coluna/constraint (caso da prova oral 021–028) saem limpas, sem renames.

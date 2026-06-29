@@ -44,4 +44,4 @@ run = ["node", "server.js"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 120000
+timeoutMs = 180000
