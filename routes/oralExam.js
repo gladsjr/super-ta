@@ -88,6 +88,10 @@ function requireOral(req, res, next) {
     next();
 }
 
+// Ping LEVÍSSIMO para o teste de conexão do aluno (mede RTT antes da prova). Sem
+// auth, sem banco — só confirma o caminho até o servidor. no-store p/ não cachear.
+router.get("/oral/ping", (_req, res) => { res.set("Cache-Control", "no-store"); res.type("text/plain").send("ok"); });
+
 // Info para a página do professor: config + perguntas extraídas (o professor vê
 // perguntas E respostas — é a prova dele) + lista de vozes.
 router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req, res) => {

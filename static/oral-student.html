@@ -66,6 +66,7 @@
           <figure style="margin:0; flex:1"><img id="pose-b" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b-cap"></figcaption></figure>
         </div>
         <div class="note-warn"><strong>Importante:</strong> a prova <strong>não será interrompida</strong> se você sair da posição (ou se algo for detectado) durante a conversa. Mas isso fica registrado e o(a) <strong>professor(a) é avisado(a) na hora da avaliação</strong>. Mantenha a posição dos exemplos do início ao fim.</div>
+        <div class="banner wait" id="conn-banner" style="margin-bottom:14px">Testando a conexão…</div>
         <button class="btn" id="to-check-btn">Continuar</button>
       </div>
 
@@ -210,6 +211,7 @@
       //    medidores só entram na página 2 (continueToCheck).
       show('instr');
       pickAndShowPoses();
+      connTest(); // mede a conexão em segundo plano enquanto o aluno lê
     }
     // Página 2: liga a câmera no preview e começa a verificação CONTÍNUA de
     // ruído + posição. Com tudo ok, a prova começa sozinha (1-2-3).
@@ -244,6 +246,36 @@
       const setPair = (a, b) => { $(a).src = base + pair[0].f; $(a + '-cap').textContent = 'Com mesa'; $(b).src = base + pair[1].f; $(b + '-cap').textContent = 'Sem mesa'; };
       setPair('pose-a', 'pose-b');   // página 1
       setPair('pose-a2', 'pose-b2'); // página 2
+    }
+
+    // TESTE DE CONEXÃO: mede o RTT (ida-e-volta) até o servidor algumas vezes. Numa
+    // conversa por voz em tempo real, latência alta/instável é o que mais atrapalha.
+    // Avisa se estiver ruim — mas NÃO impede começar. Roda na página 1 (em segundo
+    // plano, enquanto o aluno lê as instruções).
+    async function connTest() {
+      const bn = $('conn-banner');
+      bn.className = 'banner wait'; bn.textContent = 'Testando a conexão…';
+      const times = []; let fails = 0;
+      for (let i = 0; i < 5; i++) {
+        const t0 = performance.now();
+        try {
+          const resp = await fetch(`/oral/ping?t=${i}-${Math.random()}`, { cache: 'no-store' });
+          if (!resp.ok) throw 0;
+          await resp.text();
+          times.push(performance.now() - t0);
+        } catch { fails++; }
+        await new Promise(res => setTimeout(res, 120));
+      }
+      if (!times.length) { bn.className = 'banner adjust'; bn.textContent = '⚠ Não consegui testar a conexão. Se a internet estiver instável, a prova por voz pode falhar — prefira uma rede melhor.'; return; }
+      times.sort((a, b) => a - b);
+      const med = Math.round(times[Math.floor(times.length / 2)]);
+      if (fails >= 2 || med >= 450) {
+        bn.className = 'banner adjust';
+        bn.textContent = `⚠ Conexão instável/lenta (~${med} ms${fails ? `, ${fails} falha(s)` : ''}). A prova é por voz em tempo real e pode ficar difícil — cortes e atrasos. Se puder, use uma rede melhor (Wi-Fi estável). Você ainda pode continuar.`;
+      } else {
+        bn.className = 'banner ok';
+        bn.textContent = `Conexão ok ✓ (~${med} ms)`;
+      }
     }
 
     // ---- Verificação de POSIÇÃO no NAVEGADOR (MediaPipe WASM), em tempo real ----
