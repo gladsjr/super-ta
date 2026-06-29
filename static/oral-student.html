@@ -233,19 +233,19 @@
     // de rede; escala para muitas provas simultâneas. Limiares portados de
     // scripts/proctor_position.py (validados nas posições canônicas). Runtime e
     // modelos vêm de CDN (não passam pela nossa VM).
-    const MP_VER = '0.10.36-rc.20260617';
-    const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`;
-    const MP_MODELS = 'https://storage.googleapis.com/mediapipe-models';
+    // Runtime e modelos AUTO-HOSPEDADOS em /static/vision (sem dependência de CDN
+    // externo no momento da prova). Baixados de @mediapipe/tasks-vision 0.10.36-rc.
+    const MP_BASE = '/static/vision';
     const SW_MIN = 0.28, SW_MAX = 0.62, CX_TOL = 0.18; // ombros (distância) / centralização
     let poseLm = null, handLm = null, objDet = null, visionReady = false, visionFailed = false;
     async function initVision() {
       try {
-        const mp = await import(`${MP_CDN}/vision_bundle.mjs`);
-        const fs = await mp.FilesetResolver.forVisionTasks(`${MP_CDN}/wasm`);
+        const mp = await import(`${MP_BASE}/vision_bundle.mjs`);
+        const fs = await mp.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
         [poseLm, handLm, objDet] = await Promise.all([
-          mp.PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_MODELS}/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task` }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5 }),
-          mp.HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_MODELS}/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task` }, runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.3 }),
-          mp.ObjectDetector.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_MODELS}/object_detector/efficientdet_lite0/int8/latest/efficientdet_lite0.tflite` }, runningMode: 'VIDEO', scoreThreshold: 0.4, categoryAllowlist: ['cell phone'] }),
+          mp.PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/pose_landmarker_lite.task` }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5 }),
+          mp.HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/hand_landmarker.task` }, runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.3 }),
+          mp.ObjectDetector.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/efficientdet_lite0.tflite` }, runningMode: 'VIDEO', scoreThreshold: 0.4, categoryAllowlist: ['cell phone'] }),
         ]);
         visionReady = true;
       } catch (e) { visionFailed = true; console.warn('MediaPipe não carregou:', e); }
