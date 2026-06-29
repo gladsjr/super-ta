@@ -11,8 +11,6 @@ import multer from "multer";
 import OpenAI from "openai";
 import fs from "fs";
 import os from "os";
-import path from "path";
-import crypto from "crypto";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
@@ -22,13 +20,16 @@ import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
-import { analyzeOralVideo, analyzePositionImage } from "../lib/proctor.js";
+import { analyzeOralVideo } from "../lib/proctor.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
 const examUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
-const videoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 300 * 1024 * 1024 } }); // vídeo da prova (até 300MB)
-const posUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 1 frame p/ checagem de posição
+// Vídeo da prova (até 300MB): em DISCO (não memória). Com memoryStorage, 50
+// uploads simultâneos seguram até 300MB cada na RAM durante toda a transferência
+// (lenta no mobile). Em disco, a transferência não pesa na RAM; só lemos o arquivo
+// na hora de mandar pro storage, e apagamos o temporário em seguida.
+const videoUpload = multer({ dest: os.tmpdir(), limits: { fileSize: 300 * 1024 * 1024 } });
 
 // Alertas de proctoring por VÍDEO para a lista do professor (resumo conservador,
 // calculado dos flags brutos — limiares ajustáveis sem reprocessar o vídeo).
@@ -526,25 +527,9 @@ router.get("/s/:submissionToken/oral/result", requireSubmissionToken, async (req
     } catch (err) { log.error("ORAL", `result failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
 
-// Portão de SETUP: o aluno manda 1 frame da câmera e recebe veredito + orientação
-// (posição canônica). Roda localmente (sidecar Python). Não persiste o frame.
-router.post("/s/:submissionToken/oral/position-check", requireSubmissionToken, posUpload.single("file"), async (req, res) => {
-    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
-    if (!req.file) return res.status(400).json({ error: "file required" });
-    const tmp = path.join(os.tmpdir(), `oralpos-${crypto.randomBytes(6).toString("hex")}.jpg`);
-    try {
-        await fs.promises.writeFile(tmp, req.file.buffer);
-        const result = await analyzePositionImage(tmp);
-        // Sem sidecar/python disponível → não bloqueia: libera com aviso.
-        if (!result) return res.json({ ok: true, unavailable: true, guidance: "Verificação de posição indisponível — siga a figura ao lado." });
-        res.json(result);
-    } catch (err) {
-        log.error("ORAL", `position-check failed: ${err.message}`);
-        res.status(500).json({ error: "falha ao verificar posição" });
-    } finally {
-        fs.promises.unlink(tmp).catch(() => {});
-    }
-});
+// O portão de SETUP (posição/distância/mãos/celular) agora roda 100% no NAVEGADOR
+// (MediaPipe WASM em static/oral-student.html) — sem chamar o servidor. Não há
+// mais rota de position-check aqui (a análise de vídeo PÓS-prova segue no servidor).
 
 // Registra o aceite do consentimento (voz + vídeo) ANTES de começar a prova.
 router.post("/s/:submissionToken/oral/consent", requireSubmissionToken, async (req, res) => {
@@ -561,22 +546,25 @@ router.post("/s/:submissionToken/oral/consent", requireSubmissionToken, async (r
 
 // Recebe o vídeo gravado da prova e guarda no object storage (não vai à OpenAI).
 router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
-    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
-    if (!req.file) return res.status(400).json({ error: "file required" });
     try {
+        if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+        if (!req.file) return res.status(400).json({ error: "file required" });
         const ext = extFromMimetype(req.file.mimetype);
         const key = `oral-video/${req.submission.submission_token}.${ext}`;
-        const r = await putAudio({ key, buffer: req.file.buffer, mimetype: req.file.mimetype });
+        const buffer = await fs.promises.readFile(req.file.path); // do temporário em disco
+        const r = await putAudio({ key, buffer, mimetype: req.file.mimetype });
         if (!r.stored) {
             log.error("ORAL", `vídeo não armazenado submission=${req.submission.submission_token}: ${r.reason}`);
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.setOralVideoKey(req.submission.id, key);
-        log.info("ORAL", `vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${req.file.buffer.length}`);
+        log.info("ORAL", `vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}`);
         res.json({ ok: true });
     } catch (err) {
         log.error("ORAL", `video upload failed: ${err.message}`);
         res.status(500).json({ error: "falha no upload do vídeo", detail: err.message });
+    } finally {
+        if (req.file && req.file.path) fs.promises.unlink(req.file.path).catch(() => {});
     }
 });
 
