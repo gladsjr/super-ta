@@ -274,7 +274,7 @@
       else if (!centered) guidance = 'Centralize-se no quadro.';
       else if (sw < SW_MIN) guidance = 'Aproxime-se um pouco da câmera.';
       else if (sw > SW_MAX) guidance = 'Afaste-se um pouco da câmera.';
-      else if (!handsOk) guidance = 'Mantenha as mãos à mostra (sobre a mesa).';
+      else if (!handsOk) guidance = 'Deixe as mãos visíveis, como nas fotos de exemplo.';
       else guidance = 'Posição ok!';
       return { ok: face && shoulders && distance && centered && handsOk && !phone, guidance };
     }
