@@ -34,9 +34,11 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
         }
         budget = parsed;
     }
+    // Tipo do trabalho: entrevista (padrão) ou prova oral (Realtime).
+    const kind = req.body?.kind === "oral_realtime" ? "oral_realtime" : "interview";
     try {
-        const work = await db.createWork(name, budget);
-        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
+        const work = await db.createWork(name, budget, kind);
+        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" kind=${work.kind} budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
         res.json({ work });
     } catch (err) {
         log.error("ADMIN", `create work failed: ${err.message}`);

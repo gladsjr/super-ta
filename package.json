@@ -24,8 +24,10 @@
     "js-yaml": "^4.1.1",
     "multer": "^1.4.4",
     "music-metadata": "^11.12.3",
+    "onnxruntime-node": "^1.27.0",
     "openai": "^6.17.0",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "playwright-core": "^1.60.0"

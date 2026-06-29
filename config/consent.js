@@ -45,6 +45,35 @@ export const CONSENT_TEXT_HTML = `
 <p>Você pode solicitar acesso, correção ou exclusão dos seus dados — incluindo a exclusão antecipada das gravações de voz — entrando em contato com o(a) responsável pelo trabalho.</p>
 `.trim();
 
+// Termo do tipo de trabalho PROVA ORAL (Realtime): conversa por voz + GRAVAÇÃO
+// DE VÍDEO da câmera, retida para avaliação posterior pelo professor. Mostrado
+// na página da prova oral, antes de iniciar; aceite explícito (checkbox).
+export const CONSENT_ORAL_HTML = `
+<p><strong>Você está prestes a realizar uma PROVA ORAL conduzida por um sistema de inteligência artificial (ORATIA)</strong>, por voz e com a câmera ligada.</p>
+
+<h4>Como funciona</h4>
+<ul>
+  <li>Um examinador por voz fará as perguntas e você responde <strong>falando</strong>. Você pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</li>
+  <li>O ORATIA <strong>não dá a nota</strong> — a avaliação é responsabilidade exclusiva do(a) professor(a). Não há decisão automatizada de aprovação.</li>
+</ul>
+
+<h4>Dados coletados</h4>
+<ul>
+  <li><strong>Sua voz</strong>, durante a conversa.</li>
+  <li><strong>Vídeo da sua câmera</strong> durante a prova, que será <strong>gravado e armazenado para avaliação posterior</strong> pelo(a) professor(a) (verificação da realização da prova e de autoria).</li>
+  <li>Metadados da sessão (data, duração, identificador do trabalho).</li>
+</ul>
+
+<h4>Processamento e transferência internacional</h4>
+<p>A conversa por voz é processada pela <strong>OpenAI (EUA)</strong>. Pela política da OpenAI, dados enviados via API <strong>não são usados para treinar modelos</strong>. <strong>O vídeo da câmera NÃO é enviado à OpenAI</strong> — fica armazenado de forma controlada pelo ORATIA, com acesso restrito ao(à) professor(a) e administradores autorizados.</p>
+
+<h4>Retenção</h4>
+<p>O vídeo e a gravação são <strong>retidos por até 6 meses</strong> após a prova, para auditoria, e depois apagados automaticamente. Você pode solicitar a exclusão antecipada ao(à) responsável pelo trabalho.</p>
+
+<h4>Seus direitos (LGPD)</h4>
+<p>Você pode solicitar acesso, correção ou exclusão dos seus dados — inclusive do vídeo — entrando em contato com o(a) responsável pelo trabalho. A gravação de vídeo é condição para realizar esta prova oral; se não concordar, fale com o(a) professor(a) sobre uma forma alternativa de avaliação.</p>
+`.trim();
+
 // Parágrafo extra mostrado SÓ quando a entrevista está em modo áudio.
 // Concatenado dentro do modal, antes do checkbox.
 export const CONSENT_AUDIO_ADDITION_HTML = `

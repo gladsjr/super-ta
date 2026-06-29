@@ -1,0 +1,10 @@
+# Sidecar Python do proctoring de MÃOS (prova oral): MediaPipe Hands sobre o
+# vídeo gravado, pós-prova. Invocado por lib/proctor.js (PROCTOR_PYTHON aponta o
+# interpretador). Leve — sem torch. No Replit, instalar estas deps e garantir
+# que `python` (ou PROCTOR_PYTHON) as enxergue.
+#
+# Pins frouxos de propósito: versões exatas de build do opencv variam por
+# plataforma/Python e quebram instalação limpa (vide #58). Deixe o pip escolher
+# um build compatível.
+mediapipe>=0.10.30
+opencv-python>=4.10

@@ -28,6 +28,8 @@ import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
+import oralExamRoutes from "./routes/oralExam.js";
+import { attachOralRelay } from "./lib/oralRealtime.js";
 import diagRoutes from "./routes/diag.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
@@ -53,9 +55,10 @@ app.use(staticRoutes);
 app.use(adminRoutes);
 app.use(workRoutes);
 app.use(interviewRoutes);
+app.use(oralExamRoutes); // /w/:t/oral/* e /s/:t/oral/* — prova oral (Realtime)
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 
-app.listen(PORT, "0.0.0.0", async () => {
+const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {
         log.warn("BOOT", "OPENAI_API_KEY ausente no .env");
     }
@@ -80,3 +83,6 @@ app.listen(PORT, "0.0.0.0", async () => {
     }
     log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });
+
+// Relay WebSocket da prova oral (Realtime) — navegador ↔ servidor ↔ OpenAI.
+attachOralRelay(httpServer);
