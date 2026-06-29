@@ -44,6 +44,10 @@
     .pill-pub  { background: #e9f0fe; border: 1px solid #b9cdf6; }
     .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--ink-700); }
     code.tok { background: var(--bg-muted); padding: 1px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
+
+    /* Ampulheta (spinner) por célula durante o lote progressivo */
+    .cell-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #cfd8e3; border-top-color: #2a6df4; border-radius: 50%; animation: cellspin .8s linear infinite; vertical-align: -2px; }
+    @keyframes cellspin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -366,24 +370,28 @@
     const rows = SUBS.filter(s => !s.is_test || s.status === 'completed'); // mostra reais + testes já realizados
     if (!rows.length) { tableEl.classList.add('hidden'); empty.classList.remove('hidden'); return; }
     empty.classList.add('hidden'); tableEl.classList.remove('hidden');
+    const SPIN = '<span class="cell-spin"></span>';
     tbody.innerHTML = rows.map(s => {
       const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
-      const evalPill = s.has_oral_eval ? '<span class="pill pill-done">avaliada</span>' : '<span class="hint">—</span>';
-      const grade = (s.grade ?? null) === null ? '<span class="hint">—</span>' : `<strong>${Number(s.grade).toFixed(1)}</strong>`;
+      const evalPill = s._evalPending ? SPIN
+        : (s.has_oral_eval ? '<span class="pill pill-done">avaliada</span>' : '<span class="hint">—</span>');
+      const grade = s._evalPending ? SPIN
+        : ((s.grade ?? null) === null ? '<span class="hint">—</span>' : `<strong>${Number(s.grade).toFixed(1)}</strong>`);
       const pub = [
         s.devolutiva_published ? '<span class="pill pill-pub">devolutiva</span>' : '',
         s.grade_published ? '<span class="pill pill-pub">nota</span>' : '',
       ].filter(Boolean).join(' ') || '<span class="hint">—</span>';
       const alertPills = (s.proctor_alerts || []).map(a => `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">${esc(a)}</span>`);
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
-      const alerts = alertPills.length ? alertPills.join(' ')
-        : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>' : '<span class="hint">—</span>');
-      return `<tr>
+      const alerts = s._proctorPending ? SPIN
+        : (alertPills.length ? alertPills.join(' ')
+          : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>' : '<span class="hint">—</span>'));
+      return `<tr data-sub="${s.submission_token}">
         <td>${esc(s.student_label || '')}${test}</td>
         <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
         <td>${evalPill}</td>
-        <td style="text-align:right">${grade}</td>
-        <td>${alerts}</td>
+        <td class="cell-grade" style="text-align:right">${grade}</td>
+        <td class="cell-alerts">${alerts}</td>
         <td>${pub}</td>
         <td><a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
       </tr>`;
@@ -483,19 +491,65 @@
   function batchStatus(id, txt, busy) {
     const el = document.getElementById(id); el.classList.remove('hidden'); el.textContent = txt;
   }
+  // Acha o objeto da submissão em SUBS pelo token (usado pelos lotes em streaming).
+  function findSub(token) { return SUBS.find(s => s.submission_token === token); }
+  // Lê uma resposta NDJSON: decodifica o corpo, quebra por '\n' e chama onLine(obj)
+  // para cada linha JSON completa. Reusado pelos lotes de eval e proctor.
+  async function readNdjson(resp, onLine) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) { try { onLine(JSON.parse(line)); } catch (e) { /* linha parcial/ruído: ignora */ } }
+      }
+    }
+    const tail = buf.trim();
+    if (tail) { try { onLine(JSON.parse(tail)); } catch (e) {} }
+  }
+
   async function runEvalAll(force) {
     const btnIds = ['eval-all-btn', 'eval-all-force-btn'];
     btnIds.forEach(i => document.getElementById(i).disabled = true);
     batchStatus('eval-batch-status', force ? 'Reavaliando todas as provas…' : 'Avaliando as provas realizadas…');
     try {
       const r = await fetch(`${API}/oral/evaluate-all${force ? '?force=1' : ''}`, { method: 'POST' });
-      const j = await r.json();
-      if (!r.ok) { batchStatus('eval-batch-status', 'Falha: ' + (j.error || r.status)); return; }
-      let t = `${j.evaluated} avaliada(s) de ${j.candidates} candidata(s).`;
-      if (j.errors && j.errors.length) t += ` ${j.errors.length} com erro.`;
-      batchStatus('eval-batch-status', t);
-      await load();
-    } catch (e) { batchStatus('eval-batch-status', 'Falha de comunicação.'); }
+      if (!r.ok || !r.body) {
+        let msg = r.status;
+        try { msg = (await r.json()).error || r.status; } catch (e) {}
+        batchStatus('eval-batch-status', 'Falha: ' + msg);
+        return;
+      }
+      await readNdjson(r, (m) => {
+        if (m.type === 'start') {
+          (m.tokens || []).forEach(tok => { const s = findSub(tok); if (s) s._evalPending = true; });
+          renderEvalTable();
+        } else if (m.type === 'item') {
+          const s = findSub(m.submission_token);
+          if (s) {
+            s._evalPending = false;
+            if (m.ok) { s.has_oral_eval = true; s.grade = m.grade; }
+            renderEvalTable();
+          }
+        } else if (m.type === 'done') {
+          SUBS.forEach(s => { if (s._evalPending) s._evalPending = false; }); // limpa sobras
+          let t = `${m.evaluated} avaliada(s) de ${m.candidates} candidata(s).`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          batchStatus('eval-batch-status', t);
+          renderEvalTable();
+        }
+      });
+    } catch (e) {
+      SUBS.forEach(s => { if (s._evalPending) s._evalPending = false; });
+      renderEvalTable();
+      batchStatus('eval-batch-status', 'Falha de comunicação.');
+    }
     finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
   }
   document.getElementById('eval-all-btn').onclick = () => runEvalAll(false);
@@ -507,13 +561,37 @@
     batchStatus('proctor-batch-status', (force ? 'Reanalisando todos os vídeos' : 'Analisando os vídeos') + '… (pode demorar — cada vídeo leva alguns segundos)');
     try {
       const r = await fetch(`${API}/oral/proctor-all${force ? '?force=1' : ''}`, { method: 'POST' });
-      const j = await r.json();
-      if (!r.ok) { batchStatus('proctor-batch-status', 'Falha: ' + (j.error || r.status)); return; }
-      let t = `${j.analyzed} vídeo(s) analisado(s) de ${j.candidates} com gravação.`;
-      if (j.errors && j.errors.length) t += ` ${j.errors.length} com erro.`;
-      batchStatus('proctor-batch-status', t);
-      await load();
-    } catch (e) { batchStatus('proctor-batch-status', 'Falha de comunicação.'); }
+      if (!r.ok || !r.body) {
+        let msg = r.status;
+        try { msg = (await r.json()).error || r.status; } catch (e) {}
+        batchStatus('proctor-batch-status', 'Falha: ' + msg);
+        return;
+      }
+      await readNdjson(r, (m) => {
+        if (m.type === 'start') {
+          (m.tokens || []).forEach(tok => { const s = findSub(tok); if (s) s._proctorPending = true; });
+          renderEvalTable();
+        } else if (m.type === 'item') {
+          const s = findSub(m.submission_token);
+          if (s) {
+            s._proctorPending = false;
+            if (m.ok) { s.has_oral_proctor = true; s.proctor_alerts = m.proctor_alerts; s.voice_alert = m.voice_alert; }
+            renderEvalTable();
+          }
+        } else if (m.type === 'done') {
+          SUBS.forEach(s => { if (s._proctorPending) s._proctorPending = false; }); // limpa sobras
+          let t = `${m.analyzed} vídeo(s) analisado(s) de ${m.candidates} com gravação.`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          if (m.elapsed_total_ms != null) t += ` (tempo total ${(m.elapsed_total_ms / 1000).toFixed(1)}s)`;
+          batchStatus('proctor-batch-status', t);
+          renderEvalTable();
+        }
+      });
+    } catch (e) {
+      SUBS.forEach(s => { if (s._proctorPending) s._proctorPending = false; });
+      renderEvalTable();
+      batchStatus('proctor-batch-status', 'Falha de comunicação.');
+    }
     finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
   }
   document.getElementById('proctor-all-btn').onclick = () => runProctorAll(false);

@@ -293,11 +293,22 @@ router.post("/w/:workToken/oral/submissions/:subToken/proctor", requireWorkToken
 // Avalia todas as provas realizadas. Sem ?force, pula as que já têm relatório;
 // com ?force=1, reavalia todas. Sequencial (uma chamada de LLM por aluno).
 router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, requireWithinBudget, async (req, res) => {
+    let started = false; // se já mandamos headers (streaming), não dá mais p/ responder 500
     try {
         const force = req.query.force === "1" || req.body?.force === true;
         const allQuestions = await db.getOralQuestions(req.work.id);
         if (!allQuestions.length) return res.status(409).json({ error: "a prova não tem gabarito (perguntas)" });
         const subs = await db.listOralSubmissionsForEval(req.work.id, force);
+
+        // Streaming NDJSON: uma linha JSON por evento, sobre o mesmo POST. O cliente
+        // põe ampulheta nas linhas anunciadas em "start" e troca cada uma pela nota
+        // assim que o respectivo "item" chega. Como os headers já vão cedo, erros
+        // depois do start são tratados por item (não dá p/ mandar status 500).
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+        started = true;
+        const send = (obj) => res.write(JSON.stringify(obj) + "\n");
+        send({ type: "start", tokens: subs.map(s => s.submission_token) });
+
         let evaluated = 0;
         const errors = [];
         // Avalia em PARALELO com concorrência limitada: cada avaliação é uma
@@ -313,24 +324,35 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
                     const [asked, detail] = await Promise.all([db.getOralAsked(s.id), db.getOralSubmissionDetail(s.id)]);
                     const questions = asked || allQuestions; // só as perguntas feitas a este aluno
                     const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
-                    if (!transcript.length) continue;
+                    if (!transcript.length) {
+                        // Item pulado: avisa o cliente p/ tirar a ampulheta dessa linha.
+                        send({ type: "item", submission_token: s.submission_token, ok: false, error: "sem transcrição" });
+                        continue;
+                    }
                     const report = await oralExamEvaluatorAgent.evaluate({
                         questions, transcript, meterCtx: { workId: req.work.id, submissionId: s.id },
                     });
                     await db.setOralEvaluation(s.id, report);
                     await applyEvalDefaults(s.id, detail, report); // devolutiva + nota default
                     evaluated++;
+                    // Lê a nota efetivamente gravada (applyEvalDefaults não sobrescreve
+                    // ajuste manual do professor, então o default pode não valer).
+                    const after = await db.getOralSubmissionDetail(s.id);
+                    send({ type: "item", submission_token: s.submission_token, ok: true, has_oral_eval: true, grade: after?.grade_final ?? null });
                 } catch (e) {
                     errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
                     log.error("ORAL", `evaluate-all item failed sub=${s.submission_token}: ${e.message}`);
+                    send({ type: "item", submission_token: s.submission_token, ok: false, error: e.message });
                 }
             }
         }
         await Promise.all(Array.from({ length: Math.min(ORAL_EVAL_CONCURRENCY, subs.length) }, evalWorker));
         log.info("ORAL", `evaluate-all work=${req.work.work_token} avaliadas=${evaluated}/${subs.length} force=${force} conc=${ORAL_EVAL_CONCURRENCY}`);
-        res.json({ ok: true, evaluated, candidates: subs.length, errors });
+        send({ type: "done", evaluated, candidates: subs.length, errors });
+        res.end();
     } catch (err) {
         log.error("ORAL", `evaluate-all failed: ${err.message}`);
+        if (started) { try { res.end(); } catch {} return; } // headers já enviados: só encerra
         res.status(500).json({ error: "falha na avaliação em lote", detail: err.message });
     }
 });
@@ -356,27 +378,59 @@ router.post("/w/:workToken/oral/publish-all", requireWorkToken, requireOral, exp
 // pula as já analisadas; com ?force=1, reanalisa todas. Sequencial (cada vídeo:
 // ffmpeg + 2 modelos por frame), tudo local — o vídeo não vai a serviço externo.
 router.post("/w/:workToken/oral/proctor-all", requireWorkToken, requireOral, async (req, res) => {
+    let started = false; // se já mandamos headers (streaming), não dá mais p/ responder 500
     try {
         const force = req.query.force === "1" || req.body?.force === true;
         const subs = await db.listOralSubmissionsForProctor(req.work.id, force);
+
+        // Streaming NDJSON (mesmo protocolo do evaluate-all): a coluna Alertas de
+        // cada aluno candidato vira ampulheta no "start" e é preenchida quando o
+        // respectivo "item" chega. SERIAL de propósito (cada vídeo: ffmpeg + 2
+        // modelos por frame); medimos o tempo por vídeo p/ avaliar paralelizar depois.
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+        started = true;
+        const send = (obj) => res.write(JSON.stringify(obj) + "\n");
+        send({ type: "start", tokens: subs.map(s => s.submission_token) });
+
         let analyzed = 0;
         const errors = [];
+        const perVideoMs = [];
+        const t0 = Date.now();
         for (const s of subs) {
             try {
                 const key = await db.getOralVideoKey(s.id);
-                if (!key) continue;
+                if (!key) {
+                    // Item pulado: avisa o cliente p/ tirar a ampulheta dessa linha.
+                    send({ type: "item", submission_token: s.submission_token, ok: false, error: "sem vídeo" });
+                    continue;
+                }
+                const tv = Date.now();
                 const report = await analyzeOralVideo(key);
                 await db.setOralProctor(s.id, report);
+                const elapsed = Date.now() - tv;
+                perVideoMs.push(elapsed);
                 analyzed++;
+                // Mesmos cálculos que /oral/info: alertas de vídeo do report e alerta
+                // de voz do oral_voice_json gravado para o aluno.
+                const detail = await db.getOralSubmissionDetail(s.id);
+                send({
+                    type: "item", submission_token: s.submission_token, ok: true, has_oral_proctor: true,
+                    proctor_alerts: proctorAlerts(report),
+                    voice_alert: voiceAlert(detail?.oral_voice_json),
+                });
             } catch (e) {
                 errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
                 log.error("ORAL", `proctor-all item failed sub=${s.submission_token}: ${e.message}`);
+                send({ type: "item", submission_token: s.submission_token, ok: false, error: e.message });
             }
         }
-        log.info("ORAL", `proctor-all work=${req.work.work_token} analisados=${analyzed}/${subs.length} force=${force}`);
-        res.json({ ok: true, analyzed, candidates: subs.length, errors });
+        const elapsedTotal = Date.now() - t0;
+        log.info("ORAL", `proctor-all work=${req.work.work_token} analisados=${analyzed}/${subs.length} force=${force} tempo_total_ms=${elapsedTotal} por_video_ms=[${perVideoMs.join(", ")}]`);
+        send({ type: "done", analyzed, candidates: subs.length, errors, elapsed_total_ms: elapsedTotal, per_video_ms: perVideoMs });
+        res.end();
     } catch (err) {
         log.error("ORAL", `proctor-all failed: ${err.message}`);
+        if (started) { try { res.end(); } catch {} return; } // headers já enviados: só encerra
         res.status(500).json({ error: "falha no proctoring em lote", detail: err.message });
     }
 });
