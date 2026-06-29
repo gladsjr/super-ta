@@ -98,10 +98,10 @@
       </div>
 
       <div class="card">
-        <h3 class="card-title">Prova (PDF de perguntas e respostas)</h3>
+        <h3 class="card-title">Prova (PDF ou TXT de perguntas e respostas)</h3>
         <p class="card-sub" id="exam-status">—</p>
         <div class="row" style="align-items: center">
-          <input type="file" id="exam-file" class="input" accept="application/pdf"/>
+          <input type="file" id="exam-file" class="input" accept="application/pdf,.pdf,text/plain,.txt"/>
           <button class="btn" id="upload-btn" type="button">Enviar e extrair</button>
           <span class="hint" id="upload-msg"></span>
         </div>
@@ -109,7 +109,7 @@
 
       <div class="card">
         <h3 class="card-title">Perguntas <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
-        <p class="card-sub">Digite as perguntas e o gabarito, ou edite o que veio do PDF. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
+        <p class="card-sub">Digite as perguntas e o gabarito, ou edite o que veio do arquivo. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
         <div id="questions" class="q-list"></div>
         <div class="row" style="margin-top: var(--sp-3)">
           <button class="btn btn-ghost btn-sm" id="q-add" type="button">+ adicionar pergunta</button>
@@ -410,7 +410,7 @@
     document.getElementById('meta').innerHTML =
       `<span>Prova oral</span><span>·</span><span>${SUBS.length} aluno(s)</span><span>·</span><span>${done} realizada(s)</span>` +
       (j.work.has_exam ? '<span>·</span><span>prova enviada</span>' : '');
-    document.getElementById('exam-status').textContent = j.work.has_exam ? 'Prova enviada. As perguntas abaixo podem ser editadas.' : 'Nenhuma prova enviada ainda — suba um PDF ou digite as perguntas abaixo.';
+    document.getElementById('exam-status').textContent = j.work.has_exam ? 'Prova enviada. As perguntas abaixo podem ser editadas.' : 'Nenhuma prova enviada ainda — suba um PDF/TXT ou digite as perguntas abaixo.';
     document.getElementById('cfg-n').value = j.work.question_count || 6;
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
@@ -425,7 +425,7 @@
   document.getElementById('upload-btn').onclick = async () => {
     const f = document.getElementById('exam-file').files[0];
     const msg = document.getElementById('upload-msg');
-    if (!f) { msg.textContent = 'Escolha um PDF.'; return; }
+    if (!f) { msg.textContent = 'Escolha um PDF ou TXT.'; return; }
     const btn = document.getElementById('upload-btn'); btn.disabled = true; msg.textContent = 'Enviando e extraindo…';
     try {
       const form = new FormData(); form.append('file', f);
