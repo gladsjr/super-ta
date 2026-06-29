@@ -42,3 +42,21 @@ id = "M4hMaEe5Xax6da3wvi6MR"
 uri = "file://tests/audio-e2e/runs/2026-06-16T17-24-00-788Z/audio/turn06_entrevistador.mp3"
 type = "audio"
 title = "Pergunta 4 — retorno e risco (último turno)"
+
+[[outputs]]
+id = "e7GLt24eI7sJC3XbZqpg8"
+uri = "file://reports/envios-x-gasto-0f260729a5ed.png"
+type = "image"
+title = "Mackenzie 06 — Envios × Gasto por dia"
+
+[[outputs]]
+id = "3unHukU5eZs5VGRMo02b3"
+uri = "file://reports/relatorio-custos-0f260729a5ed.md"
+type = "text"
+title = "Relatório de Custos — Mackenzie 06 (Markdown)"
+
+[[outputs]]
+id = "IbdGq29bkg7JAp1SUgE72"
+uri = "file://reports/relatorio-custos-0f260729a5ed.pdf"
+type = "pdf"
+title = "Relatório de Custos — Mackenzie 06 (PDF)"
