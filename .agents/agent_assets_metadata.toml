@@ -1,5 +1,10 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "NIKOLz3TPJKU9qdqd753G"
+uri = "file://attached_assets/generated_images/a_realistic_webcam_photo_f73c.png"
+type = "image"
+title = "generated_image"
 
 [[outputs]]
 id = "36QNQy9w2uH6FSZBvAn2z"

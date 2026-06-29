@@ -7,3 +7,4 @@
 - [Processos longos no Replit](long-running-process-replit.md) — tarefas >120s morrem em bash background (reaped); rode como workflow e faça polling entre tool calls.
 - [Harness áudio E2E no Replit](audio-e2e-harness-replit.md) — precisa pkgs.chromium + PLAYWRIGHT_CHROME_PATH; creds do seed não existem no dev DB → use modo remoto contra trabalho configurado.
 - [Git destrutivo exige task agent isolado](destructive-git-needs-task-agent.md) — agente principal é bloqueado de reset/commit/checkout/rebase/force-push; só task agent isolado faz (fetch/branch/push-sem-force ok).
+- [VAD Realtime com áudio sintético](realtime-synthetic-vad-harness.md) — TTS sintético contra o semantic_vad+far_field commita turnos de forma não-determinística; use piso de ruído e faça o gate refletir o produto.
