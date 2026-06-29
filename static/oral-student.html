@@ -38,9 +38,7 @@
 
     <div class="card">
       <div id="pre">
-        <p>Ao iniciar, o navegador vai pedir acesso ao seu <strong>microfone</strong> e à sua <strong>câmera</strong>. O examinador vai se apresentar e começar. Você pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</p>
-        <p style="background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:10px 12px; margin:10px 0"><strong>🎧 Use fones de ouvido.</strong> São necessários para evitar eco e garantir que o examinador entenda você — sem fones, o áudio da prova vaza pelo microfone e atrapalha a conversa.</p>
-        <p class="hint">Procure também um lugar <strong>silencioso</strong> — antes de começar, vamos medir o ruído do ambiente.</p>
+        <p>Você vai fazer uma <strong>prova oral por voz</strong>, com a câmera ligada. Leia o termo abaixo e confirme para continuar — na tela seguinte você ajusta fones, posição e silêncio antes de começar.</p>
         <div class="consent" id="consent-text">Carregando o termo…</div>
         <label class="accept"><input type="checkbox" id="accept"/> <span>Li e <strong>concordo</strong> com a gravação de voz e vídeo e com o uso descrito acima.</span></label>
         <button class="btn" id="start-btn" disabled>Iniciar prova oral</button>
@@ -48,21 +46,24 @@
       </div>
 
       <div id="setup" style="display:none">
-        <p>Antes de começar, ajuste sua posição como nos exemplos: <strong>rosto e ombros centralizados</strong>, a cerca de <strong>1,5 m</strong> da câmera (do tronco até a cabeça), e <strong>mãos à mostra</strong> (sobre a mesa ou no apoio da cadeira).</p>
-        <div class="hint" style="text-align:center; margin-bottom:4px">Exemplos de posição</div>
-        <div style="display:flex; gap:10px; justify-content:center; margin-bottom:12px">
+        <p>Ao começar, o examinador se apresenta e faz as perguntas; você responde <strong>falando</strong>. Pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</p>
+        <p style="background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:10px 12px; margin:10px 0"><strong>🎧 Use fones de ouvido.</strong> Evitam eco e garantem que o examinador entenda você — sem fones, o áudio da prova vaza pelo microfone e atrapalha a conversa.</p>
+        <p>Ajuste sua posição como nos exemplos: <strong>rosto e ombros centralizados</strong>, a cerca de <strong>1,5 m</strong> da câmera (do tronco até a cabeça), e <strong>mãos à mostra</strong>. Vá seguindo as instruções abaixo — quando a <strong>posição</strong> e o <strong>silêncio</strong> estiverem ok, a prova começa sozinha.</p>
+        <div style="display:flex; gap:10px; justify-content:center; margin:8px 0 12px">
           <figure style="margin:0; flex:1; max-width:230px"><img id="pose-a" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a-cap"></figcaption></figure>
           <figure style="margin:0; flex:1; max-width:230px"><img id="pose-b" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b-cap"></figcaption></figure>
         </div>
         <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
         <video id="setup-cam" autoplay muted playsinline style="margin:0 auto 0"></video>
-        <div class="status" style="margin-top:10px"><span class="dot" id="pos-dot"></span> <span id="pos-guidance">Toque em “Verificar” e vá se ajustando — a prova começa sozinha quando a posição estiver certa.</span></div>
-        <div id="noise-wrap" style="display:none; max-width:300px; margin:8px auto 0">
+        <!-- Nível de ruído: medidor CONTÍNUO, sempre visível -->
+        <div style="max-width:320px; margin:12px auto 0">
           <div class="hint" style="text-align:center; margin-bottom:3px">Nível de ruído do ambiente</div>
-          <div style="height:9px; background:#e5e7eb; border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:#1a8a4a; transition:width .12s linear"></div></div>
+          <div style="height:9px; background:#e5e7eb; border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:#1a8a4a; transition:width .1s linear"></div></div>
+          <div class="hint" id="noise-verdict" style="text-align:center; margin-top:3px">Medindo o ambiente…</div>
         </div>
+        <!-- Posição: verificação CONTÍNUA, sempre visível -->
+        <div class="status" style="margin-top:12px; justify-content:center"><span class="dot" id="pos-dot"></span> <span id="pos-guidance">Iniciando a câmera…</span></div>
         <div class="row" style="margin-top:10px; justify-content:center">
-          <button class="btn" id="pos-check-btn">Verificar minha posição</button>
           <button class="btn" id="pos-begin-btn" disabled>Começar a prova</button>
         </div>
         <div class="err" id="setup-err"></div>
@@ -182,10 +183,13 @@
         $('pre-err').textContent = 'Não foi possível acessar microfone/câmera. Autorize o acesso e tente de novo.';
         return;
       }
-      // 3) portão de SETUP: ajusta a posição antes de começar a prova
+      // 3) portão de SETUP: ruído + posição rodam CONTÍNUOS e sempre visíveis;
+      //    o aluno se ajusta e, com tudo ok, a prova começa sozinha (1-2-3).
       show('setup');
       $('setup-cam').srcObject = micStream;
       pickAndShowPoses();
+      startNoiseMeter();
+      startPositionLoop();
     }
 
     // Exemplos de posição: 1 com mesa + 1 sem mesa, sorteados garantindo gênero
@@ -227,89 +231,82 @@
       return await r.json();
     }
 
-    // Mede o RUÍDO do ambiente por alguns segundos (Web Audio, no navegador).
-    // Usa uma captação CRUA (sem AGC/supressão) para o nível refletir o ambiente
-    // real, não o já tratado. Atualiza a barra ao vivo e devolve o RMS médio.
+    // RUÍDO do ambiente: medidor CONTÍNUO, sempre visível no setup. Captação CRUA
+    // (sem AGC/supressão) para refletir o ambiente real. Barra = nível instantâneo
+    // (com movimento); cor/veredito/`noiseOk` = média suavizada (EMA), estável.
     const NOISE_MAX_RMS = 0.05; // limiar de "barulhento" (heurístico, ajustável)
-    async function measureNoise(ms = 2600) {
-      let stream;
-      try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
-      catch { return null; }
-      const ac = new (window.AudioContext || window.webkitAudioContext)();
-      const src = ac.createMediaStreamSource(stream);
-      const an = ac.createAnalyser(); an.fftSize = 2048; src.connect(an);
+    let noiseOk = false, noiseStream = null, noiseCtx = null, noiseRAF = 0;
+    async function startNoiseMeter() {
+      try { noiseStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
+      catch { $('noise-verdict').textContent = 'Não foi possível medir o ruído.'; noiseOk = true; return; } // não bloqueia se falhar
+      noiseCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = noiseCtx.createMediaStreamSource(noiseStream);
+      const an = noiseCtx.createAnalyser(); an.fftSize = 2048; src.connect(an);
       const buf = new Float32Array(an.fftSize);
-      $('noise-wrap').style.display = '';
-      let sum = 0, cnt = 0, t0 = performance.now();
-      await new Promise(res => {
-        const tick = () => {
-          an.getFloatTimeDomainData(buf);
-          let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
-          const rms = Math.sqrt(s / buf.length);
-          sum += rms; cnt++;
-          const pct = Math.min(100, Math.round((rms / NOISE_MAX_RMS) * 70));
-          const bar = $('noise-bar'); bar.style.width = pct + '%';
-          bar.style.background = rms > NOISE_MAX_RMS ? '#b8732a' : '#1a8a4a';
-          if (posLoop && performance.now() - t0 < ms) requestAnimationFrame(tick); else res();
-        };
-        requestAnimationFrame(tick);
-      });
-      try { src.disconnect(); ac.close(); } catch {}
-      stream.getTracks().forEach(t => t.stop());
-      return { avg: sum / (cnt || 1) };
+      let ema = null;
+      const tick = () => {
+        an.getFloatTimeDomainData(buf);
+        let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+        const rms = Math.sqrt(s / buf.length);
+        ema = ema == null ? rms : ema * 0.9 + rms * 0.1;
+        noiseOk = ema <= NOISE_MAX_RMS;
+        $('noise-bar').style.width = Math.min(100, Math.round((rms / NOISE_MAX_RMS) * 70)) + '%';
+        $('noise-bar').style.background = noiseOk ? '#1a8a4a' : '#b8732a';
+        const v = $('noise-verdict');
+        v.textContent = noiseOk ? 'Silêncio ok ✓' : 'Muito barulho — procure um lugar mais silencioso';
+        v.style.color = noiseOk ? '#1a8a4a' : '#b8732a';
+        noiseRAF = requestAnimationFrame(tick);
+      };
+      noiseRAF = requestAnimationFrame(tick);
+    }
+    function stopNoiseMeter() {
+      if (noiseRAF) { cancelAnimationFrame(noiseRAF); noiseRAF = 0; }
+      try { if (noiseCtx) noiseCtx.close(); } catch {}
+      if (noiseStream) noiseStream.getTracks().forEach(t => t.stop());
+      noiseStream = null; noiseCtx = null;
     }
 
-    // Verificação CONTÍNUA: toca uma vez e o aluno vai se ajustando; o sistema
-    // avisa ao vivo e INICIA a prova sozinho quando a posição fica boa por 2
-    // checagens seguidas — resolve o "clicar de longe". Auto-pausada (a próxima
-    // só dispara após a anterior responder), então não enfileira chamadas.
+    // POSIÇÃO: verificação CONTÍNUA, sempre visível. O aluno se ajusta pelas
+    // instruções; quando posição E ruído estão ok por 2 checagens seguidas, conta
+    // 1-2-3 e começa. Auto-pausada (a próxima só dispara após a anterior).
     let posLoop = false, okStreak = 0;
-    async function togglePositionLoop() {
-      if (posLoop) { posLoop = false; $('pos-check-btn').textContent = 'Verificar minha posição'; $('pos-dot').className = 'dot'; $('pos-guidance').textContent = 'Verificação pausada.'; return; }
+    async function startPositionLoop() {
+      if (posLoop) return;
       posLoop = true; okStreak = 0; $('setup-err').textContent = '';
-      $('pos-check-btn').textContent = 'Pausar verificação';
-      // 1) RUÍDO do ambiente — bloqueia se estiver alto demais (a prova não começa).
-      $('pos-guidance').textContent = 'Medindo o ruído do ambiente — fique em silêncio por alguns segundos…';
-      $('pos-dot').className = 'dot';
-      const noise = await measureNoise();
-      if (!posLoop) return;
-      if (noise && noise.avg > NOISE_MAX_RMS) {
-        posLoop = false;
-        $('pos-check-btn').textContent = 'Verificar minha posição';
-        $('pos-guidance').textContent = 'Ambiente muito barulhento — procure um lugar mais silencioso (e use fones) e toque em Verificar de novo.';
-        return;
-      }
-      $('noise-wrap').style.display = 'none';
-      // 2) POSIÇÃO — contínua, com auto-início.
       while (posLoop) {
         try {
           const j = await checkPositionOnce();
           if (!posLoop) break;
-          if (!j) { $('pos-guidance').textContent = 'Aguardando a câmera…'; }
+          if (!j) { $('pos-guidance').textContent = 'Aguardando a câmera…'; $('pos-dot').className = 'dot'; $('pos-begin-btn').disabled = true; }
           else {
-            $('pos-guidance').textContent = j.guidance || (j.ok ? 'Posição ok!' : 'Ajuste a posição.');
-            $('pos-dot').className = 'dot' + (j.ok ? ' live' : '');
-            if (j.ok) { $('pos-begin-btn').disabled = false; okStreak++; } else okStreak = 0;
-            if (okStreak >= 2) {
-              posLoop = false;
-              let n = 3;
-              $('pos-guidance').textContent = `Posição ok! Começando em ${n}…`;
-              const tick = setInterval(() => {
-                n--;
-                if (n <= 0) { clearInterval(tick); beginExam(); }
-                else $('pos-guidance').textContent = `Posição ok! Começando em ${n}…`;
-              }, 1000);
-              return;
-            }
+            const posOk = !!j.ok;
+            const ready = posOk && noiseOk;
+            $('pos-dot').className = 'dot' + (ready ? ' live' : '');
+            $('pos-begin-btn').disabled = !ready;
+            if (!posOk) $('pos-guidance').textContent = j.guidance || 'Ajuste a posição.';
+            else if (!noiseOk) $('pos-guidance').textContent = 'Posição ok! Falta o ambiente ficar mais silencioso (veja o nível de ruído acima).';
+            else $('pos-guidance').textContent = 'Posição e silêncio ok!';
+            okStreak = ready ? okStreak + 1 : 0;
+            if (okStreak >= 2) { posLoop = false; startCountdown(); return; }
           }
         } catch { if (!posLoop) break; $('pos-guidance').textContent = 'Falha ao verificar; tentando de novo…'; }
         await new Promise(r => setTimeout(r, 900));
       }
     }
+    function startCountdown() {
+      let n = 3;
+      $('pos-guidance').textContent = `Tudo certo! Começando em ${n}…`;
+      const tick = setInterval(() => {
+        n--;
+        if (n <= 0) { clearInterval(tick); beginExam(); }
+        else $('pos-guidance').textContent = `Tudo certo! Começando em ${n}…`;
+      }, 1000);
+    }
 
     // Começa a prova de fato: grava o vídeo + conecta ao relay.
     function beginExam() {
       posLoop = false; // garante que o loop de posição parou
+      stopNoiseMeter(); // libera o stream/contexto de áudio do medidor de ruído
       show('live');
       $('selfview').srcObject = micStream;
       setStatus('Conectando…');
@@ -343,7 +340,6 @@
       ws.onerror = () => setStatus('Erro de conexão', 'err');
       ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
     }
-    $('pos-check-btn').onclick = togglePositionLoop;
     $('pos-begin-btn').onclick = beginExam;
 
     async function uploadVideo() {
