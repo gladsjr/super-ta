@@ -1,5 +1,5 @@
 import log from "../lib/logger.js";
-import { meteredResponses } from "../lib/billing.js";
+import { runStructured } from "../lib/agentRun.js";
 import { renderAgentPreamble } from "../lib/agentPreamble.js";
 import { GRADE_MIN, GRADE_MAX } from "../lib/rubric.js";
 
@@ -67,50 +67,21 @@ AVALIAÇÃO INTERNA COMPLETA (base para a nota):
 
 ${JSON.stringify(internalReport, null, 2)}`;
 
-        const payload = {
-            model: this.model,
-            instructions: systemPrompt,
-            input: [{ role: "user", content: [{ type: "input_text", text: userText }] }],
-            text: {
-                format: {
-                    type: "json_schema",
-                    name: "criterion_grade",
-                    strict: true,
-                    schema: GRADE_SCHEMA,
-                },
+        const { score, justification } = await runStructured({
+            client: this.client, model: this.model, label: "AGENT:Grading",
+            instructions: systemPrompt, input: [{ role: "user", content: [{ type: "input_text", text: userText }] }],
+            schema: GRADE_SCHEMA, schemaName: "criterion_grade", meterCtx,
+            promptLog: systemPrompt + "\n\n" + userText, maxAttempts: 2, extractObject: true,
+            validate: (parsed) => {
+                const s = clampScore(parsed.score);
+                if (s == null) throw new Error(`Grading: score inválido "${parsed.score}"`);
+                const j = typeof parsed.justification === "string" ? parsed.justification.trim() : "";
+                if (!j) throw new Error("Grading: justification vazia");
+                return { score: s, justification: j };
             },
-        };
-
-        log.prompt("AGENT:Grading", systemPrompt + "\n\n" + userText);
-
-        const MAX_ATTEMPTS = 2;
-        let lastErr = null;
-        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            try {
-                const response = await log.span("AGENT:Grading", `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
-                    meteredResponses(
-                        { ...meterCtx, agentLabel: "AGENT:Grading", model: this.model },
-                        () => this.client.responses.create(payload)
-                    )
-                );
-                const text = response.output_text || "";
-                const match = text.match(/\{[\s\S]*\}/);
-                if (!match) throw new Error(`Grading: no JSON in response (${log.preview(text, 120)})`);
-                const parsed = JSON.parse(match[0]);
-
-                const score = clampScore(parsed.score);
-                if (score == null) throw new Error(`Grading: score inválido "${parsed.score}"`);
-                const justification = typeof parsed.justification === "string" ? parsed.justification.trim() : "";
-                if (!justification) throw new Error("Grading: justification vazia");
-
-                log.info("AGENT:Grading", `ok criterio="${criterion.name}" nota=${score}${attempt > 1 ? ` (na tentativa ${attempt})` : ""}`);
-                return { score, justification };
-            } catch (err) {
-                lastErr = err;
-                log.error("AGENT:Grading", `tentativa ${attempt}/${MAX_ATTEMPTS} falhou: ${err.message}`);
-            }
-        }
-        throw lastErr;
+        });
+        log.info("AGENT:Grading", `ok criterio="${criterion.name}" nota=${score}`);
+        return { score, justification };
     }
 }
 
