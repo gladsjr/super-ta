@@ -35,7 +35,7 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "autoscale"
+deploymentTarget = "vm"
 run = ["node", "server.js"]
 
 [userenv]
@@ -44,4 +44,4 @@ run = ["node", "server.js"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 120000
+timeoutMs = 180000

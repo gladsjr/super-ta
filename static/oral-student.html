@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Prova oral</title>
+  <style>
+    :root { --ink:#1c2530; --ink-soft:#5b6675; --line:#e1e6ec; --bg:#f6f8fa; --accent:#2a6df4; --ok:#1a8a4a; --danger:#c0392b; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px; }
+    .wrap { max-width: 880px; margin: 0 auto; }
+    /* Setup em 2 colunas no desktop (instruções | câmera+medidores) p/ usar a
+       largura e reduzir a altura; empilha no mobile. */
+    .setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+    .setup-grid p:first-child { margin-top: 0; }
+    @media (max-width: 760px) { .setup-grid { grid-template-columns: 1fr; gap: 4px; } }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: var(--ink-soft); margin: 0 0 20px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 24px; }
+    .btn { font: inherit; padding: 12px 22px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
+    .btn.danger { background:#fff; color: var(--danger); border-color: var(--danger); }
+    .btn:disabled { opacity:.5; cursor: default; }
+    .status { display:flex; align-items:center; gap:10px; font-size:16px; margin: 16px 0; }
+    .dot { width:12px; height:12px; border-radius:50%; background:#bbb; flex:none; }
+    .dot.live { background: var(--ok); animation: pulse 1.4s infinite; }
+    .dot.err { background: var(--danger); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .hint { font-size: 13px; color: var(--ink-soft); }
+    .err { color: var(--danger); font-size: 14px; margin-top: 10px; white-space: pre-wrap; }
+    .big { font-size: 18px; text-align:center; padding: 10px 0; }
+    /* Avisos de status (posição/silêncio) em DESTAQUE: banner colorido grande. */
+    .banner { font-size:17px; font-weight:600; text-align:center; padding:12px 14px; border-radius:10px; margin:12px auto 0; max-width:380px; border:1px solid var(--line); }
+    .banner.ok { color:#fff; background:var(--ok); border-color:var(--ok); }
+    .banner.adjust { color:#7a4a12; background:#fff6e0; border-color:#ecc874; }
+    .banner.wait { color:var(--ink-soft); background:#f1f3f5; }
+    .note-warn { font-size:14px; line-height:1.45; background:#fff8e6; border:1px solid #f0d27a; border-radius:10px; padding:12px 14px; margin:14px 0; }
+    .consent { border:1px solid var(--line); border-radius:10px; padding: 14px 16px; max-height: 260px; overflow:auto; background:#fbfcfd; font-size: 14px; margin: 14px 0; }
+    .consent h4 { margin: 12px 0 4px; font-size: 14px; }
+    .consent p, .consent li { line-height: 1.45; }
+    .accept { display:flex; align-items:flex-start; gap:10px; margin: 6px 0 14px; cursor:pointer; }
+    .accept input { margin-top: 3px; }
+    video { width: 100%; max-width: 320px; border-radius: 10px; background:#000; transform: scaleX(-1); display:block; margin: 0 auto 14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Prova oral</h1>
+    <p class="sub">Uma conversa por voz, com a câmera ligada. O examinador faz as perguntas e você responde falando.</p>
+
+    <div class="card">
+      <div id="pre">
+        <p>Você vai fazer uma <strong>prova oral por voz</strong>, com a câmera ligada. Leia o termo abaixo e confirme para continuar — na tela seguinte você ajusta fones, posição e silêncio antes de começar.</p>
+        <div class="consent" id="consent-text">Carregando o termo…</div>
+        <label class="accept"><input type="checkbox" id="accept"/> <span>Li e <strong>concordo</strong> com a gravação de voz e vídeo e com o uso descrito acima.</span></label>
+        <button class="btn" id="start-btn" disabled>Iniciar prova oral</button>
+        <div class="err" id="pre-err"></div>
+      </div>
+
+      <!-- Página 1: instruções (ler com calma) + exemplos -->
+      <div id="instr" style="display:none">
+        <p style="margin-top:0">Ao começar, o examinador se apresenta e faz as perguntas; você responde <strong>falando</strong>. Pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</p>
+        <p style="background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:10px 12px; margin:10px 0"><strong>🎧 Use fones de ouvido.</strong> Evitam eco e garantem que o examinador entenda você — sem fones, o áudio da prova vaza pelo microfone e atrapalha a conversa.</p>
+        <p>Você vai se posicionar como nos exemplos abaixo: <strong>rosto e ombros centralizados</strong>, a cerca de <strong>1,5 m</strong> da câmera (do tronco até a cabeça), e <strong>mãos à mostra</strong>.</p>
+        <div style="display:flex; gap:10px; margin-top:12px">
+          <figure style="margin:0; flex:1"><img id="pose-a" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a-cap"></figcaption></figure>
+          <figure style="margin:0; flex:1"><img id="pose-b" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b-cap"></figcaption></figure>
+        </div>
+        <div class="note-warn"><strong>Importante:</strong> a prova <strong>não será interrompida</strong> se você sair da posição (ou se algo for detectado) durante a conversa. Mas isso fica registrado e o(a) <strong>professor(a) é avisado(a) na hora da avaliação</strong>. Mantenha a posição dos exemplos do início ao fim.</div>
+        <div class="banner wait" id="conn-banner" style="margin-bottom:14px">Testando a conexão…</div>
+        <button class="btn" id="to-check-btn">Continuar</button>
+      </div>
+
+      <!-- Página 2: verificação de posição + silêncio (a prova começa sozinha) -->
+      <div id="setup" style="display:none">
+        <p class="hint" style="text-align:center; margin-top:0">Posicione-se como nos exemplos. Quando a <strong>posição</strong> e o <strong>silêncio</strong> ficarem ok, a prova começa sozinha.</p>
+        <div style="display:flex; gap:10px; max-width:380px; margin:8px auto 14px">
+          <figure style="margin:0; flex:1"><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
+          <figure style="margin:0; flex:1"><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
+        </div>
+        <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
+        <video id="setup-cam" autoplay muted playsinline style="margin:0 auto"></video>
+        <!-- Nível de ruído: medidor CONTÍNUO -->
+        <div style="max-width:380px; margin:10px auto 0">
+          <div class="hint" style="text-align:center; margin-bottom:4px">Nível de ruído do ambiente</div>
+          <div style="height:10px; background:#e5e7eb; border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:var(--ok); transition:width .1s linear"></div></div>
+          <div class="banner wait" id="noise-verdict" style="margin-top:6px">Medindo o ambiente…</div>
+        </div>
+        <!-- Posição: verificação CONTÍNUA, em destaque -->
+        <div class="banner wait" id="pos-guidance" style="margin-top:10px">Iniciando a câmera…</div>
+        <div style="margin-top:14px; text-align:center">
+          <button class="btn" id="pos-begin-btn" disabled>Começar a prova</button>
+        </div>
+        <div class="err" id="setup-err"></div>
+      </div>
+
+      <div id="live" style="display:none">
+        <video id="selfview" autoplay muted playsinline></video>
+        <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
+        <p class="hint" id="qinfo"></p>
+        <button class="btn danger" id="end-btn">Encerrar prova</button>
+      </div>
+
+      <div id="done" style="display:none">
+        <div class="big" id="done-msg">Encerrando…</div>
+        <p class="sub" style="text-align:center" id="done-sub"></p>
+      </div>
+
+      <div id="blocked" style="display:none">
+        <div class="big">Prova já realizada</div>
+        <p class="sub" style="text-align:center">Esta prova oral já foi realizada com este link e <strong>não pode ser refeita</strong>. Se precisar, fale com o(a) professor(a) para um novo link.</p>
+        <div id="result" style="margin-top:16px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUB = (location.pathname.match(/\/s\/([0-9a-f]{12})/) || [])[1];
+    const $ = id => document.getElementById(id);
+    const SR = 24000;
+    let ws = null, ctx = null, micStream = null, srcNode = null, procNode = null;
+    let recorder = null, recChunks = [], playHead = 0, ended = false, activeSources = [];
+
+    function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
+    function show(id) { for (const s of ['pre', 'instr', 'setup', 'live', 'done', 'blocked']) $(s).style.display = s === id ? '' : 'none'; }
+
+    // No-retake: se a prova já foi realizada com este link, bloqueia a entrada.
+    let blocked = false;
+    (async () => {
+      try {
+        const st = await (await fetch(`/s/${SUB}/oral/status`)).json();
+        if (st.done) {
+          blocked = true; show('blocked');
+          // mostra devolutiva/nota se já publicadas pelo professor
+          try {
+            const rr = await (await fetch(`/s/${SUB}/oral/result`)).json();
+            const parts = [];
+            if (rr.grade != null) parts.push(`<div class="big">Nota: ${rr.grade}</div>`);
+            if (rr.devolutiva) parts.push(`<div class="card" style="margin-top:10px; text-align:left; white-space:pre-wrap">${rr.devolutiva.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</div>`);
+            if (parts.length) document.getElementById('result').innerHTML = '<h3 style="text-align:center">Resultado</h3>' + parts.join('');
+          } catch {}
+        }
+      } catch {}
+    })();
+
+    // Termo de consentimento (voz + vídeo) — habilita o Iniciar só após o aceite.
+    (async () => {
+      try {
+        const j = await (await fetch('/api/consent')).json();
+        $('consent-text').innerHTML = j.oralHtml || '(termo indisponível)';
+      } catch { $('consent-text').textContent = 'Não foi possível carregar o termo. Recarregue a página.'; }
+    })();
+    $('accept').onchange = () => { $('start-btn').disabled = !$('accept').checked; };
+
+    // --- Reprodução: PCM16 (do relay) → toca sem emendas ---
+    function playPcm(arrayBuf) {
+      if (!ctx || ended) return;
+      const i16 = new Int16Array(arrayBuf);
+      if (!i16.length) return;
+      const buf = ctx.createBuffer(1, i16.length, SR);
+      const f32 = buf.getChannelData(0);
+      for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+      const node = ctx.createBufferSource();
+      node.buffer = buf; node.connect(ctx.destination);
+      const t = Math.max(ctx.currentTime + 0.02, playHead);
+      node.start(t); playHead = t + buf.duration;
+      activeSources.push(node);
+      node.onended = () => { const i = activeSources.indexOf(node); if (i >= 0) activeSources.splice(i, 1); };
+    }
+    // Barge-in: descarta TODO o áudio do examinador já agendado, para ele calar
+    // na hora quando o aluno começa a falar.
+    function flushPlayback() {
+      for (const n of activeSources) { try { n.onended = null; n.stop(); } catch {} }
+      activeSources = [];
+      if (ctx) playHead = ctx.currentTime;
+    }
+
+    // --- Captura: microfone → PCM16 → WebSocket ---
+    function startCapture() {
+      srcNode = ctx.createMediaStreamSource(micStream);
+      procNode = ctx.createScriptProcessor(4096, 1, 1);
+      procNode.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const f32 = e.inputBuffer.getChannelData(0);
+        const i16 = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) { let s = Math.max(-1, Math.min(1, f32[i])); i16[i] = s < 0 ? s * 32768 : s * 32767; }
+        ws.send(i16.buffer);
+      };
+      srcNode.connect(procNode);
+      const sink = ctx.createGain(); sink.gain.value = 0;
+      procNode.connect(sink); sink.connect(ctx.destination);
+    }
+
+    async function start() {
+      if (blocked) { show('blocked'); return; }
+      $('pre-err').textContent = '';
+      $('start-btn').disabled = true;
+      // 1) registra o consentimento no servidor
+      try { await fetch(`/s/${SUB}/oral/consent`, { method: 'POST' }); } catch {}
+      // 2) microfone + câmera
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+      } catch (e) {
+        $('start-btn').disabled = false;
+        $('pre-err').textContent = 'Não foi possível acessar microfone/câmera. Autorize o acesso e tente de novo.';
+        return;
+      }
+      // 3) Página 1: instruções + exemplos. O aluno lê com calma; câmera e
+      //    medidores só entram na página 2 (continueToCheck).
+      show('instr');
+      pickAndShowPoses();
+      connTest(); // mede a conexão em segundo plano enquanto o aluno lê
+    }
+    // Página 2: liga a câmera no preview e começa a verificação CONTÍNUA de
+    // ruído + posição. Com tudo ok, a prova começa sozinha (1-2-3).
+    function continueToCheck() {
+      show('setup');
+      $('setup-cam').srcObject = micStream;
+      startNoiseMeter();
+      startPositionLoop();
+    }
+
+    // Exemplos de posição: 1 com mesa + 1 sem mesa, sorteados garantindo gênero
+    // E raça diferentes entre as duas imagens (diversidade nos exemplos).
+    const POSES = [
+      { f: 'sem-mesa__m__latino.jpg',   s: 'sem', g: 'm', r: 'latino' },
+      { f: 'sem-mesa__f__branca.jpg',   s: 'sem', g: 'f', r: 'branca' },
+      { f: 'sem-mesa__m__asiatico.jpg', s: 'sem', g: 'm', r: 'asiatico' },
+      { f: 'sem-mesa__f__negra.jpg',    s: 'sem', g: 'f', r: 'negra' },
+      { f: 'com-mesa__m__branco.jpg',   s: 'com', g: 'm', r: 'branca' },
+      { f: 'com-mesa__f__latina.jpg',   s: 'com', g: 'f', r: 'latino' },
+      { f: 'com-mesa__m__negro.jpg',    s: 'com', g: 'm', r: 'negra' },
+      { f: 'com-mesa__f__asiatica.jpg', s: 'com', g: 'f', r: 'asiatico' },
+    ];
+    function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
+    function pickAndShowPoses() {
+      const com = shuffle(POSES.filter(p => p.s === 'com'));
+      const sem = shuffle(POSES.filter(p => p.s === 'sem'));
+      let pair = null;
+      for (const c of com) { const m = sem.find(s => s.g !== c.g && s.r !== c.r); if (m) { pair = [c, m]; break; } }
+      if (!pair) pair = [com[0], sem[0]];
+      const base = '/static/oral-poses/';
+      // Mesmo par mostrado nas DUAS páginas (instruções e verificação).
+      const setPair = (a, b) => { $(a).src = base + pair[0].f; $(a + '-cap').textContent = 'Com mesa'; $(b).src = base + pair[1].f; $(b + '-cap').textContent = 'Sem mesa'; };
+      setPair('pose-a', 'pose-b');   // página 1
+      setPair('pose-a2', 'pose-b2'); // página 2
+    }
+
+    // TESTE DE CONEXÃO: mede o RTT (ida-e-volta) até o servidor algumas vezes. Numa
+    // conversa por voz em tempo real, latência alta/instável é o que mais atrapalha.
+    // Avisa se estiver ruim — mas NÃO impede começar. Roda na página 1 (em segundo
+    // plano, enquanto o aluno lê as instruções).
+    async function connTest() {
+      const bn = $('conn-banner');
+      bn.className = 'banner wait'; bn.textContent = 'Testando a conexão…';
+      const times = []; let fails = 0;
+      for (let i = 0; i < 5; i++) {
+        const t0 = performance.now();
+        try {
+          const resp = await fetch(`/oral/ping?t=${i}-${Math.random()}`, { cache: 'no-store' });
+          if (!resp.ok) throw 0;
+          await resp.text();
+          times.push(performance.now() - t0);
+        } catch { fails++; }
+        await new Promise(res => setTimeout(res, 120));
+      }
+      if (!times.length) { bn.className = 'banner adjust'; bn.textContent = '⚠ Não consegui testar a conexão. Se a internet estiver instável, a prova por voz pode falhar — prefira uma rede melhor.'; return; }
+      times.sort((a, b) => a - b);
+      const med = Math.round(times[Math.floor(times.length / 2)]);
+      if (fails >= 2 || med >= 450) {
+        bn.className = 'banner adjust';
+        bn.textContent = `⚠ Conexão instável/lenta (~${med} ms${fails ? `, ${fails} falha(s)` : ''}). A prova é por voz em tempo real e pode ficar difícil — cortes e atrasos. Se puder, use uma rede melhor (Wi-Fi estável). Você ainda pode continuar.`;
+      } else {
+        bn.className = 'banner ok';
+        bn.textContent = `Conexão ok ✓ (~${med} ms)`;
+      }
+    }
+
+    // ---- Verificação de POSIÇÃO no NAVEGADOR (MediaPipe WASM), em tempo real ----
+    // Pose (tronco+cabeça/distância) + Hands (mãos à mostra) + ObjectDetector
+    // (celular e outra pessoa). Roda 100% no cliente — sem servidor, sem latência
+    // de rede; escala para muitas provas simultâneas. Limiares portados de
+    // scripts/proctor_position.py (validados nas posições canônicas). Runtime e
+    // modelos vêm de CDN (não passam pela nossa VM).
+    // Runtime e modelos AUTO-HOSPEDADOS em /static/vision (sem dependência de CDN
+    // externo no momento da prova). Baixados de @mediapipe/tasks-vision 0.10.36-rc.
+    const MP_BASE = '/static/vision';
+    // Distância pela LARGURA DA FACE (orelha a orelha) — robusta mesmo quando o
+    // aluno inclina ou levanta o braço (aí os ombros ficam pouco confiáveis).
+    // >MAX = perto demais (corta o tronco/cabeça), <MIN = longe demais. Sem
+    // centralização (incômoda). Limiares ajustáveis com feedback real.
+    const FACE_MAX = 0.16, FACE_MIN = 0.06;
+    let poseLm = null, handLm = null, objDet = null, visionReady = false, visionFailed = false;
+    async function initVision() {
+      try {
+        const mp = await import(`${MP_BASE}/vision_bundle.mjs`);
+        const fs = await mp.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+        [poseLm, handLm, objDet] = await Promise.all([
+          mp.PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/pose_landmarker_lite.task` }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5 }),
+          mp.HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/hand_landmarker.task` }, runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.3 }),
+          mp.ObjectDetector.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/efficientdet_lite0.tflite` }, runningMode: 'VIDEO', scoreThreshold: 0.4, categoryAllowlist: ['cell phone', 'person'] }),
+        ]);
+        visionReady = true;
+      } catch (e) { visionFailed = true; console.warn('MediaPipe não carregou:', e); }
+    }
+
+    // Avalia 1 frame e devolve {ok, guidance}. PRIORIDADE, do essencial ao acessório:
+    //  (1) TRONCO + CABEÇA enquadrados — posição confortável e sustentável;
+    //  (2) MÃOS visíveis;
+    //  (3) sem CELULAR e sem OUTRA PESSOA no quadro.
+    // A orientação ao vivo segue essa ordem: só cobra o próximo nível quando o
+    // anterior está ok. Sem checagem de centralização (incômoda, pouco relevante).
+    function evalFrame(vid, ts) {
+      const pr = poseLm.detectForVideo(vid, ts);
+      const hr = handLm.detectForVideo(vid, ts);
+      const od = objDet.detectForVideo(vid, ts);
+      const dets = od.detections || [];
+      const phone = dets.some(d => (d.categories || []).some(c => c.categoryName === 'cell phone' && c.score >= 0.4));
+      const people = dets.filter(d => (d.categories || []).some(c => c.categoryName === 'person' && c.score >= 0.5)).length;
+      const L = (pr.landmarks && pr.landmarks[0]) || null;
+
+      // (1) TRONCO + CABEÇA — o essencial.
+      if (!L) return { ok: false, guidance: 'Apareça na câmera, de frente — mostre o rosto e o tronco.' };
+      const vis = i => (L[i].visibility != null ? L[i].visibility : 1);
+      const head = vis(0) > 0.5;                          // nariz = cabeça
+      const shoulders = vis(11) > 0.5 && vis(12) > 0.5;   // ombros = topo do tronco
+      if (!head || !shoulders) return { ok: false, guidance: 'Enquadre do tronco até a cabeça, como nos exemplos.' };
+      // Distância pela LARGURA DA FACE (orelha a orelha) — robusta mesmo com braço levantado.
+      const faceW = Math.abs(L[7].x - L[8].x);
+      if (faceW > FACE_MAX) return { ok: false, guidance: 'Afaste-se — você está perto demais; preciso ver do tronco até a cabeça.' };
+      if (faceW < FACE_MIN) return { ok: false, guidance: 'Aproxime-se um pouco da câmera.' };
+
+      // (2) AS DUAS MÃOS visíveis (como nos exemplos — não vale só uma).
+      if ((hr.landmarks || []).length < 2) return { ok: false, guidance: 'Deixe AS DUAS mãos visíveis, como nas fotos de exemplo.' };
+
+      // (3) sem CELULAR e sem OUTRA PESSOA.
+      if (phone) return { ok: false, guidance: 'Guarde o celular para começar.' };
+      if (people >= 2) return { ok: false, guidance: 'Você precisa estar sozinho — há outra pessoa no quadro.' };
+
+      return { ok: true, guidance: 'Posição e enquadramento ok!' };
+    }
+
+    // RUÍDO do ambiente: medidor CONTÍNUO, sempre visível no setup. Captação CRUA
+    // (sem AGC/supressão) para refletir o ambiente real. Barra = nível instantâneo
+    // (com movimento); cor/veredito/`noiseOk` = média suavizada (EMA), estável.
+    const NOISE_MAX_RMS = 0.05; // limiar de "barulhento" (heurístico, ajustável)
+    let noiseOk = false, noiseStream = null, noiseCtx = null, noiseRAF = 0;
+    async function startNoiseMeter() {
+      try { noiseStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
+      catch { $('noise-verdict').textContent = 'Não foi possível medir o ruído.'; noiseOk = true; return; } // não bloqueia se falhar
+      noiseCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = noiseCtx.createMediaStreamSource(noiseStream);
+      const an = noiseCtx.createAnalyser(); an.fftSize = 2048; src.connect(an);
+      const buf = new Float32Array(an.fftSize);
+      let ema = null;
+      const tick = () => {
+        an.getFloatTimeDomainData(buf);
+        let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+        const rms = Math.sqrt(s / buf.length);
+        ema = ema == null ? rms : ema * 0.9 + rms * 0.1;
+        noiseOk = ema <= NOISE_MAX_RMS;
+        $('noise-bar').style.width = Math.min(100, Math.round((rms / NOISE_MAX_RMS) * 70)) + '%';
+        $('noise-bar').style.background = noiseOk ? 'var(--ok)' : '#b8732a';
+        const v = $('noise-verdict');
+        v.className = 'banner ' + (noiseOk ? 'ok' : 'adjust');
+        v.textContent = noiseOk ? 'Silêncio ok ✓' : 'Muito barulho — procure um lugar mais silencioso';
+        noiseRAF = requestAnimationFrame(tick);
+      };
+      noiseRAF = requestAnimationFrame(tick);
+    }
+    function stopNoiseMeter() {
+      if (noiseRAF) { cancelAnimationFrame(noiseRAF); noiseRAF = 0; }
+      try { if (noiseCtx) noiseCtx.close(); } catch {}
+      if (noiseStream) noiseStream.getTracks().forEach(t => t.stop());
+      noiseStream = null; noiseCtx = null;
+    }
+
+    // POSIÇÃO: verificação CONTÍNUA no navegador (~2-3 fps), sempre visível. O
+    // aluno se ajusta pelas instruções ao vivo; quando posição E ruído ficam ok
+    // por ~1 s seguido, conta 1-2-3 e começa. Sem servidor → responde na hora.
+    let posLoop = false, okStreak = 0;
+    // Banner de posição em DESTAQUE: cls ∈ wait|adjust|ok.
+    function setPosBanner(cls, text) { const e = $('pos-guidance'); e.className = 'banner ' + cls; e.textContent = text; }
+    async function startPositionLoop() {
+      if (posLoop) return;
+      posLoop = true; okStreak = 0; $('setup-err').textContent = '';
+      if (!visionReady && !visionFailed) { setPosBanner('wait', 'Carregando o verificador de posição…'); await initVision(); }
+      if (visionFailed) { // MediaPipe não carregou: não dá pra checar a posição.
+        setPosBanner('adjust', 'Não consegui verificar a posição automaticamente. Posicione-se como nos exemplos; quando o silêncio estiver ok, toque em “Começar a prova”.');
+        // sem visão, o gate possível é o ruído: só libera o botão com silêncio ok.
+        const poll = () => { if (!posLoop) return; $('pos-begin-btn').disabled = !noiseOk; setTimeout(poll, 350); };
+        poll();
+        return;
+      }
+      const vid = $('setup-cam');
+      while (posLoop) {
+        try {
+          if (!vid.videoWidth || vid.readyState < 2) {
+            setPosBanner('wait', 'Aguardando a câmera…'); $('pos-begin-btn').disabled = true;
+          } else {
+            const res = evalFrame(vid, performance.now());
+            const ready = res.ok && noiseOk; // só começa com POSIÇÃO e SILÊNCIO ok
+            $('pos-begin-btn').disabled = !ready;
+            if (!res.ok) setPosBanner('adjust', res.guidance);
+            else if (!noiseOk) setPosBanner('adjust', 'Posição ok! Falta o ambiente ficar mais silencioso.');
+            else setPosBanner('ok', 'Posição e silêncio ok!');
+            okStreak = ready ? okStreak + 1 : 0;
+            if (okStreak >= 3) { posLoop = false; startCountdown(); return; } // ~1 s de posição boa
+          }
+        } catch (e) { /* erro pontual de frame: ignora e segue */ }
+        await new Promise(r => setTimeout(r, 350));
+      }
+    }
+    function startCountdown() {
+      let n = 3;
+      setPosBanner('ok', `Tudo certo! Começando em ${n}…`);
+      const tick = setInterval(() => {
+        n--;
+        if (n <= 0) { clearInterval(tick); beginExam(); }
+        else setPosBanner('ok', `Tudo certo! Começando em ${n}…`);
+      }, 1000);
+    }
+
+    // Encerra os detectores de visão (libera GPU/WASM) ao sair do setup.
+    function stopVision() {
+      for (const d of [poseLm, handLm, objDet]) { try { d && d.close(); } catch {} }
+      poseLm = handLm = objDet = null; visionReady = false;
+    }
+
+    // Começa a prova de fato: grava o vídeo + conecta ao relay.
+    function beginExam() {
+      posLoop = false; // garante que o loop de posição parou
+      stopNoiseMeter(); // libera o stream/contexto de áudio do medidor de ruído
+      stopVision();     // libera os modelos de visão
+      show('live');
+      $('selfview').srcObject = micStream;
+      setStatus('Conectando…');
+      // grava o vídeo (áudio do aluno + câmera) para avaliação posterior. Bitrate
+      // BAIXO de propósito: o vídeo é só para revisão humana / proctoring (que
+      // reduz para 640px), não precisa de HD — envio rápido no fim, sem disputar
+      // banda com a voz durante a prova.
+      try {
+        try { recorder = new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
+        catch (e0) { recorder = new MediaRecorder(micStream); }
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+        recorder.onstop = uploadVideo;
+        recorder.start(1000);
+      } catch (e) { /* sem gravação se o navegador não suportar — não bloqueia a prova */ }
+      // áudio em PCM via Web Audio + conexão ao relay
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
+      playHead = ctx.currentTime;
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}/s/${SUB}/oral/relay`);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => { setStatus('Conectando ao examinador…'); startCapture(); };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data !== 'string') { playPcm(ev.data); return; }
+        let m; try { m = JSON.parse(ev.data); } catch { return; }
+        if (m.type === 'status') {
+          if (m.state === 'connected') { setStatus('Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
+          else if (m.state === 'listening') { flushPlayback(); setStatus('🎤 Ouvindo você…', 'live'); }
+          else if (m.state === 'thinking') setStatus('…', 'live');
+        } else if (m.type === 'ended') { finish(); }
+      };
+      ws.onerror = () => setStatus('Erro de conexão', 'err');
+      ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
+    }
+    $('to-check-btn').onclick = continueToCheck;
+    $('pos-begin-btn').onclick = beginExam;
+
+    async function uploadVideo() {
+      // chamado quando o MediaRecorder para; envia o vídeo e finaliza a UI
+      const stopTracks = () => { try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} };
+      if (!recChunks.length) { stopTracks(); $('done-msg').textContent = '✓ Prova encerrada'; $('done-sub').textContent = 'Você pode fechar esta página.'; return; }
+      $('done-msg').textContent = 'Enviando o vídeo…';
+      $('done-sub').textContent = 'Não feche a página até concluir.';
+      try {
+        const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
+        const form = new FormData(); form.append('file', blob, 'prova.webm');
+        const r = await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form });
+        $('done-msg').textContent = '✓ Prova encerrada';
+        $('done-sub').textContent = r.ok ? 'Vídeo enviado. Você pode fechar esta página.' : 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
+      } catch {
+        $('done-msg').textContent = '✓ Prova encerrada';
+        $('done-sub').textContent = 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
+      } finally { stopTracks(); }
+    }
+
+    function finish() {
+      if (ended) return;
+      ended = true;
+      try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'bye' })); } catch {}
+      try { ws && ws.close(); } catch {}
+      try { procNode && (procNode.onaudioprocess = null, procNode.disconnect()); } catch {}
+      try { srcNode && srcNode.disconnect(); } catch {}
+      try { ctx && ctx.close(); } catch {}
+      show('done');
+      // para a gravação → onstop dispara o upload (e só então paramos a câmera)
+      if (recorder && recorder.state !== 'inactive') { try { recorder.stop(); } catch { uploadVideo(); } }
+      else { uploadVideo(); }
+    }
+
+    $('start-btn').onclick = start;
+    $('end-btn').onclick = finish;
+    if (!SUB) { $('pre-err').textContent = 'Link inválido.'; $('start-btn').disabled = true; }
+  </script>
+</body>
+</html>

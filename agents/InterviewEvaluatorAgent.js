@@ -1,5 +1,5 @@
 import log from "../lib/logger.js";
-import { meteredResponses } from "../lib/billing.js";
+import { runStructured } from "../lib/agentRun.js";
 import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { buildDeliveryReport } from "../lib/deliverySignals.js";
@@ -273,8 +273,12 @@ ${transcript}
 
 Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a perspectiva do entrevistador da agenda e produza o relatório JSON conforme o contrato.`;
 
-        const payload = {
-            model: this.model,
+        // Saída estruturada estrita (json_schema): elimina o "JSON com vírgula
+        // faltando" que já perdeu uma avaliação de 96s em produção (jun/2026).
+        // one-shot e sem efeito colateral até o cache: re-tentar a chamada INTEIRA
+        // em falha de API/parse/validação é seguro (só custa outra chamada).
+        const parsed = await runStructured({
+            client: this.client, model: this.model, label: "AGENT:InterviewEvaluator",
             instructions: systemPrompt,
             input: [{
                 role: "user",
@@ -284,52 +288,12 @@ Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a p
                     { type: "input_file", file_id: studentFileId },
                 ],
             }],
-            // Saída estruturada estrita: a API só devolve JSON conforme o
-            // schema — elimina o "JSON com vírgula faltando" que já perdeu
-            // uma avaliação de 96s em produção (jun/2026).
-            text: {
-                format: {
-                    type: "json_schema",
-                    name: "interview_evaluation",
-                    strict: true,
-                    schema: REPORT_SCHEMA,
-                },
-            },
-        };
-
-        log.prompt("AGENT:InterviewEvaluator", systemPrompt + "\n\n" + userText);
-
-        // Diferente do SuperOrchestrator (que NÃO pode re-tentar parse porque
-        // a chamada commita estado na Conversations API), o avaliador é
-        // one-shot e sem efeito colateral até o cache ser gravado — re-tentar
-        // a chamada INTEIRA em falha de API, parse ou validação é seguro;
-        // custa só outra chamada, em vez de perder o lote/clique do professor.
-        const MAX_ATTEMPTS = 2;
-        let lastErr = null;
-        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            try {
-                const response = await log.span("AGENT:InterviewEvaluator", `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
-                    meteredResponses(
-                        { ...meterCtx, agentLabel: "AGENT:InterviewEvaluator", model: this.model },
-                        () => this.client.responses.create(payload)
-                    )
-                );
-
-                const text = response.output_text || "";
-                // Com json_schema estrito o texto já É o JSON; o match fica
-                // como cinto-e-suspensório para qualquer envelope inesperado.
-                const match = text.match(/\{[\s\S]*\}/);
-                if (!match) throw new Error(`InterviewEvaluator: no JSON in response (${log.preview(text, 120)})`);
-                const parsed = JSON.parse(match[0]);
-                this._validateReport(parsed);
-                log.info("AGENT:InterviewEvaluator", `ok defense=${parsed.overall.defense_quality} authorship=${parsed.overall.authorship_confidence} per_question=${parsed.per_question.length}${attempt > 1 ? ` (na tentativa ${attempt})` : ""}`);
-                return parsed;
-            } catch (err) {
-                lastErr = err;
-                log.error("AGENT:InterviewEvaluator", `tentativa ${attempt}/${MAX_ATTEMPTS} falhou: ${err.message}`);
-            }
-        }
-        throw lastErr;
+            schema: REPORT_SCHEMA, schemaName: "interview_evaluation", meterCtx,
+            promptLog: systemPrompt + "\n\n" + userText, maxAttempts: 2, extractObject: true,
+            validate: (p) => { this._validateReport(p); return p; },
+        });
+        log.info("AGENT:InterviewEvaluator", `ok defense=${parsed.overall.defense_quality} authorship=${parsed.overall.authorship_confidence} per_question=${parsed.per_question.length}`);
+        return parsed;
     }
 
     _validateReport(r) {

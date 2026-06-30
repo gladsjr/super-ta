@@ -11,6 +11,10 @@ Convenções de prompt para agentes:
 - Qualquer agente novo que precise da agenda do entrevistador usa `renderInterviewerAgenda(yamlText)`. Não recrie a estrutura.
 - Contexto de conversa curto e bem-delimitado (ex.: turno corrente + intervenções) vem do estado local em `SESSIONS` (`sess.turnLog`), não da Conversations API. O parâmetro `conversation:` das Responses polui o `conv_chat` remoto com turnos internos; evite.
 
+Helpers compartilhados — diretriz permanente:
+- **Agente de saída ESTRUTURADA (json_schema, não-streaming)** usa `lib/agentRun.js#runStructured` — ele concentra o esqueleto repetido (montar payload Responses+json_schema → `log.prompt` → `log.span`+`meteredResponses` → extrair/parsear o JSON → `validate` → retry). Passe só o que varia: `instructions`, `input`, `schema`/`schemaName` e um `validate(parsed)` que mapeia/valida e LANÇA p/ forçar retry. NÃO recrie o loop de `responses.create`+parse à mão. Exceções legítimas (não encaixam): `SuperOrchestratorAgent` (`stream:true` por turno), `StudentFeedbackAgent` (muta o payload no retry p/ apontar vazamento de `FORBIDDEN_PATTERNS`), `EnunciadoCoherenceAgent` (saída livre, sem json_schema).
+- **Lote com concorrência limitada** (avaliar N alunos, etc.) usa `lib/concurrency.js#mapPool(items, limit, fn)` — pool de workers que preserva ordem e captura erro por item. NÃO escreva pool de workers/`Promise.all(Array.from(...))` à mão.
+
 Modo de interação (texto vs áudio) — diretriz permanente:
 - Análise é sempre em texto. Áudio existe apenas como última-milha da interface com o aluno (STT na entrada, TTS na saída). Agentes, evaluators, document map, vector store, log da conversa e relatório final operam só em texto. Nunca passar áudio para um agente.
 - Áudio não é persistido. TTS vai num cache LRU em memória de sessão (`sess.audioCache`, `lib/audio.js#AudioCache`) e é servido por `GET /s/:t/audio/:turnId`. Se o cache evict ou o servidor reiniciar, o frontend degrada para texto.

@@ -1,0 +1,94 @@
+{
+  "work": "a4f54f6bd4f9",
+  "sub": "cd58f5319ae9",
+  "steps": {
+    "setup": {
+      "ok": true,
+      "work": "a4f54f6bd4f9",
+      "sub": "cd58f5319ae9",
+      "n": 3
+    },
+    "consent": {
+      "ok": true,
+      "version": "3.0.0"
+    },
+    "tts": {
+      "ok": true,
+      "respostas": 3,
+      "bytes": [
+        1111200,
+        463200,
+        331200
+      ]
+    },
+    "voice_session": {
+      "ok": true,
+      "respostas_entregues": 2,
+      "esperadas": 3,
+      "examinerSeg": "35.4"
+    },
+    "oral_asked_json": {
+      "ok": true,
+      "n": 3
+    },
+    "oral_transcript": {
+      "ok": true,
+      "turnos": 3,
+      "aluno": 1,
+      "examinador": 2
+    },
+    "oral_voice_json": {
+      "ok": true,
+      "flagged": 0,
+      "turnos": 1
+    },
+    "completion": {
+      "ok": true,
+      "reason": "complete"
+    },
+    "cost_realtime": {
+      "ok": true,
+      "eventos": 1,
+      "cost_usd": 0.085717,
+      "tokens_in": 3126,
+      "tokens_out": 877
+    },
+    "oral_video_key": {
+      "ok": true,
+      "key": "oral-video/cd58f5319ae9.webm",
+      "bytes": 101837
+    },
+    "evaluate_all": {
+      "ok": true,
+      "evaluated": 1,
+      "grade": 3.3
+    },
+    "oral_eval_json": {
+      "ok": true,
+      "perguntas": 3,
+      "nota": 3.3
+    },
+    "proctor_all": {
+      "ok": true,
+      "analyzed": 1,
+      "alerts": [],
+      "voice_alert": false
+    },
+    "oral_proctor_json": {
+      "ok": true,
+      "frames": 4,
+      "flags": [
+        "phone",
+        "absent",
+        "multiple_people"
+      ]
+    },
+    "professor_view": {
+      "ok": true,
+      "grade": 3.3,
+      "proctor_alerts": [],
+      "voice_alert": false
+    }
+  },
+  "ok": true
+}
