@@ -213,13 +213,57 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [InterviewEvaluatorAgent.js](../agents/InterviewEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Avalia a entrevista realizada sob a perspectiva do entrevistador (rota `/w/:workToken/submissions/:subToken/evaluation`, botão na página da conversa). Recebe os dois PDFs via `input_file`, a agenda renderizada e a transcrição serializada em texto com métricas de FORMA/ENTREGA por turno (latência, tempo até começar a falar, palavras/s, caracteres/s, disfluências, registro escrito, polimento — [lib/deliverySignals.js](../lib/deliverySignals.js), mesma fonte de heurísticas do forense `scripts/detect-ai-answers.mjs`; nunca os bytes de áudio); injeta o `EXTEMPORANEOUS_ANSWER_PRINCIPLE` para não punir respostas de direção+mecanismo+ordem de grandeza. Avaliação holística: conteúdo decide o mérito por pergunta; forma alimenta o campo `delivery` e corrobora sinais de autoria. Resultado cacheado em `submissions.evaluation_json` — NUNCA exposto ao aluno.
    - [StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_ui`. Deriva do relatório interno a devolutiva FORMATIVA ao aluno: sem nota/juízo interno cru, sem follow-ups do professor. Professor SOBERANO sobre o conteúdo: por default fica no conteúdo, mas se as diretrizes pedirem, comenta forma/entrega/espontaneidade (observação calibrada, nunca acusação) — não depende de `expect_spontaneous`. Sanitização — regras de conteúdo no prompt (regra inviolável: não imputar causa/acusar) + varredura `FORBIDDEN_PATTERNS` no código (conjunto único de ACUSAÇÃO; se vazar, re-tenta apontando o vazamento; persistindo, falha). FLUXO EM DOIS PASSOS: gerar a prévia (`/evaluation/student-version` individual, `/evaluations/student-versions` em lote — único ponto que chama o agente) e, depois da revisão do professor, publicar (`/evaluation/publish`, `/evaluations/publish` — só marca visibilidade, sem LLM). O professor pode EDITAR a devolutiva (PUT `/evaluation/student-version`; validação de forma + warnings de vocabulário interno, sem bloquear): a edição vive em `student_evaluation_edited_json`, a automática fica preservada em `student_evaluation_json`, e a efetiva (editada ?? automática) é o que se publica. Aluno lê em `GET /s/:t/evaluation`, sem expirar com a janela de revisão.
    - [GradingAgent.js](../agents/GradingAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Calcula a nota (0–10) de UM critério da rubrica aplicando o prompt do critério sobre o relatório interno completo; devolve `{score, justification}`. Uma chamada por critério (em paralelo); a nota FINAL é a média ponderada pelos pesos, calculada em código ([lib/rubric.js](../lib/rubric.js)#weightedFinal), nunca pelo LLM. A rubrica do trabalho vive em `works.grading_rubric` (`NULL` ⇒ `DEFAULT_RUBRIC`: "avaliação do entrevistador" + "avaliação do professor", peso igual); o professor edita no painel e pode ajustar ad-hoc por aluno (`rubricOverride`) ou sobrescrever a nota manualmente (PUT). Notas em `submissions.grades_json`/`grade_final`. A nota é uma PUBLICAÇÃO À PARTE da devolutiva (`grade_published_at`, independente de `evaluation_published_at`): o professor publica a devolutiva subjetiva, pode receber o comentário do aluno e só então publicar a nota — ou tudo junto. Ao aluno vão nota final + critérios (nome/peso/nota), SEM justificativas (professor-only). Rotas: calcular `/evaluation/grades` (POST individual com `rubricOverride`, PUT override manual; lote `/evaluations/grades`); publicar `/evaluation/grade-publish` (POST/DELETE; lote `/evaluations/grade-publish`). A rota do aluno `GET /s/:t/evaluation` devolve devolutiva e nota independentes.
-   - **Prova oral (Realtime)** — subsistema à parte (`kind='oral_realtime'`), ainda NÃO desenhado no diagrama Mermaid acima (débito de documentação a integrar):
+   - **Prova oral (Realtime)** — subsistema à parte (`kind='oral_realtime'`), desenhado no diagrama dedicado em *Prova oral (Realtime) — relay e prompts* (abaixo):
      - [OralExamExtractorAgent.js](../agents/OralExamExtractorAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`. Lê o PDF da prova (perguntas + gabarito) via `input_file` e extrai a lista estruturada. As respostas ficam só no servidor.
      - [OralExamAspectsAgent.js](../agents/OralExamAspectsAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`. De cada pergunta+gabarito gera 2–3 "aspectos de cobertura" (rótulos de tópico, NÃO as respostas). Diferente do gabarito, os aspectos VÃO à sessão Realtime: o examinador os usa só para apontar pontos não abordados, sem corrigir nem revelar. Sugeridos no upload do PDF e no salvamento manual; editáveis pelo professor.
      - [OralExamEvaluatorAgent.js](../agents/OralExamEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Compara a transcrição das respostas do aluno ao gabarito, pergunta a pergunta (rota `/w/:t/oral/submissions/:sub/evaluate` e lote).
      - Instruções do examinador (persona fixa + protocolo de condução + checagem de completude + perguntas + aspectos) — string montada em [lib/oralRealtime.js](../lib/oralRealtime.js)#buildExamInstructions, enviada como `instructions` da sessão Realtime (fala-a-fala). O gabarito NUNCA entra na sessão; só as perguntas e os aspectos.
 3. **Templates de prompt em `config/` usados por `routes/`**:
    - [config/interviewer_adapt_instructions.txt](../config/interviewer_adapt_instructions.txt) (`INTERVIEWER_ADAPT_INSTRUCTIONS`) — instruções para "Adaptar ao enunciado", carregado por [routes/work.js](../routes/work.js).
+
+## Prova oral (Realtime) — relay e prompts
+
+Subsistema à parte do `/chat` da entrevista (`works.kind = 'oral_realtime'`). **Não é orquestração** — é um **relay** de áudio fala-a-fala para a Realtime API; o servidor só repassa o PCM. O gabarito NUNCA vai ao navegador/Realtime — só as perguntas e os aspectos. O portão de setup roda 100% no **navegador** (MediaPipe WASM auto-hospedado); o proctoring de vídeo é **pós-prova** no servidor.
+
+```mermaid
+flowchart TD
+  %% PROFESSOR: sobe a prova → extrai perguntas + aspectos.
+  ExamUp([Professor sobe PDF/TXT]) --> ExamPdf["/w/:t/oral/exam-pdf"]
+  ExamPdf --> Extractor["OralExamExtractorAgent<br/>(fast: perguntas + gabarito)"]
+  Extractor --> Aspects["OralExamAspectsAgent<br/>(fast: aspectos de cobertura)"]
+  Aspects --> Questions[("oral_questions<br/>gabarito fica no servidor")]
+
+  %% ALUNO: consentimento → portão no NAVEGADOR → relay Realtime.
+  StuStart([Aluno abre o link]) --> Setup["Portão de setup (NAVEGADOR)<br/>MediaPipe WASM: posição + celular<br/>+ ruído + teste de conexão"]
+  Setup --> Relay["lib/oralRealtime.js<br/>relay WebSocket (PCM repassado)"]
+  Questions -.->|"só perguntas + aspectos"| BuildInstr
+  Relay --> BuildInstr["buildExamInstructions<br/>persona + protocolo + perguntas + aspectos"]
+  BuildInstr --> RT["Sessão Realtime (gpt-realtime)<br/>fala-a-fala"]
+  RT --> Transcript[("oral_transcript + oral_asked_json")]
+  RT --> Video[("vídeo → object storage")]
+
+  %% PÓS-PROVA: avaliação + proctoring (lote, com streaming NDJSON).
+  Transcript --> Evaluator["OralExamEvaluatorAgent<br/>(principal: transcrição x gabarito)"]
+  Evaluator --> Devol[("devolutiva + nota (editáveis)")]
+  Video --> Proctor["lib/proctor.js<br/>YOLO + MediaPipe hands"]
+  Proctor --> Flags[("flags p/ revisão humana")]
+
+  classDef agent fill:#eaf0f7,stroke:#1e3a5f,color:#0f1b2d;
+  classDef state fill:#f3f5f8,stroke:#5a6b80,color:#0f1b2d,stroke-dasharray: 4 2;
+  classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
+  class ExamPdf,Extractor,Aspects,Setup,Relay,BuildInstr,RT,Evaluator,Proctor agent
+  class Questions,Transcript,Video,Devol,Flags state
+  class ExamUp,StuStart entry
+
+  click ExamPdf "vscode://file/c:/Users/glads/src/super-ta/routes/oralExam.js" "Handler /oral/exam-pdf (PDF ou TXT)"
+  click Extractor "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamExtractorAgent.js:33" "systemPrompt do OralExamExtractorAgent"
+  click Aspects "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamAspectsAgent.js" "OralExamAspectsAgent"
+  click Relay "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "attachOralRelay (relay WebSocket)"
+  click BuildInstr "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "buildExamInstructions"
+  click RT "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "Sessão Realtime"
+  click Evaluator "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamEvaluatorAgent.js:33" "systemPrompt do OralExamEvaluatorAgent"
+  click Proctor "vscode://file/c:/Users/glads/src/super-ta/lib/proctor.js" "analyzeOralVideo (proctoring de vídeo)"
+```
 
 ## Convenção do esquema `vscode://`
 
