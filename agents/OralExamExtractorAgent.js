@@ -8,7 +8,7 @@
 // Audience: orchestrator_only (saída é dado estruturado, não fala ao aluno).
 
 import log from "../lib/logger.js";
-import { meteredResponses } from "../lib/billing.js";
+import { runStructured } from "../lib/agentRun.js";
 
 const SCHEMA = {
     type: "object",
@@ -65,30 +65,15 @@ export class OralExamExtractorAgent {
                 { type: "input_text", text: "Extraia as perguntas e respostas do PDF anexo." },
                 { type: "input_file", file_id: examFileId },
             ];
-        const payload = {
-            model: this.model,
-            instructions: SYS,
-            input: [{ role: "user", content }],
-            text: { format: { type: "json_schema", name: "oral_exam_questions", strict: true, schema: SCHEMA } },
-        };
-        log.prompt("AGENT:OralExamExtractor", SYS);
-        const r = await log.span("AGENT:OralExamExtractor", "extract.create", () =>
-            meteredResponses(
-                { ...(meterCtx || {}), agentLabel: "AGENT:OralExamExtractor", model: this.model },
-                () => this.client.responses.create(payload)
-            )
-        );
-        let parsed;
-        try { parsed = JSON.parse(r.output_text || "{}"); }
-        catch (err) {
-            log.error("AGENT:OralExamExtractor", `invalid JSON: ${log.preview(r.output_text, 200)}`);
-            throw new Error(`OralExamExtractor: invalid JSON (${err.message})`);
-        }
-        const raw = Array.isArray(parsed.questions) ? parsed.questions : [];
-        const out = raw
-            .map(q => ({ question: String(q.question || "").trim(), answer: String(q.answer || "").trim() }))
-            .filter(q => q.question)
-            .map((q, i) => ({ id: i + 1, ...q }));
+        const out = await runStructured({
+            client: this.client, model: this.model, label: "AGENT:OralExamExtractor",
+            instructions: SYS, input: [{ role: "user", content }],
+            schema: SCHEMA, schemaName: "oral_exam_questions", meterCtx,
+            validate: (parsed) => (Array.isArray(parsed.questions) ? parsed.questions : [])
+                .map(q => ({ question: String(q.question || "").trim(), answer: String(q.answer || "").trim() }))
+                .filter(q => q.question)
+                .map((q, i) => ({ id: i + 1, ...q })),
+        });
         log.info("AGENT:OralExamExtractor", `extracted ${out.length} questions`);
         return out;
     }

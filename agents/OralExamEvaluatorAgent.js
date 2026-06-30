@@ -9,7 +9,7 @@
 // transcrição já é texto; nunca recebe áudio).
 
 import log from "../lib/logger.js";
-import { meteredResponses } from "../lib/billing.js";
+import { runStructured } from "../lib/agentRun.js";
 import { renderAgentPreamble } from "../lib/agentPreamble.js";
 
 const SCHEMA = {
@@ -82,23 +82,15 @@ export class OralExamEvaluatorAgent {
         const userText = `**GABARITO (professor)**\n${gabarito}\n\n**TRANSCRIÇÃO DA PROVA**\n${conversa}\n\nAvalie pergunta a pergunta conforme o contrato e retorne o JSON.`;
 
         const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}\n\n${SYS}`;
-        const payload = {
-            model: this.model,
-            instructions: systemPrompt,
-            input: [{ role: "user", content: userText }],
-            text: { format: { type: "json_schema", name: "oral_exam_evaluation", strict: true, schema: SCHEMA } },
-        };
-        log.prompt("AGENT:OralExamEvaluator", `${systemPrompt}\n\n${userText}`);
-        const r = await log.span("AGENT:OralExamEvaluator", "evaluate.create", () =>
-            meteredResponses(
-                { ...(meterCtx || {}), agentLabel: "AGENT:OralExamEvaluator", model: this.model },
-                () => this.client.responses.create(payload)
-            )
-        );
-        let parsed;
-        try { parsed = JSON.parse(r.output_text || "{}"); }
-        catch (err) { throw new Error(`OralExamEvaluator: invalid JSON (${err.message})`); }
-        if (!Array.isArray(parsed.per_question)) throw new Error("OralExamEvaluator: per_question ausente");
+        const parsed = await runStructured({
+            client: this.client, model: this.model, label: "AGENT:OralExamEvaluator",
+            instructions: systemPrompt, input: userText, promptLog: `${systemPrompt}\n\n${userText}`,
+            schema: SCHEMA, schemaName: "oral_exam_evaluation", meterCtx,
+            validate: (p) => {
+                if (!Array.isArray(p.per_question)) throw new Error("OralExamEvaluator: per_question ausente");
+                return p;
+            },
+        });
         log.info("AGENT:OralExamEvaluator", `ok per_question=${parsed.per_question.length}`);
         return parsed;
     }
