@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ORATIA — Prova oral (professor)</title>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
+  <style>
+    .meta-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-sm); }
+    .table-toolbar { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-2); flex-wrap: wrap; }
+    .table-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
+    .table-toolbar .spacer { flex: 1; }
+    .create-panel { border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); background: var(--bg-muted); }
+    .create-actions { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); flex-wrap: wrap; }
+    .create-actions .spacer { flex: 1; }
+
+    /* Abas */
+    .tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--ink-200); margin-bottom: var(--sp-4); flex-wrap: wrap; }
+    .tab-btn { border: none; background: transparent; cursor: pointer; padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); font-weight: 600; color: var(--ink-500); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn:hover { color: var(--ink-900); }
+    .tab-btn.is-active { color: var(--ink-900); border-bottom-color: var(--gold-500); font-weight: 700; }
+
+    /* Lista recolhível de perguntas */
+    .q-list { margin-top: var(--sp-2); }
+    .q-item { border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px); margin-bottom: var(--sp-2); background: #fff; }
+    .q-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; }
+    .q-head .q-chevron { color: var(--ink-500); transition: transform .15s ease; font-size: 12px; }
+    .q-item.open .q-chevron { transform: rotate(90deg); }
+    .q-head .q-num { font-weight: 700; color: var(--ink-500); min-width: 1.6em; text-align: right; }
+    .q-head .q-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-900); }
+    .q-item.open .q-head .q-text { white-space: normal; font-weight: 600; }
+    .q-head .q-empty { color: var(--ink-500); font-style: italic; }
+    .q-del { border: none; background: transparent; color: var(--ink-500); cursor: pointer; padding: 2px 6px; border-radius: var(--r-sm); font-size: 14px; }
+    .q-del:hover { background: #fde2e2; color: #8a1c1c; }
+    .q-body { display: none; padding: 0 var(--sp-3) var(--sp-3) var(--sp-3); }
+    .q-item.open .q-body { display: block; }
+    .q-body label { display: block; font-size: var(--fs-xs); color: var(--ink-500); margin: var(--sp-2) 0 2px; }
+    .q-body textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--ink-200); border-radius: var(--r-sm); }
+
+    .pill-test { background: #fff7e6; border: 1px solid #f0c890; }
+    .pill-done { background: #eaf7ee; border: 1px solid #9fd4af; }
+    .pill-pub  { background: #e9f0fe; border: 1px solid #b9cdf6; }
+    .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--ink-700); }
+    code.tok { background: var(--bg-muted); padding: 1px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
+
+    /* Ampulheta (spinner) por célula durante o lote progressivo */
+    .cell-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #cfd8e3; border-top-color: #2a6df4; border-radius: 50%; animation: cellspin .8s linear infinite; vertical-align: -2px; }
+    @keyframes cellspin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""> ORATIA</a>
+    <span class="topbar-context">Prova oral · painel do professor</span>
+  </div>
+</header>
+
+<main class="page">
+
+  <div id="notfound" class="notice notice-error hidden">Trabalho não encontrado, ou não é uma prova oral. Confira o link.</div>
+
+  <div id="main" class="hidden">
+    <div class="page-header">
+      <div class="row" style="gap: var(--sp-2); align-items: center">
+        <h1 id="work-name" style="margin: 0">—</h1>
+      </div>
+      <div class="meta-row" id="meta"></div>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Seções da prova">
+      <button class="tab-btn is-active" type="button" id="tab-btn-prova" data-tab="prova" role="tab" aria-selected="true">Prova</button>
+      <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
+      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; notas</button>
+    </nav>
+
+    <!-- ABA: PROVA (config + PDF + perguntas) -->
+    <div class="tab-panel" id="tab-prova" role="tabpanel" aria-labelledby="tab-btn-prova">
+      <div class="card">
+        <h3 class="card-title">Configuração</h3>
+        <p class="card-sub">A voz do examinador e quantas perguntas cada aluno recebe (sorteadas do gabarito).</p>
+        <div class="row" style="align-items: flex-end; gap: var(--sp-4)">
+          <div class="field" style="margin: 0">
+            <label class="label" for="cfg-voice">Voz do examinador</label>
+            <select id="cfg-voice" class="select"></select>
+          </div>
+          <div class="field" style="margin: 0">
+            <label class="label" for="cfg-n">Nº de perguntas por aluno</label>
+            <input type="number" id="cfg-n" class="input" min="3" max="20" value="6" style="width: 110px"/>
+          </div>
+          <button class="btn btn-primary" id="cfg-btn" type="button">Salvar</button>
+          <span class="hint" id="cfg-msg"></span>
+        </div>
+        <p class="hint" id="cfg-hint" style="margin-top: var(--sp-3)"></p>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Prova (PDF ou TXT de perguntas e respostas)</h3>
+        <p class="card-sub" id="exam-status">—</p>
+        <div class="row" style="align-items: center">
+          <input type="file" id="exam-file" class="input" accept="application/pdf,.pdf,text/plain,.txt"/>
+          <button class="btn" id="upload-btn" type="button">Enviar e extrair</button>
+          <span class="hint" id="upload-msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Perguntas <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
+        <p class="card-sub">Digite as perguntas e o gabarito, ou edite o que veio do arquivo. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
+        <div id="questions" class="q-list"></div>
+        <div class="row" style="margin-top: var(--sp-3)">
+          <button class="btn btn-ghost btn-sm" id="q-add" type="button">+ adicionar pergunta</button>
+          <span class="spacer"></span>
+          <button class="btn btn-primary" id="q-save" type="button">Salvar perguntas</button>
+          <span class="hint" id="q-msg"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ABA: ALUNOS & PROGRESSO (gerar tokens + tabela) -->
+    <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
+      <div class="card">
+        <h3 class="card-title">Tokens de envio para alunos</h3>
+        <p class="card-sub">Cada token é um link individual de prova. Tokens de teste servem para experimentar e não contam como prova real do aluno.</p>
+        <div class="create-bar">
+          <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar tokens</button>
+        </div>
+        <div id="create-panel" class="create-panel hidden">
+          <div class="row" style="align-items: flex-end; gap: var(--sp-3)">
+            <div class="field" style="margin: 0; flex: 1; min-width: 160px">
+              <label class="label" for="lk-label">Rótulo (ex.: Turma A)</label>
+              <input type="text" id="lk-label" class="input" value="Aluno" style="width: 100%"/>
+            </div>
+            <div class="field" style="margin: 0">
+              <label class="label" for="lk-count">Quantos</label>
+              <input type="number" id="lk-count" class="input" min="1" max="50" value="1" style="width: 90px"/>
+            </div>
+          </div>
+          <div class="field" style="margin-top: var(--sp-3)">
+            <label class="label" for="lk-names">…ou um nome por linha (cada nome vira um link próprio)</label>
+            <textarea id="lk-names" class="textarea" rows="3" placeholder="Maria Silva&#10;João Souza"></textarea>
+          </div>
+          <div class="create-actions">
+            <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
+              <input type="checkbox" id="lk-test"/> Marcar como <strong>teste</strong>
+            </label>
+            <span class="spacer"></span>
+            <button class="btn btn-primary" id="lk-btn" type="button">Gerar</button>
+            <span class="hint" id="lk-msg"></span>
+          </div>
+        </div>
+
+        <div class="table-toolbar">
+          <label class="filter-label" for="sub-filter">Mostrar:</label>
+          <select id="sub-filter" class="select">
+            <option value="all" selected>Todos</option>
+            <option value="done">Realizadas</option>
+            <option value="pending">Não realizadas</option>
+            <option value="test">De teste</option>
+            <option value="real">Reais</option>
+          </select>
+          <span class="spacer"></span>
+          <button id="download-csv" class="btn btn-sm" type="button" title="Baixar lista (rótulo, token, URL) em CSV">⬇ Baixar CSV</button>
+        </div>
+        <table id="sub-table" class="table hidden">
+          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Vídeo</th><th>Ações</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
+        <div id="sub-filtered-empty" class="table-empty hidden">Nenhum aluno neste filtro.</div>
+      </div>
+    </div>
+
+    <!-- ABA: AVALIAÇÃO & NOTAS (lote + tabela de alunos) -->
+    <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
+      <div class="card">
+        <h3 class="card-title" data-help="A avaliação compara, pergunta a pergunta, as respostas do aluno (transcrição) com o gabarito. É um relatório interno, só você vê. A devolutiva e a nota são MANUAIS — não há geração por IA: você escreve a devolutiva e atribui a nota na página de cada aluno.">Avaliação em lote</h3>
+        <p class="card-sub">Gera o relatório de comparação com o gabarito das provas realizadas. Relatório interno — o aluno não vê.</p>
+        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
+          <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">Avaliar provas</button>
+          <button id="eval-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reavalia TODAS as provas realizadas, inclusive as já avaliadas">Reavaliar todas</button>
+        </div>
+        <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Publicação em lote</h3>
+        <p class="card-sub">Devolutivas e notas são escritas aluno a aluno (sem geração por IA). Aqui você só publica/despublica em massa o que já foi escrito.</p>
+        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
+          <button id="pub-dev-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já escritas">Publicar devolutivas</button>
+          <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
+          <span class="spacer"></span>
+          <button id="unpub-dev-btn" class="btn btn-ghost btn-sm" type="button">Despublicar devolutivas</button>
+          <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+        </div>
+        <div id="pub-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. São indícios para revisão humana, nunca acusação — o professor assiste ao trecho e decide. A latência da voz é capturada automaticamente durante a prova.">Proctoring por vídeo (em lote)</h3>
+        <p class="card-sub">Roda a análise do vídeo das provas realizadas. Os alertas aparecem na lista abaixo; clique em <strong>gerenciar</strong> para ver os trechos.</p>
+        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
+          <button id="proctor-all-btn" class="btn btn-primary" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
+          <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
+        </div>
+        <div id="proctor-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">Alunos</h3>
+        <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
+        <table id="eval-table" class="table hidden">
+          <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  const WORK = (location.pathname.match(/\/w\/([0-9a-f]{12})\/oral/) || [])[1];
+  const API = `/w/${WORK}`;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  let SUBS = [];   // cache da última listagem
+
+  // ---------- Abas ----------
+  const TAB_NAMES = ['prova', 'alunos', 'avaliacao'];
+  function setTab(name) {
+    if (!TAB_NAMES.includes(name)) name = 'prova';
+    TAB_NAMES.forEach(t => {
+      const panel = document.getElementById('tab-' + t);
+      const btn = document.getElementById('tab-btn-' + t);
+      const active = t === name;
+      if (panel) panel.classList.toggle('hidden', !active);
+      if (btn) { btn.classList.toggle('is-active', active); btn.setAttribute('aria-selected', String(active)); }
+    });
+    if (history.replaceState) history.replaceState(null, '', '#' + name);
+  }
+  TAB_NAMES.forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.onclick = () => setTab(t); });
+  (function initTab() {
+    const h = (location.hash || '').replace('#', '');
+    setTab(TAB_NAMES.includes(h) ? h : 'prova');
+  })();
+
+  // ---------- Editor de perguntas (lista recolhível) ----------
+  function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .q-item').length; cfgWarn(); }
+  function cfgWarn() {
+    const total = collectQuestions().length;
+    const n = Number(document.getElementById('cfg-n').value) || 0;
+    const el = document.getElementById('cfg-hint'); if (!el) return;
+    if (!total) { el.textContent = ''; el.style.color = ''; return; }
+    if (n > total) {
+      el.innerHTML = `⚠️ <strong>N = ${n}, mas há só ${total} pergunta(s) cadastrada(s)</strong> — a prova terá ${total}. Adicione perguntas ou reduza o N.`;
+      el.style.color = 'var(--warn, #b8732a)';
+    } else {
+      el.textContent = n < total ? `${total} perguntas cadastradas; cada aluno recebe ${n} sorteada(s).` : `${total} pergunta(s) · N = ${n}.`;
+      el.style.color = '';
+    }
+  }
+  function syncHead(item) {
+    const q = item.querySelector('.q-q').value.trim();
+    const txt = item.querySelector('.q-text');
+    if (q) { txt.textContent = q; txt.classList.remove('q-empty'); }
+    else { txt.textContent = '(pergunta vazia)'; txt.classList.add('q-empty'); }
+  }
+  function renumber() {
+    [...document.querySelectorAll('#questions .q-item')].forEach((it, i) => { it.querySelector('.q-num').textContent = (i + 1) + '.'; });
+  }
+  function makeItem(q = '', a = '', aspects = [], open = false) {
+    const div = document.createElement('div');
+    div.className = 'q-item' + (open ? ' open' : '');
+    div.innerHTML =
+      '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num"></span>' +
+      '<span class="q-text"></span><button class="q-del" title="remover">✕</button></div>' +
+      '<div class="q-body">' +
+      '<label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
+      '<label>Resposta / gabarito (só o professor vê)</label><textarea class="q-a" placeholder="Resposta esperada"></textarea>' +
+      '<label>Aspectos a cobrir — um por linha (tópicos, não respostas). O examinador usa só para apontar o que o aluno não abordou. Sugeridos automaticamente; edite à vontade.</label><textarea class="q-asp" placeholder="ex.: número de camadas&#10;um exemplo de aplicação"></textarea>' +
+      '</div>';
+    div.querySelector('.q-q').value = q;
+    div.querySelector('.q-a').value = a;
+    div.querySelector('.q-asp').value = (Array.isArray(aspects) ? aspects : []).join('\n');
+    div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; div.classList.toggle('open'); };
+    div.querySelector('.q-del').onclick = () => { div.remove(); renumber(); updateQCount(); };
+    div.querySelector('.q-q').addEventListener('input', () => { syncHead(div); cfgWarn(); });
+    document.getElementById('questions').appendChild(div);
+    syncHead(div); renumber();
+    return div;
+  }
+  function renderQuestions(qs) {
+    const c = document.getElementById('questions'); c.innerHTML = '';
+    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', q.aspects || [], false));
+    if (!(qs || []).length) makeItem('', '', [], true);
+    updateQCount();
+  }
+  function collectQuestions() {
+    return [...document.querySelectorAll('#questions .q-item')]
+      .map(r => ({
+        question: r.querySelector('.q-q').value.trim(),
+        answer: r.querySelector('.q-a').value.trim(),
+        aspects: r.querySelector('.q-asp').value.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 3),
+      }))
+      .filter(q => q.question);
+  }
+
+  // ---------- Status helpers ----------
+  const STATUS_PILL = {
+    completed: '<span class="pill pill-done">realizada</span>',
+    gave_up: '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">desistiu</span>',
+    pending: '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">aguardando</span>',
+    in_progress: '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">aguardando</span>',
+  };
+
+  // ---------- Tabela de alunos (aba Alunos) ----------
+  function filterSubs() {
+    const f = document.getElementById('sub-filter').value;
+    return SUBS.filter(s => {
+      if (f === 'done') return s.status === 'completed';
+      if (f === 'pending') return s.status !== 'completed';
+      if (f === 'test') return s.is_test;
+      if (f === 'real') return !s.is_test;
+      return true;
+    });
+  }
+  function renderSubsTable() {
+    const tbody = document.querySelector('#sub-table tbody');
+    const tableEl = document.getElementById('sub-table');
+    const empty = document.getElementById('sub-empty');
+    const fEmpty = document.getElementById('sub-filtered-empty');
+    if (!SUBS.length) { tableEl.classList.add('hidden'); fEmpty.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    const rows = filterSubs();
+    if (!rows.length) { tableEl.classList.add('hidden'); fEmpty.classList.remove('hidden'); return; }
+    fEmpty.classList.add('hidden'); tableEl.classList.remove('hidden');
+    tbody.innerHTML = rows.map(s => {
+      const url = `${location.origin}/s/${s.submission_token}`;
+      const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
+      const vid = s.has_oral_video
+        ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
+        : '<span class="hint">—</span>';
+      return `<tr>
+        <td>${esc(s.student_label || '')}${test}</td>
+        <td><code class="tok">${s.submission_token}</code></td>
+        <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
+        <td>${vid}</td>
+        <td><a href="${url}" target="_blank">abrir ↗</a> · <a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+      </tr>`;
+    }).join('');
+  }
+  document.getElementById('sub-filter').onchange = renderSubsTable;
+  document.getElementById('download-csv').onclick = () => {
+    const lines = [['rotulo', 'token', 'url'].join(',')].concat(
+      SUBS.map(s => [`"${(s.student_label || '').replace(/"/g, '""')}"`, s.submission_token, `${location.origin}/s/${s.submission_token}`].join(','))
+    );
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'provas-oral.csv'; a.click();
+  };
+
+  // ---------- Tabela de avaliação (aba Avaliação) ----------
+  function renderEvalTable() {
+    const tbody = document.querySelector('#eval-table tbody');
+    const tableEl = document.getElementById('eval-table');
+    const empty = document.getElementById('eval-empty');
+    const rows = SUBS.filter(s => !s.is_test || s.status === 'completed'); // mostra reais + testes já realizados
+    if (!rows.length) { tableEl.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden'); tableEl.classList.remove('hidden');
+    const SPIN = '<span class="cell-spin"></span>';
+    tbody.innerHTML = rows.map(s => {
+      const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
+      const evalPill = s._evalPending ? SPIN
+        : (s.has_oral_eval ? '<span class="pill pill-done">avaliada</span>' : '<span class="hint">—</span>');
+      const grade = s._evalPending ? SPIN
+        : ((s.grade ?? null) === null ? '<span class="hint">—</span>' : `<strong>${Number(s.grade).toFixed(1)}</strong>`);
+      const pub = [
+        s.devolutiva_published ? '<span class="pill pill-pub">devolutiva</span>' : '',
+        s.grade_published ? '<span class="pill pill-pub">nota</span>' : '',
+      ].filter(Boolean).join(' ') || '<span class="hint">—</span>';
+      const alertPills = (s.proctor_alerts || []).map(a => `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">${esc(a)}</span>`);
+      if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
+      const alerts = s._proctorPending ? SPIN
+        : (alertPills.length ? alertPills.join(' ')
+          : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>' : '<span class="hint">—</span>'));
+      return `<tr data-sub="${s.submission_token}">
+        <td>${esc(s.student_label || '')}${test}</td>
+        <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
+        <td>${evalPill}</td>
+        <td class="cell-grade" style="text-align:right">${grade}</td>
+        <td class="cell-alerts">${alerts}</td>
+        <td>${pub}</td>
+        <td><a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ---------- Carga ----------
+  async function load() {
+    const r = await fetch(`${API}/oral/info`);
+    if (!r.ok) { document.getElementById('notfound').classList.remove('hidden'); return; }
+    const j = await r.json();
+    document.getElementById('main').classList.remove('hidden');
+    document.getElementById('work-name').textContent = j.work.name;
+    SUBS = j.submissions || [];
+    const done = SUBS.filter(s => s.status === 'completed').length;
+    document.getElementById('meta').innerHTML =
+      `<span>Prova oral</span><span>·</span><span>${SUBS.length} aluno(s)</span><span>·</span><span>${done} realizada(s)</span>` +
+      (j.work.has_exam ? '<span>·</span><span>prova enviada</span>' : '');
+    document.getElementById('exam-status').textContent = j.work.has_exam ? 'Prova enviada. As perguntas abaixo podem ser editadas.' : 'Nenhuma prova enviada ainda — suba um PDF/TXT ou digite as perguntas abaixo.';
+    document.getElementById('cfg-n').value = j.work.question_count || 6;
+    const vs = document.getElementById('cfg-voice');
+    vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
+    renderQuestions(j.questions || []);
+    renderSubsTable();
+    renderEvalTable();
+    cfgWarn();
+  }
+  document.getElementById('cfg-n').addEventListener('input', cfgWarn);
+
+  // ---------- Ações: PROVA ----------
+  document.getElementById('upload-btn').onclick = async () => {
+    const f = document.getElementById('exam-file').files[0];
+    const msg = document.getElementById('upload-msg');
+    if (!f) { msg.textContent = 'Escolha um PDF ou TXT.'; return; }
+    const btn = document.getElementById('upload-btn'); btn.disabled = true; msg.textContent = 'Enviando e extraindo…';
+    try {
+      const form = new FormData(); form.append('file', f);
+      const r = await fetch(`${API}/oral/exam-pdf`, { method: 'POST', body: form });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
+      msg.textContent = `${j.count} pergunta(s) extraída(s).`;
+      document.getElementById('exam-status').textContent = 'Prova enviada. As perguntas abaixo podem ser editadas.';
+      renderQuestions(j.questions || []);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
+  };
+  document.getElementById('cfg-btn').onclick = async () => {
+    const msg = document.getElementById('cfg-msg');
+    const body = { question_count: Number(document.getElementById('cfg-n').value), voice: document.getElementById('cfg-voice').value };
+    msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/oral/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', [], true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
+  document.getElementById('q-save').onclick = async () => {
+    const qs = collectQuestions(); const msg = document.getElementById('q-msg');
+    if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
+    msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      msg.textContent = `${j.count} pergunta(s) salva(s).`;
+      document.getElementById('exam-status').textContent = 'Perguntas definidas.';
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  // ---------- Ações: ALUNOS ----------
+  document.getElementById('toggle-create').onclick = () => {
+    const panel = document.getElementById('create-panel');
+    const open = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !open);
+    document.getElementById('toggle-create').setAttribute('aria-expanded', String(open));
+  };
+  document.getElementById('lk-btn').onclick = async () => {
+    const msg = document.getElementById('lk-msg');
+    const is_test = document.getElementById('lk-test').checked;
+    const names = document.getElementById('lk-names').value.split('\n').map(s => s.trim()).filter(Boolean);
+    const body = names.length
+      ? { labels: names, is_test }
+      : { label: document.getElementById('lk-label').value.trim() || 'Aluno', count: Number(document.getElementById('lk-count').value), is_test };
+    msg.textContent = 'Gerando…';
+    try {
+      const r = await fetch(`${API}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      msg.textContent = `${j.submissions.length} link(s) gerado(s).`;
+      document.getElementById('lk-names').value = '';
+      await load();
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  // ---------- Ações: AVALIAÇÃO (lote) ----------
+  function batchStatus(id, txt, busy) {
+    const el = document.getElementById(id); el.classList.remove('hidden'); el.textContent = txt;
+  }
+  // Acha o objeto da submissão em SUBS pelo token (usado pelos lotes em streaming).
+  function findSub(token) { return SUBS.find(s => s.submission_token === token); }
+  // Lê uma resposta NDJSON: decodifica o corpo, quebra por '\n' e chama onLine(obj)
+  // para cada linha JSON completa. Reusado pelos lotes de eval e proctor.
+  async function readNdjson(resp, onLine) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) { try { onLine(JSON.parse(line)); } catch (e) { /* linha parcial/ruído: ignora */ } }
+      }
+    }
+    const tail = buf.trim();
+    if (tail) { try { onLine(JSON.parse(tail)); } catch (e) {} }
+  }
+
+  async function runEvalAll(force) {
+    const btnIds = ['eval-all-btn', 'eval-all-force-btn'];
+    btnIds.forEach(i => document.getElementById(i).disabled = true);
+    batchStatus('eval-batch-status', force ? 'Reavaliando todas as provas…' : 'Avaliando as provas realizadas…');
+    try {
+      const r = await fetch(`${API}/oral/evaluate-all${force ? '?force=1' : ''}`, { method: 'POST' });
+      if (!r.ok || !r.body) {
+        let msg = r.status;
+        try { msg = (await r.json()).error || r.status; } catch (e) {}
+        batchStatus('eval-batch-status', 'Falha: ' + msg);
+        return;
+      }
+      await readNdjson(r, (m) => {
+        if (m.type === 'start') {
+          (m.tokens || []).forEach(tok => { const s = findSub(tok); if (s) s._evalPending = true; });
+          renderEvalTable();
+        } else if (m.type === 'item') {
+          const s = findSub(m.submission_token);
+          if (s) {
+            s._evalPending = false;
+            if (m.ok) { s.has_oral_eval = true; s.grade = m.grade; }
+            renderEvalTable();
+          }
+        } else if (m.type === 'done') {
+          SUBS.forEach(s => { if (s._evalPending) s._evalPending = false; }); // limpa sobras
+          let t = `${m.evaluated} avaliada(s) de ${m.candidates} candidata(s).`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          batchStatus('eval-batch-status', t);
+          renderEvalTable();
+        }
+      });
+    } catch (e) {
+      SUBS.forEach(s => { if (s._evalPending) s._evalPending = false; });
+      renderEvalTable();
+      batchStatus('eval-batch-status', 'Falha de comunicação.');
+    }
+    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
+  }
+  document.getElementById('eval-all-btn').onclick = () => runEvalAll(false);
+  document.getElementById('eval-all-force-btn').onclick = () => { if (confirm('Reavaliar TODAS as provas, inclusive as já avaliadas?')) runEvalAll(true); };
+
+  async function runProctorAll(force) {
+    const btnIds = ['proctor-all-btn', 'proctor-all-force-btn'];
+    btnIds.forEach(i => document.getElementById(i).disabled = true);
+    batchStatus('proctor-batch-status', (force ? 'Reanalisando todos os vídeos' : 'Analisando os vídeos') + '… (pode demorar — cada vídeo leva alguns segundos)');
+    try {
+      const r = await fetch(`${API}/oral/proctor-all${force ? '?force=1' : ''}`, { method: 'POST' });
+      if (!r.ok || !r.body) {
+        let msg = r.status;
+        try { msg = (await r.json()).error || r.status; } catch (e) {}
+        batchStatus('proctor-batch-status', 'Falha: ' + msg);
+        return;
+      }
+      await readNdjson(r, (m) => {
+        if (m.type === 'start') {
+          (m.tokens || []).forEach(tok => { const s = findSub(tok); if (s) s._proctorPending = true; });
+          renderEvalTable();
+        } else if (m.type === 'item') {
+          const s = findSub(m.submission_token);
+          if (s) {
+            s._proctorPending = false;
+            if (m.ok) { s.has_oral_proctor = true; s.proctor_alerts = m.proctor_alerts; s.voice_alert = m.voice_alert; }
+            renderEvalTable();
+          }
+        } else if (m.type === 'done') {
+          SUBS.forEach(s => { if (s._proctorPending) s._proctorPending = false; }); // limpa sobras
+          let t = `${m.analyzed} vídeo(s) analisado(s) de ${m.candidates} com gravação.`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          if (m.elapsed_total_ms != null) t += ` (tempo total ${(m.elapsed_total_ms / 1000).toFixed(1)}s)`;
+          batchStatus('proctor-batch-status', t);
+          renderEvalTable();
+        }
+      });
+    } catch (e) {
+      SUBS.forEach(s => { if (s._proctorPending) s._proctorPending = false; });
+      renderEvalTable();
+      batchStatus('proctor-batch-status', 'Falha de comunicação.');
+    }
+    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
+  }
+  document.getElementById('proctor-all-btn').onclick = () => runProctorAll(false);
+  document.getElementById('proctor-all-force-btn').onclick = () => { if (confirm('Reanalisar TODOS os vídeos, inclusive os já analisados?')) runProctorAll(true); };
+
+  async function runPublishAll(target, on) {
+    batchStatus('pub-batch-status', (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));
+    try {
+      const r = await fetch(`${API}/oral/publish-all`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target, on }) });
+      const j = await r.json();
+      if (!r.ok) { batchStatus('pub-batch-status', 'Falha: ' + (j.error || r.status)); return; }
+      batchStatus('pub-batch-status', `${j.affected} ${target === 'devolutiva' ? 'devolutiva(s)' : 'nota(s)'} ${on ? 'publicada(s)' : 'despublicada(s)'}.`);
+      await load();
+    } catch (e) { batchStatus('pub-batch-status', 'Falha de comunicação.'); }
+  }
+  document.getElementById('pub-dev-btn').onclick = () => runPublishAll('devolutiva', true);
+  document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true);
+  document.getElementById('unpub-dev-btn').onclick = () => { if (confirm('Despublicar TODAS as devolutivas?')) runPublishAll('devolutiva', false); };
+  document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false); };
+
+  load();
+</script>
+</body>
+</html>

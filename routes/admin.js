@@ -35,15 +35,13 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
         }
         budget = parsed;
     }
-    // Tipo do trabalho: 'scenario' (multi-interação) é o default dos trabalhos
-    // novos; 'interview' (entrevista legada) fica disponível para testes
-    // comparativos. Coexistência — ver migration 022.
-    const kind = req.body?.kind === "interview" ? "interview" : "scenario";
+    // Tipo do trabalho: scenario (multi-interação, default dos novos), interview
+    // (entrevista legada) ou oral_realtime (prova oral). Coexistência.
+    const valid = ["interview", "oral_realtime", "scenario"];
+    const kind = valid.includes(req.body?.kind) ? req.body.kind : "scenario";
     try {
         const work = await db.createWork(name, budget, kind);
-        // Trabalho multi-interação nasce com um cenário vazio vinculado (work_id),
-        // que o roteamento do aluno usa para servir a tela multi-interação e o
-        // estúdio escopado ao trabalho preenche.
+        // Trabalho multi-interação nasce com um cenário vazio vinculado (work_id).
         if (kind === "scenario") {
             await scenarioStore.saveScenario({ name: work.name, description: "", personas: [], interactions: [], work_id: work.id });
         }

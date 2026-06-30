@@ -4,11 +4,18 @@ challenge_task: true
 
 # Model configuration
 models:
-  principal_reasoning_model: "gpt-5.5"
+  principal_reasoning_model: "gpt-5.4"
+  # Esforço de raciocínio aplicado SEMPRE que o modelo principal é usado (todos os
+  # agentes que o consomem). Injetado em lib/openaiClient.js. Valores válidos:
+  # minimal | low | medium | high. Vazio/ausente = padrão do modelo.
+  # gpt-5.4 em "high" substitui o gpt-5.5 (cognição suficiente p/ avaliação, custo menor).
+  principal_reasoning_effort: "high"
   fast_model: "gpt-5.4-mini"
   # Audio (modo de interação áudio com o aluno; ver replit.md)
   stt_model: "gpt-4o-transcribe"
   tts_model: "gpt-4o-mini-tts"
+  # Realtime (fala-a-fala) — usado só pelo tipo de trabalho "prova oral".
+  realtime_model: "gpt-realtime"
   # Future context-specific models can be configured here
   # comprehension_evaluator_model: "gpt-5.3"
   # clarification_evaluator_model: "gpt-5.3"

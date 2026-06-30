@@ -31,6 +31,8 @@ import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
 import scenarioStudentRoutes from "./routes/scenarioStudent.js";
 import scenarioCockpitRoutes from "./routes/scenarioCockpit.js";
+import oralExamRoutes from "./routes/oralExam.js";
+import { attachOralRelay } from "./lib/oralRealtime.js";
 import diagRoutes from "./routes/diag.js";
 import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
@@ -61,9 +63,10 @@ app.use(interviewRoutes);
 app.use("/scenarios/api", requireAdmin); // gate de sessão SÓ na API de config do professor (path-scoped; não afeta o fluxo do aluno nem a página pública /scenarios).
 app.use(scenarioRoutes); // /scenarios/api/* (gateado acima). O dev server scenarios-dev.mjs monta sem gate (local).
 app.use(scenarioStudentRoutes); // /s/:submissionToken/scenario/* — fluxo do aluno (auth por token de submissão).
+app.use(oralExamRoutes); // /w/:t/oral/* e /s/:t/oral/* — prova oral (Realtime)
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 
-app.listen(PORT, "0.0.0.0", async () => {
+const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {
         log.warn("BOOT", "OPENAI_API_KEY ausente no .env");
     }
@@ -88,3 +91,6 @@ app.listen(PORT, "0.0.0.0", async () => {
     }
     log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });
+
+// Relay WebSocket da prova oral (Realtime) — navegador ↔ servidor ↔ OpenAI.
+attachOralRelay(httpServer);

@@ -1,5 +1,10 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "NIKOLz3TPJKU9qdqd753G"
+uri = "file://attached_assets/generated_images/a_realistic_webcam_photo_f73c.png"
+type = "image"
+title = "generated_image"
 
 [[outputs]]
 id = "36QNQy9w2uH6FSZBvAn2z"
@@ -12,3 +17,51 @@ id = "I3oxaI0aWsv6T3X0AFZeg"
 uri = "file://.local/reports/analise-autoria-fgv-mineracao.html.tar.gz"
 type = "unspecified"
 title = "Mesmo relatório em HTML estilizado (compactado)"
+
+[[outputs]]
+id = "ZweRBZrKbafRBVbHjK290"
+uri = "file://tests/audio-e2e/runs/2026-06-16T17-24-00-788Z/audio/turn00_entrevistador.mp3"
+type = "audio"
+title = "Abertura — Juliana se apresenta (coral)"
+
+[[outputs]]
+id = "J7NC9ckv4zrVwjcusaDoe"
+uri = "file://tests/audio-e2e/runs/2026-06-16T17-24-00-788Z/audio/turn03_entrevistador.mp3"
+type = "audio"
+title = "Pergunta 1 — conexão da proposta com o empreendimento"
+
+[[outputs]]
+id = "Pi8X8pkW2vIjj9y29CXqk"
+uri = "file://tests/audio-e2e/runs/2026-06-16T17-24-00-788Z/audio/turn04_entrevistador.mp3"
+type = "audio"
+title = "Pergunta 2 — cobrança sobre a mineração não estar no relatório"
+
+[[outputs]]
+id = "BvC3tABDk2haLlLbme53z"
+uri = "file://tests/audio-e2e/runs/2026-06-16T17-24-00-788Z/audio/turn05_entrevistador.mp3"
+type = "audio"
+title = "Pergunta 3 — blocos de custo"
+
+[[outputs]]
+id = "M4hMaEe5Xax6da3wvi6MR"
+uri = "file://tests/audio-e2e/runs/2026-06-16T17-24-00-788Z/audio/turn06_entrevistador.mp3"
+type = "audio"
+title = "Pergunta 4 — retorno e risco (último turno)"
+
+[[outputs]]
+id = "e7GLt24eI7sJC3XbZqpg8"
+uri = "file://reports/envios-x-gasto-0f260729a5ed.png"
+type = "image"
+title = "Mackenzie 06 — Envios × Gasto por dia"
+
+[[outputs]]
+id = "3unHukU5eZs5VGRMo02b3"
+uri = "file://reports/relatorio-custos-0f260729a5ed.md"
+type = "text"
+title = "Relatório de Custos — Mackenzie 06 (Markdown)"
+
+[[outputs]]
+id = "IbdGq29bkg7JAp1SUgE72"
+uri = "file://reports/relatorio-custos-0f260729a5ed.pdf"
+type = "pdf"
+title = "Relatório de Custos — Mackenzie 06 (PDF)"

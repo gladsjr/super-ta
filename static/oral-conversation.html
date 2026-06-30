@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ORATIA — Prova oral (aluno)</title>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
+  <style>
+    .meta-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-sm); }
+    .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--ink-700); }
+    .pill-done { background: #eaf7ee; border: 1px solid #9fd4af; }
+    .pill-pub  { background: #e9f0fe; border: 1px solid #b9cdf6; }
+    .q { border-top: 1px solid var(--ink-200); padding: var(--sp-3) 0; }
+    .q:first-child { border-top: 0; }
+    .q .qt { font-weight: 600; }
+    .q .qa { color: var(--ink-700); font-size: var(--fs-sm); margin-top: 4px; white-space: pre-wrap; }
+    .assess-correct { background: #eaf7ee; border: 1px solid #9fd4af; }
+    .assess-partial { background: #fff6e0; border: 1px solid #ecc874; }
+    .assess-incorrect { background: #fdeaea; border: 1px solid #e7b3b3; }
+    .assess-not_answered { background: var(--bg-muted); border: 1px solid var(--ink-200); }
+    .transcript { max-height: 360px; overflow: auto; border: 1px solid var(--ink-200); border-radius: var(--r-md, 8px); padding: var(--sp-3); }
+    .turn { margin-bottom: var(--sp-3); }
+    .turn .who { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-500); }
+    .turn .what { white-space: pre-wrap; }
+    .turn.examiner .who { color: var(--gold-600, #9a7b1f); }
+    video.exam-video { width: 100%; max-height: 460px; border-radius: var(--r-md, 8px); background: #000; }
+  </style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""> ORATIA</a>
+    <span class="topbar-context">Prova oral · avaliação do aluno</span>
+  </div>
+</header>
+
+<main class="page">
+  <div id="notfound" class="notice notice-error hidden">Não foi possível carregar este aluno.</div>
+
+  <div id="main" class="hidden">
+    <div class="page-header">
+      <a class="hint" id="back-link" href="#">← voltar à lista de alunos</a>
+      <h1 id="student-name" style="margin: var(--sp-2) 0 0">—</h1>
+      <div class="meta-row" id="meta"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Avaliação (comparação com o gabarito)</h3>
+      <p class="card-sub">Relatório interno: como cada resposta do aluno se compara ao gabarito. O aluno não vê isto.</p>
+      <div class="row">
+        <button class="btn btn-primary" id="eval-btn" type="button">Avaliar / reavaliar</button>
+        <span class="hint" id="eval-msg"></span>
+      </div>
+      <div id="report" style="margin-top: var(--sp-3)"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Devolutiva</h3>
+      <p class="card-sub">Texto que o aluno verá quando publicado. Escrita manual — sem geração por IA.</p>
+      <textarea id="devolutiva" class="textarea" rows="6" placeholder="Escreva a devolutiva para o aluno…"></textarea>
+      <div class="row" style="margin-top: var(--sp-2)">
+        <button class="btn" id="dev-save" type="button">Salvar devolutiva</button>
+        <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
+          <input type="checkbox" id="dev-pub"/> publicar devolutiva
+        </label>
+        <span class="hint" id="dev-msg"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Nota (0 a 10)</h3>
+      <p class="card-sub">Atribuição manual. A nota é uma publicação à parte da devolutiva.</p>
+      <div class="row">
+        <input type="number" id="grade" class="input" min="0" max="10" step="0.1" style="width: 110px"/>
+        <button class="btn" id="grade-save" type="button">Salvar nota</button>
+        <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
+          <input type="checkbox" id="grade-pub"/> publicar nota
+        </label>
+        <span class="hint" id="grade-msg"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Transcrição da prova</h3>
+      <div id="transcript" class="transcript"></div>
+    </div>
+
+    <div class="card" id="video-card">
+      <h3 class="card-title">Vídeo da prova</h3>
+      <div id="video-wrap"></div>
+    </div>
+
+    <div class="card" id="proctor-card">
+      <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo). Sinaliza indícios para a SUA revisão — ausência, mais de uma pessoa, celular à vista, mãos fora do quadro. Nunca é acusação automática; a câmera não vê a tela do aluno nem prova uso de IA.">Análise do vídeo (proctoring)</h3>
+      <p class="card-sub">Sinais para revisão humana, gerados localmente. Não é prova de irregularidade — apenas indícios para você assistir aos trechos marcados.</p>
+      <div class="row">
+        <button class="btn btn-primary" id="proctor-btn" type="button">Analisar vídeo</button>
+        <span class="hint" id="proctor-msg"></span>
+      </div>
+      <div id="proctor-result" style="margin-top: var(--sp-3)"></div>
+    </div>
+
+    <div class="card" id="voice-card">
+      <h3 class="card-title" data-help="Sinais extraídos da conversa, para SUA revisão — nunca acusação. Latência: pausa entre a pergunta e o início da resposta (capturada ao vivo). Pausa longa antes de resposta substancial pode indicar consulta. A câmera/áudio não provam uso de IA.">Análise da voz</h3>
+      <p class="card-sub">Sinais de "cola" por voz, para revisão humana. A latência é capturada automaticamente durante a prova.</p>
+      <div id="voice-result"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+  const m = location.pathname.match(/\/w\/([0-9a-f]{12})\/oral\/s\/([0-9a-f]{12})/) || [];
+  const WORK = m[1], SUB = m[2];
+  const API = `/w/${WORK}`;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  document.getElementById('back-link').href = `${API}/oral#avaliacao`;
+
+  const ASSESS = { correct: '✓ correta', partial: '~ parcial', incorrect: '✗ incorreta', not_answered: '— não respondeu' };
+  function renderReport(ev) {
+    const el = document.getElementById('report');
+    if (!ev || !Array.isArray(ev.per_question)) { el.innerHTML = '<p class="hint">Ainda não avaliado. Clique em “Avaliar / reavaliar”.</p>'; return; }
+    el.innerHTML = ev.per_question.map(q =>
+      `<div class="q"><div class="qt">${q.id}. ${esc(q.question)} <span class="pill assess-${q.assessment || 'not_answered'}">${ASSESS[q.assessment] || esc(q.assessment)}</span></div>` +
+      `<div class="qa"><strong>Aluno:</strong> ${esc(q.student_answer || '(sem resposta)')}</div>` +
+      (q.expected ? `<div class="qa"><strong>Esperado:</strong> ${esc(q.expected)}</div>` : '') +
+      `<div class="qa">${esc(q.comment || '')}</div></div>`
+    ).join('') + (ev.summary ? `<p style="margin-top: var(--sp-3)"><strong>Resumo:</strong> ${esc(ev.summary)}</p>` : '');
+  }
+  function renderTranscript(turns) {
+    const el = document.getElementById('transcript');
+    if (!turns || !turns.length) { el.innerHTML = '<p class="hint">Sem transcrição — o aluno ainda não realizou a prova.</p>'; return; }
+    el.innerHTML = turns.map(t => {
+      const who = t.role === 'examiner' ? 'Examinador' : 'Aluno';
+      return `<div class="turn ${t.role === 'examiner' ? 'examiner' : ''}"><div class="who">${who}</div><div class="what">${esc(t.text)}</div></div>`;
+    }).join('');
+  }
+
+  async function load() {
+    if (!WORK || !SUB) { document.getElementById('notfound').classList.remove('hidden'); return; }
+    const r = await fetch(`${API}/oral/submissions/${SUB}`);
+    if (!r.ok) { document.getElementById('notfound').classList.remove('hidden'); return; }
+    const d = await r.json();
+    document.getElementById('main').classList.remove('hidden');
+    document.getElementById('student-name').textContent = d.student_label || SUB;
+    const pills = [];
+    pills.push(d.completion_reason ? '<span class="pill pill-done">prova realizada</span>' : '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">não realizada</span>');
+    if (d.evaluation) pills.push('<span class="pill pill-done">avaliada</span>');
+    if (d.devolutiva_published) pills.push('<span class="pill pill-pub">devolutiva publicada</span>');
+    if (d.grade_published) pills.push('<span class="pill pill-pub">nota publicada</span>');
+    document.getElementById('meta').innerHTML = pills.join(' ');
+
+    renderReport(d.evaluation);
+    document.getElementById('devolutiva').value = d.devolutiva || '';
+    document.getElementById('grade').value = d.grade ?? '';
+    document.getElementById('dev-pub').checked = !!d.devolutiva_published;
+    document.getElementById('grade-pub').checked = !!d.grade_published;
+    renderTranscript(d.transcript);
+
+    const vw = document.getElementById('video-wrap');
+    if (d.has_oral_video) {
+      vw.innerHTML = `<video class="exam-video" controls preload="metadata" src="${API}/oral/video/${SUB}"></video>`;
+    } else {
+      vw.innerHTML = '<p class="hint">Sem vídeo gravado para esta prova.</p>';
+    }
+    document.getElementById('proctor-btn').disabled = !d.has_oral_video;
+    renderProctor(d.proctor);
+    renderVoice(d.voice);
+  }
+
+  function renderVoice(v) {
+    const el = document.getElementById('voice-result');
+    if (!v || !v.latency) { el.innerHTML = '<p class="hint">Sem sinais de voz ainda (capturados automaticamente durante a prova).</p>'; return; }
+    const L = v.latency;
+    let html = '';
+    if (!L.turns || !L.turns.length) {
+      html += '<p class="hint">Nenhuma resposta substancial medida.</p>';
+    } else {
+      const head = L.flagged_count
+        ? `<strong style="color:#8a1c1c">${L.flagged_count}</strong> de ${L.turns.length} respostas começaram após espera longa (≥ ${L.threshold_sec}s; maior: ${L.max_gap_sec}s)`
+        : `nenhuma espera longa (≥ ${L.threshold_sec}s; maior: ${L.max_gap_sec}s)`;
+      html += `<p style="margin:0 0 var(--sp-1)"><strong>Tempo até começar a responder</strong> — ${head}</p>`;
+      html += `<p class="hint" style="margin:0 0 var(--sp-2)">Apenas tempo, para você interpretar — pode ser reflexão, nervosismo ou barulho ambiente, não necessariamente consulta. Conta só respostas substanciais (≥ ${L.min_words || 8} palavras).</p>`;
+      html += L.turns.map((t, i) => {
+        const flag = t.gap_sec >= L.threshold_sec;
+        const bg = flag ? '#fdeaea' : 'var(--bg-muted)', bd = flag ? '#e7b3b3' : 'var(--ink-200)';
+        return `<div style="display:flex;align-items:baseline;gap:var(--sp-2);padding:6px 10px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:4px">
+          <span style="flex:1">Resposta ${i + 1} — começou após <strong>${t.gap_sec}s</strong></span>
+          <span class="hint" style="margin:0">${t.answer_words} palavra(s)</span>
+        </div>`;
+      }).join('');
+    }
+    el.innerHTML = html;
+  }
+
+  const FLAG_LABELS = {
+    absent: 'Ausência (ninguém no quadro)',
+    multiple_people: 'Mais de uma pessoa',
+    phone: 'Celular detectado',
+  };
+  const mmss = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  // Leva o vídeo direto ao segundo indicado (clique nos trechos do proctoring).
+  window.seekVideo = function (sec) {
+    const vid = document.querySelector('#video-wrap video');
+    if (!vid) return;
+    const go = () => {
+      try { vid.currentTime = sec; } catch (e) {}
+      if (vid.play) { const pr = vid.play(); if (pr && pr.catch) pr.catch(() => {}); }
+    };
+    // currentTime só "pega" depois que os metadados carregam (duração conhecida).
+    if (vid.readyState >= 1) go();
+    else { vid.addEventListener('loadedmetadata', go, { once: true }); vid.load(); }
+    vid.scrollIntoView({ block: 'center' });
+  };
+  function renderProctor(p) {
+    const el = document.getElementById('proctor-result');
+    if (!p || !p.flags) { el.innerHTML = '<p class="hint">Ainda não analisado.</p>'; return; }
+    const rows = Object.keys(FLAG_LABELS).map(k => {
+      const f = p.flags[k] || { count: 0, pct: 0, at: [] };
+      const fired = f.count > 0;
+      const color = fired ? (f.pct >= 30 ? '#fdeaea' : '#fff6e0') : '#eaf7ee';
+      const border = fired ? (f.pct >= 30 ? '#e7b3b3' : '#ecc874') : '#9fd4af';
+      const stamps = (f.at || []).length ? ` · trechos: ${f.at.map(s => `<a href="#" onclick="seekVideo(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}` : '';
+      return `<div style="padding:8px 12px;border:1px solid ${border};background:${color};border-radius:var(--r-sm);margin-bottom:6px">
+        <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
+          <span style="flex:1;font-weight:600">${FLAG_LABELS[k]}</span>
+          <strong style="white-space:nowrap">${fired ? f.pct + '% dos frames' : 'ok'}</strong>
+        </div>
+        ${fired ? `<div class="hint" style="margin-top:3px">${f.count} frame(s)${stamps}</div>` : ''}
+      </div>`;
+    }).join('');
+    // Mãos (MediaPipe): mostra presença; só sinaliza (vermelho) com ausência sustentada.
+    let handsHtml = '';
+    const h = p.flags.hands;
+    if (h) {
+      const fired = !!h.flag;
+      const bg = fired ? '#fdeaea' : '#eaf7ee', bd = fired ? '#e7b3b3' : '#9fd4af';
+      const stamps = (fired && (h.at || []).length) ? ` · trechos: ${h.at.map(s => `<a href="#" onclick="seekVideo(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}` : '';
+      handsHtml = `<div style="padding:8px 12px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:6px">
+        <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
+          <span style="flex:1;font-weight:600">Mãos no quadro</span>
+          <strong style="white-space:nowrap">${fired ? 'ausência de ' + h.max_absence_sec + 's' : h.present_pct + '% do tempo'}</strong>
+        </div>
+        ${fired ? `<div class="hint" style="margin-top:3px">mãos fora do quadro por um trecho contínuo${stamps}</div>` : ''}
+      </div>`;
+    }
+    el.innerHTML = rows + handsHtml + `<p class="hint" style="margin-top:var(--sp-2)">${p.frames} frames (1 a cada ${p.interval_sec}s) · ${p.model} · ${p.analyzed_at ? new Date(p.analyzed_at).toLocaleString('pt-BR') : ''}</p>`;
+  }
+
+  document.getElementById('eval-btn').onclick = async () => {
+    const msg = document.getElementById('eval-msg'); const btn = document.getElementById('eval-btn');
+    btn.disabled = true; msg.textContent = 'Avaliando…';
+    try {
+      const r = await fetch(`${API}/oral/submissions/${SUB}/evaluate`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      // Recarrega o estado: a avaliação preenche devolutiva e nota como default
+      // no banco; sem isso a tela ficava com os campos vazios até dar refresh (#57).
+      await load();
+      msg.textContent = 'Avaliado.';
+    } catch { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
+  };
+  document.getElementById('dev-save').onclick = async () => {
+    const msg = document.getElementById('dev-msg'); msg.textContent = 'Salvando…';
+    try {
+      await fetch(`${API}/oral/submissions/${SUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('devolutiva').value }) });
+      await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ devolutiva: document.getElementById('dev-pub').checked }) });
+      msg.textContent = document.getElementById('dev-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
+    } catch { msg.textContent = 'Falha de comunicação.'; }
+  };
+  document.getElementById('grade-save').onclick = async () => {
+    const msg = document.getElementById('grade-msg'); msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/oral/submissions/${SUB}/grade`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('grade').value }) });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('grade-pub').checked }) });
+      msg.textContent = document.getElementById('grade-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
+    } catch { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  document.getElementById('proctor-btn').onclick = async () => {
+    const msg = document.getElementById('proctor-msg'); const btn = document.getElementById('proctor-btn');
+    btn.disabled = true; msg.textContent = 'Analisando o vídeo (pode levar alguns segundos)…';
+    try {
+      const r = await fetch(`${API}/oral/submissions/${SUB}/proctor`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
+      msg.textContent = `Analisado (${j.proctor.frames} frames, ${j.proctor.ms} ms).`;
+      renderProctor(j.proctor);
+    } catch { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
+  };
+
+  load();
+</script>
+</body>
+</html>

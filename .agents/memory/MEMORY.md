@@ -1,4 +1,10 @@
 - [Servidor stale após troca de branch/pull](stale-server-after-git-switch.md) — erro não bate com o disco (rota 404, ENOENT de config)? Processo Node antigo em memória; restart do workflow resolve.
 - [Dev funciona / prod não = red herring](dev-vs-prod-red-herring.md) — antes de culpar cache/deploy/migrations, verifique banco→API→md5→SW→console; a causa pode ser data-dependent (runtime throw).
-- [Replit publish vs boot migrations](replit-publish-vs-boot-migrations.md) — prod crasha no boot ("column already exists") porque o publish-diff adiciona colunas sem atualizar schema_migrations; fix = sincronizar o ledger, não tornar migrations idempotentes.
+- [Replit publish vs boot migrations](replit-publish-vs-boot-migrations.md) — nesta app migrations NÃO rodam no boot; o schema de prod é do Publish diff. Não sincronize o ledger nem rode DDL em prod; após mudar schema em dev, republique.
+- [Publish geography é permanente](replit-publish-geography-permanent.md) — região trava na 1ª publish e é colocada com o DB; trocar = nova deployment+DB+downtime. P/ voz realtime o relay força 1 perna longa; meça antes (dev=North America).
 - [Object Storage bucket binding](object-storage-bucket-binding.md) — @replit/object-storage não lê DEFAULT_OBJECT_STORAGE_BUCKET_ID sozinha; passe new Client({ bucketId }). no-op best-effort mascarava a falta de bucket.
+- [Preços de deploy: fonte da verdade](deploy-pricing-source-of-truth.md) — searchReplitDocs deu preço errado (US$500 p/ Reserved VM 2vCPU/8GB que é US$80); use a tela de Publicação / replit.com/pricing.
+- [Processos longos no Replit](long-running-process-replit.md) — tarefas >120s morrem em bash background (reaped); rode como workflow e faça polling entre tool calls.
+- [Harness áudio E2E no Replit](audio-e2e-harness-replit.md) — precisa pkgs.chromium + PLAYWRIGHT_CHROME_PATH; creds do seed não existem no dev DB → use modo remoto contra trabalho configurado.
+- [Git destrutivo exige task agent isolado](destructive-git-needs-task-agent.md) — agente principal é bloqueado de reset/commit/checkout/rebase/force-push; só task agent isolado faz (fetch/branch/push-sem-force ok).
+- [VAD Realtime com áudio sintético](realtime-synthetic-vad-harness.md) — TTS sintético contra o semantic_vad+far_field commita turnos de forma não-determinística; use piso de ruído e faça o gate refletir o produto.

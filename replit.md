@@ -1,7 +1,7 @@
 # ORATIA – Production Architecture
 
 ## Overview
-ORATIA is an assignment evaluation system that conducts a structured, stateful interview with students about their submitted work, assessing authorship, understanding, and conceptual coherence (not just textual correctness).
+ORATIA is an assignment evaluation system that conducts a structured, stateful interview with students about their submitted work, assessing authorship, understanding, and conceptual coherence (not just textual correctness). A second work kind (`oral_realtime`) conducts a spoken, camera-on **oral exam** over the Realtime API against a professor-supplied gabarito (see *Oral exam (Realtime)* below).
 
 Per-turn orchestration is **delegated to a single reasoning-model call** (`SuperOrchestratorAgent`) that receives full context and returns a JSON action. The code is a dispatcher around that decision with hard guardrails (turn cap, early-finalize block). This replaced an earlier triage×3 + sufficiency + relevance fleet.
 
@@ -24,10 +24,11 @@ Not specified.
 - `routes/interview.js`: Student-facing endpoints (`/start`, `/upload`, `/chat`, `/audio`, `/finalize`, `/intro/advance`). `/chat` dispatches by phase: `intro` → `IntroductionAgent`; `interviewing` → `SuperOrchestratorAgent`.
 - `routes/work.js`: Professor-facing endpoints (info, conversation, interviewer config, evaluation + student-version + sections + publish, feedback settings, grades, batch evaluate/generate/publish, submission management).
 - `routes/admin.js`: Admin endpoints (works, users).
+- `routes/oralExam.js`: Oral exam (Realtime) endpoints — professor (exam PDF/TXT upload + extraction, config, batch evaluate/proctor with NDJSON streaming) and student (Realtime session mint, consent, video upload, connection `ping`). The setup position-check now runs in the browser, not here.
 - `agents/`: All agent classes (see Cognitive Agents below).
-- `lib/`: Shared infrastructure (db, session lifecycle/state, conversation utils, audio, audioStore, billing, middleware, deliverySignals, rubric, superOrchestrator/actionSchema).
+- `lib/`: Shared infrastructure (db, session lifecycle/state, conversation utils, audio, audioStore, billing, middleware, deliverySignals, rubric, superOrchestrator/actionSchema; `oralRealtime` = Realtime WebSocket relay, `proctor` = post-exam video proctoring).
 - `config/`: `policy.yaml`, `pricing.yaml`, `voices.js`, prompt/agenda templates, `interviewers/*.yaml`.
-- `static/`: Frontend HTML (`student.html`, `professor.html`, `admin.html`, `conversation.html`, `student_instructions.html`).
+- `static/`: Frontend HTML (`student.html`, `professor.html`, `admin.html`, `conversation.html`, `student_instructions.html`; oral exam: `oral-student.html`, `oral-professor.html`, `oral-conversation.html`; MediaPipe Tasks WASM + models self-hosted under `static/vision/`).
 - `migrations/`: SQL migrations, file-per-change (see CLAUDE.md).
 
 ### Core Runtime Concepts
@@ -51,6 +52,10 @@ All are classes under `agents/`, use the Responses API, and fail fast.
 - **`StudentFeedbackAgent`** — derives sanitized, formative student-facing feedback from the internal evaluation. Strips grades/forensics; professor is sovereign over content; the inviolable rule is "never impute cause / accuse." Two-layer sanitization (prompt rules + `FORBIDDEN_PATTERNS` code sweep).
 - **`GradingAgent`** — 0–10 grade per rubric criterion (one LLM call per criterion); final grade is a weighted average computed in code (`lib/rubric.js`). The grade is its OWN publication (`submissions.grade_published_at`), independent of the devolutiva: compute (`/evaluation/grades`, batch `/evaluations/grades`) → publish separately (`/evaluation/grade-publish`, batch `/evaluations/grade-publish`). Professor-only until published; justifications never reach the student.
 
+- **`OralExamExtractorAgent`** — extracts the question+answer list from the exam material (PDF via Files API, or TXT inline); fast model. Answers stay server-side; only questions reach the student's Realtime session.
+- **`OralExamAspectsAgent`** — per-question coverage aspects (topics, not answers) so the examiner can probe completeness; fast model.
+- **`OralExamEvaluatorAgent`** — compares the student's spoken transcript to the gabarito → per-question assessment; principal model. Seeds the default devolutiva + grade (both editable by the professor).
+
 Devolutiva flow: generate preview → professor reviews/edits → publish (`evaluation_published_at`). Per-section visibility (interviewer opinion, strengths, improvement areas, study suggestions) is independent of generation. The GRADE is decoupled: a separate artifact published via `grade_published_at` — so the professor can publish the subjective devolutiva first, read the student's comment, then compute/publish the grade (or do it all at once). Students read whatever is published (devolutiva and/or grade, independently) at `GET /s/:submissionToken/evaluation`.
 
 ### Orchestration Model
@@ -71,10 +76,20 @@ Form-based "studio" (no YAML), three tabs in authoring order — **🎬 Cenário
 
 **Persistence & flows (done).** Store is Postgres (migration `021`: `scenario_templates`, `scenarios` with `name/description` + JSONB `data` + optional `work_id`, `scenario_runs`); `lib/scenarios/store.js` keeps the same interface and seeds when empty. The **student flow** is `routes/scenarioStudent.js` (`/s/:submissionToken/scenario/{state,start,turn,advance}`, authed by `requireSubmissionToken`): the run is tied to the submission (`scenario_runs.submission_id`) with persistence + resume; the page `static/scenario-student.html` is a tabbed multi-interaction view (no professor controls); the entry `/s/:submissionToken` (in `routes/static.js`) routes to it when the work has a cenário, else to the interview. The student turn streams via **SSE** (`/turn?stream=1`: thinking → responding → message → done), reusing the orchestrator's first-token/early-message scheme. **Evaluation/grades/devolutiva** persist on the run: `/scenarios/api/run/:id/{evaluate,grades,devolutiva}` (evaluator → report; grades reuse `GradingAgent`; devolutiva reuses `StudentFeedbackAgent` with a `per_question:[]` shim). **Auth**: `/scenarios/api/*` is gated in `server.js` (`app.use("/scenarios/api", requireAdmin)`, path-scoped); the page `/scenarios` is public like `/admin`; the student routes use the submission token. **Prep**: `POST /scenarios/api/scenarios/:id/pdf-file` uploads the enunciado to OpenAI Files → vector store; the live runs pass its `vector_store_id` as `file_search` so personas can ground in the case. Dev-only runner: `scenarios-dev.mjs` (port 5096, gitignored; loads dotenv; uses Postgres). Verified against the isolated DB `superta_claude`. **Note:** `mockEngine` stays for the studio's zero-token preview; the JSON store was retired in favor of Postgres.
 
+### Oral exam (Realtime)
+A second work kind (`works.kind = 'oral_realtime'`) runs a spoken, camera-on exam over OpenAI's Realtime API. It is deliberately **not** the interview architecture:
+- **Relay, not orchestration.** `lib/oralRealtime.js` attaches a WebSocket relay (browser ↔ server ↔ OpenAI Realtime). The server only forwards PCM audio and tracks a response-latency signal; the conversation runs on `gpt-realtime`. The gabarito never reaches the browser/Realtime — only the questions (a per-student sample when N < total, persisted in `oral_asked_json`).
+- **Setup gate runs in the browser.** Before the exam, `static/oral-student.html` loads MediaPipe Tasks WASM (self-hosted in `static/vision/`) to check position (pose/distance/centering), hands visible, and phone presence — plus a Web-Audio noise meter and an RTT connection test — all client-side, so the server carries no per-student detection load (scales to many simultaneous exams). Checks only gate the start; the exam is never interrupted.
+- **Proctoring is post-exam and server-side.** The recorded video is analyzed in batch by `lib/proctor.js` (YOLOv8n via `onnxruntime-node`, lazy-loaded so a missing native binary never blocks boot, + a MediaPipe-Hands Python sidecar over ffmpeg). Flags (absence, multiple people, phone, hands) are signals for human review — never auto-accusation.
+- **Evaluation + batch UI.** `OralExamEvaluatorAgent` grades against the gabarito; the professor panel mirrors the interview (devolutiva + grade, both editable). Batch evaluate/proctor stream per-row progress as NDJSON so the table fills in live.
+- **Schema** (migrations 021–029): per-submission `oral_video_key`, `oral_transcript`, `oral_eval_json`, `oral_devolutiva`, `oral_proctor_json`, `oral_voice_json`, `oral_asked_json`; `works.kind` + `exam_pdf`/`oral_questions`.
+
 ## External Dependencies
 
 ### OpenAI Integration
-`openai@^6.17.0`; **no** Assistants API. APIs used: Files (upload both PDFs), Vector Stores (per-session, `file_search`), Conversations (`conv_chat`/`conv_eval`, server-side compaction), Responses (all generation; `stream: true` for audio-mode `/chat`), Audio Transcriptions/STT (with logprobs for the pre-gate), Audio Speech/TTS (interviewer voice).
+`openai@^6.17.0`; **no** Assistants API. APIs used: Files (upload both PDFs), Vector Stores (per-session, `file_search`), Conversations (`conv_chat`/`conv_eval`, server-side compaction), Responses (all generation; `stream: true` for audio-mode `/chat`), Audio Transcriptions/STT (with logprobs for the pre-gate), Audio Speech/TTS (interviewer voice), and the **Realtime API** (`gpt-realtime`) for the oral-exam relay.
+
+**Model selection** (`config/policy.yaml#models`): `principal_reasoning_model` (currently `gpt-5.4`) for analysis/orchestration/evaluation; `fast_model` (`gpt-5.4-mini`) for extraction/phrasing. `principal_reasoning_effort` (e.g. `high`) is injected as `reasoning.effort` on every principal-model call by a small wrapper in `lib/openaiClient.js` — set once, applied uniformly, never overriding an explicit `reasoning`.
 
 ### Interaction Modes (text vs audio)
 Per work: `text` (default) or `audio` (`works.interaction_mode`; `works.voice` from `config/voices.js`). **Analysis is always on text** — audio is the last-mile interface only (inbound voice → STT → text; outbound text → TTS). Mode is re-synced with the work config at `/s/:t/start` and each `/s/:t/upload`, immutable in between.
