@@ -1,6 +1,6 @@
 // OralExamExtractorAgent
 //
-// Lê um PDF de PROVA (perguntas e respostas/gabarito) e extrai a lista
+// Lê uma PROVA (PDF ou TXT com perguntas e respostas/gabarito) e extrai a lista
 // estruturada de perguntas. Roda UMA vez, no upload da prova pelo professor
 // (modelo rápido). As RESPOSTAS são extraídas e guardadas no servidor (futura
 // avaliação), mas NUNCA vão à sessão Realtime do aluno — só as perguntas.
@@ -50,23 +50,25 @@ export class OralExamExtractorAgent {
     }
 
     /**
+     * Fonte da prova: PDF (via file_id) OU texto cru (.txt). Forneça um dos dois.
      * @param {object} p
-     * @param {string} p.examFileId - file_id do PDF da prova (input_file)
+     * @param {string|null} p.examFileId - file_id do PDF da prova (input_file)
+     * @param {string|null} p.examText   - conteúdo de um arquivo .txt da prova
      * @param {object|null} p.meterCtx
      * @returns {Promise<Array<{id:number,question:string,answer:string}>>}
      */
-    async extract({ examFileId, meterCtx = null }) {
-        if (!examFileId) throw new Error("OralExamExtractor.extract: missing examFileId");
+    async extract({ examFileId = null, examText = null, meterCtx = null }) {
+        if (!examFileId && !examText) throw new Error("OralExamExtractor.extract: missing examFileId/examText");
+        const content = examText
+            ? [{ type: "input_text", text: `Extraia as perguntas e respostas do texto de prova abaixo.\n\n---\n${examText}\n---` }]
+            : [
+                { type: "input_text", text: "Extraia as perguntas e respostas do PDF anexo." },
+                { type: "input_file", file_id: examFileId },
+            ];
         const payload = {
             model: this.model,
             instructions: SYS,
-            input: [{
-                role: "user",
-                content: [
-                    { type: "input_text", text: "Extraia as perguntas e respostas do PDF anexo." },
-                    { type: "input_file", file_id: examFileId },
-                ],
-            }],
+            input: [{ role: "user", content }],
             text: { format: { type: "json_schema", name: "oral_exam_questions", strict: true, schema: SCHEMA } },
         };
         log.prompt("AGENT:OralExamExtractor", SYS);

@@ -88,6 +88,10 @@ function requireOral(req, res, next) {
     next();
 }
 
+// Ping LEVÍSSIMO para o teste de conexão do aluno (mede RTT antes da prova). Sem
+// auth, sem banco — só confirma o caminho até o servidor. no-store p/ não cachear.
+router.get("/oral/ping", (_req, res) => { res.set("Cache-Control", "no-store"); res.type("text/plain").send("ok"); });
+
 // Info para a página do professor: config + perguntas extraídas (o professor vê
 // perguntas E respostas — é a prova dele) + lista de vozes.
 router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req, res) => {
@@ -128,23 +132,34 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
     }
 });
 
-// Upload do PDF da prova → extração das perguntas (modelo rápido).
+// Upload do material da prova (PDF ou TXT) → extração das perguntas (modelo
+// rápido). PDF vai à OpenAI Files (input_file); TXT entra como texto direto.
 router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUpload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file required" });
+    const name = (req.file.originalname || "").toLowerCase();
+    const mime = req.file.mimetype || "";
+    const isPdf = mime === "application/pdf" || name.endsWith(".pdf");
+    const isTxt = mime === "text/plain" || name.endsWith(".txt");
+    if (!isPdf && !isTxt) return res.status(400).json({ error: "envie um arquivo PDF ou TXT" });
     try {
+        // Guarda os bytes da fonte (serve de flag has_exam; col. exam_pdf é genérica).
         await db.setExamPdf(req.work.id, req.file.buffer, req.file.originalname);
-        const examFile = await openai.files.create({
-            file: await OpenAI.toFile(req.file.buffer, req.file.originalname || "prova.pdf"),
-            purpose: "user_data",
-        });
-        let questions = await oralExamExtractorAgent.extract({
-            examFileId: examFile.id,
-            meterCtx: { workId: req.work.id },
-        });
+        let questions;
+        if (isTxt) {
+            const text = req.file.buffer.toString("utf-8").replace(/^\uFEFF/, "").trim();
+            if (!text) return res.status(400).json({ error: "o arquivo .txt está vazio" });
+            questions = await oralExamExtractorAgent.extract({ examText: text, meterCtx: { workId: req.work.id } });
+        } else {
+            const examFile = await openai.files.create({
+                file: await OpenAI.toFile(req.file.buffer, req.file.originalname || "prova.pdf"),
+                purpose: "user_data",
+            });
+            questions = await oralExamExtractorAgent.extract({ examFileId: examFile.id, meterCtx: { workId: req.work.id } });
+        }
         // Aspectos de cobertura (tópicos, não respostas) para o examinador checar completude.
         questions = await oralExamAspectsAgent.generate(questions, { workId: req.work.id });
         await db.setOralQuestions(req.work.id, questions);
-        log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} questions=${questions.length}`);
+        log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} type=${isTxt ? "txt" : "pdf"} questions=${questions.length}`);
         res.json({ ok: true, count: questions.length, questions });
     } catch (err) {
         log.error("ORAL", `exam-pdf failed: ${err.message}`);
