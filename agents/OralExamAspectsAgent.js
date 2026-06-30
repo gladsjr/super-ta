@@ -9,7 +9,7 @@
 // Por isso o cuidado central: o aspecto diz O QUE abordar, não O QUE responder.
 
 import log from "../lib/logger.js";
-import { meteredResponses } from "../lib/billing.js";
+import { runStructured } from "../lib/agentRun.js";
 
 const SCHEMA = {
     type: "object",
@@ -69,27 +69,22 @@ export class OralExamAspectsAgent {
         const needing = list.filter(q => q.answer.trim() && !q.hasAspects);
         if (needing.length === 0) return (questions || []).map((q, i) => ({ ...q, id: q.id ?? i + 1, aspects: Array.isArray(q.aspects) ? q.aspects : [] }));
 
-        const payload = {
-            model: this.model,
-            instructions: SYS,
-            input: [{ role: "user", content: [{ type: "input_text", text: JSON.stringify({ questions: needing.map(q => ({ id: q.id, question: q.question, answer: q.answer })) }) }] }],
-            text: { format: { type: "json_schema", name: "oral_exam_aspects", strict: true, schema: SCHEMA } },
-        };
-        log.prompt("AGENT:OralExamAspects", SYS);
+        const input = [{ role: "user", content: [{ type: "input_text", text: JSON.stringify({ questions: needing.map(q => ({ id: q.id, question: q.question, answer: q.answer })) }) }] }];
         let byId = new Map();
         try {
-            const r = await log.span("AGENT:OralExamAspects", "generate.create", () =>
-                meteredResponses(
-                    { ...(meterCtx || {}), agentLabel: "AGENT:OralExamAspects", model: this.model },
-                    () => this.client.responses.create(payload)
-                )
-            );
-            const parsed = JSON.parse(r.output_text || "{}");
-            for (const it of (parsed.items || [])) {
-                const aspects = (Array.isArray(it.aspects) ? it.aspects : [])
-                    .map(a => String(a || "").trim()).filter(Boolean).slice(0, 3);
-                byId.set(it.id, aspects);
-            }
+            byId = await runStructured({
+                client: this.client, model: this.model, label: "AGENT:OralExamAspects",
+                instructions: SYS, input, schema: SCHEMA, schemaName: "oral_exam_aspects", meterCtx,
+                validate: (parsed) => {
+                    const m = new Map();
+                    for (const it of (parsed.items || [])) {
+                        const aspects = (Array.isArray(it.aspects) ? it.aspects : [])
+                            .map(a => String(a || "").trim()).filter(Boolean).slice(0, 3);
+                        m.set(it.id, aspects);
+                    }
+                    return m;
+                },
+            });
         } catch (err) {
             // Aspectos são um aprimoramento — falha não deve quebrar o salvamento da prova.
             log.error("AGENT:OralExamAspects", `falhou (segue sem aspectos): ${err.message}`);
