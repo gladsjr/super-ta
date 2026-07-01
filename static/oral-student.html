@@ -97,7 +97,8 @@
         <video id="selfview" autoplay muted playsinline></video>
         <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
         <p class="hint" id="qinfo"></p>
-        <button class="btn danger" id="end-btn">Encerrar prova</button>
+        <p class="hint">Ao terminar as perguntas, a prova <strong>encerra sozinha</strong> e o vídeo é enviado automaticamente — é só aguardar. Use o botão abaixo apenas se precisar <strong>sair antes</strong> do fim.</p>
+        <button class="btn danger" id="end-btn">Encerrar agora</button>
       </div>
 
       <div id="done" style="display:none">
@@ -462,7 +463,8 @@
           if (m.state === 'connected') { setStatus('Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
           else if (m.state === 'listening') { flushPlayback(); setStatus('🎤 Ouvindo você…', 'live'); }
           else if (m.state === 'thinking') setStatus('…', 'live');
-        } else if (m.type === 'ended') { finish(); }
+        } else if (m.type === 'wrapup') { endAfterPlayback(); }
+        else if (m.type === 'ended') { finish(); }
       };
       ws.onerror = () => setStatus('Erro de conexão', 'err');
       ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
@@ -486,6 +488,24 @@
         $('done-msg').textContent = '✓ Prova encerrada';
         $('done-sub').textContent = 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
       } finally { stopTracks(); }
+    }
+
+    // Auto-encerramento: o examinador terminou e o servidor mandou 'wrapup'.
+    // Esperamos o áudio da despedida (já agendado) terminar de tocar e só então
+    // chamamos finish() — que segue o mesmo caminho do botão "Encerrar prova"
+    // (manda 'bye' → conclusão limpa no servidor → para a gravação → sobe o vídeo).
+    let wrappingUp = false;
+    function endAfterPlayback() {
+      if (ended || wrappingUp) return;
+      wrappingUp = true;
+      setStatus('Prova concluída', 'live');
+      const deadline = ctx ? ctx.currentTime + 20 : 0; // teto de segurança
+      (function waitTail() {
+        if (ended) return;
+        const pending = ctx && (activeSources.length || (playHead - ctx.currentTime) > 0.05);
+        if (pending && ctx.currentTime < deadline) { setTimeout(waitTail, 200); return; }
+        finish();
+      })();
     }
 
     function finish() {

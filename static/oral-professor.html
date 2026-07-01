@@ -399,6 +399,30 @@
   }
 
   // ---------- Carga ----------
+  function setMeta(work) {
+    const done = SUBS.filter(s => s.status === 'completed').length;
+    document.getElementById('meta').innerHTML =
+      `<span>Prova oral</span><span>·</span><span>${SUBS.length} aluno(s)</span><span>·</span><span>${done} realizada(s)</span>` +
+      (work.has_exam ? '<span>·</span><span>prova enviada</span>' : '');
+  }
+
+  // Re-sincroniza SÓ a lista de submissões com o servidor (fonte da verdade) e
+  // re-renderiza as tabelas — sem tocar no formulário de perguntas/config (para
+  // não descartar edições não salvas). Usado antes/depois das ações em lote,
+  // pois provas concluídas DEPOIS que a página abriu não entram no snapshot
+  // inicial (era a causa do "0 candidata(s)" / aluno sem marca de avaliado).
+  async function refreshSubs() {
+    try {
+      const r = await fetch(`${API}/oral/info`);
+      if (!r.ok) return;
+      const j = await r.json();
+      SUBS = j.submissions || [];
+      setMeta(j.work);
+      renderSubsTable();
+      renderEvalTable();
+    } catch { /* refresh best-effort: mantém o estado atual se falhar */ }
+  }
+
   async function load() {
     const r = await fetch(`${API}/oral/info`);
     if (!r.ok) { document.getElementById('notfound').classList.remove('hidden'); return; }
@@ -406,10 +430,7 @@
     document.getElementById('main').classList.remove('hidden');
     document.getElementById('work-name').textContent = j.work.name;
     SUBS = j.submissions || [];
-    const done = SUBS.filter(s => s.status === 'completed').length;
-    document.getElementById('meta').innerHTML =
-      `<span>Prova oral</span><span>·</span><span>${SUBS.length} aluno(s)</span><span>·</span><span>${done} realizada(s)</span>` +
-      (j.work.has_exam ? '<span>·</span><span>prova enviada</span>' : '');
+    setMeta(j.work);
     document.getElementById('exam-status').textContent = j.work.has_exam ? 'Prova enviada. As perguntas abaixo podem ser editadas.' : 'Nenhuma prova enviada ainda — suba um PDF/TXT ou digite as perguntas abaixo.';
     document.getElementById('cfg-n').value = j.work.question_count || 6;
     const vs = document.getElementById('cfg-voice');
@@ -518,6 +539,7 @@
     const btnIds = ['eval-all-btn', 'eval-all-force-btn'];
     btnIds.forEach(i => document.getElementById(i).disabled = true);
     batchStatus('eval-batch-status', force ? 'Reavaliando todas as provas…' : 'Avaliando as provas realizadas…');
+    await refreshSubs(); // pega provas concluídas desde que a página abriu (evita snapshot velho)
     try {
       const r = await fetch(`${API}/oral/evaluate-all${force ? '?force=1' : ''}`, { method: 'POST' });
       if (!r.ok || !r.body) {
@@ -539,7 +561,9 @@
           }
         } else if (m.type === 'done') {
           SUBS.forEach(s => { if (s._evalPending) s._evalPending = false; }); // limpa sobras
-          let t = `${m.evaluated} avaliada(s) de ${m.candidates} candidata(s).`;
+          let t = m.candidates === 0
+            ? 'Nenhuma prova nova para avaliar (as realizadas já estão avaliadas).'
+            : `${m.evaluated} avaliada(s) de ${m.candidates} candidata(s).`;
           if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
           batchStatus('eval-batch-status', t);
           renderEvalTable();
@@ -550,7 +574,7 @@
       renderEvalTable();
       batchStatus('eval-batch-status', 'Falha de comunicação.');
     }
-    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
+    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); await refreshSubs(); } // estado autoritativo do banco no fim
   }
   document.getElementById('eval-all-btn').onclick = () => runEvalAll(false);
   document.getElementById('eval-all-force-btn').onclick = () => { if (confirm('Reavaliar TODAS as provas, inclusive as já avaliadas?')) runEvalAll(true); };
@@ -559,6 +583,7 @@
     const btnIds = ['proctor-all-btn', 'proctor-all-force-btn'];
     btnIds.forEach(i => document.getElementById(i).disabled = true);
     batchStatus('proctor-batch-status', (force ? 'Reanalisando todos os vídeos' : 'Analisando os vídeos') + '… (pode demorar — cada vídeo leva alguns segundos)');
+    await refreshSubs(); // pega provas concluídas desde que a página abriu (evita snapshot velho)
     try {
       const r = await fetch(`${API}/oral/proctor-all${force ? '?force=1' : ''}`, { method: 'POST' });
       if (!r.ok || !r.body) {
@@ -580,7 +605,9 @@
           }
         } else if (m.type === 'done') {
           SUBS.forEach(s => { if (s._proctorPending) s._proctorPending = false; }); // limpa sobras
-          let t = `${m.analyzed} vídeo(s) analisado(s) de ${m.candidates} com gravação.`;
+          let t = m.candidates === 0
+            ? 'Nenhum vídeo novo para analisar.'
+            : `${m.analyzed} vídeo(s) analisado(s) de ${m.candidates} com gravação.`;
           if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
           if (m.elapsed_total_ms != null) t += ` (tempo total ${(m.elapsed_total_ms / 1000).toFixed(1)}s)`;
           batchStatus('proctor-batch-status', t);
@@ -592,7 +619,7 @@
       renderEvalTable();
       batchStatus('proctor-batch-status', 'Falha de comunicação.');
     }
-    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); }
+    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); await refreshSubs(); } // estado autoritativo do banco no fim
   }
   document.getElementById('proctor-all-btn').onclick = () => runProctorAll(false);
   document.getElementById('proctor-all-force-btn').onclick = () => { if (confirm('Reanalisar TODOS os vídeos, inclusive os já analisados?')) runProctorAll(true); };
