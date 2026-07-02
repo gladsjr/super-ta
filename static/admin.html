@@ -83,15 +83,12 @@
       <h3 class="card-title">Novo trabalho</h3>
       <div class="row">
         <input id="new-work-name" class="input" placeholder="Nome do trabalho (ex.: Prova 1)" style="flex:1; min-width: 260px"/>
-        <select id="new-work-kind" class="select" style="width: 220px" title="Tipo do trabalho. A entrevista é o fluxo padrão; a prova oral (Realtime) usa voz ao vivo a partir de um PDF de perguntas.">
-          <option value="interview">Entrevista (padrão)</option>
+        <select id="new-work-kind" class="select" style="width: 240px" title="Tipo do trabalho: Prova oral (Realtime) = voz ao vivo a partir de um PDF de perguntas; Entrevista por mensagem = uma interação, turno a turno (texto ou áudio); Multi-interação = cenário com etapas ordenadas (default dos novos).">
           <option value="oral_realtime">Prova oral (Realtime)</option>
+          <option value="interview">Entrevista por mensagem</option>
+          <option value="scenario" selected>Multi-interação</option>
         </select>
-        <input id="new-work-budget" class="input" type="number" min="0" step="0.5" placeholder="Orçamento USD" style="width: 160px" title="Orçamento total deste trabalho em dólares — limite de gasto com o modelo, somando criação + entrevistas dos alunos."/>
-        <select id="new-work-kind" class="select" style="width: 220px" title="Multi-interação: cenário com etapas ordenadas (novo, default). Entrevista: fluxo legado de uma única interação, para testes comparativos.">
-          <option value="scenario" selected>Multi-interação (cenário)</option>
-          <option value="interview">Entrevista (legado)</option>
-        </select>
+        <input id="new-work-budget" class="input" type="number" min="0" step="0.5" placeholder="Orçamento USD" style="width: 160px" title="Orçamento total deste trabalho em dólares — limite de gasto com o modelo, somando criação + interações dos alunos."/>
         <button id="create-work" class="btn btn-primary">Criar</button>
       </div>
       <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho.</div>
@@ -218,7 +215,6 @@ document.getElementById('create-work').onclick = async () => {
     if (!Number.isFinite(n) || n < 0) { msg.textContent = 'Orçamento inválido'; return; }
     body.budget_usd = n;
   }
-  body.kind = document.getElementById('new-work-kind').value === 'interview' ? 'interview' : 'scenario';
   try {
     const r = await fetch('/admin/works', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
