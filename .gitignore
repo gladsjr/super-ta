@@ -8,3 +8,5 @@ data/works/
 .audio-store/
 tests/runs-text/
 commit-msg.txt
+tmp/
+.claude/launch.json
