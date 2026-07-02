@@ -1,6 +1,22 @@
 #Contexto arquitetural e features
 Leia o @replit.md para uma visão geral arquitetural e das features do sistema
 
+# Divisão de ambientes (Claude / Codex / Replit) — regra dura
+
+Três agentes mexem neste projeto. Cada um trabalha no SEU clone, com o SEU banco e a SUA porta. **Nenhum agente toca no ambiente do outro** — não troca a branch do outro, não recria/migra o banco do outro, não sobe servidor na porta do outro.
+
+| Agente | Working tree (clone) | Banco (no container `superta-db`) | Porta | Branch de trabalho |
+|---|---|---|---|---|
+| **Claude** (este) | `C:\Users\glads\Dropbox\Projetos\ORATIA\super-ta-repo` | `oratia_claude` | `:5000` | a feature em andamento (ex.: `feat/prova-oral-realtime`) |
+| **Codex** | `C:\Users\glads\Dropbox\Projetos\ORATIA\super-ta-codex` | `oratia_codex` | `:5001` | `feat/multiagent-scenarios-mock` |
+| **Replit** | ambiente próprio (Reserved VM) | banco próprio do Replit (dev/prod) | — | `main` |
+
+- O **container Postgres `superta-db`** é compartilhado, mas cada agente usa SÓ o seu database (`oratia_claude` / `oratia_codex`). Nunca o do outro.
+- A `.env` de cada clone aponta para o seu banco + sua porta. A do Codex tem `DATABASE_URL=.../oratia_codex` e `PORT=5001`.
+- **Working tree VIVO do usuário** (`C:\Users\glads\src\super-ta`): NENHUM agente toca — nem Claude, nem Codex.
+- **`main` é a fonte única** que vai a produção. O Replit puxa a `main` e publica (ver regras de migration/Publish abaixo). Cada agente dá push só na SUA branch; integração para a `main` é via PR.
+- Bancos legados (`superta`, `superta_oral`, `superta_codex`, `superta_claude*`) são lixo de migração anterior — ignorar; limpar quando o usuário autorizar.
+
 Diretriz permanente:
 - evite fallback arquitetural e hierarquia de opções de configuração quando isso obscurecer o comportamento do sistema;
 - para seleção de modelo, use apenas `config/policy.yaml` como fonte de verdade;
