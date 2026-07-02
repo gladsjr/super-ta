@@ -347,7 +347,7 @@
         <td><code class="tok">${s.submission_token}</code></td>
         <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
         <td>${vid}</td>
-        <td><a href="${url}" target="_blank">abrir ↗</a> · <a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+        <td>${s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : ''}<a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
       </tr>`;
     }).join('');
   }

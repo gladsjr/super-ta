@@ -464,7 +464,7 @@
         if (typeof ev.data !== 'string') { playPcm(ev.data); return; }
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === 'status') {
-          if (m.state === 'connected') { setStatus('Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
+          if (m.state === 'connected') { setStatus(m.resuming ? 'Retomando de onde você parou…' : 'Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
           else if (m.state === 'listening') { flushPlayback(); setStatus('🎤 Ouvindo você…', 'live'); }
           else if (m.state === 'thinking') setStatus('…', 'live');
         } else if (m.type === 'wrapup') { endAfterPlayback(); }
