@@ -271,8 +271,6 @@ async function runAudioRepeat({ sess, transcript, spans, aggregate, persist, rea
     try {
         await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: markedStudent }] });
         await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: phrased.message }] });
-        await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: markedStudent }] });
-        await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: phrased.message }] });
     } catch (err) {
         log.error("CHAT", `remote write (audio repeat) failed: ${err.message}`);
     }
@@ -667,9 +665,6 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
             await openai.conversations.items.create(sess.conversationId_chat, {
                 items: [{ role: "assistant", content: greeting.message }],
             });
-            await openai.conversations.items.create(sess.conversationId_eval, {
-                items: [{ role: "assistant", content: greeting.message }],
-            });
         } catch (err) {
             log.error("CHAT", `remote write (intro greeting) failed: ${err.message}`);
         }
@@ -1033,7 +1028,6 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.history = sess.conv_chat;
         try {
             await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
-            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
         } catch (err) {
             log.error("CHAT", `remote write (intro user) failed: ${err.message}`);
         }
@@ -1073,7 +1067,6 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             sess.history = sess.conv_chat;
             try {
                 await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: intro.message }] });
-                await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: intro.message }] });
             } catch (err) {
                 log.error("CHAT", `remote write (intro present_self) failed: ${err.message}`);
             }
@@ -1174,7 +1167,6 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             sess.history = sess.conv_chat;
             try {
                 await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: combined }] });
-                await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: combined }] });
             } catch (err) {
                 log.error("CHAT", `remote write (intro begin) failed: ${err.message}`);
             }
@@ -1285,7 +1277,6 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.history = sess.conv_chat;
         try {
             await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
-            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
         } catch (err) { log.error("CHAT", `remote write (user, cap) failed: ${err.message}`); }
         if (currentTurn && currentTurn.answer == null) {
             currentTurn.answer = message;
@@ -1299,7 +1290,6 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.history = sess.conv_chat;
         try {
             await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: forcedMessage }] });
-            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: forcedMessage }] });
         } catch (err) { log.error("CHAT", `remote write (assistant, cap) failed: ${err.message}`); }
         sess.currentPhase = "finalizing";
         sess.conversationCompleted = true;
@@ -1331,8 +1321,10 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
     sess.history = sess.conv_chat;
     try {
+        // Espelho remoto SÓ na conv_chat (lida pelo orquestrador via `conversation`).
+        // A conv_eval vive apenas no array LOCAL (→ conversation_json p/ o professor):
+        // nada lê a conv_eval REMOTA, então paramos de escrevê-la a cada turno.
         await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
-        await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "user", content: message }] });
     } catch (err) { log.error("CHAT", `remote write (user) failed: ${err.message}`); }
     log.info("CHAT", `user ${log.preview(message, 140)}`);
 
@@ -1460,9 +1452,8 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         // legado: meta vai pro eval pra audit).
         sess.conv_chat.pop(); // tira a user message recém-empurrada
         sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { kind, rationale, channel: "modal", timestamp: Date.now() } });
-        try {
-            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: assistantMessage }] });
-        } catch (err) { log.error("CHAT", `remote eval write (meta_modal) failed: ${err.message}`); }
+        // meta_modal fica só no registro LOCAL (sess.conv_eval → conversation_json);
+        // sem espelho remoto (a conv_eval da OpenAI não é lida por ninguém).
         if (currentTurn) {
             if (!Array.isArray(currentTurn.interventions)) currentTurn.interventions = [];
             currentTurn.interventions.push({
@@ -1492,7 +1483,6 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.history = sess.conv_chat;
         try {
             await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: assistantMessage }] });
-            await openai.conversations.items.create(sess.conversationId_eval, { items: [{ role: "assistant", content: assistantMessage }] });
         } catch (err) { log.error("CHAT", `remote write (assistant, kind=${kind}) failed: ${err.message}`); }
         await logLastConvItem(sess.conversationId_chat, "CONV:chat");
     };
