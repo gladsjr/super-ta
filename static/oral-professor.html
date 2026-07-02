@@ -339,9 +339,12 @@
     tbody.innerHTML = rows.map(s => {
       const url = `${location.origin}/s/${s.submission_token}`;
       const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
-      const vid = s.has_oral_video
-        ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
-        : '<span class="hint">—</span>';
+      const nParts = s.oral_video_parts || (s.has_oral_video ? 1 : 0);
+      const vid = nParts > 1
+        ? '🎥 ' + Array.from({ length: nParts }, (_, i) => `<a href="${API}/oral/video/${s.submission_token}/${i}" target="_blank" title="Segmento ${i + 1} de ${nParts} (a prova foi retomada)">${i + 1}</a>`).join(' · ')
+        : s.has_oral_video
+          ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
+          : '<span class="hint">—</span>';
       return `<tr>
         <td>${esc(s.student_label || '')}${test}</td>
         <td><code class="tok">${s.submission_token}</code></td>

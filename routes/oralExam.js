@@ -20,7 +20,7 @@ import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
-import { analyzeOralVideo } from "../lib/proctor.js";
+import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
 import { mapPool } from "../lib/concurrency.js";
 import log from "../lib/logger.js";
 
@@ -117,6 +117,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 status: s.status,
                 is_test: !!s.is_test,
                 has_oral_video: !!s.has_oral_video,
+                oral_video_parts: Number(s.oral_video_parts_count) || (s.has_oral_video ? 1 : 0),
                 has_oral_eval: !!s.has_oral_eval,
                 grade: s.grade_final ?? null,
                 devolutiva_published: !!s.evaluation_published_at,
@@ -294,9 +295,9 @@ router.post("/w/:workToken/oral/submissions/:subToken/publish", requireWorkToken
 router.post("/w/:workToken/oral/submissions/:subToken/proctor", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
-        const key = await db.getOralVideoKey(req.submission.id);
-        if (!key) return res.status(409).json({ error: "esta prova não tem vídeo gravado" });
-        const report = await analyzeOralVideo(key);
+        const parts = await db.getOralVideoParts(req.submission.id);
+        if (!parts.length) return res.status(409).json({ error: "esta prova não tem vídeo gravado" });
+        const report = await analyzeOralVideoParts(parts);
         await db.setOralProctor(req.submission.id, report);
         res.json({ ok: true, proctor: report });
     } catch (err) {
@@ -411,14 +412,14 @@ router.post("/w/:workToken/oral/proctor-all", requireWorkToken, requireOral, asy
         const t0 = Date.now();
         for (const s of subs) {
             try {
-                const key = await db.getOralVideoKey(s.id);
-                if (!key) {
+                const parts = await db.getOralVideoParts(s.id);
+                if (!parts.length) {
                     // Item pulado: avisa o cliente p/ tirar a ampulheta dessa linha.
                     send({ type: "item", submission_token: s.submission_token, ok: false, error: "sem vídeo" });
                     continue;
                 }
                 const tv = Date.now();
-                const report = await analyzeOralVideo(key);
+                const report = await analyzeOralVideoParts(parts);
                 await db.setOralProctor(s.id, report);
                 const elapsed = Date.now() - tv;
                 perVideoMs.push(elapsed);
@@ -562,15 +563,18 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUploa
         if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
         if (!req.file) return res.status(400).json({ error: "file required" });
         const ext = extFromMimetype(req.file.mimetype);
-        const key = `oral-video/${req.submission.submission_token}.${ext}`;
+        // Chave ÚNICA por segmento (multi-parte): o original e cada retomada são
+        // preservados. Antes usava chave fixa por token → a retomada sobrescrevia
+        // o segmento anterior e o professor só via a última gravação.
+        const key = `oral-video/${req.submission.submission_token}-${Date.now()}.${ext}`;
         const buffer = await fs.promises.readFile(req.file.path); // do temporário em disco
         const r = await putAudio({ key, buffer, mimetype: req.file.mimetype });
         if (!r.stored) {
             log.error("ORAL", `vídeo não armazenado submission=${req.submission.submission_token}: ${r.reason}`);
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
-        await db.setOralVideoKey(req.submission.id, key);
-        log.info("ORAL", `vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}`);
+        await db.appendOralVideoPart(req.submission.id, key);
+        log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}`);
         res.json({ ok: true });
     } catch (err) {
         log.error("ORAL", `video upload failed: ${err.message}`);
@@ -582,9 +586,11 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUploa
 
 // Professor assiste ao vídeo gravado (avaliação posterior). Auth por token do
 // trabalho + submissão pertencente a ele.
-router.get("/w/:workToken/oral/video/:subToken", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+router.get("/w/:workToken/oral/video/:subToken/:idx?", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     try {
-        const key = await db.getOralVideoKey(req.submission.id);
+        const parts = await db.getOralVideoParts(req.submission.id);
+        const idx = req.params.idx != null ? parseInt(req.params.idx, 10) : 0;
+        const key = parts[Number.isFinite(idx) ? idx : 0];
         if (!key) return res.status(404).json({ error: "sem vídeo para esta submissão" });
         const ext = key.split(".").pop();
         const type = (ext === "mp4" || ext === "m4a") ? "video/mp4" : "video/webm";
