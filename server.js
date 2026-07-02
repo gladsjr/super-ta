@@ -12,6 +12,8 @@ import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 
 import {
     sessionMiddleware,
@@ -40,12 +42,27 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 // Middlewares globais.
+// helmet: headers de segurança (X-Frame-Options, X-Content-Type-Options nosniff,
+// HSTS, etc.). CSP fica DESLIGADA de propósito — as telas carregam scripts de CDN
+// (KaTeX/marked) e inline, e uma CSP restritiva quebraria o front. Ligar CSP com
+// allowlist testada é um passo separado.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use("/static", express.static(path.join(__dirname, "static")));
 app.use(express.json({ limit: "2mb" }));
 app.use(sessionMiddleware);
 
-// Auth (público).
-app.post("/login", loginHandler);
+// Auth (público). Rate limit no /login para travar força bruta de senha de
+// professor. Janela de 15 min; logins bem-sucedidos não contam (skipSuccessful),
+// então uso legítimo não é penalizado.
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: { error: "Muitas tentativas de login. Tente de novo em alguns minutos." },
+});
+app.post("/login", loginLimiter, loginHandler);
 app.post("/logout", logoutHandler);
 app.get("/me", meHandler);
 
