@@ -97,7 +97,11 @@
         <video id="selfview" autoplay muted playsinline></video>
         <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
         <p class="hint" id="qinfo"></p>
-        <p class="hint">Ao terminar as perguntas, a prova <strong>encerra sozinha</strong> e o vídeo é enviado automaticamente — é só aguardar. Use o botão abaixo apenas se precisar <strong>sair antes</strong> do fim.</p>
+        <div style="margin:10px 0">
+          <button class="btn" id="nudge-btn" type="button">Já respondi ✓</button>
+        </div>
+        <p class="hint" id="nudge-hint">Terminou de responder e a examinadora não seguiu? Toque em <strong>"Já respondi"</strong> para avançar.</p>
+        <p class="hint">Ao terminar as perguntas, a prova <strong>encerra sozinha</strong> e o vídeo é enviado automaticamente — é só aguardar. Use <strong>"Encerrar agora"</strong> apenas se precisar <strong>sair antes</strong> do fim.</p>
         <button class="btn danger" id="end-btn">Encerrar agora</button>
       </div>
 
@@ -460,14 +464,18 @@
         if (typeof ev.data !== 'string') { playPcm(ev.data); return; }
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === 'status') {
-          if (m.state === 'connected') { setStatus('Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
+          if (m.state === 'connected') { setStatus(m.resuming ? 'Retomando de onde você parou…' : 'Prova em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
           else if (m.state === 'listening') { flushPlayback(); setStatus('🎤 Ouvindo você…', 'live'); }
           else if (m.state === 'thinking') setStatus('…', 'live');
         } else if (m.type === 'wrapup') { endAfterPlayback(); }
         else if (m.type === 'ended') { finish(); }
       };
       ws.onerror = () => setStatus('Erro de conexão', 'err');
-      ws.onclose = () => { if (!ended) setStatus('Conexão encerrada', 'err'); };
+      ws.onclose = () => {
+        if (ended) return;
+        setStatus('Conexão encerrada', 'err');
+        salvageVideo(); // queda inesperada: sobe o vídeo parcial p/ não perder a gravação
+      };
     }
     $('to-check-btn').onclick = continueToCheck;
     $('pos-begin-btn').onclick = beginExam;
@@ -488,6 +496,26 @@
         $('done-msg').textContent = '✓ Prova encerrada';
         $('done-sub').textContent = 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
       } finally { stopTracks(); }
+    }
+
+    // Rede de segurança do vídeo: numa QUEDA inesperada (sem encerramento limpo),
+    // sobe o que já foi gravado — senão os pedaços se perdem se o aluno não voltar.
+    // best-effort e silencioso (a tela já mostra "Conexão encerrada").
+    let salvaged = false;
+    function salvageVideo() {
+      if (salvaged) return; salvaged = true;
+      try {
+        if (recorder && recorder.state !== 'inactive') { recorder.onstop = uploadVideoSilent; recorder.stop(); }
+        else uploadVideoSilent();
+      } catch {}
+    }
+    async function uploadVideoSilent() {
+      if (!recChunks.length) return;
+      try {
+        const blob = new Blob(recChunks, { type: (recorder && recorder.mimeType) || 'video/webm' });
+        const form = new FormData(); form.append('file', blob, 'prova.webm');
+        await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form });
+      } catch {}
     }
 
     // Auto-encerramento: o examinador terminou e o servidor mandou 'wrapup'.
@@ -524,6 +552,11 @@
 
     $('start-btn').onclick = start;
     $('end-btn').onclick = finish;
+    $('nudge-btn').onclick = () => {
+      // Válvula manual: avisa o servidor que o aluno terminou de falar, para
+      // destravar caso o detector de fim de turno não feche o turno sozinho.
+      try { if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'done_speaking' })); setStatus('…', 'live'); } } catch {}
+    };
     if (!SUB) { $('pre-err').textContent = 'Link inválido.'; $('start-btn').disabled = true; }
   </script>
 </body>
