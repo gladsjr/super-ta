@@ -68,6 +68,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
         res.json({
             work: {
                 name: req.work.name,
+                kind: req.work.kind,
                 has_enunciado: !!req.work.assignment_pdf,
                 has_interviewer: !!req.work.has_interviewer,
                 interaction_mode: req.work.interaction_mode,

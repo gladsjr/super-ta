@@ -28,6 +28,7 @@
     "music-metadata": "^11.12.3",
     "onnxruntime-node": "^1.27.0",
     "openai": "^6.17.0",
+    "pdfkit": "^0.19.1",
     "pg": "^8.20.0",
     "ws": "^8.21.0"
   },

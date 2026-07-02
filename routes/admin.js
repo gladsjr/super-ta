@@ -6,6 +6,7 @@ import express from "express";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
 import * as db from "../lib/db.js";
+import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
 import log from "../lib/logger.js";
 
@@ -34,11 +35,17 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
         }
         budget = parsed;
     }
-    // Tipo do trabalho: entrevista (padrão) ou prova oral (Realtime).
-    const kind = req.body?.kind === "oral_realtime" ? "oral_realtime" : "interview";
+    // Tipo do trabalho: scenario (multi-interação, default dos novos), interview
+    // (entrevista legada) ou oral_realtime (prova oral). Coexistência.
+    const valid = ["interview", "oral_realtime", "scenario"];
+    const kind = valid.includes(req.body?.kind) ? req.body.kind : "scenario";
     try {
         const work = await db.createWork(name, budget, kind);
-        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" kind=${work.kind} budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
+        // Trabalho multi-interação nasce com um cenário vazio vinculado (work_id).
+        if (kind === "scenario") {
+            await scenarioStore.saveScenario({ name: work.name, description: "", personas: [], interactions: [], work_id: work.id });
+        }
+        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" kind=${kind} budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
         res.json({ work });
     } catch (err) {
         log.error("ADMIN", `create work failed: ${err.message}`);

@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>ORATIA — Professor</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
+<link rel="stylesheet" href="/static/css/studio.css"/>
+<style>
+  /* Cockpit de cenário (visão por aluno só-leitura). */
+  .sc-conv { display:flex; flex-direction:column; gap:6px; max-height:420px; overflow:auto; margin-top:8px; padding:8px; background:var(--bg-muted,#f7f5ef); border-radius:6px; }
+  .sc-b { padding:6px 10px; border-radius:10px; max-width:90%; font-size:var(--fs-sm); }
+  .sc-b-student { align-self:flex-end; background:var(--accent-100,#d8efe9); }
+  .sc-b-persona { align-self:flex-start; background:var(--bg-raised,#fff); border:1px solid var(--ink-200,#e5e1d8); }
+  .sc-b-hint { align-self:center; background:var(--gold-50,#fdf8ec); border:1px dashed var(--gold-300,#e6cf94); font-style:italic; }
+  .sc-itk { font-size:var(--fs-xs); color:var(--ink-600,#6b6555); font-weight:600; margin-top:4px; }
+</style>
 <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
 <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
 <style>
@@ -114,6 +124,14 @@
     </nav>
 
     <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
+    <!-- Trabalho MULTI-INTERAÇÃO (kind=scenario): a configuração vai para o estúdio. -->
+    <div class="card hidden" id="cenario-scenario-panel">
+      <h3 class="card-title">Interações (cenário multi-interação)</h3>
+      <p class="card-sub">Este é um trabalho <strong>multi-interação</strong>. Configure aqui as personas, a sequência de interações e o PDF. A gestão de alunos e a avaliação seguem nas abas ao lado.</p>
+      <div id="studio-mount"></div>
+    </div>
+    <!-- Config da ENTREVISTA legada (kind=interview). Ocultada em trabalhos scenario. -->
+    <div id="cenario-interview-config">
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
       <p class="card-sub" id="enunciado-status">—</p>
@@ -244,6 +262,7 @@
       </div>
       <p class="card-sub" style="margin-top: var(--sp-2)">Salva de uma vez o modo de interação, a voz, a identidade, o nº de perguntas e a espontaneidade. O <strong>entrevistador</strong> (galeria ou avançado) e o <strong>enunciado</strong> são salvos à parte, nos próprios cards.</p>
     </div>
+    </div><!-- /cenario-interview-config -->
     </div><!-- /tab-cenario -->
 
     <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
@@ -449,6 +468,8 @@
   </div>
 </dialog>
 
+<script src="/static/js/studio.js"></script>
+<script src="/static/js/scenarioCockpit.js"></script>
 <script>
 const workToken = location.pathname.split('/').filter(Boolean)[1];
 
@@ -468,6 +489,34 @@ async function load() {
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('work-name').textContent = j.work.name;
   document.getElementById('tb-context').textContent = j.work.name;
+
+  // Trabalho multi-interação (coexistência): a aba "Cenário" vira "Interações" e
+  // aponta para o estúdio escopado ao trabalho; a config de entrevista some.
+  // Alunos/Avaliação/Notas seguem reusadas. A config de entrevista (oculta) ainda
+  // é populada abaixo sem efeito visível.
+  if (j.work.kind === 'scenario') {
+    document.getElementById('tab-btn-cenario').textContent = 'Interações';
+    document.getElementById('cenario-interview-config').classList.add('hidden');
+    document.getElementById('cenario-scenario-panel').classList.remove('hidden');
+    if (window.mountStudio && !window.__studioMounted) {
+      window.__studioMounted = true;
+      window.mountStudio({ root: document.getElementById('studio-mount'), workToken });
+    }
+    // Cockpit de cenário (lote-first) ocupa a aba "Alunos & avaliação"; as abas
+    // de avaliação/notas da entrevista somem (mundo isolado, sem risco à entrevista).
+    document.getElementById('tab-btn-alunos').textContent = 'Alunos & avaliação';
+    document.getElementById('tab-btn-avaliacao').style.display = 'none';
+    document.getElementById('tab-btn-notas').style.display = 'none';
+    const al = document.getElementById('tab-alunos');
+    if (al && !window.__scCockpitMounted) {
+      window.__scCockpitMounted = true;
+      [...al.children].forEach(c => c.classList.add('hidden'));   // some o conteúdo de entrevista (segue populado, sem efeito)
+      const m = document.createElement('div'); m.id = 'scenario-cockpit-mount'; al.appendChild(m);
+      if (window.mountScenarioCockpit) window.mountScenarioCockpit({ root: m, workToken });
+    }
+    const curTab = document.querySelector('.tab-btn.is-active')?.dataset.tab;
+    if (curTab === 'avaliacao' || curTab === 'notas') setTab('alunos');
+  }
 
   const enunciadoUrl = `/w/${encodeURIComponent(workToken)}/enunciado`;
   document.getElementById('enunciado-status').innerHTML = j.work.has_enunciado

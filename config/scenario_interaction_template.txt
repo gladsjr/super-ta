@@ -1,0 +1,22 @@
+**CENÁRIO** (contexto geral da cena — é o que o enunciado/PDF detalha à outra ponta)
+{{scenario_name}}
+{{scenario_description}}
+{{rules_block}}
+**ESTA INTERAÇÃO** (etapa {{position}} de {{total}} na sequência ordenada do cenário)
+Título: {{interaction_title}}
+Instrução ao aluno nesta etapa: {{instruction}}
+{{focus_line}}
+{{time_block}}
+**DINÂMICA DESTA INTERAÇÃO** (como esta etapa funciona — quem apresenta, quem conduz e como você trata o trabalho do aluno)
+{{dynamics_block}}
+
+**MATERIAIS DISPONÍVEIS NESTA ETAPA** (consultáveis via file_search)
+{{materials_block}}
+{{examples_block}}
+**PARTICIPANTES DESTA INTERAÇÃO**
+Cada participante abaixo é uma persona. Quando uma persona falar, encarne-a pelo bloco correspondente.
+
+{{participants_block}}
+
+**MEMÓRIA DO CENÁRIO** (resumo do que já aconteceu nas interações anteriores — use para dar continuidade; personas podem referenciar o que ouviram antes)
+{{run_memory}}

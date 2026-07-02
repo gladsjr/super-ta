@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ORATIA — Cenário</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+<style>
+  .wrap { max-width: 760px; margin: 0 auto; padding: var(--sp-4) var(--sp-4) 56px; }
+  .rn-tabs { display:flex; gap:6px; flex-wrap:wrap; margin: var(--sp-3) 0; }
+  .rn-tab { font-size: var(--fs-xs); padding:6px 12px; border-radius:999px; border:1px solid var(--ink-200); color: var(--ink-600); background: var(--bg-raised,#fff); cursor:pointer; }
+  .rn-tab.active { background: var(--ink-900,#1c1a17); color:#fff; border-color: var(--ink-900,#1c1a17); }
+  .rn-tab.done { color: var(--ink-700); border-color: var(--accent-300,#9ed8cc); }
+  .rn-tab.locked { color: var(--ink-300,#bbb); cursor:not-allowed; background: var(--bg-muted,#f4f2ec); }
+  .transcript { display:flex; flex-direction:column; gap: var(--sp-2); padding: var(--sp-2); background: var(--bg-muted,#f7f5ef); border-radius: var(--r-sm,6px); }
+  .t-scenario { font-weight:600; background: var(--bg-raised,#fff); border:1px solid var(--ink-200); border-radius: var(--r-sm,6px); padding: var(--sp-2); white-space:pre-wrap; }
+  .t-interaction { font-size: var(--fs-sm); color: var(--ink-700); background: var(--gold-50,#fdf8ec); border:1px solid var(--gold-300,#e6cf94); border-radius: var(--r-sm,6px); padding: var(--sp-2); }
+  .t-interaction .meta { color: var(--ink-500); font-size: var(--fs-xs); margin-top:2px; }
+  .bubble { padding: var(--sp-2) var(--sp-3); border-radius:12px; max-width:85%; } .b-name { font-size: var(--fs-xs); color: var(--ink-500); margin-bottom:2px; }
+  .b-persona { background: var(--bg-raised,#fff); border:1px solid var(--ink-200); align-self:flex-start; }
+  .b-student { background: var(--accent-100, #d8efe9); align-self:flex-end; }
+  .b-aside { align-self:center; max-width:92%; font-size: var(--fs-sm); font-style:italic; color: var(--ink-600); background: var(--gold-50,#fdf8ec); border:1px dashed var(--gold-300,#e6cf94); border-radius:10px; }
+  .runner-input { display:flex; gap: var(--sp-2); margin-top: var(--sp-3); align-items:flex-end; } .runner-input textarea { flex:1; min-height:90px; resize:vertical; }
+  .task-note { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--accent-50,#eef8f4); border:1px solid var(--accent-300,#9ed8cc); border-radius: var(--r-sm,6px); font-size: var(--fs-sm); color: var(--ink-800); }
+  .rn-controls { display:flex; gap: var(--sp-2); margin-top: var(--sp-2); align-items:center; flex-wrap:wrap; }
+  .empty { color: var(--ink-500); padding: var(--sp-4); text-align:center; }
+  .rn-thinking { color: var(--ink-500); font-style:italic; padding: var(--sp-1) var(--sp-2); }
+  /* Balão de DICA (fora do role-play): fora de escopo / tempo esgotado. */
+  .b-hint { align-self:center; max-width:92%; font-size: var(--fs-sm); background: var(--gold-50,#fdf8ec); border:1px solid var(--gold-300,#e6cf94); border-left:4px solid var(--gold-500,#caa53d); border-radius:10px; padding: var(--sp-2) var(--sp-3); }
+  .b-hint .b-name { color: var(--ink-700); font-weight:600; margin-bottom:2px; }
+  /* Painel recolhível de regras (premissas + fora de escopo), no topo. */
+  .rules-panel { margin: var(--sp-3) 0 0; border:1px solid var(--ink-200); border-radius: var(--r-sm,6px); background: var(--bg-raised,#fff); padding: var(--sp-2) var(--sp-3); }
+  .rules-panel > summary { cursor:pointer; font-weight:600; font-size: var(--fs-sm); color: var(--ink-800); }
+  .result-panel { border-color: var(--accent-300,#9ed8cc); background: var(--accent-50,#eef8f4); }
+  .rules-panel .rule-h { font-size: var(--fs-xs); text-transform:uppercase; letter-spacing:.05em; color: var(--ink-600); margin-top: var(--sp-2); }
+  .rules-panel .rule-b { white-space:pre-wrap; font-size: var(--fs-sm); color: var(--ink-800); }
+  /* Cronômetro da etapa. */
+  .it-timer { font-variant-numeric: tabular-nums; font-size: var(--fs-sm); padding:2px 10px; border-radius:999px; border:1px solid var(--ink-200); color: var(--ink-700); background: var(--bg-muted,#f4f2ec); }
+  .it-timer.low { color:#8a4f10; border-color:#e6cf94; background:#fdf8ec; }
+  .it-timer.over { color:#fff; background:#b4453a; border-color:#b4453a; }
+  /* Área de espera/pausa do turno (a persona respondendo / pausado). */
+  .rn-wait { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding: var(--sp-1) var(--sp-2); }
+  /* Tela de conclusão do cenário. */
+  .final-panel { margin: var(--sp-3) 0 0; padding: var(--sp-4); border:1px solid var(--accent-300,#9ed8cc); background: var(--accent-50,#eef8f4); border-radius: var(--r-sm,6px); text-align:center; }
+  .final-panel h2 { margin:0 0 var(--sp-2); }
+  .final-panel p { margin: var(--sp-1) 0; color: var(--ink-800); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title" style="margin:0 0 var(--sp-1)">Cenário</h1>
+  <p class="card-sub" id="subtitle"></p>
+  <div id="root"><div class="empty">Carregando…</div></div>
+</div>
+<script>
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TOKEN = (location.pathname.match(/\/s\/([0-9a-f]{12})/i) || [])[1] || '';
+const API = `/s/${TOKEN}/scenario`;
+// "Testar (rápido)" do professor: ?model=fast vem na URL e é repassado aos turnos
+// (o servidor só honra em submissão de teste). Aluno real abre sem isso.
+const MODELQ = new URLSearchParams(location.search).get('model') === 'fast' ? 'model=fast' : '';
+let SCEN = null, RUN = null, SELTAB = 0, IS_ADMIN = false, RESULT = null, PREPPING = false, CURRENT_SPEAKER = null;
+
+async function api(method, path, body) {
+  const r = await fetch(API + path, { method, headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+  return j;
+}
+const personaById = id => (SCEN?.personas || []).find(p => p.id === id);
+const hasWork = it => !!(it && RUN?.student_work && RUN.student_work[it.id]);
+// O prep (lê o material por inteiro e planeja a etapa) leva alguns segundos — em
+// vez de uma tela parada, mostra um progresso encadeado. setText recebe cada passo.
+const prepSteps = withWork => withWork
+  ? ['📖 a persona está lendo seu trabalho…', '🧠 planejando a conversa…', '✍️ preparando a abertura…']
+  : ['🧠 planejando a conversa…', '✍️ preparando a abertura…'];
+function cycleStatus(setText, withWork) {
+  const steps = prepSteps(withWork); let i = 0; setText(steps[0]);
+  const id = setInterval(() => { if (i < steps.length - 1) setText(steps[++i]); }, 3500);
+  return () => clearInterval(id);
+}
+
+async function boot() {
+  try {
+    const st = await api('GET', '/state');
+    if (!st.has_scenario) { document.getElementById('root').innerHTML = '<div class="empty">Este trabalho não tem um cenário configurado.</div>'; return; }
+    SCEN = st.scenario;
+    IS_ADMIN = !!st.is_admin;   // professor testando pela URL do aluno → atalho de IA
+    document.getElementById('title').textContent = SCEN.name || 'Cenário';
+    // ESQUELETO IMEDIATO (#48): renderiza já abas/contexto/card/tarefa com o que
+    // temos (o /state traz o cenário e, em resume, o run). Só a abertura da persona
+    // fica em estado de carregamento — o /start (lento) roda o prep em seguida.
+    const firstNeedsWork = !st.run && !!SCEN.interactions?.[0]?.includes_student_work;
+    PREPPING = (!st.run && !firstNeedsWork);   // abertura sendo preparada → esqueleto + controles travados (render cuida)
+    RUN = st.run || { interaction_index: 0, transcript: [], student_work: {}, artifact_acks: {}, done: false };
+    SELTAB = RUN.interaction_index ?? 0;
+    render();
+    let stop = () => {};
+    if (PREPPING) {
+      prepWaitBubble(SCEN.interactions[SELTAB]);   // bolha do opener (nome/ícone) + indicador
+      stop = cycleStatus(t => { const e = document.getElementById('rn-prep-ind'); if (e) e.textContent = t; }, false);
+    }
+    const j = await api('POST', '/start' + (MODELQ ? '?' + MODELQ : '')); // cria ou resume
+    stop(); PREPPING = false;
+    SCEN = j.scenario; RUN = j.run; SELTAB = RUN.interaction_index ?? 0;
+    document.getElementById('subtitle').textContent = j.resumed ? 'Você está retomando de onde parou.' : '';
+    try { RESULT = await api('GET', '/evaluation'); } catch (e) { RESULT = null; }   // devolutiva/nota, se publicadas
+    render();
+  } catch (e) { document.getElementById('root').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function segments() {
+  const intro = []; const segs = []; let cur = null;
+  for (const e of (RUN.transcript || [])) {
+    if (e.kind === 'interaction') { cur = { header: e, entries: [] }; segs.push(cur); }
+    else if (!cur) intro.push(e);
+    else cur.entries.push(e);
+  }
+  return { intro, segs };
+}
+function bubbleHtml(t) {
+  if (t.kind === 'scenario') return `<div class="t-scenario">${esc(t.text)}</div>`;
+  if (t.kind === 'interaction') return `<div class="t-interaction"><strong>${esc(t.text)}</strong>${t.meta?`<div class="meta">${esc(t.meta)}</div>`:''}</div>`;
+  if (t.kind === 'student') return `<div class="bubble b-student">${esc(t.text)}</div>`;
+  if (t.kind === 'hint') return `<div class="bubble b-hint"><div class="b-name">💡 ${esc(t.title || 'Dica')}</div>${esc(t.text)}</div>`;
+  if (t.kind === 'aside') return `<div class="bubble b-aside"><div class="b-name">${esc(t.name)} → ${esc(personaById(t.to)?.name||'persona')}</div>${esc(t.text)}</div>`;
+  return `<div class="bubble b-persona"><div class="b-name">${esc(t.icon||'')} ${esc(t.name)}</div>${esc(t.text)}</div>`;
+}
+function render() {
+  const total = (SCEN.interactions || []).length;
+  const cur = RUN.interaction_index ?? 0;
+  const done = !!RUN.done || cur >= total;
+  let tabs = (SCEN.interactions || []).map((it, i) => {
+    const locked = i > cur;
+    const cls = i === SELTAB ? 'active' : (i < cur ? 'done' : (locked ? 'locked' : ''));
+    const mark = i < cur ? '✓ ' : ((locked && !(PREPPING && i === SELTAB)) ? '🔒 ' : '');
+    return `<button class="rn-tab ${cls}" data-tab="${i}" ${locked?'disabled':''}>${mark}${i+1}. ${esc(it.title)}</button>`;
+  }).join('');
+  // Concluído: aba sintética de Conclusão (data-tab = total) — onde mora a tela final.
+  if (done) tabs += `<button class="rn-tab done ${SELTAB >= total ? 'active' : ''}" data-tab="${total}">🎉 Conclusão</button>`;
+  const { intro, segs } = segments();
+  const seg = segs[SELTAB];
+  const entries = (SELTAB === 0 ? intro : []).concat(seg ? [seg.header, ...seg.entries] : []);
+  const itAtSel = SCEN.interactions[SELTAB];
+  // Etapa sendo PREPARADA (boot/advance) conta como ATIVA, p/ mostrar o esqueleto
+  // completo (cabeçalho/tarefa/controles) já durante o preparo. #48/#49
+  const activeIdx = (PREPPING && SELTAB > cur && SELTAB < total) ? SELTAB : cur;
+  const isStudentStep = !done && SELTAB === activeIdx && itAtSel && itAtSel.kind === 'student';
+  const isExchangeStep = !done && SELTAB === activeIdx && itAtSel && itAtSel.kind === 'persona_exchange';
+  const viewingPast = SELTAB < cur;
+  // Cabeçalho/contexto ESTÁTICOS quando a etapa ainda não abriu (transcript sem o
+  // segmento): "Interação X de Y — título · tipo · personas" + (na 1ª) o contexto. #48
+  const staticHeader = (!seg && !done && itAtSel)
+    ? `${SELTAB === 0 && SCEN.description ? `<div class="t-scenario">${esc(SCEN.description)}</div>` : ''}<div class="t-interaction"><strong>Interação ${SELTAB+1} de ${total} — ${esc(itAtSel.title)}</strong>${itAtSel.header_meta ? `<div class="meta">${esc(itAtSel.header_meta)}</div>` : ''}</div>`
+    : '';
+  // Trabalho do aluno por interação: se a etapa pede e ainda não anexou, mostra o upload ANTES de liberar a resposta.
+  const needsWork = isStudentStep && itAtSel.includes_student_work && !hasWork(itAtSel);
+  // Material (artefato PDF) da etapa: o aluno LÊ (link) e confirma ("li o material")
+  // antes de responder. O ack fica no run (artifact_acks).
+  const artAcked = isStudentStep && itAtSel.artifact && !!(RUN.artifact_acks || {})[itAtSel.id];
+  const needsArtifact = isStudentStep && itAtSel.artifact && !artAcked;
+  const artLink = itAtSel?.artifact ? `${API}/interactions/${encodeURIComponent(itAtSel.id)}/artifact` : '';
+  const materialGate = `
+    <div class="rn-controls" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div class="task-note">📄 <strong>Material desta etapa:</strong> <a href="${artLink}" target="_blank" rel="noopener">abrir &ldquo;${esc(itAtSel?.artifact?.filename||'material')}&rdquo; (PDF)</a></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" id="rn-art-ack">✓ Li o material</button><span class="hint">leia o material acima — depois sua resposta é liberada</span></div>
+    </div>`;
+  const materialNote = (isStudentStep && itAtSel.artifact && artAcked)
+    ? `<div class="rn-controls"><span class="hint">📄 material: <a href="${artLink}" target="_blank" rel="noopener">${esc(itAtSel.artifact.filename)}</a> · ✓ lido</span></div>` : '';
+  // Uma vez anexado, o trabalho fica TRAVADO nesta etapa — a persona já o leu e
+  // planejou a conversa em cima dele; trocar no meio não faria sentido.
+  const sw = (isStudentStep && itAtSel.includes_student_work) ? (RUN.student_work || {})[itAtSel.id] : null;
+  const workLink = `${API}/interactions/${encodeURIComponent(itAtSel?.id)}/work-file`;
+  const workNote = sw
+    ? `<div class="task-note">📎 <strong>Trabalho entregue nesta etapa:</strong> ${sw.downloadable ? `<a href="${workLink}" target="_blank" rel="noopener">${esc(sw.filename)}</a>` : `${esc(sw.filename)}`}${sw.generated ? ` <span class="hint">(gerado no modo teste)</span>` : ''} — a persona já leu.</div>` : '';
+  // Tempo da etapa (cronômetro): só nas etapas student com limite definido.
+  const limitMin = (isStudentStep && itAtSel.time_limit_min) ? itAtSel.time_limit_min : 0;
+  const remMs = (isStudentStep && limitMin) ? remainingMsOf(seg?.header, limitMin) : null;
+  const overTime = remMs !== null && remMs <= 0;
+  // Tarefa da etapa (instrução ao aluno): aparece só no INÍCIO da etapa (some
+  // assim que o aluno manda a 1ª mensagem) — não fica seguindo a conversa.
+  const stepStarted = (seg?.entries || []).some(e => e.kind === 'student');
+  const taskNote = isStudentStep && itAtSel.instruction && !stepStarted
+    ? `<div class="task-note">📋 <strong>Sua tarefa nesta etapa:</strong> ${esc(itAtSel.instruction)}</div>` : '';
+  // Resultado publicado (devolutiva + nota, desacoplados): aparece quando o professor publica.
+  const dv = RESULT?.devolutiva, gr = RESULT?.grade;
+  const hasResult = !!(dv || gr);
+  const bullets = arr => (arr || []).map(x => '• ' + esc(x)).join('<br>');
+  const resultPanel = hasResult ? `
+    <details class="rules-panel result-panel" open>
+      <summary>📋 Seu resultado${gr ? ` · nota <strong>${gr.final ?? '—'}</strong>` : ''}</summary>
+      ${gr ? `<div class="rule-h">Nota</div><div class="rule-b"><strong style="font-size:1.2em">${gr.final ?? '—'}</strong> &nbsp; ${(gr.criteria || []).map(c => `<span class="it-timer" style="margin-right:4px">${esc(c.name)}: ${c.score ?? '—'}</span>`).join(' ')}</div>` : ''}
+      ${dv ? `<div class="rule-h">Devolutiva</div><div class="rule-b">${esc(dv.summary || '')}</div>
+        ${(dv.strengths || []).length ? `<div class="rule-h">O que sustentou bem</div><div class="rule-b">${bullets(dv.strengths)}</div>` : ''}
+        ${(dv.improvement_areas || []).length ? `<div class="rule-h">O que pode melhorar</div><div class="rule-b">${bullets(dv.improvement_areas)}</div>` : ''}
+        ${(dv.study_suggestions || []).length ? `<div class="rule-h">Sugestões de estudo</div><div class="rule-b">${bullets(dv.study_suggestions)}</div>` : ''}` : ''}
+    </details>` : '';
+  // Painel de regras (premissas + fora de escopo): aberto na 1ª etapa, sempre acessível.
+  const rulesPanel = (SCEN.out_of_scope || SCEN.premissas) ? `
+    <details class="rules-panel" ${cur===0&&!done?'open':''}>
+      <summary>ℹ️ Premissas e fora de escopo</summary>
+      ${SCEN.premissas ? `<div class="rule-h">Premissas</div><div class="rule-b">${esc(SCEN.premissas)}</div>` : ''}
+      ${SCEN.out_of_scope ? `<div class="rule-h">Fora do escopo</div><div class="rule-b">${esc(SCEN.out_of_scope)}</div>` : ''}
+    </details>` : '';
+  // Tela de conclusão: a aba sintética "Conclusão" (SELTAB === total) substitui o
+  // transcript vazio que aparecia ao terminar (interaction_index passa de total).
+  const showConclusion = done && SELTAB >= total;
+  const finalPanel = showConclusion ? `
+    <div class="final-panel">
+      <h2>🎉 Você concluiu o cenário!</h2>
+      <p>Você percorreu ${total === 1 ? 'a interação' : `as ${total} interações`}. Obrigado pela participação.</p>
+      ${hasResult
+        ? `<p>Seu resultado já está disponível — confira o painel <strong>“Seu resultado”</strong> no topo da página. 👆</p>`
+        : `<p class="hint">Seu professor ainda vai avaliar suas interações. Quando a devolutiva e a nota forem publicadas, elas aparecerão aqui — você pode voltar a esta página mais tarde, pelo mesmo link.</p>`}
+      <p class="hint">Use as abas acima para revisar qualquer etapa.</p>
+    </div>` : '';
+  const workBox = `
+      <div class="rn-controls" style="flex-direction:column;align-items:stretch;gap:6px">
+        <span class="hint">Esta etapa pede o seu trabalho — anexe-o (PDF) para a persona poder consultá-lo.</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="file" id="rn-work-file" accept=".pdf,.txt,.md"/><button class="btn btn-primary" id="rn-work-send">Anexar trabalho</button><span class="hint" id="rn-work-msg"></span></div>
+        ${IS_ADMIN ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-sm" id="rn-work-gen" title="(modo teste) gerar um trabalho plausível com IA a partir do enunciado e anexá-lo">⚙ gerar trabalho com IA</button><span class="hint">só no modo de teste do professor — usa o enunciado para criar um PDF de exemplo</span></div>` : ''}
+      </div>`;
+
+  document.getElementById('root').innerHTML = `
+    ${resultPanel}
+    ${rulesPanel}
+    <div class="rn-tabs">${tabs}</div>
+    ${showConclusion ? finalPanel : `
+    ${isStudentStep ? workNote : ''}
+    <div class="transcript" id="rn-transcript">${staticHeader}${entries.map(bubbleHtml).join('') || (staticHeader || PREPPING ? '' : '<div class="empty">—</div>')}</div>
+    ${isStudentStep ? taskNote : ''}
+    ${isStudentStep ? (needsWork ? workBox : (needsArtifact ? materialGate : (overTime ? `
+      <div class="rn-controls"><span class="hint">⏰ O tempo desta etapa terminou — a persona não responde mais.</span><button class="btn btn-primary" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : `
+      ${materialNote}
+      <div class="runner-input"><textarea class="textarea" id="rn-input" rows="4" placeholder="Sua resposta…"></textarea><button class="btn btn-primary" id="rn-send">Enviar</button></div>
+      <div class="rn-controls">${limitMin?`<span id="rn-timer" class="it-timer">⏰ —</span>`:''}${IS_ADMIN ? `<select class="select" id="rn-aiprofile" style="max-width:160px" title="(professor) perfil do aluno simulado"><option value="">perfil…</option><option value="domina">Domina</option><option value="vago">Vago / enrola</option><option value="inseguro">Inseguro</option><option value="contradiz">Contradiz</option></select><button class="btn btn-sm" id="rn-aigen" title="(professor) gerar uma mensagem plausível do aluno com IA — você revisa e envia">⚙ mensagem do aluno (IA)</button>` : ''}<button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>`))) : ''}
+    ${isExchangeStep ? `<div class="rn-controls"><span class="hint">As personas conversam entre si — leia e avance.</span><button class="btn" id="rn-advance">${cur>=total-1?'Concluir':'Avançar →'}</button></div>` : ''}
+    ${viewingPast ? `<div class="rn-controls"><span class="hint">Etapa concluída (somente leitura).${done ? ' Abra a aba <strong>🎉 Conclusão</strong>.' : ' Volte à aba atual para continuar.'}</span></div>` : ''}`}`;
+
+  document.querySelectorAll('.rn-tab').forEach(b => { if (!b.disabled) b.onclick = () => { SELTAB = +b.dataset.tab; render(); }; });
+  const adv = document.getElementById('rn-advance'); if (adv) adv.onclick = advance;
+  const send = document.getElementById('rn-send'); if (send) send.onclick = sendTurn;
+  const inp = document.getElementById('rn-input'); if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); } });
+  const wsend = document.getElementById('rn-work-send'); if (wsend) wsend.onclick = () => uploadWork(itAtSel.id);
+  const wgen = document.getElementById('rn-work-gen'); if (wgen) wgen.onclick = () => generateWork(itAtSel.id);
+  const aack = document.getElementById('rn-art-ack'); if (aack) aack.onclick = () => ackArtifact(itAtSel.id);
+  const aig = document.getElementById('rn-aigen'); if (aig) aig.onclick = aiGen;
+  clearTimer();
+  if (isStudentStep && seg && !PREPPING && limitMin && !needsWork && !needsArtifact && !overTime) startTimer(seg.header, limitMin);
+  // Durante o preparo da abertura, o esqueleto aparece mas os controles ficam
+  // travados (ainda não há fala da persona). #48/#49
+  if (PREPPING) { const i2 = document.getElementById('rn-input'); if (i2) i2.disabled = true; const s2 = document.getElementById('rn-send'); if (s2) s2.disabled = true; const av = document.getElementById('rn-advance'); if (av) av.disabled = true; }
+}
+// "Li o material": registra o aceite (libera responder na etapa) e re-renderiza.
+async function ackArtifact(iid) {
+  try { const j = await api('POST', `/interactions/${encodeURIComponent(iid)}/artifact/ack`); if (j.run) RUN = j.run; render(); }
+  catch (e) { alert(e.message); }
+}
+// ===== cronômetro da etapa (wall-clock; congela enquanto a persona processa) =====
+// PAUSE_REQUESTED: o aluno pediu para pausar (sair) antes da resposta aparecer.
+// AWAITING_REVEAL: a resposta já está pronta, mas segurada até ele clicar continuar.
+// HELD_RUN: o run com a resposta segurada (só vira RUN ao continuar).
+let TIMER_ID = null, TURN_INFLIGHT = false, PAUSE_REQUESTED = false, AWAITING_REVEAL = false, HELD_RUN = null;
+function clearTimer() { if (TIMER_ID) { clearInterval(TIMER_ID); TIMER_ID = null; } }
+function remainingMsOf(header, limitMin) {
+  if (!header?.started_at || !limitMin) return null;
+  return limitMin * 60000 - (Date.now() - Date.parse(header.started_at) - (header.paused_ms || 0));
+}
+const fmtClock = sec => `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`;
+function startTimer(header, limitMin) {
+  clearTimer();
+  const el = document.getElementById('rn-timer'); if (!el || !header?.started_at) return;
+  const tick = () => {
+    if (TURN_INFLIGHT) return;                       // congela: a latência da persona não consome o tempo
+    const rem = remainingMsOf(header, limitMin);
+    if (rem <= 0) { el.textContent = '⏰ tempo esgotado'; el.className = 'it-timer over'; clearTimer(); render(); return; }
+    const sec = Math.round(rem/1000);
+    el.textContent = `⏰ ${fmtClock(sec)}`;
+    el.className = 'it-timer' + (rem <= 120000 ? ' low' : '');
+  };
+  tick(); TIMER_ID = setInterval(tick, 1000);
+}
+// (professor) preenche a caixa com uma resposta plausível do aluno gerada por IA.
+async function aiGen() {
+  const inp = document.getElementById('rn-input'), btn = document.getElementById('rn-aigen'); if (!inp) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⚙ gerando…'; }
+  const profile = document.getElementById('rn-aiprofile')?.value || '';
+  try { const j = await api('POST', '/simulate-student', { profile }); inp.value = j.text || ''; inp.focus(); }
+  catch (e) { alert(e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '⚙ mensagem do aluno (IA)'; } }
+}
+async function uploadWork(iid) {
+  const fileEl = document.getElementById('rn-work-file'); const msg = document.getElementById('rn-work-msg');
+  if (!fileEl?.files[0]) { if (msg) msg.textContent = 'escolha um arquivo'; return; }
+  const stop = cycleStatus(t => { if (msg) msg.textContent = t; }, true);
+  const fd = new FormData(); fd.append('file', fileEl.files[0]);
+  try {
+    const r = await fetch(`${API}/interactions/${encodeURIComponent(iid)}/work`, { method: 'POST', body: fd });
+    const j = await r.json().catch(() => ({})); stop(); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    if (j.run) RUN = j.run; render();
+  } catch (e) { stop(); if (msg) msg.textContent = e.message; }
+}
+// Modo teste: gera o trabalho do aluno por IA (a partir do enunciado) e anexa.
+async function generateWork(iid) {
+  const msg = document.getElementById('rn-work-msg'); const btn = document.getElementById('rn-work-gen');
+  if (btn) btn.disabled = true;
+  const stop = cycleStatus(t => { if (msg) msg.textContent = '⚙ ' + t; }, true);
+  try {
+    const r = await fetch(`${API}/interactions/${encodeURIComponent(iid)}/work-generate` + (MODELQ ? '?' + MODELQ : ''), { method: 'POST' });
+    const j = await r.json().catch(() => ({})); stop(); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    if (j.run) RUN = j.run; render();
+  } catch (e) { stop(); if (btn) btn.disabled = false; if (msg) msg.textContent = e.message; }
+}
+function thinking(on) { const t = document.getElementById('rn-transcript'); if (!t) return; t.querySelector('.rn-thinking')?.remove(); if (on) { t.insertAdjacentHTML('beforeend', '<div class="rn-thinking">⏳ aguarde…</div>'); t.scrollTop = t.scrollHeight; } }
+// Bolha "preparando" já com o nome/ícone de quem vai ABRIR a etapa — feedback rico
+// durante o prep. (A fala em si não strema token-a-token: o "opening" é o último
+// campo que o prep gera, derivado do plano inteiro.) #49
+function prepWaitBubble(it) {
+  const t = document.getElementById('rn-transcript'); if (!t || !it) return;
+  const p = it.opener_persona_id ? personaById(it.opener_persona_id) : null;
+  t.querySelector('.rn-wait')?.remove(); t.querySelector('.rn-thinking')?.remove();
+  const nameHtml = p ? `<div class="b-name">${esc(p.icon||'')} ${esc(p.name)}</div>` : '';
+  t.insertAdjacentHTML('beforeend', `<div class="bubble b-persona">${nameHtml}<span class="rn-thinking" id="rn-prep-ind">✍️ preparando a abertura…</span></div>`);
+  t.scrollTop = t.scrollHeight;
+}
+function setStatus(msg, partial) {
+  const t = document.getElementById('rn-transcript'); if (!t) return;
+  t.querySelector('.rn-thinking')?.remove(); t.querySelector('.rn-partial')?.remove();
+  if (partial) t.insertAdjacentHTML('beforeend', `<div class="bubble b-persona rn-partial">${esc(partial)}</div>`);
+  else if (msg) t.insertAdjacentHTML('beforeend', `<div class="rn-thinking">${esc(msg)}</div>`);
+  t.scrollTop = t.scrollHeight;
+}
+// Indicador de espera do turno. Enquanto a persona responde, o aluno pode PAUSAR
+// (sair); ao voltar, clica "continuar" e a resposta aparece — o relógio fica
+// congelado o tempo todo (a pausa não consome o tempo dele).
+function renderWait() {
+  const t = document.getElementById('rn-transcript'); if (!t) return;
+  t.querySelector('.rn-thinking')?.remove(); t.querySelector('.rn-partial')?.remove(); t.querySelector('.rn-wait')?.remove();
+  let html;
+  if (AWAITING_REVEAL) html = `<div class="rn-wait"><span class="rn-thinking">⏸ Pausado — a resposta da persona está pronta.</span><button class="btn btn-sm" id="rn-continue">▶ continuar</button></div>`;
+  else if (PAUSE_REQUESTED) html = `<div class="rn-wait"><span class="rn-thinking">⏸ Pausado — pode sair; ao voltar, clique continuar (o relógio está parado).</span></div>`;
+  else html = `<div class="rn-wait"><span class="rn-thinking">✍️ a persona está respondendo…</span><button class="btn btn-sm" id="rn-pause" title="pausar o relógio e ver a resposta só quando você voltar">⏸ pausar e sair</button></div>`;
+  t.insertAdjacentHTML('beforeend', html); t.scrollTop = t.scrollHeight;
+  const pb = document.getElementById('rn-pause'); if (pb) pb.onclick = () => { PAUSE_REQUESTED = true; renderWait(); };
+  const cb = document.getElementById('rn-continue'); if (cb) cb.onclick = continueReveal;
+  // Trava a caixa enquanto o turno está em espera (evita disparar outro turno).
+  const inp = document.getElementById('rn-input'); if (inp) inp.disabled = true;
+  const sb = document.getElementById('rn-send'); if (sb) sb.disabled = true;
+}
+async function continueReveal() {
+  RUN = HELD_RUN || RUN; AWAITING_REVEAL = false; PAUSE_REQUESTED = false; HELD_RUN = null;
+  try { const j = await api('POST', '/reveal'); if (j.run) RUN = j.run; } catch (e) {}  // credita a pausa no relógio (server)
+  TURN_INFLIGHT = false; SELTAB = RUN.interaction_index ?? SELTAB; render();
+}
+function handleSSE(chunk) {
+  const ev = (chunk.match(/event: (.+)/) || [])[1];
+  const dl = (chunk.match(/data: (.+)/) || [])[1];
+  let data = {}; try { data = JSON.parse(dl || '{}'); } catch (e) {}
+  if (ev === 'thinking' || ev === 'responding') renderWait();
+  else if (ev === 'speaker') {
+    // Quem fala neste turno (chega antes da message). Se a bolha já nasceu sem
+    // cabeçalho (corrida), adiciona o nome/ícone da persona.
+    CURRENT_SPEAKER = data.persona_id || null;
+    const sb = document.querySelector('#rn-transcript .rn-stream-txt');
+    if (sb && CURRENT_SPEAKER) { const bub = sb.closest('.bubble'); const p = personaById(CURRENT_SPEAKER); if (bub && p && !bub.querySelector('.b-name')) bub.insertAdjacentHTML('afterbegin', `<div class="b-name">${esc(p.icon||'')} ${esc(p.name)}</div>`); }
+  }
+  else if (ev === 'message_delta') {
+    // Fala da persona em STREAMING (token a token), como o assistente/voz. Se o
+    // aluno pediu pausa, a resposta fica segurada — não revela aqui.
+    if (PAUSE_REQUESTED || AWAITING_REVEAL) return;
+    const t = document.getElementById('rn-transcript'); if (!t) return;
+    t.querySelector('.rn-wait')?.remove(); t.querySelector('.rn-thinking')?.remove();
+    let b = t.querySelector('.rn-stream-txt');
+    if (!b) {
+      const p = CURRENT_SPEAKER ? personaById(CURRENT_SPEAKER) : null;
+      const nameHtml = p ? `<div class="b-name">${esc(p.icon||'')} ${esc(p.name)}</div>` : '';
+      t.insertAdjacentHTML('beforeend', `<div class="bubble b-persona">${nameHtml}<div class="rn-stream-txt"></div></div>`); b = t.querySelector('.rn-stream-txt');
+    }
+    b.textContent += (data.delta || ''); t.scrollTop = t.scrollHeight;
+  }
+  else if (ev === 'done') {
+    if (PAUSE_REQUESTED) { HELD_RUN = data.run; AWAITING_REVEAL = true; renderWait(); }   // segura a resposta; relógio fica congelado
+    else { TURN_INFLIGHT = false; RUN = data.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
+  }
+  else if (ev === 'error') { TURN_INFLIGHT = false; PAUSE_REQUESTED = false; AWAITING_REVEAL = false; HELD_RUN = null; setStatus(''); const t=document.getElementById('rn-transcript'); if (t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(data.error || 'erro')}</div>`); }
+}
+async function sendTurn() {
+  const inp = document.getElementById('rn-input'); const text = inp?.value.trim(); if (!text) return;
+  TURN_INFLIGHT = true; PAUSE_REQUESTED = false; AWAITING_REVEAL = false; HELD_RUN = null; CURRENT_SPEAKER = null;   // congela o cronômetro até a resposta aparecer
+  inp.value = ''; RUN.transcript.push({ speaker:'student', kind:'student', text }); render(); renderWait();
+  try {
+    const resp = await fetch(API + '/turn?stream=1' + (MODELQ ? '&' + MODELQ : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
+    if (!resp.ok || !resp.body) { const j = await resp.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + resp.status)); }
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf('\n\n')) >= 0) { handleSSE(buf.slice(0, i)); buf = buf.slice(i + 2); }
+    }
+  } catch (e) { TURN_INFLIGHT = false; setStatus(''); const t=document.getElementById('rn-transcript'); if (t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
+}
+async function advance() {
+  if (PREPPING) return;   // evita duplo-avanço enquanto a próxima etapa é preparada
+  // Transição IMEDIATA: já mostramos a próxima etapa (aba + transcript vazio) e o
+  // indicador de preparação aparece no contexto dela — não grudado na etapa
+  // anterior (#45). O /advance roda o prep da próxima etapa em seguida.
+  const cur = RUN.interaction_index ?? 0;
+  const total = (SCEN.interactions || []).length;
+  const hasNext = cur + 1 < total;
+  PREPPING = true;
+  if (hasNext) { SELTAB = cur + 1; render(); prepWaitBubble(SCEN.interactions[SELTAB]); }
+  const stop = cycleStatus(t => { const e = document.getElementById('rn-prep-ind'); if (e) e.textContent = t; }, false);
+  try { const j = await api('POST', '/advance' + (MODELQ ? '?' + MODELQ : '')); stop(); PREPPING = false; RUN = j.run; SELTAB = RUN.interaction_index ?? SELTAB; render(); }
+  catch (e) { stop(); PREPPING = false; if (hasNext) SELTAB = cur; render(); const t=document.getElementById('rn-transcript'); if(t) t.insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); }
+}
+boot();
+</script>
+</body>
+</html>

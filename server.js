@@ -30,9 +30,13 @@ import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
+import scenarioRoutes from "./routes/scenarios.js";
+import scenarioStudentRoutes from "./routes/scenarioStudent.js";
+import scenarioCockpitRoutes from "./routes/scenarioCockpit.js";
 import oralExamRoutes from "./routes/oralExam.js";
 import { attachOralRelay } from "./lib/oralRealtime.js";
 import diagRoutes from "./routes/diag.js";
+import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
 
@@ -70,8 +74,12 @@ app.get("/me", meHandler);
 // montamos sem prefixo para preservar exatamente as URLs anteriores.
 app.use(staticRoutes);
 app.use(adminRoutes);
+app.use(scenarioCockpitRoutes); // /w/:t/scenario-runs|scenario-evaluations/* — cockpit do professor p/ cenários (requireAdmin por rota). Antes de workRoutes (paths específicos).
 app.use(workRoutes);
 app.use(interviewRoutes);
+app.use("/scenarios/api", requireAdmin); // gate de sessão SÓ na API de config do professor (path-scoped; não afeta o fluxo do aluno nem a página pública /scenarios).
+app.use(scenarioRoutes); // /scenarios/api/* (gateado acima). O dev server scenarios-dev.mjs monta sem gate (local).
+app.use(scenarioStudentRoutes); // /s/:submissionToken/scenario/* — fluxo do aluno (auth por token de submissão).
 app.use(oralExamRoutes); // /w/:t/oral/* e /s/:t/oral/* — prova oral (Realtime)
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 

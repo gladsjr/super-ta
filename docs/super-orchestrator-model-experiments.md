@@ -7,7 +7,11 @@ resposta** ao trocar o modelo forte por um mais barato/rápido, e quanto disso
 custa em **qualidade** — principalmente na capacidade de pegar contradições do
 aluno, que é a razão de existir da ferramenta.
 
-Data dos runs: 11–12/jun/2026. Harness usado: `tests/ab-orchestrator/`.
+Data dos runs A/B: 11–12/jun/2026 (harness `tests/ab-orchestrator/`, **texto**).
+Adendo de **custo em áudio real**: 24–25/jun/2026 (harness `tests/audio-e2e/`,
+entrevista inteira; ver seção própria abaixo). **Validação em produção real**
+(turma Mackenzie 06, 22 entrevistas): seção "Validação em PRODUÇÃO" abaixo — é a
+âncora mais forte e mostra que o número para orçar é **~$3,50/entrevista**.
 
 > **Aviso de confiança estatística.** Os runs de triagem têm amostra pequena
 > (3 entrevistas por configuração = "n=3"); o run inicial tem 6. São sinais
@@ -182,6 +186,181 @@ universalmente útil — ele rende onde o modelo ainda não saturou.**
 
 ---
 
+## Adendo: custo em ÁUDIO real — entrevista LEGADA de 6 perguntas (24–25/jun/2026)
+
+Os A/B acima são **texto** (harness `tests/ab-orchestrator/`) e comparam o custo
+**por turno**. Esta seção é complementar: o **custo absoluto de uma entrevista
+legada inteira em ÁUDIO**, do `/start` ao fim + avaliação, medido do **gasto real**
+em `work_cost_events` — **5 entrevistas por configuração**, 6 perguntas, aluno
+simulado pelo harness de áudio. Inclui prep, todos os turnos do orquestrador,
+STT, TTS, devolutiva e notas.
+
+**Atualização de preços (commit `eb99e8f`, 22/jun).** Mudou **só o preço do input
+cacheado**: de 50% → ~10% do input (desconto oficial de cache hit da OpenAI), nos
+três modelos. O `input` e o `output` **não mudaram** — e o `gpt-5.4` **continua
+sendo exatamente metade** do `gpt-5.5` em todos os eixos. (Os antigos 50%, = 5× o
+preço real de cache hit, faziam o medidor superfaturar ~28%.) Preços atuais:
+
+| Modelo | input | input cacheado (antes → agora) | output |
+|---|---|---|---|
+| `gpt-5.5` | 5,00 | 2,50 → **0,50** | 30,00 |
+| `gpt-5.4` | 2,50 | 1,25 → **0,25** | 15,00 |
+| `gpt-5.4-mini` | 0,75 | 0,375 → **0,075** | 4,50 |
+
+Efeito vs. os runs A–C (que usaram o cacheado a 50%): o **piso** fica um pouco
+mais barato; o **teto** (recálculo cache-frio) usa o delta `input − cacheado` —
+para o `gpt-5.4`, **2,50 − 0,25 = 2,25/Mtok** (e não 1,00, erro que subestimava o
+teto numa primeira versão deste adendo).
+
+### Conceito novo: PISO × TETO (o ritmo do aluno move o custo)
+
+O custo por turno do orquestrador é dominado pelo **input** (o contexto relido a
+cada turno), e o prompt caching desconta ~90% desse input **enquanto o cache
+estiver quente**. O cache tem TTL curto (~5–10 min de inatividade):
+
+- **PISO** — turnos colados (o harness responde em segundos): o cache fica
+  quente, o input sai barato. Melhor caso / **ritmo de laboratório**.
+- **TETO** — **ritmo humano**: o aluno pausa 30s–3min entre respostas; esse gap
+  **expira o cache** e o turno seguinte paga o contexto inteiro a preço cheio.
+  Recalculado tratando cada token cacheado como cache-frio. É a **projeção
+  realista para a aula** (e o número para orçar). *Esta dimensão não existia nos
+  A/B de texto, que rodam colados.*
+
+### `gpt-5.5` medium (default) × `gpt-5.4` high — 5 entrevistas de voz cada
+
+| | PISO (cache quente) | TETO (ritmo humano) | out tok do orquestrador / entrevista |
+|---|---|---|---|
+| `gpt-5.5` medium (produção) | **$1,52** | **$2,69** | ~5.840 |
+| `gpt-5.4` esforço alto | **$1,01** | **$1,72** | ~10.870 |
+
+O `gpt-5.4/high` sai **~34% mais barato no piso e ~36% no teto** — apesar de
+**raciocinar ~2× mais** (o dobro de tokens de output). Como o `gpt-5.4` é metade
+do preço do `gpt-5.5` no input (e o input/contexto domina o custo do turno), o
+líquido cai mesmo o `5.4` gerando mais texto interno. Coerente com o Run C
+(texto): é o esforço alto que torna o `5.4` competitivo.
+
+### Híbrido — só o orquestrador vira `gpt-5.4` high (prep e avaliação ficam em `gpt-5.5`)
+
+Estimativa **composta** dos componentes reais dos dois lotes (prep + avaliação do
+braço `5.5`; orquestrador do braço `5.4/high`):
+
+| | por entrevista | economia vs produção |
+|---|---|---|
+| PISO | $1,52 → **$1,39** | $0,13 (**9%**) |
+| TETO | $2,69 → **$2,12** | $0,57 (**21%**) |
+
+A economia mora no **teto**: o orquestrador sozinho custa **$1,82/entrevista** no
+teto em `5.5`, contra **$1,26** em `5.4/high`. O híbrido captura **~3/5** da
+economia do "tudo-`5.4`" no teto ($2,69 → $2,12 vs $1,72 do tudo-`5.4`), mas
+**preserva o `gpt-5.5` onde a qualidade tende a importar mais**: o **prep**
+(leitura profunda e única do trabalho — grounding/contradições) e a **avaliação**
+(notas/devolutiva). Só o **condutor por turno** vira o modelo barato.
+
+**Turma de 30 alunos (teto):** ~$81 (`5.5`) → **~$64 (híbrido)** → ~$52 (tudo-`5.4`).
+
+### Qualidade — ainda NÃO re-medida em áudio
+Estes números são **só custo**. A qualidade do `gpt-5.4/high` foi medida em
+**texto** no Run C (empate técnico por turno; fechou quase todo o buraco de
+contradições: 14/2 → 10/7). Uma checagem de qualidade **específica do áudio** /
+da config híbrida **não foi feita** — recomendada antes de qualquer troca,
+sobretudo porque o `5.4/high` raciocina 2× mais (pode mudar a condução para
+melhor ou pior).
+
+### Ressalvas
+- **n=5** por configuração; o **híbrido é estimativa composta** (não rodei a
+  config exata — prep `5.5` + orquestrador `5.4/high` no mesmo run).
+- O **teto** é projeção (recálculo cache-frio), não um run com pausas reais.
+- O braço `5.5` rodou no esforço **default (= medium)**; o `5.4` em **high**.
+- Lotes em `superta_claude`: `95b0c3df6278` (`5.5` medium) e `41392d188ac6`
+  (`5.4`/high). Reproduzir: `node tests/audio-e2e/run.mjs --base <url> --work
+  <token> --persona <perfil> --pdf <trabalho>` (5×), depois somar `work_cost_events`
+  por submissão.
+
+---
+
+## Validação em PRODUÇÃO real — turma "Mackenzie 06" (06–16/jun/2026)
+
+Relatório gerado pelo Replit sobre uso **real, em produção** (`super-ta.replit.app`),
+com alunos e trabalhos reais — a **âncora mais forte** que temos. Trabalho
+`0f260729a5ed`, **22 entrevistas com custo** (27 envios), orçamento $100. Fonte:
+tabela `work_cost_events` do banco de produção; total confere com `works.spent_usd`.
+
+> Todos os valores **já abatem o cache** (eventos cacheados cobrados na tarifa
+> reduzida `input_cached_per_mtok`). **~62% dos tokens de entrada foram cache hit**
+> — bate com os ~65% da memória de custo do projeto.
+
+### Resumo
+| Indicador | Valor |
+|---|---|
+| Gasto total | **$77,02** (77% do orçamento de $100) |
+| Entrevistas com custo | 22 (de 27 envios) |
+| **Custo médio por entrevista** | **~$3,50** |
+| Tokens de entrada | 16,18 M (**62% em cache**) |
+| Tokens de saída | 631,6 k |
+| Caracteres de voz (TTS) | 168,8 k |
+
+### Gasto por dia (o gasto atrasa em relação ao envio)
+Os envios concentram-se em 06–09/jun, mas o **gasto se espalha** pelos dias
+seguintes (entrevistas/processamento acontecem depois do envio), com **pico em
+10/jun: $41,81**. Demais dias entre $0,10 e $7,84.
+
+### Gasto por etapa
+| Etapa | $ | % |
+|---|---:|---:|
+| 🟦 Durante a entrevista (SuperOrchestrator) | 58,40 | 75,8% |
+| 🟨 Pós-entrevista (avaliação + devolutiva + nota) | 11,75 | 15,2% |
+| 🟩 Preparação (antes da entrevista) | 6,87 | 8,9% |
+
+Detalhe do pós: devolutiva (StudentFeedback) **$6,35** · avaliação interna
+(InterviewEvaluator) **$4,53** · cálculo das notas (Grading) **$0,86**. O cálculo
+da nota em si é barato; o peso vem das **devolutivas** e **avaliações internas**
+(texto longo e cuidadoso por aluno).
+
+### Gasto por agente
+| Agente / componente | Eventos | $ | % |
+|---|---:|---:|---:|
+| SuperOrchestrator (condução turno a turno) | 232 | 53,43 | 69,4% |
+| StudentFeedback (devolutiva) | 145 | 6,35 | 8,2% |
+| InterviewEvaluator (avaliação interna) | 25 | 4,53 | 5,9% |
+| Voz / TTS | 365 | 4,22 | 5,5% |
+| PrepBuilder · buildPlan | 20 | 3,46 | 4,5% |
+| PrepBuilder · analyzeWork | 20 | 3,42 | 4,4% |
+| Grading (notas) | 40 | 0,86 | 1,1% |
+| Transcrição / STT | 283 | 0,54 | 0,7% |
+| Introdução | 68 | 0,19 | 0,2% |
+| Inteligibilidade de áudio | 11 | 0,02 | 0,0% |
+
+Por tipo de chamada: raciocínio (LLM) **$72,26** (561 ev.) · voz **$4,22** (365) ·
+transcrição **$0,54** (283).
+
+### Reconciliação com o adendo sintético (importante)
+
+O número que salta: o **real ($3,50/entrevista) fica ACIMA do meu teto sintético
+($2,69)**. **Não é discrepância de preço — é duração.** A produção roda entrevistas
+mais longas que as 6 perguntas do harness:
+
+| | sintético (gpt-5.5, 6 perguntas) | produção real |
+|---|---|---|
+| turnos do orquestrador / entrevista | ~6–8 | **232/22 ≈ 10,5** |
+| custo do orquestrador / entrevista | $1,82 (teto) | **$2,43** |
+| custo do orquestrador / **turno** | ~$0,26 | **~$0,23** |
+| total / entrevista | $2,69 (teto) | **$3,50** |
+
+O **custo por turno bate** (~$0,23 vs ~$0,26): o adendo sintético acertou a
+*física por turno*. O que empurra o total para $3,50 é a entrevista real ter
+**mais turnos** (follow-ups; o teto duro é `perguntas × 3`) e devolutivas mais
+longas. **Conclusão para orçamento: usar ~$3,50/entrevista, não os $2,69** — e o
+teto sintético deve ser lido por turno, não por entrevista.
+
+E a tese central se confirma: o **SuperOrchestrator domina (~69%)** — é onde a
+troca de modelo rende. Projetando o **híbrido** (orquestrador → `5.4/high`) sobre o
+gasto real, com a razão de teto medida ($1,26/$1,82 ≈ 0,69): orquestrador
+$2,43 → ~$1,68, total **$3,50 → ~$2,75/entrevista (−21%)**; o lote de 22, **$77 →
+~$61**. (Projeção grosseira; mesma ressalva de qualidade do adendo — não medida em
+áudio.)
+
+---
+
 ## Situação atual (jun/2026) e próximos passos
 
 - **Candidato líder:** `gpt-5.4` com esforço de raciocínio **alto**. Mais barato
@@ -195,6 +374,11 @@ universalmente útil — ele rende onde o modelo ainda não saturou.**
   contradições estão enumeradas em `tests/ab-orchestrator/fixtures.mjs`).
 - **Pendente — confirmação em amostra maior** (n=9+) do `5.4/high` antes de
   qualquer troca em produção.
+- **Âncora de produção (Mackenzie 06, 22 entrevistas):** ~**$3,50/entrevista**,
+  SuperOrchestrator ~**69%** do custo, ~62% de cache hit. Para orçar uma turma,
+  usar $3,50 (não os $2,69 do teto sintético, que é por entrevista de 6 perguntas
+  — produção roda ~10,5 turnos). O híbrido projetado sobre o real cai para
+  ~$2,75/entrevista (−21%).
 
 ### Nota de arquitetura (avaliada, não implementada)
 Cogitou-se separar parte do trabalho do super-orquestrador num **agente paralelo

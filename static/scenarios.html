@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ORATIA — Estúdio de cenários</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+<link rel="stylesheet" href="/static/css/studio.css"/>
+<style>
+  .wrap { max-width: 1000px; margin: 0 auto; padding: var(--sp-4); }
+  .head-row { display:flex; align-items:baseline; gap: var(--sp-3); flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head-row"><h1 style="margin:0">Estúdio de cenários</h1></div>
+  <p class="card-sub">Três passos, na ordem natural: <strong>Cenário</strong> (explicação geral + PDF) → <strong>Personas</strong> (biblioteca de templates e as personas escolhidas) → <strong>Interações</strong> (a sequência ordenada que o aluno percorre, referenciando as personas).</p>
+  <div id="studio-root"></div>
+</div>
+
+<script src="/static/js/studio.js"></script>
+<script>
+// Standalone: /w/:token/studio é escopado ao trabalho; /scenarios é o estúdio global.
+const WORK_TOKEN = (location.pathname.match(/^\/w\/([0-9a-f]{12})\/studio/i) || [])[1] || null;
+window.mountStudio({ root: document.getElementById('studio-root'), workToken: WORK_TOKEN })
+  .catch(e => { document.querySelector('.wrap').insertAdjacentHTML('beforeend', `<div style="color:var(--ink-500);padding:var(--sp-4)">Falha ao carregar: ${e.message}</div>`); });
+</script>
+</body>
+</html>
