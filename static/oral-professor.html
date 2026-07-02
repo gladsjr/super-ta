@@ -98,25 +98,23 @@
       </div>
 
       <div class="card">
-        <h3 class="card-title">Prova (PDF ou TXT de perguntas e respostas)</h3>
+        <h3 class="card-title">Prova — perguntas e gabarito <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
         <p class="card-sub" id="exam-status">—</p>
+        <!-- Fonte: sobe um PDF/TXT de perguntas e respostas; a extração popula a lista abaixo. -->
         <div class="row" style="align-items: center">
           <input type="file" id="exam-file" class="input" accept="application/pdf,.pdf,text/plain,.txt"/>
           <button class="btn" id="upload-btn" type="button">Enviar e extrair</button>
           <span class="hint" id="upload-msg"></span>
         </div>
-      </div>
-
-      <div class="card">
-        <h3 class="card-title">Perguntas <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
-        <p class="card-sub">Digite as perguntas e o gabarito, ou edite o que veio do arquivo. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
-        <div id="questions" class="q-list"></div>
-        <div class="row" style="margin-top: var(--sp-3)">
+        <!-- Ações da lista NO TOPO, para não obrigar a rolar até o fim só para salvar. -->
+        <div class="row" style="margin-top: var(--sp-3); align-items: center">
           <button class="btn btn-ghost btn-sm" id="q-add" type="button">+ adicionar pergunta</button>
           <span class="spacer"></span>
           <button class="btn btn-primary" id="q-save" type="button">Salvar perguntas</button>
           <span class="hint" id="q-msg"></span>
         </div>
+        <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas e o gabarito, ou edite o que veio do arquivo. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
+        <div id="questions" class="q-list"></div>
       </div>
     </div>
 
