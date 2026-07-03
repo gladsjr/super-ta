@@ -231,22 +231,35 @@
         ${fired ? `<div class="hint" style="margin-top:3px">${f.count} frame(s)${stamps}</div>` : ''}
       </div>`;
     }).join('');
-    // Mãos (MediaPipe): mostra presença; só sinaliza (vermelho) com ausência sustentada.
-    let handsHtml = '';
-    const h = p.flags.hands;
-    if (h) {
-      const fired = !!h.flag;
-      const bg = fired ? '#fdeaea' : '#eaf7ee', bd = fired ? '#e7b3b3' : '#9fd4af';
-      const stamps = (fired && (h.at || []).length) ? ` · trechos: ${h.at.map(s => `<a href="#" onclick="seekVideo(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}` : '';
-      handsHtml = `<div style="padding:8px 12px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:6px">
+    // Mãos e Enquadramento (sidecar MediaPipe). Diferente dos flags do YOLO, podem
+    // NÃO ter sido analisados (sidecar Python ausente) — aí mostramos "não analisado"
+    // em vez de "ok", para o painel não enganar.
+    const sideRow = (label, data, okText, badText, badHint) => {
+      if (!data) return `<div style="padding:8px 12px;border:1px solid var(--ink-200);background:var(--bg-muted);border-radius:var(--r-sm);margin-bottom:6px">
         <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
-          <span style="flex:1;font-weight:600">Mãos no quadro</span>
-          <strong style="white-space:nowrap">${fired ? 'ausência de ' + h.max_absence_sec + 's' : h.present_pct + '% do tempo'}</strong>
+          <span style="flex:1;font-weight:600">${label}</span>
+          <strong style="white-space:nowrap;color:var(--ink-500)">não analisado</strong>
+        </div></div>`;
+      const fired = !!data.flag;
+      const bg = fired ? '#fdeaea' : '#eaf7ee', bd = fired ? '#e7b3b3' : '#9fd4af';
+      const stamps = (fired && (data.at || []).length) ? ` · trechos: ${data.at.map(s => `<a href="#" onclick="seekVideo(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}` : '';
+      return `<div style="padding:8px 12px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:6px">
+        <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
+          <span style="flex:1;font-weight:600">${label}</span>
+          <strong style="white-space:nowrap">${fired ? badText(data) : okText(data)}</strong>
         </div>
-        ${fired ? `<div class="hint" style="margin-top:3px">mãos fora do quadro por um trecho contínuo${stamps}</div>` : ''}
+        ${fired ? `<div class="hint" style="margin-top:3px">${badHint}${stamps}</div>` : ''}
       </div>`;
-    }
-    el.innerHTML = rows + handsHtml + `<p class="hint" style="margin-top:var(--sp-2)">${p.frames} frames (1 a cada ${p.interval_sec}s) · ${p.model} · ${p.analyzed_at ? new Date(p.analyzed_at).toLocaleString('pt-BR') : ''}</p>`;
+    };
+    const handsHtml = sideRow('Mãos no quadro', p.flags.hands,
+      h => `${h.present_pct}% do tempo`,
+      h => `${h.present_pct}% do tempo`,
+      'mãos nem sempre visíveis (abaixo de 95% do tempo, ou fora do quadro por um trecho contínuo)');
+    const framingHtml = sideRow('Enquadramento (cabeça e tronco visíveis)', p.flags.framing,
+      f => `${f.well_pct}% bem enquadrado`,
+      f => `mal enquadrado por ${f.max_bad_sec}s`,
+      'cabeça/tronco fora do quadro (perto demais ou saiu) por um trecho contínuo');
+    el.innerHTML = rows + handsHtml + framingHtml + `<p class="hint" style="margin-top:var(--sp-2)">${p.frames} frames (1 a cada ${p.interval_sec}s) · ${p.model} · ${p.analyzed_at ? new Date(p.analyzed_at).toLocaleString('pt-BR') : ''}</p>`;
   }
 
   document.getElementById('eval-btn').onclick = async () => {
