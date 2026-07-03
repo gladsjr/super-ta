@@ -16,7 +16,7 @@
     @media (max-width: 760px) { .setup-grid { grid-template-columns: 1fr; gap: 4px; } }
     h1 { font-size: 22px; margin: 0 0 6px; }
     .sub { color: var(--ink-soft); margin: 0 0 20px; }
-    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 24px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 18px; }
     .btn { font: inherit; padding: 12px 22px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
     .btn.danger { background:#fff; color: var(--danger); border-color: var(--danger); }
     .btn:disabled { opacity:.5; cursor: default; }
@@ -34,18 +34,17 @@
     .banner.adjust { color:#7a4a12; background:#fff6e0; border-color:#ecc874; }
     .banner.wait { color:var(--ink-soft); background:#f1f3f5; }
     .note-warn { font-size:14px; line-height:1.45; background:#fff8e6; border:1px solid #f0d27a; border-radius:10px; padding:12px 14px; margin:14px 0; }
-    .consent { border:1px solid var(--line); border-radius:10px; padding: 14px 16px; max-height: 260px; overflow:auto; background:#fbfcfd; font-size: 14px; margin: 14px 0; }
+    .consent { border:1px solid var(--line); border-radius:10px; padding: 14px 16px; max-height: 360px; overflow:auto; background:#fbfcfd; font-size: 14px; margin: 14px 0; }
     .consent h4 { margin: 12px 0 4px; font-size: 14px; }
     .consent p, .consent li { line-height: 1.45; }
     .accept { display:flex; align-items:flex-start; gap:10px; margin: 6px 0 14px; cursor:pointer; }
     .accept input { margin-top: 3px; }
-    video { width: 100%; max-width: 320px; border-radius: 10px; background:#000; transform: scaleX(-1); display:block; margin: 0 auto 14px; }
+    video { width: 100%; max-width: 300px; border-radius: 10px; background:#000; transform: scaleX(-1); display:block; margin: 0 auto 10px; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Prova oral</h1>
-    <p class="sub">Uma conversa por voz, com a câmera ligada. O examinador faz as perguntas e você responde falando.</p>
 
     <div class="card">
       <div id="pre">
@@ -58,22 +57,21 @@
 
       <!-- Página 1: instruções (ler com calma) + exemplos -->
       <div id="instr" style="display:none">
-        <p style="margin-top:0">Ao começar, o examinador se apresenta e faz as perguntas; você responde <strong>falando</strong>. Pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</p>
-        <p style="background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:10px 12px; margin:10px 0"><strong>🎧 Use fones de ouvido.</strong> Evitam eco e garantem que o examinador entenda você — sem fones, o áudio da prova vaza pelo microfone e atrapalha a conversa.</p>
-        <p>Você vai se posicionar como nos exemplos abaixo: <strong>rosto e ombros centralizados</strong>, a cerca de <strong>1,5 m</strong> da câmera (do tronco até a cabeça), e <strong>mãos à mostra</strong>.</p>
-        <div style="display:flex; gap:10px; margin-top:12px">
+        <p style="margin-top:0; background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:8px 12px"><strong>🎧 Use fones de ouvido.</strong></p>
+        <p style="margin:8px 0"><strong>Posição:</strong> tronco à cabeça no quadro; ~1,5 m da câmera; mãos à mostra.</p>
+        <div style="display:flex; gap:10px; margin-top:10px; max-width:380px; margin-left:auto; margin-right:auto">
           <figure style="margin:0; flex:1"><img id="pose-a" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a-cap"></figcaption></figure>
           <figure style="margin:0; flex:1"><img id="pose-b" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b-cap"></figcaption></figure>
         </div>
-        <div class="note-warn"><strong>Importante:</strong> a prova <strong>não será interrompida</strong> se você sair da posição (ou se algo for detectado) durante a conversa. Mas isso fica registrado e o(a) <strong>professor(a) é avisado(a) na hora da avaliação</strong>. Mantenha a posição dos exemplos do início ao fim.</div>
+        <div class="note-warn"><strong>Importante:</strong> a prova não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
         <div class="banner wait" id="conn-banner" style="margin-bottom:14px">Testando a conexão…</div>
         <button class="btn" id="to-check-btn">Continuar</button>
       </div>
 
       <!-- Página 2: verificação de posição + silêncio (a prova começa sozinha) -->
       <div id="setup" style="display:none">
-        <p class="hint" style="text-align:center; margin-top:0">Posicione-se como nos exemplos. Quando a <strong>posição</strong> e o <strong>silêncio</strong> ficarem ok, a prova começa sozinha.</p>
-        <div style="display:flex; gap:10px; max-width:380px; margin:8px auto 14px">
+        <p class="hint" style="text-align:center; margin-top:0">Quando a <strong>posição</strong> e o <strong>silêncio</strong> ficarem ok, a prova começa sozinha.</p>
+        <div style="display:flex; gap:10px; max-width:300px; margin:6px auto 10px">
           <figure style="margin:0; flex:1"><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
           <figure style="margin:0; flex:1"><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
         </div>
@@ -97,7 +95,7 @@
         <video id="selfview" autoplay muted playsinline></video>
         <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
         <p class="hint" id="qinfo"></p>
-        <p class="hint">A prova <strong>encerra sozinha</strong> ao fim das perguntas e o vídeo é enviado automaticamente — é só aguardar. Se precisar de algo, é só <strong>falar com o examinador</strong>. Use <strong>"Encerrar agora"</strong> apenas para <strong>sair antes</strong> do fim.</p>
+        <p class="hint">A prova <strong>encerra sozinha</strong> no fim das perguntas. Use <strong>"Encerrar agora"</strong> apenas para sair antes.</p>
         <button class="btn danger" id="end-btn">Encerrar agora</button>
       </div>
 
@@ -322,21 +320,32 @@
       const people = dets.filter(d => (d.categories || []).some(c => c.categoryName === 'person' && c.score >= 0.5)).length;
       const L = (pr.landmarks && pr.landmarks[0]) || null;
 
-      // (1) TRONCO + CABEÇA — o essencial.
+      // (1) CABEÇA + FRENTE + TRONCO + DISTÂNCIA — o essencial, nesta ordem.
       if (!L) return { ok: false, guidance: 'Apareça na câmera, de frente — mostre o rosto e o tronco.' };
       const vis = i => (L[i].visibility != null ? L[i].visibility : 1);
       // Dentro do quadro DE VERDADE: a pose pode ser ESTIMADA fora da tela com
       // visibilidade alta, então checamos as coordenadas normalizadas também.
       const inFrame = i => L[i].x > 0.03 && L[i].x < 0.97 && L[i].y > 0.05 && L[i].y < 0.98;
-      // CABEÇA: nariz + os dois olhos visíveis E dentro do quadro, com folga no topo
-      // p/ a testa caber — senão "cabeça de fora, mas mãos no quadro" passava.
+
+      // CABEÇA no quadro: nariz + os dois olhos visíveis e dentro do quadro, com
+      // folga no topo p/ a testa — senão "cabeça de fora, mas mãos no quadro" passava.
       const head = vis(0) > 0.6 && vis(2) > 0.5 && vis(5) > 0.5 && inFrame(0) && L[0].y > 0.08;
-      // TRONCO: ombros visíveis e ao menos um dentro do quadro.
-      const shoulders = vis(11) > 0.5 && vis(12) > 0.5 && (inFrame(11) || inFrame(12));
       if (!head) return { ok: false, guidance: 'Mostre o ROSTO inteiro na câmera — sua cabeça precisa aparecer (não vale só as mãos).' };
-      if (!shoulders) return { ok: false, guidance: 'Enquadre do tronco (ombros) até a cabeça, como nos exemplos.' };
-      // Distância pela LARGURA DA FACE (orelha a orelha) — robusta mesmo com braço levantado.
-      const faceW = Math.abs(L[7].x - L[8].x);
+
+      // DE FRENTE (não de lado/3-4): as DUAS orelhas visíveis + nariz CENTRADO entre
+      // elas. De lado, a orelha de trás some e o nariz desloca — e é o que fazia a
+      // distância (largura da face) encolher e passar como "ok".
+      const earMid = (L[7].x + L[8].x) / 2, faceW = Math.abs(L[7].x - L[8].x);
+      const facingFront = vis(7) > 0.5 && vis(8) > 0.5 && faceW > 0.001 && Math.abs(L[0].x - earMid) < 0.30 * faceW;
+      if (!facingFront) return { ok: false, guidance: 'Fique DE FRENTE para a câmera, olhando para ela (não de lado).' };
+
+      // TRONCO: os DOIS ombros visíveis E dentro do quadro (não só um). Perto demais
+      // → os ombros saem do quadro → cai aqui.
+      const trunk = vis(11) > 0.5 && vis(12) > 0.5 && inFrame(11) && inFrame(12);
+      if (!trunk) return { ok: false, guidance: 'Mostre o TRONCO: os dois ombros precisam aparecer (afaste-se se estiver perto demais).' };
+
+      // DISTÂNCIA pela largura da face (orelha a orelha) — volta a valer agora que
+      // exigimos a frontalidade acima.
       if (faceW > FACE_MAX) return { ok: false, guidance: 'Afaste-se — você está perto demais; preciso ver do tronco até a cabeça.' };
       if (faceW < FACE_MIN) return { ok: false, guidance: 'Aproxime-se um pouco da câmera.' };
 
