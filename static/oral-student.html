@@ -97,11 +97,7 @@
         <video id="selfview" autoplay muted playsinline></video>
         <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
         <p class="hint" id="qinfo"></p>
-        <div style="margin:10px 0">
-          <button class="btn" id="nudge-btn" type="button">Já respondi ✓</button>
-        </div>
-        <p class="hint" id="nudge-hint">Terminou de responder e a examinadora não seguiu? Toque em <strong>"Já respondi"</strong> para avançar.</p>
-        <p class="hint">Ao terminar as perguntas, a prova <strong>encerra sozinha</strong> e o vídeo é enviado automaticamente — é só aguardar. Use <strong>"Encerrar agora"</strong> apenas se precisar <strong>sair antes</strong> do fim.</p>
+        <p class="hint">A prova <strong>encerra sozinha</strong> ao fim das perguntas e o vídeo é enviado automaticamente — é só aguardar. Se precisar de algo, é só <strong>falar com o examinador</strong>. Use <strong>"Encerrar agora"</strong> apenas para <strong>sair antes</strong> do fim.</p>
         <button class="btn danger" id="end-btn">Encerrar agora</button>
       </div>
 
@@ -329,9 +325,16 @@
       // (1) TRONCO + CABEÇA — o essencial.
       if (!L) return { ok: false, guidance: 'Apareça na câmera, de frente — mostre o rosto e o tronco.' };
       const vis = i => (L[i].visibility != null ? L[i].visibility : 1);
-      const head = vis(0) > 0.5;                          // nariz = cabeça
-      const shoulders = vis(11) > 0.5 && vis(12) > 0.5;   // ombros = topo do tronco
-      if (!head || !shoulders) return { ok: false, guidance: 'Enquadre do tronco até a cabeça, como nos exemplos.' };
+      // Dentro do quadro DE VERDADE: a pose pode ser ESTIMADA fora da tela com
+      // visibilidade alta, então checamos as coordenadas normalizadas também.
+      const inFrame = i => L[i].x > 0.03 && L[i].x < 0.97 && L[i].y > 0.05 && L[i].y < 0.98;
+      // CABEÇA: nariz + os dois olhos visíveis E dentro do quadro, com folga no topo
+      // p/ a testa caber — senão "cabeça de fora, mas mãos no quadro" passava.
+      const head = vis(0) > 0.6 && vis(2) > 0.5 && vis(5) > 0.5 && inFrame(0) && L[0].y > 0.08;
+      // TRONCO: ombros visíveis e ao menos um dentro do quadro.
+      const shoulders = vis(11) > 0.5 && vis(12) > 0.5 && (inFrame(11) || inFrame(12));
+      if (!head) return { ok: false, guidance: 'Mostre o ROSTO inteiro na câmera — sua cabeça precisa aparecer (não vale só as mãos).' };
+      if (!shoulders) return { ok: false, guidance: 'Enquadre do tronco (ombros) até a cabeça, como nos exemplos.' };
       // Distância pela LARGURA DA FACE (orelha a orelha) — robusta mesmo com braço levantado.
       const faceW = Math.abs(L[7].x - L[8].x);
       if (faceW > FACE_MAX) return { ok: false, guidance: 'Afaste-se — você está perto demais; preciso ver do tronco até a cabeça.' };
@@ -350,7 +353,8 @@
     // RUÍDO do ambiente: medidor CONTÍNUO, sempre visível no setup. Captação CRUA
     // (sem AGC/supressão) para refletir o ambiente real. Barra = nível instantâneo
     // (com movimento); cor/veredito/`noiseOk` = média suavizada (EMA), estável.
-    const NOISE_MAX_RMS = 0.05; // limiar de "barulhento" (heurístico, ajustável)
+    const NOISE_MAX_RMS = 0.035; // limiar de "barulhento" — mais sensível que antes (0.05),
+                                 // p/ aproximar da sensibilidade do examinador na prova (ajustável)
     let noiseOk = false, noiseStream = null, noiseCtx = null, noiseRAF = 0;
     async function startNoiseMeter() {
       try { noiseStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
@@ -589,11 +593,6 @@
 
     $('start-btn').onclick = start;
     $('end-btn').onclick = finish;
-    $('nudge-btn').onclick = () => {
-      // Válvula manual: avisa o servidor que o aluno terminou de falar, para
-      // destravar caso o detector de fim de turno não feche o turno sozinho.
-      try { if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'done_speaking' })); setStatus('…', 'live'); } } catch {}
-    };
     if (!SUB) { $('pre-err').textContent = 'Link inválido.'; $('start-btn').disabled = true; }
   </script>
 </body>
