@@ -434,11 +434,46 @@
       poseLm = handLm = objDet = null; visionReady = false;
     }
 
+    // Layer 2: durante a prova, checagem LEVE de presença (só a pose, ~1x a cada
+    // 2,5 s) alimenta o vigia de silêncio do servidor — presente = mais paciência;
+    // ausente (saiu do quadro) = age mais rápido. Libera mãos+objetos (não precisa
+    // ao vivo) e mantém só a pose. Sem visão → nenhum sinal, e o servidor assume
+    // "presente" (degradação segura). Só envia quando o estado MUDA.
+    let presenceTimer = 0, lastPresent = null;
+    function startPresenceWatch() {
+      try { handLm && handLm.close(); } catch {}
+      try { objDet && objDet.close(); } catch {}
+      handLm = objDet = null;
+      if (!poseLm) return;
+      const vid = $('selfview');
+      const tick = () => {
+        if (ended) return;
+        let present = lastPresent == null ? true : lastPresent;
+        try {
+          if (vid.videoWidth && vid.readyState >= 2) {
+            const pr = poseLm.detectForVideo(vid, performance.now());
+            present = !!(pr.landmarks && pr.landmarks[0]); // pose detectada = pessoa no quadro
+          }
+        } catch {}
+        if (present !== lastPresent) {
+          lastPresent = present;
+          try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'presence', present })); } catch {}
+        }
+        presenceTimer = setTimeout(tick, 2500);
+      };
+      tick();
+    }
+    function stopPresenceWatch() {
+      if (presenceTimer) { clearTimeout(presenceTimer); presenceTimer = 0; }
+      try { poseLm && poseLm.close(); } catch {}
+      poseLm = null;
+    }
+
     // Começa a prova de fato: grava o vídeo + conecta ao relay.
     function beginExam() {
       posLoop = false; // garante que o loop de posição parou
       stopNoiseMeter(); // libera o stream/contexto de áudio do medidor de ruído
-      stopVision();     // libera os modelos de visão
+      startPresenceWatch(); // Layer 2: mantém só a pose viva p/ sinal de presença
       show('live');
       $('selfview').srcObject = micStream;
       setStatus('Conectando…');
@@ -473,6 +508,7 @@
       ws.onerror = () => setStatus('Erro de conexão', 'err');
       ws.onclose = () => {
         if (ended) return;
+        stopPresenceWatch(); // libera a pose (Layer 2)
         setStatus('Conexão encerrada', 'err');
         salvageVideo(); // queda inesperada: sobe o vídeo parcial p/ não perder a gravação
       };
@@ -539,6 +575,7 @@
     function finish() {
       if (ended) return;
       ended = true;
+      stopPresenceWatch(); // libera a pose (Layer 2)
       try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'bye' })); } catch {}
       try { ws && ws.close(); } catch {}
       try { procNode && (procNode.onaudioprocess = null, procNode.disconnect()); } catch {}
