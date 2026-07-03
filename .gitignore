@@ -1,5 +1,6 @@
 .env
 node_modules/
+.pythonlibs/
 *.log
 .DS_Store
 data/submissions/*
