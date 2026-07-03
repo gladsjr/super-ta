@@ -32,7 +32,11 @@ test("propostas válidas são normalizadas (patch + persona add + interação co
     assert.equal(it.kind, "student");
     assert.equal(it.includes_student_work, false);   // default da consultoria
     assert.equal(it.time_limit_min, 10);
-    assert.equal(it.participants[0].role, "entrevista");
+    // Regra de domínio: em CONSULTORIA o aluno conduz e a persona é a FONTE, então
+    // um role "entrevista" proposto é normalizado para "fonte" (ver ScenarioAssistantAgent,
+    // interactionForms.js e o studio.js que força fonte na UI). O teste antes esperava
+    // o valor cru "entrevista"; o certo é o normalizado. [issue #68]
+    assert.equal(it.participants[0].role, "fonte");
     assert.equal(it.private_info[0].text, "usina entrega 80kW");
     assert.deepEqual(it.private_info[0].personas, ["Larissa"]);
 });

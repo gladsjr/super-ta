@@ -107,7 +107,9 @@ export async function seed({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // sanitizeLabel proíbe < > : " / \ | ? * — timestamp só com dígitos e hífen.
-        body: JSON.stringify({ name: `E2E Audio ${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}` }),
+        // kind EXPLÍCITO: na main o default de /admin/works virou "scenario" (cenários);
+        // este harness testa a ENTREVISTA (student.html, upload em #file), então força interview.
+        body: JSON.stringify({ name: `E2E Audio ${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`, kind: "interview" }),
     });
     const { work } = await expectJson(workRes, "create work");
     const workToken = work.work_token;
