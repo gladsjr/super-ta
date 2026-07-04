@@ -40,6 +40,19 @@ import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
 
+// Rede de segurança do processo. A causa raiz das quedas por conexão do banco é
+// tratada no pool (ver auth.js#pool.on('error')); estes handlers são defensivos,
+// para que qualquer falha inesperada fique registrada em vez de sumir no reinício
+// da VM. Em uncaughtException o processo fica em estado indefinido: registramos e
+// saímos (fail-fast) para a VM reiniciar limpo.
+process.on("unhandledRejection", (reason) => {
+    log.error("PROCESS", `unhandledRejection: ${reason?.stack || reason?.message || reason}`);
+});
+process.on("uncaughtException", (err) => {
+    log.error("PROCESS", `uncaughtException: ${err?.stack || err?.message || err}`);
+    process.exit(1);
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

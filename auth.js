@@ -6,13 +6,28 @@ import crypto from "crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import log from "./lib/logger.js";
 
 const { Pool } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// keepAlive mantém o TCP das conexões vivo, reduzindo a chance de o banco/rede
+// derrubar conexões ociosas durante operações longas (ex.: avaliação ~72s).
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  keepAlive: true,
+});
+
+// node-postgres: um cliente OCIOSO do pool continua ligado a um backend vivo e
+// pode emitir 'error' se a conexão cair (timeout do banco, blip de rede,
+// reciclagem). Sem este listener, esse 'error' vira "unhandled 'error' event" e
+// DERRUBA o processo inteiro (exit status 1). O pool já descarta o cliente
+// quebrado sozinho — aqui só registramos, sem relançar.
+pool.on("error", (err) => {
+  log.error("DB", `pool idle client error: ${err.message}`);
+});
 
 const PgSession = connectPgSimple(session);
 
