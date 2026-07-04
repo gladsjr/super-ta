@@ -1270,7 +1270,7 @@ function batchLine(batch, verbing, doneNoun) {
     ? ' · <strong>interrompida: orçamento esgotado</strong>'
     : (batch.stopped_reason ? ` · interrompida (${escapeHtml(batch.stopped_reason)})` : '');
   if (batch.running) {
-    return `⏳ ${verbing} (${batch.done}/${batch.total})… ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}. Cada item leva por volta de um minuto; pode sair desta página e voltar.`;
+    return `<span class="cell-spin" style="margin-right:6px"></span>${verbing} (${batch.done}/${batch.total})… ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}. Cada item leva por volta de um minuto; pode sair desta página e voltar.`;
   }
   return `✔ Lote concluído: ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}${stoppedNote}.`;
 }
