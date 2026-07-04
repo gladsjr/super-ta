@@ -13,6 +13,16 @@ entrevista inteira; ver seção própria abaixo). **Validação em produção re
 (turma Mackenzie 06, 22 entrevistas): seção "Validação em PRODUÇÃO" abaixo — é a
 âncora mais forte e mostra que o número para orçar é **~$3,50/entrevista**.
 
+> **Estado do modelo em produção (atualização).** Originalmente o
+> `SuperOrchestratorAgent` rodava em **`gpt-5.5` no esforço `medium`** (o *default*
+> da API — o código não setava nada). **Por volta do fim de junho de 2026
+> (28/jun, commit `57e2c56`) passamos a usar `gpt-5.4` com esforço `high`** como
+> modelo principal, GLOBAL (não só a prova oral — afeta entrevista, orquestrador,
+> prep e avaliação). Portanto, nas tabelas abaixo, onde se lê "produção =
+> `gpt-5.5` medium" entenda-se a **configuração ORIGINAL**; a de produção **hoje**
+> é o antigo braço candidato **`gpt-5.4` high** (o do Run C). Fonte de verdade:
+> `config/policy.yaml#models` (`principal_reasoning_model` + `principal_reasoning_effort`).
+
 > **Aviso de confiança estatística.** Os runs de triagem têm amostra pequena
 > (3 entrevistas por configuração = "n=3"); o run inicial tem 6. São sinais
 > **direcionais**, bons para decidir o que vale aprofundar — não são números
@@ -363,10 +373,12 @@ $2,43 → ~$1,68, total **$3,50 → ~$2,75/entrevista (−21%)**; o lote de 22, 
 
 ## Situação atual (jun/2026) e próximos passos
 
-- **Candidato líder:** `gpt-5.4` com esforço de raciocínio **alto**. Mais barato
-  e mais rápido que produção, com qualidade encostada por turno. Ainda perde de
-  leve a entrevista inteira e em captura de contradições — **a confirmar com mais
-  amostra**.
+- **Modelo em produção (desde ~28/jun/2026, commit `57e2c56`):** `gpt-5.4` com
+  esforço de raciocínio **alto** — adotado como principal GLOBAL (antes:
+  `gpt-5.5` no esforço `medium`, o default). Mais barato e mais rápido, com
+  qualidade encostada por turno; ainda perde de leve a entrevista inteira e em
+  captura de contradições (n=3, texto) — **confirmação em amostra maior segue
+  pendente** (não bloqueou a adoção).
 - **Pendente — medição absoluta:** todos os números acima são **comparativos**
   ("A vence B"). Falta medir em **absoluto**: de N contradições plantadas no
   trabalho sintético, quantas cada modelo **deixa passar**. Plano: um "boletim de
