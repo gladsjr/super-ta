@@ -119,8 +119,7 @@
     <nav class="tabs" role="tablist" aria-label="Seções do trabalho">
       <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Configuração</button>
       <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
-      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; devolutivas</button>
-      <button class="tab-btn" type="button" id="tab-btn-notas" data-tab="notas" role="tab" aria-selected="false">Notas</button>
+      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; notas</button>
     </nav>
 
     <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
@@ -362,9 +361,6 @@
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
     </div>
 
-    </div><!-- /tab-avaliacao -->
-
-    <div class="tab-panel hidden" id="tab-notas" role="tabpanel" aria-labelledby="tab-btn-notas">
     <div class="card">
       <h3 class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</h3>
       <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
@@ -390,7 +386,7 @@
       <p class="card-sub">Nota final de cada aluno. Clique no aluno para ver o detalhamento e publicar individualmente.</p>
       <div id="grades-table"></div>
     </div>
-    </div><!-- /tab-notas -->
+    </div><!-- /tab-avaliacao -->
   </div>
 
 </main>
@@ -506,7 +502,6 @@ async function load() {
     // de avaliação/notas da entrevista somem (mundo isolado, sem risco à entrevista).
     document.getElementById('tab-btn-alunos').textContent = 'Alunos & avaliação';
     document.getElementById('tab-btn-avaliacao').style.display = 'none';
-    document.getElementById('tab-btn-notas').style.display = 'none';
     const al = document.getElementById('tab-alunos');
     if (al && !window.__scCockpitMounted) {
       window.__scCockpitMounted = true;
@@ -515,7 +510,7 @@ async function load() {
       if (window.mountScenarioCockpit) window.mountScenarioCockpit({ root: m, workToken });
     }
     const curTab = document.querySelector('.tab-btn.is-active')?.dataset.tab;
-    if (curTab === 'avaliacao' || curTab === 'notas') setTab('alunos');
+    if (curTab === 'avaliacao') setTab('alunos');
   }
 
   const enunciadoUrl = `/w/${encodeURIComponent(workToken)}/enunciado`;
@@ -1859,7 +1854,7 @@ async function copyToken(btn, token) {
 
 // Abas das seções (Cenário · Alunos · Avaliação). Estado persistido por
 // localStorage e deep-linkável por hash (#alunos, #avaliacao).
-const TAB_NAMES = ['cenario', 'alunos', 'avaliacao', 'notas'];
+const TAB_NAMES = ['cenario', 'alunos', 'avaliacao'];
 function setTab(name) {
   if (!TAB_NAMES.includes(name)) name = 'cenario';
   TAB_NAMES.forEach(t => {

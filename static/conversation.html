@@ -1564,6 +1564,16 @@ async function load() {
   }
 }
 
+// Ordem dos blocos de avaliação igual à da prova oral: Avaliação interna →
+// Devolutiva → Nota. No HTML a Avaliação vem por último; movemos para o topo.
+(function reorderEvalCards() {
+  const ev = document.getElementById('evaluation');
+  const fb = document.getElementById('student-feedback-card');
+  if (ev && fb && ev.parentNode && ev.parentNode === fb.parentNode) {
+    ev.parentNode.insertBefore(ev, fb);
+  }
+})();
+
 load();
 setupCockpitNav();
 </script>
