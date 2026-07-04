@@ -22,7 +22,10 @@ import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
 import { mapPool } from "../lib/concurrency.js";
+import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
 import log from "../lib/logger.js";
+
+const MAX_COMMENT_LEN = 2000;
 
 const router = express.Router();
 const examUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -260,6 +263,7 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             grade_published: !!d?.grade_published_at,
             proctor: d?.oral_proctor_json || null,
             voice: d?.oral_voice_json || null,
+            student_comment: d?.student_comment || null,
         });
     } catch (err) { log.error("ORAL", `detail failed: ${err.message}`); res.status(500).json({ error: "falha ao carregar" }); }
 });
@@ -538,6 +542,67 @@ router.get("/s/:submissionToken/oral/result", requireSubmissionToken, async (req
             grade: d?.grade_published_at ? (d.grade_final ?? null) : null,
         });
     } catch (err) { log.error("ORAL", `result failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
+});
+
+// Revisão pós-prova (LGPD self-access), espelha o GET /s/:t/review da entrevista:
+// dentro da janela de revisão o aluno vê a TRANSCRIÇÃO da própria prova e pode
+// deixar UM comentário ao professor. A devolutiva/nota publicadas vêm à parte,
+// pelo /oral/result (não expiram com a janela). Após a janela: 410.
+router.get("/s/:submissionToken/oral/review", requireSubmissionToken, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    if (!req.submission.completion_reason) {
+        return res.status(409).json({ error: "not_finalized", detail: "Prova ainda não foi realizada." });
+    }
+    const win = reviewWindowState(req.submission);
+    if (win.expired) return res.status(410).json({ error: "review_window_expired", deadline: win.deadline });
+    try {
+        const d = await db.getOralSubmissionDetail(req.submission.id);
+        res.set("Cache-Control", "no-store");
+        res.json({
+            submission: {
+                student_label: req.submission.student_label,
+                completion_reason: req.submission.completion_reason,
+                completed_at: req.submission.completed_at,
+            },
+            review_window: { deadline: win.deadline, days: REVIEW_WINDOW_DAYS },
+            comment: {
+                value: d?.student_comment ?? null,
+                locked: !!d?.student_comment,
+            },
+            transcript: Array.isArray(d?.oral_transcript) ? d.oral_transcript : [],
+        });
+    } catch (err) {
+        log.error("ORAL", `review failed token=${req.submission.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "failed_to_load_review" });
+    }
+});
+
+// Comentário do aluno ao professor. Single-shot (uma vez que student_comment
+// estiver setado, não muda), dentro da janela de revisão. Reusa a MESMA coluna
+// e o MESMO helper da entrevista.
+router.post("/s/:submissionToken/oral/comment", requireSubmissionToken, express.json({ limit: "16kb" }), async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    if (!req.submission.completion_reason) return res.status(409).json({ error: "not_finalized" });
+    const win = reviewWindowState(req.submission);
+    if (win.expired) return res.status(410).json({ error: "review_window_expired" });
+    // Single-shot: lê o valor atual do banco (o req.submission da middleware não
+    // carrega student_comment).
+    const existing = await db.getOralSubmissionDetail(req.submission.id);
+    if (existing?.student_comment) {
+        return res.status(409).json({ error: "comment_already_submitted", detail: "Comentário já foi enviado e não pode ser editado." });
+    }
+    const raw = req.body?.comment;
+    if (typeof raw !== "string") return res.status(400).json({ error: "comment é obrigatório (string)" });
+    const trimmed = raw.trim().slice(0, MAX_COMMENT_LEN);
+    if (!trimmed) return res.status(400).json({ error: "comment vazio" });
+    try {
+        await db.setSubmissionStudentComment(req.submission.id, trimmed);
+        log.info("ORAL", `comment submitted token=${req.submission.submission_token} chars=${trimmed.length}`);
+        res.json({ ok: true, comment: trimmed });
+    } catch (err) {
+        log.error("ORAL", `comment submit failed token=${req.submission.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "failed_to_save_comment" });
+    }
 });
 
 // O portão de SETUP (posição/distância/mãos/celular) agora roda 100% no NAVEGADOR
