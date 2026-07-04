@@ -299,8 +299,9 @@
       <div class="table-toolbar">
         <label class="filter-label" for="sub-filter">Mostrar:</label>
         <select id="sub-filter" class="select">
-          <option value="all">Todos</option>
-          <option value="active" selected>Ativas</option>
+          <option value="all" selected>Todos</option>
+          <option value="done">Concluídas</option>
+          <option value="notdone">Não concluídas</option>
           <option value="blocked">Bloqueadas</option>
           <option value="test">De teste</option>
           <option value="real">Reais</option>
@@ -628,7 +629,8 @@ function renderSubmissionsTable() {
   emptyEl.classList.add('hidden');
 
   const filtered = lastSubmissions.filter(s => {
-    if (filter === 'active') return !s.is_blocked;
+    if (filter === 'done') return s.status === 'completed';
+    if (filter === 'notdone') return s.status !== 'completed';
     if (filter === 'blocked') return !!s.is_blocked;
     if (filter === 'test') return !!s.is_test;
     if (filter === 'real') return !s.is_test;
@@ -663,7 +665,7 @@ function renderSubmissionsTable() {
       <td>
         <div class="row-tight">
           <code class="token-chip">${escapeHtml(s.submission_token)}</code>
-          <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${s.submission_token}')">📋</button>
+          <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button>
         </div>
       </td>
       <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge}</td>
@@ -1825,8 +1827,8 @@ async function sendChat() {
   }
 }
 
-async function copyToken(btn, token) {
-  try { await navigator.clipboard.writeText(token); }
+async function copyStudentLink(btn, token) {
+  try { await navigator.clipboard.writeText(location.origin + '/s/' + token); }
   catch { return; }
   const prev = btn.textContent;
   btn.textContent = '✓';
