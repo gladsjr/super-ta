@@ -386,7 +386,9 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
  * Badges
  * ================================================================= */
 
-.badge {
+/* Chips de estado — sistema ÚNICO compartilhado entre a entrevista (.badge) e a
+   prova oral (.pill). Mesma base; variantes de cor por estado. */
+.badge, .pill {
   display: inline-flex;
   align-items: center;
   padding: 0.15em 0.65em;
@@ -398,11 +400,14 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
   color: var(--ink-700);
   border: 1px solid var(--ink-100);
 }
-.badge-pending     { background: var(--ink-50);     color: var(--ink-700);     border-color: var(--ink-100); }
+.badge-pending     { background: var(--ink-50); color: var(--ink-700); border-color: var(--ink-100); }
 .badge-in_progress { background: var(--warning-50); color: var(--warning-700); border-color: var(--warning-50); }
-.badge-completed   { background: var(--success-50); color: var(--success-700); border-color: var(--success-50); }
-.badge-gave_up     { background: #fbeaea;           color: #8a2525;            border-color: #fbeaea; }
-.badge-accent      { background: var(--accent-50);  color: var(--accent-700);  border-color: var(--accent-50); }
+.badge-completed,
+.pill-done         { background: #eaf7ee; color: var(--ink-700); border-color: #9fd4af; }
+.badge-gave_up     { background: #fbeaea; color: #8a2525; border-color: #fbeaea; }
+.badge-accent,
+.pill-pub          { background: #e9f0fe; color: var(--ink-700); border-color: #b9cdf6; }
+.pill-test         { background: #fff7e6; color: var(--ink-700); border-color: #f0c890; }
 
 /* ====================================================================
  * Token display (copy-paste friendly)

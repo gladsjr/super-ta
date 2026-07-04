@@ -9,9 +9,6 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
   <style>
     .meta-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-sm); }
-    .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--ink-700); }
-    .pill-done { background: #eaf7ee; border: 1px solid #9fd4af; }
-    .pill-pub  { background: #e9f0fe; border: 1px solid #b9cdf6; }
     .q { border-top: 1px solid var(--ink-200); padding: var(--sp-3) 0; }
     .q:first-child { border-top: 0; }
     .q .qt { font-weight: 600; }
@@ -161,7 +158,7 @@
     document.getElementById('main').classList.remove('hidden');
     document.getElementById('student-name').textContent = d.student_label || SUB;
     const pills = [];
-    pills.push(d.completion_reason ? '<span class="pill pill-done">prova realizada</span>' : '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">não realizada</span>');
+    pills.push(d.completion_reason ? '<span class="pill pill-done">prova concluída</span>' : '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">não concluída</span>');
     if (d.evaluation) pills.push('<span class="pill pill-done">avaliada</span>');
     if (d.devolutiva_published) pills.push('<span class="pill pill-pub">devolutiva publicada</span>');
     if (d.grade_published) pills.push('<span class="pill pill-pub">nota publicada</span>');
