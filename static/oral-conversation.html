@@ -88,6 +88,12 @@
       <div id="transcript" class="transcript"></div>
     </div>
 
+    <div class="card" id="student-comment-card" style="display:none">
+      <h3 class="card-title">Comentário do aluno</h3>
+      <p class="card-sub">Deixado pelo aluno após a prova, na janela de revisão.</p>
+      <div id="student-comment" style="white-space:pre-wrap"></div>
+    </div>
+
     <div class="card" id="video-card">
       <h3 class="card-title">Vídeo da prova</h3>
       <div id="video-wrap"></div>
@@ -158,6 +164,14 @@
     document.getElementById('dev-pub').checked = !!d.devolutiva_published;
     document.getElementById('grade-pub').checked = !!d.grade_published;
     renderTranscript(d.transcript);
+
+    const scCard = document.getElementById('student-comment-card');
+    if (d.student_comment) {
+      document.getElementById('student-comment').textContent = d.student_comment;
+      scCard.style.display = '';
+    } else {
+      scCard.style.display = 'none';
+    }
 
     const vw = document.getElementById('video-wrap');
     if (d.has_oral_video) {

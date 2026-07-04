@@ -26,6 +26,7 @@ import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
 import { classifyAudio } from "../lib/audioIntelligibility.js";
 import { classifyAcoustic, combineTiers } from "../lib/acousticGate.js";
+import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
 import {
     introductionAgent,
     audioIntelligibilityAgent,
@@ -126,19 +127,8 @@ async function persistFinalization(req, completionReason) {
 // muito além do que cabe num turno legítimo de entrevista oral.
 const MAX_STUDENT_MESSAGE_CHARS = 4000;
 
-// Janela de revisão pós-entrevista (LGPD self-access). Aluno tem N dias
-// após completed_at para ver texto + áudios e mandar comentário ao professor.
-const REVIEW_WINDOW_DAYS = 7;
-
-function reviewWindowState(submission) {
-    if (!submission?.completion_reason || !submission?.completed_at) {
-        return { eligible: false, expired: false, deadline: null };
-    }
-    const completed = new Date(submission.completed_at);
-    const deadline = new Date(completed.getTime() + REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-    const now = new Date();
-    return { eligible: now < deadline, expired: now >= deadline, deadline: deadline.toISOString() };
-}
+// Janela de revisão pós-encerramento (LGPD self-access) — REVIEW_WINDOW_DAYS +
+// reviewWindowState vivem em lib/reviewWindow.js, compartilhados com a prova oral.
 
 // Arquiva o buffer de áudio do aluno (best-effort) — sobe pro Object Storage
 // e grava metadados no Postgres. NUNCA lança. Se o storage estiver indisponível

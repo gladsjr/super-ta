@@ -105,8 +105,10 @@
       </div>
 
       <div id="blocked" style="display:none">
-        <div class="big">Prova já realizada</div>
-        <p class="sub" style="text-align:center">Esta prova oral já foi realizada com este link e <strong>não pode ser refeita</strong>. Se precisar, fale com o(a) professor(a) para um novo link.</p>
+        <div class="big" id="blocked-title">Prova realizada</div>
+        <p class="sub" style="text-align:center" id="blocked-sub">Esta prova oral já foi realizada com este link e <strong>não pode ser refeita</strong>. Se precisar, fale com o(a) professor(a) para um novo link.</p>
+        <div id="review-transcript" style="margin-top:16px"></div>
+        <div id="review-comment" style="margin-top:16px"></div>
         <div id="result" style="margin-top:16px"></div>
       </div>
     </div>
@@ -122,24 +124,91 @@
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
     function show(id) { for (const s of ['pre', 'instr', 'setup', 'live', 'done', 'blocked']) $(s).style.display = s === id ? '' : 'none'; }
 
-    // No-retake: se a prova já foi realizada com este link, bloqueia a entrada.
+    const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+    // No-retake: se a prova já foi realizada com este link, bloqueia a entrada e
+    // mostra a tela de PÓS-PROVA (transcrição + comentário + resultado).
     let blocked = false;
     (async () => {
       try {
         const st = await (await fetch(`/s/${SUB}/oral/status`)).json();
-        if (st.done) {
-          blocked = true; show('blocked');
-          // mostra devolutiva/nota se já publicadas pelo professor
-          try {
-            const rr = await (await fetch(`/s/${SUB}/oral/result`)).json();
-            const parts = [];
-            if (rr.grade != null) parts.push(`<div class="big">Nota: ${rr.grade}</div>`);
-            if (rr.devolutiva) parts.push(`<div class="card" style="margin-top:10px; text-align:left; white-space:pre-wrap">${rr.devolutiva.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</div>`);
-            if (parts.length) document.getElementById('result').innerHTML = '<h3 style="text-align:center">Resultado</h3>' + parts.join('');
-          } catch {}
-        }
+        if (st.done) { blocked = true; enterPostExam({}); }
       } catch {}
     })();
+
+    // Tela de pós-prova. Espelha a revisão da entrevista: dentro da janela de 7
+    // dias o aluno vê a transcrição e pode deixar UM comentário; a devolutiva/nota
+    // aparecem quando o professor publica (independente da janela).
+    function enterPostExam(opts) {
+      show('blocked');
+      if (opts && opts.uploadNote) {
+        $('blocked-title').textContent = 'Prova encerrada';
+        $('blocked-sub').innerHTML = esc(opts.uploadNote) + ' Abaixo você pode revisar a transcrição e deixar um comentário ao professor.';
+      }
+      renderPostExam();
+    }
+
+    async function renderPostExam() {
+      // Uma repetição: logo após encerrar, o servidor pode ainda não ter marcado
+      // a prova como concluída (corrida com o fechamento do relay).
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const rv = await fetch(`/s/${SUB}/oral/review`);
+          if (rv.status === 409 && attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
+          if (rv.ok) {
+            const j = await rv.json();
+            renderReviewTranscript(j.transcript || []);
+            renderCommentBox(j.comment || {});
+          } else if (rv.status === 410) {
+            $('review-transcript').innerHTML = '<p class="sub" style="text-align:center">A janela de revisão (7 dias) já se encerrou.</p>';
+          }
+        } catch {}
+        break;
+      }
+      try {
+        const rr = await (await fetch(`/s/${SUB}/oral/result`)).json();
+        const parts = [];
+        if (rr.grade != null) parts.push(`<div class="big">Nota: ${esc(rr.grade)}</div>`);
+        if (rr.devolutiva) parts.push(`<div class="card" style="margin-top:10px; text-align:left; white-space:pre-wrap">${esc(rr.devolutiva)}</div>`);
+        $('result').innerHTML = parts.length ? '<h3 style="text-align:center">Resultado</h3>' + parts.join('') : '';
+      } catch {}
+    }
+
+    function renderReviewTranscript(turns) {
+      const el = $('review-transcript');
+      if (!turns.length) { el.innerHTML = ''; return; }
+      const rows = turns.map(t => {
+        const who = t.role === 'examiner' ? 'Examinador' : 'Aluno';
+        const color = t.role === 'examiner' ? '#9a7b1f' : '#5a6b80';
+        return `<div style="margin-bottom:10px"><div style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${color}">${who}</div><div style="white-space:pre-wrap">${esc(t.text)}</div></div>`;
+      }).join('');
+      el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${rows}</div>`;
+    }
+
+    function renderCommentBox(comment) {
+      const el = $('review-comment');
+      if (comment.locked && comment.value) {
+        el.innerHTML = `<h3 style="text-align:center">Seu comentário</h3><div class="card" style="text-align:left;white-space:pre-wrap">${esc(comment.value)}</div><p class="sub" style="text-align:center">Comentário enviado. Não é mais editável.</p>`;
+        return;
+      }
+      el.innerHTML = `<h3 style="text-align:center">Comentário ao professor (opcional)</h3>`
+        + `<p class="sub" style="text-align:center">Você pode deixar um comentário sobre a prova — enviado uma única vez.</p>`
+        + `<textarea id="oral-comment" maxlength="2000" rows="4" style="width:100%;box-sizing:border-box;font:inherit;padding:8px" placeholder="Escreva aqui (opcional)…"></textarea>`
+        + `<div style="text-align:center;margin-top:8px"><button id="oral-comment-btn" class="btn">Confirmar e enviar</button> <span class="sub" id="oral-comment-msg"></span></div>`;
+      $('oral-comment-btn').onclick = submitOralComment;
+    }
+
+    async function submitOralComment() {
+      const ta = $('oral-comment'), btn = $('oral-comment-btn'), msg = $('oral-comment-msg');
+      const text = (ta.value || '').trim();
+      if (!text) { msg.textContent = 'Escreva algo antes de enviar.'; return; }
+      btn.disabled = true; msg.textContent = 'Enviando…';
+      try {
+        const r = await fetch(`/s/${SUB}/oral/comment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comment: text }) });
+        if (r.ok) { renderCommentBox({ locked: true, value: text }); }
+        else { const e = await r.json().catch(() => ({})); msg.textContent = e.detail || e.error || 'Falha ao enviar.'; btn.disabled = false; }
+      } catch { msg.textContent = 'Falha ao enviar.'; btn.disabled = false; }
+    }
 
     // Termo de consentimento (voz + vídeo) — habilita o Iniciar só após o aceite.
     (async () => {
@@ -530,21 +599,21 @@
     $('pos-begin-btn').onclick = beginExam;
 
     async function uploadVideo() {
-      // chamado quando o MediaRecorder para; envia o vídeo e finaliza a UI
+      // chamado quando o MediaRecorder para; envia o vídeo e leva à revisão.
       const stopTracks = () => { try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} };
-      if (!recChunks.length) { stopTracks(); $('done-msg').textContent = '✓ Prova encerrada'; $('done-sub').textContent = 'Você pode fechar esta página.'; return; }
+      if (!recChunks.length) { stopTracks(); enterPostExam({ uploadNote: 'Prova registrada.' }); return; }
       $('done-msg').textContent = 'Enviando o vídeo…';
       $('done-sub').textContent = 'Não feche a página até concluir.';
+      let note = 'Vídeo enviado.';
       try {
         const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
         const form = new FormData(); form.append('file', blob, 'prova.webm');
         const r = await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form });
-        $('done-msg').textContent = '✓ Prova encerrada';
-        $('done-sub').textContent = r.ok ? 'Vídeo enviado. Você pode fechar esta página.' : 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
+        note = r.ok ? 'Vídeo enviado.' : 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
       } catch {
-        $('done-msg').textContent = '✓ Prova encerrada';
-        $('done-sub').textContent = 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
+        note = 'A prova foi registrada (o envio do vídeo falhou; avise o professor).';
       } finally { stopTracks(); }
+      enterPostExam({ uploadNote: note });
     }
 
     // Rede de segurança do vídeo: numa QUEDA inesperada (sem encerramento limpo),
