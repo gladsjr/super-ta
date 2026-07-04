@@ -9,4 +9,5 @@
 - [Git destrutivo exige task agent isolado](destructive-git-needs-task-agent.md) — agente principal é bloqueado de reset/commit/checkout/rebase/force-push; só task agent isolado faz (fetch/branch/push-sem-force ok).
 - [VAD Realtime com áudio sintético](realtime-synthetic-vad-harness.md) — TTS sintético contra o semantic_vad+far_field commita turnos de forma não-determinística; use piso de ruído e faça o gate refletir o produto.
 - [MediaPipe/OpenCV no Replit (libxcb + .pythonlibs)](mediapipe-replit-libxcb.md) — sidecar proctoring: pip --user -r (não reescreve requirements), .gitignore .pythonlibs/, e mediapipe precisa de pkgs.xorg.libxcb no replit.nix.
+- [Dev tem binários que a VM não tem](replit-vm-missing-runtime-binaries.md) — "funciona no teste, ENOENT no prod": ffmpeg etc. vêm do replit-runtime-path no dev; a VM só tem o replit.nix. Declare via installSystemDependencies + republique.
 - [Prova oral: examinador "muda" / clean=false](oral-realtime-mute-turnend.md) — semantic_vad eagerness:low+far_field pode não fechar o turno do aluno → examinador silencia e sessão cai (clean=false, "Conexão encerrada"); tell: transcrição termina em pergunta sem resposta.
