@@ -409,6 +409,10 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
 .pill-pub          { background: #e9f0fe; color: var(--ink-700); border-color: #b9cdf6; }
 .pill-test         { background: #fff7e6; color: var(--ink-700); border-color: #f0c890; }
 
+/* Spinner de progresso (lotes) — compartilhado entre entrevista e prova oral. */
+.cell-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #cfd8e3; border-top-color: #2a6df4; border-radius: 50%; animation: cellspin .8s linear infinite; vertical-align: -2px; }
+@keyframes cellspin { to { transform: rotate(360deg); } }
+
 /* ====================================================================
  * Token display (copy-paste friendly)
  * ================================================================= */
