@@ -338,15 +338,25 @@
         : s.has_oral_video
           ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
           : '<span class="hint">—</span>';
-      return `<tr>
+      const abrir = s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : '';
+      const blockBtn = s.is_blocked
+        ? `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta prova">Liberar</button>`
+        : `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', true)" title="Pausa a prova; o aluno perde acesso até você liberar">Bloquear</button>`;
+      return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
         <td>${esc(s.student_label || '')}${test}</td>
         <td><code class="tok">${s.submission_token}</code></td>
-        <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
+        <td>${STATUS_PILL[s.status] || esc(s.status)}${s.is_blocked ? ' <span class="badge-blocked">bloqueada</span>' : ''}</td>
         <td>${vid}</td>
-        <td>${s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : ''}<a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+        <td>${abrir}${blockBtn}</td>
       </tr>`;
     }).join('');
   }
+  window.toggleBlockOral = async (token, block) => {
+    const r = await fetch(`${API}/submissions/${token}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_blocked: block }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao alterar bloqueio')); return; }
+    await refreshSubs();
+  };
+
   document.getElementById('sub-filter').onchange = renderSubsTable;
   document.getElementById('download-csv').onclick = () => {
     const lines = [['rotulo', 'token', 'url'].join(',')].concat(
