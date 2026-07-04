@@ -9,9 +9,6 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
   <style>
     .meta-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--ink-500); font-size: var(--fs-sm); }
-    .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--ink-700); }
-    .pill-done { background: #eaf7ee; border: 1px solid #9fd4af; }
-    .pill-pub  { background: #e9f0fe; border: 1px solid #b9cdf6; }
     .q { border-top: 1px solid var(--ink-200); padding: var(--sp-3) 0; }
     .q:first-child { border-top: 0; }
     .q .qt { font-weight: 600; }
@@ -26,6 +23,9 @@
     .turn .what { white-space: pre-wrap; }
     .turn.examiner .who { color: var(--gold-600, #9a7b1f); }
     video.exam-video { width: 100%; max-height: 460px; border-radius: var(--r-md, 8px); background: #000; }
+    .cockpit-nav { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); background: var(--bg-raised); border: 1px solid var(--ink-100); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); box-shadow: var(--sh-sm); }
+    .cockpit-counter { font-size: var(--fs-sm); color: var(--ink-700); font-weight: 600; text-align: center; flex: 1; }
+    .cockpit-counter .muted { font-weight: 400; color: var(--ink-500); }
   </style>
 </head>
 <body>
@@ -45,6 +45,12 @@
       <a class="hint" id="back-link" href="#">← voltar à lista de alunos</a>
       <h1 id="student-name" style="margin: var(--sp-2) 0 0">—</h1>
       <div class="meta-row" id="meta"></div>
+    </div>
+
+    <div id="cockpit-nav" class="cockpit-nav hidden">
+      <button class="btn btn-sm" id="nav-prev" title="Aluno anterior (←)">◀ Anterior</button>
+      <span id="nav-counter" class="cockpit-counter"></span>
+      <button class="btn btn-sm" id="nav-next" title="Próximo aluno (→)">Próximo ▶</button>
     </div>
 
     <div class="card">
@@ -152,7 +158,7 @@
     document.getElementById('main').classList.remove('hidden');
     document.getElementById('student-name').textContent = d.student_label || SUB;
     const pills = [];
-    pills.push(d.completion_reason ? '<span class="pill pill-done">prova realizada</span>' : '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">não realizada</span>');
+    pills.push(d.completion_reason ? '<span class="pill pill-done">prova concluída</span>' : '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">não concluída</span>');
     if (d.evaluation) pills.push('<span class="pill pill-done">avaliada</span>');
     if (d.devolutiva_published) pills.push('<span class="pill pill-pub">devolutiva publicada</span>');
     if (d.grade_published) pills.push('<span class="pill pill-pub">nota publicada</span>');
@@ -182,7 +188,40 @@
     document.getElementById('proctor-btn').disabled = !d.has_oral_video;
     renderProctor(d.proctor);
     renderVoice(d.voice);
+    setupOralCockpit();
   }
+
+  // Navegação lado a lado entre alunos (mesma lista do painel, só as provas
+  // realizadas). Espelha o cockpit da entrevista.
+  let cockpitPrev = null, cockpitNext = null;
+  async function setupOralCockpit() {
+    try {
+      const r = await fetch(`${API}/oral/info`);
+      if (!r.ok) return;
+      const j = await r.json();
+      const list = (j.submissions || []).filter(s => s.status === 'completed');
+      const idx = list.findIndex(s => s.submission_token === SUB);
+      if (idx === -1 || list.length <= 1) return;
+      cockpitPrev = idx > 0 ? list[idx - 1] : null;
+      cockpitNext = idx < list.length - 1 ? list[idx + 1] : null;
+      document.getElementById('nav-counter').innerHTML =
+        `Aluno ${idx + 1} de ${list.length} <span class="muted">· ${esc(list[idx].student_label || SUB)}</span>`;
+      const pb = document.getElementById('nav-prev'), nb = document.getElementById('nav-next');
+      pb.disabled = !cockpitPrev; nb.disabled = !cockpitNext;
+      if (cockpitPrev) pb.title = `Anterior: ${cockpitPrev.student_label || cockpitPrev.submission_token} (←)`;
+      if (cockpitNext) nb.title = `Próximo: ${cockpitNext.student_label || cockpitNext.submission_token} (→)`;
+      document.getElementById('cockpit-nav').classList.remove('hidden');
+    } catch { /* nav é melhoria; se falhar, a página segue normal */ }
+  }
+  function gotoSubmission(s) { if (s) location.href = `${API}/oral/s/${s.submission_token}`; }
+  document.getElementById('nav-prev').addEventListener('click', () => gotoSubmission(cockpitPrev));
+  document.getElementById('nav-next').addEventListener('click', () => gotoSubmission(cockpitNext));
+  document.addEventListener('keydown', e => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'textarea' || tag === 'input' || e.target.isContentEditable) return;
+    if (e.key === 'ArrowLeft') gotoSubmission(cockpitPrev);
+    else if (e.key === 'ArrowRight') gotoSubmission(cockpitNext);
+  });
 
   function renderVoice(v) {
     const el = document.getElementById('voice-result');

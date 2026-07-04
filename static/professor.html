@@ -117,7 +117,7 @@
     </div>
 
     <nav class="tabs" role="tablist" aria-label="Seções do trabalho">
-      <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Cenário</button>
+      <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Configuração</button>
       <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
       <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; devolutivas</button>
       <button class="tab-btn" type="button" id="tab-btn-notas" data-tab="notas" role="tab" aria-selected="false">Notas</button>
@@ -313,7 +313,7 @@
       <div class="table-toolbar">
         <label class="filter-label" for="sub-filter">Mostrar:</label>
         <select id="sub-filter" class="select">
-          <option value="all">Todas</option>
+          <option value="all">Todos</option>
           <option value="active" selected>Ativas</option>
           <option value="blocked">Bloqueadas</option>
           <option value="test">De teste</option>
@@ -574,9 +574,9 @@ async function load() {
     ? '<span class="badge badge-pending" title="Sem saldo — operações serão bloqueadas até o admin aumentar o orçamento.">orçamento esgotado</span>'
     : '';
   metaEl.innerHTML = `
-    <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
+    <span class="badge badge-pending">${pending} aguardando</span>
     <span class="badge badge-in_progress">${inprog} em andamento</span>
-    <span class="badge badge-completed">${completed} finalizada${completed === 1 ? '' : 's'}</span>
+    <span class="badge badge-completed">${completed} concluída${completed === 1 ? '' : 's'}</span>
     ${gaveUp > 0 ? `<span class="badge badge-gave_up">${gaveUp} desisti${gaveUp === 1 ? 'u' : 'ram'}</span>` : ''}
     <span class="muted">Token do trabalho: <code class="token-chip">${escapeHtml(workToken)}</code></span>
     <span class="budget-line" title="Saldo gasto / orçamento total deste trabalho.">
@@ -712,9 +712,9 @@ async function toggleBlock(submissionToken, isBlocked) {
 
 function statusLabel(s) {
   return {
-    pending: 'pendente',
+    pending: 'aguardando',
     in_progress: 'em andamento',
-    completed: 'finalizada',
+    completed: 'concluída',
     gave_up: 'desistiu',
   }[s] || s;
 }

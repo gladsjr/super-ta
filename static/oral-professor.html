@@ -39,10 +39,6 @@
     .q-body label { display: block; font-size: var(--fs-xs); color: var(--ink-500); margin: var(--sp-2) 0 2px; }
     .q-body textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--ink-200); border-radius: var(--r-sm); }
 
-    .pill-test { background: #fff7e6; border: 1px solid #f0c890; }
-    .pill-done { background: #eaf7ee; border: 1px solid #9fd4af; }
-    .pill-pub  { background: #e9f0fe; border: 1px solid #b9cdf6; }
-    .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: var(--fs-xs); color: var(--ink-700); }
     code.tok { background: var(--bg-muted); padding: 1px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
 
     /* Ampulheta (spinner) por célula durante o lote progressivo */
@@ -72,7 +68,7 @@
     </div>
 
     <nav class="tabs" role="tablist" aria-label="Seções da prova">
-      <button class="tab-btn is-active" type="button" id="tab-btn-prova" data-tab="prova" role="tab" aria-selected="true">Prova</button>
+      <button class="tab-btn is-active" type="button" id="tab-btn-prova" data-tab="prova" role="tab" aria-selected="true">Configuração</button>
       <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
       <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; notas</button>
     </nav>
@@ -155,8 +151,8 @@
           <label class="filter-label" for="sub-filter">Mostrar:</label>
           <select id="sub-filter" class="select">
             <option value="all" selected>Todos</option>
-            <option value="done">Realizadas</option>
-            <option value="pending">Não realizadas</option>
+            <option value="done">Concluídas</option>
+            <option value="pending">Não concluídas</option>
             <option value="test">De teste</option>
             <option value="real">Reais</option>
           </select>
@@ -309,7 +305,7 @@
 
   // ---------- Status helpers ----------
   const STATUS_PILL = {
-    completed: '<span class="pill pill-done">realizada</span>',
+    completed: '<span class="pill pill-done">concluída</span>',
     gave_up: '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">desistiu</span>',
     pending: '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">aguardando</span>',
     in_progress: '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">aguardando</span>',
@@ -403,7 +399,7 @@
   function setMeta(work) {
     const done = SUBS.filter(s => s.status === 'completed').length;
     document.getElementById('meta').innerHTML =
-      `<span>Prova oral</span><span>·</span><span>${SUBS.length} aluno(s)</span><span>·</span><span>${done} realizada(s)</span>` +
+      `<span>Prova oral</span><span>·</span><span>${SUBS.length} aluno(s)</span><span>·</span><span>${done} concluída(s)</span>` +
       (work.has_exam ? '<span>·</span><span>prova enviada</span>' : '');
   }
 
