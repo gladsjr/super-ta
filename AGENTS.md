@@ -47,8 +47,8 @@ não mexe no clone `super-ta-repo`.
 
 ## Invariantes de privacidade (não negociáveis)
 
-- O **gabarito** da prova oral nunca chega ao browser nem à sessão Realtime — só
-  as perguntas (e os aspectos de cobertura). As respostas ficam no servidor.
+- O **gabarito**/critério da prova oral nunca chega ao browser nem à sessão
+  Realtime — só as perguntas. O 2º campo de cada questão fica no servidor.
 - O **vídeo** da prova oral nunca vai para a OpenAI. Proctoring é pós-prova e
   local (`lib/proctor.js`, YOLO via onnxruntime + sidecar Python).
 - Consentimento (câmera/gravação) é obrigatório antes da prova.

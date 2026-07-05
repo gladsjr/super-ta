@@ -106,7 +106,7 @@
           <button class="btn btn-primary" id="q-save" type="button">Salvar perguntas</button>
           <span class="hint" id="q-msg"></span>
         </div>
-        <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas e o gabarito, ou edite o que veio do arquivo. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
+        <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas (ou edite o que veio do arquivo) — só o <strong>enunciado</strong>, que é falado ao aluno. O peso e o critério/gabarito de cada questão ficam na aba <strong>Avaliação &amp; notas</strong>. Clique numa linha para editar.</p>
         <div id="questions" class="q-list"></div>
       </div>
     </div>
@@ -166,10 +166,26 @@
       </div>
     </div>
 
-    <!-- ABA: AVALIAÇÃO & NOTAS (lote + tabela de alunos) -->
+    <!-- ABA: AVALIAÇÃO & NOTAS (rubrica + lote + tabela de alunos) -->
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
       <div class="card">
-        <h3 class="card-title" data-help="A avaliação compara, pergunta a pergunta, as respostas do aluno (transcrição) com o gabarito. É um relatório interno, só você vê. A devolutiva e a nota são MANUAIS — não há geração por IA: você escreve a devolutiva e atribui a nota na página de cada aluno.">Avaliação em lote</h3>
+        <h3 class="card-title">Rubrica por questão</h3>
+        <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
+        <div class="row" style="gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3)">
+          <span class="label" style="margin:0">Modo de pontuação:</span>
+          <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="deterministico"/> Resposta esperada <span class="hint">(determinístico)</span></label>
+          <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="rubrica"/> Critério detalhado <span class="hint">(rubrica)</span></label>
+        </div>
+        <div id="rubric-items-oral"></div>
+        <div class="row" style="margin-top: var(--sp-3); gap: var(--sp-2)">
+          <span class="spacer"></span>
+          <button id="save-rubric-oral" class="btn btn-primary" type="button">Salvar rubrica</button>
+          <span class="hint" id="rubric-msg-oral"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title" data-help="A avaliação compara, pergunta a pergunta, as respostas do aluno (transcrição) com o material do professor (resposta esperada ou critério). É um relatório interno, só você vê. A nota é calculada pela rubrica acima; a devolutiva é escrita na página de cada aluno.">Avaliação em lote</h3>
         <p class="card-sub">Gera o relatório de comparação com o gabarito das provas realizadas. Relatório interno — o aluno não vê.</p>
         <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
           <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">Avaliar provas</button>
@@ -264,20 +280,22 @@
   function renumber() {
     [...document.querySelectorAll('#questions .q-item')].forEach((it, i) => { it.querySelector('.q-num').textContent = (i + 1) + '.'; });
   }
-  function makeItem(q = '', a = '', aspects = [], open = false) {
+  // A Configuração edita SÓ o enunciado. O 2º campo (resposta/critério) e o peso
+  // são editados na "Rubrica por questão" (aba Avaliação); aqui eles viajam como
+  // data-* para não se perderem ao salvar. Ao carregar, ambos os editores partem
+  // do mesmo /oral/info.
+  function makeItem(q = '', a = '', weight = 1, open = false) {
     const div = document.createElement('div');
     div.className = 'q-item' + (open ? ' open' : '');
+    div.dataset.answer = a || '';
+    div.dataset.weight = Number(weight) > 0 ? Number(weight) : 1;
     div.innerHTML =
       '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num"></span>' +
       '<span class="q-text"></span><button class="q-del" title="remover">✕</button></div>' +
       '<div class="q-body">' +
       '<label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
-      '<label>Resposta / gabarito (só o professor vê)</label><textarea class="q-a" placeholder="Resposta esperada"></textarea>' +
-      '<label>Aspectos a cobrir — um por linha (tópicos, não respostas). O examinador usa só para apontar o que o aluno não abordou. Sugeridos automaticamente; edite à vontade.</label><textarea class="q-asp" placeholder="ex.: número de camadas&#10;um exemplo de aplicação"></textarea>' +
       '</div>';
     div.querySelector('.q-q').value = q;
-    div.querySelector('.q-a').value = a;
-    div.querySelector('.q-asp').value = (Array.isArray(aspects) ? aspects : []).join('\n');
     div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; div.classList.toggle('open'); };
     div.querySelector('.q-del').onclick = () => { div.remove(); renumber(); updateQCount(); };
     div.querySelector('.q-q').addEventListener('input', () => { syncHead(div); cfgWarn(); });
@@ -287,18 +305,55 @@
   }
   function renderQuestions(qs) {
     const c = document.getElementById('questions'); c.innerHTML = '';
-    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', q.aspects || [], false));
-    if (!(qs || []).length) makeItem('', '', [], true);
+    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', q.weight, false));
+    if (!(qs || []).length) makeItem('', '', 1, true);
     updateQCount();
   }
   function collectQuestions() {
     return [...document.querySelectorAll('#questions .q-item')]
       .map(r => ({
         question: r.querySelector('.q-q').value.trim(),
-        answer: r.querySelector('.q-a').value.trim(),
-        aspects: r.querySelector('.q-asp').value.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 3),
+        answer: r.dataset.answer || '',
+        weight: Number(r.dataset.weight) > 0 ? Number(r.dataset.weight) : 1,
       }))
       .filter(q => q.question);
+  }
+
+  // ---------- Rubrica por questão (aba Avaliação): peso + 2º campo + modo ----------
+  let GRADING_MODE = 'deterministico';
+  function secondLabel() { return GRADING_MODE === 'rubrica' ? 'Critério de pontuação (como dar 0–10; só o professor vê)' : 'Resposta esperada (gabarito; só o professor vê)'; }
+  function renderRubric(qs, mode) {
+    GRADING_MODE = (mode === 'rubrica') ? 'rubrica' : 'deterministico';
+    document.querySelectorAll('input[name="grading-mode-oral"]').forEach(r => { r.checked = (r.value === GRADING_MODE); });
+    const c = document.getElementById('rubric-items-oral'); c.innerHTML = '';
+    const list = (qs && qs.length) ? qs : [];
+    if (!list.length) { c.innerHTML = '<p class="hint">Defina as perguntas na aba Configuração primeiro.</p>'; return; }
+    const ph = GRADING_MODE === 'rubrica' ? 'ex.: 10 se citou os 3 aspectos com exemplos; 5 se citou 2; 0 se genérico' : 'resposta esperada';
+    list.forEach((q, i) => {
+      const div = document.createElement('div');
+      div.className = 'rubric-q';
+      div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-3) 0';
+      div.dataset.question = q.question || '';
+      div.innerHTML =
+        '<div style="display:flex; gap: var(--sp-3); align-items:flex-start">' +
+          '<div style="flex:1; font-weight:600">' + (i + 1) + '. ' + esc(q.question || '') + '</div>' +
+          '<div style="width:96px"><label class="label" style="font-size:var(--fs-xs)">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1"/></div>' +
+        '</div>' +
+        '<label class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-2)">' + secondLabel() + '</label>' +
+        '<textarea class="textarea rq-answer" rows="2" placeholder="' + ph + '"></textarea>';
+      div.querySelector('.rq-weight').value = Number(q.weight) > 0 ? Number(q.weight) : 1;
+      div.querySelector('.rq-answer').value = q.answer || '';
+      c.appendChild(div);
+    });
+  }
+  function collectRubric() {
+    const mode = [...document.querySelectorAll('input[name="grading-mode-oral"]')].find(r => r.checked)?.value || GRADING_MODE;
+    const questions = [...document.querySelectorAll('#rubric-items-oral .rubric-q')].map(d => ({
+      question: d.dataset.question || '',
+      answer: d.querySelector('.rq-answer').value.trim(),
+      weight: Number(d.querySelector('.rq-weight').value) > 0 ? Number(d.querySelector('.rq-weight').value) : 1,
+    })).filter(q => q.question);
+    return { mode, questions };
   }
 
   // ---------- Status helpers ----------
@@ -448,6 +503,7 @@
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
     renderQuestions(j.questions || []);
+    renderRubric(j.questions || [], j.work.grading_mode);
     renderSubsTable();
     renderEvalTable();
     cfgWarn();
@@ -468,6 +524,7 @@
       msg.textContent = `${j.count} pergunta(s) extraída(s).`;
       document.getElementById('exam-status').textContent = 'Prova enviada. As perguntas abaixo podem ser editadas.';
       renderQuestions(j.questions || []);
+      renderRubric(j.questions || [], GRADING_MODE);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
     finally { btn.disabled = false; }
   };
@@ -481,7 +538,7 @@
       msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
-  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', [], true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
+  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', 1, true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
   document.getElementById('q-save').onclick = async () => {
     const qs = collectQuestions(); const msg = document.getElementById('q-msg');
     if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
@@ -492,8 +549,27 @@
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
       msg.textContent = `${j.count} pergunta(s) salva(s).`;
       document.getElementById('exam-status').textContent = 'Perguntas definidas.';
+      renderRubric(j.questions || [], GRADING_MODE);  // mantém a rubrica em sincronia
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
+  // Salvar rubrica (peso + 2º campo + modo). Sincroniza os dois editores.
+  document.getElementById('save-rubric-oral').onclick = async () => {
+    const { mode, questions } = collectRubric(); const msg = document.getElementById('rubric-msg-oral');
+    if (!questions.length) { msg.textContent = 'Defina as perguntas primeiro (aba Configuração).'; return; }
+    msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions, mode }) });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      msg.textContent = 'Rubrica salva.';
+      renderQuestions(j.questions || []);
+      renderRubric(j.questions || [], mode);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+  // Trocar o modo re-renderiza os rótulos preservando o que já foi digitado.
+  document.querySelectorAll('input[name="grading-mode-oral"]').forEach(radio => {
+    radio.addEventListener('change', () => { const cur = collectRubric(); renderRubric(cur.questions, cur.mode); });
+  });
 
   // ---------- Ações: ALUNOS ----------
   document.getElementById('toggle-create').onclick = () => {
