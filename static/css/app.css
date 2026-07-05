@@ -842,3 +842,33 @@ details.card-collapsible > summary::before {
 details.card-collapsible[open] > summary::before { transform: rotate(90deg); }
 details.card-collapsible > summary .card-title { margin: 0; }
 details.card-collapsible > .card-collapsible-body { margin-top: var(--sp-3); }
+
+/* Bloco recolhível DENTRO de um card (ex.: critério de penalidade no card de
+   rubrica). Mais leve que um card: borda tracejada + fundo muted. */
+details.penalty-inline {
+  border: 1px dashed var(--ink-200);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  background: var(--bg-muted);
+}
+details.penalty-inline > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink-700);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+details.penalty-inline > summary::-webkit-details-marker { display: none; }
+details.penalty-inline > summary::before {
+  content: "\25B8"; /* ▸ */
+  color: var(--ink-500);
+  font-size: 0.85em;
+  transition: transform 0.12s ease;
+}
+details.penalty-inline[open] > summary::before { transform: rotate(90deg); }
+details.penalty-inline > .penalty-inline-body { margin-top: var(--sp-2); }

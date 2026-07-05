@@ -355,29 +355,34 @@
       <summary><span class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</span></summary>
       <div class="card-collapsible-body">
       <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
-      <div id="rubric-items"></div>
-      <div class="row" style="margin-top: var(--sp-2); gap: var(--sp-2); flex-wrap: wrap">
-        <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
-        <span class="spacer"></span>
-        <button id="save-rubric-btn" class="btn" type="button">Salvar rubrica</button>
-        <span id="rubric-msg" class="hint"></span>
-      </div>
-      <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
+      <!-- Ações no topo: não obriga a rolar a lista de critérios só para salvar/calcular. -->
+      <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
+        <button id="save-rubric-btn" class="btn btn-primary" type="button">Salvar rubrica</button>
         <button id="grade-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das entrevistas já avaliadas que ainda não têm nota — usa a rubrica salva">Calcular notas</button>
         <button id="grade-publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as notas já calculadas que ainda não foram publicadas">Publicar notas</button>
         <span class="spacer"></span>
         <button id="grade-unpublish-all-btn" class="btn btn-ghost btn-sm" type="button" title="Retira da página de cada aluno todas as notas publicadas (as notas ficam guardadas)">Despublicar notas</button>
         <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
       </div>
-      <div id="eval-batch-status-notas" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-      <div style="margin-top: var(--sp-4); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
-        <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled"/> <strong>Critério de penalidade por alertas de autoria</strong></label>
-        <p class="card-sub" style="margin-top:4px">Opcional. Aplicado <em>após</em> o cálculo da nota: um agente lê os alertas de autoria da avaliação e a política abaixo e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de forte suspeita). Reflete na próxima vez que você calcular as notas.</p>
-        <textarea id="penalty-prompt" class="textarea" rows="3"></textarea>
-        <div class="row" style="margin-top: var(--sp-2)">
-          <button id="save-penalty-btn" class="btn" type="button">Salvar critério</button>
-          <span id="penalty-msg" class="hint"></span>
+      <div id="rubric-msg" class="hint" style="margin-bottom: var(--sp-1)"></div>
+      <div id="eval-batch-status-notas" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+      <!-- Critério de penalidade (opt-in), dobrado no início do card. -->
+      <details class="penalty-inline">
+        <summary data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de autoria da avaliação e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de forte suspeita).">Critério de penalidade (alertas de autoria)</summary>
+        <div class="penalty-inline-body">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled"/> Ativar penalidade por alertas de autoria</label>
+          <p class="card-sub" style="margin-top:4px">Aplicado <em>após</em> o cálculo da nota; reflete na próxima vez que você calcular as notas.</p>
+          <label class="label" for="penalty-prompt">Política (como transformar alertas em penalidade)</label>
+          <textarea id="penalty-prompt" class="textarea" rows="3"></textarea>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="save-penalty-btn" class="btn btn-sm" type="button">Salvar critério</button>
+            <span id="penalty-msg" class="hint"></span>
+          </div>
         </div>
+      </details>
+      <div id="rubric-items" style="margin-top: var(--sp-3)"></div>
+      <div class="row" style="margin-top: var(--sp-2)">
+        <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
       </div>
       </div>
     </details>

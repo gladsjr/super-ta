@@ -199,48 +199,45 @@
         </div>
       </details>
 
-      <!-- 2. Rubrica por questão + publicação das notas -->
+      <!-- 2. Rubrica por questão — ações + penalidade no topo; itens da rubrica abaixo -->
       <details class="card card-collapsible" open>
         <summary><span class="card-title">Rubrica por questão</span></summary>
         <div class="card-collapsible-body">
           <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
-          <div class="row" style="gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3)">
+          <!-- Ações no topo: não obriga a rolar a lista inteira só para salvar/publicar. -->
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
+            <button id="save-rubric-oral" class="btn btn-primary" type="button">Salvar rubrica</button>
+            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
+            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+            <span class="spacer"></span>
+            <span class="hint" id="rubric-msg-oral"></span>
+          </div>
+          <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+          <div class="row" style="gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-2)">
             <span class="label" style="margin:0">Modo de pontuação:</span>
             <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="deterministico"/> Resposta esperada <span class="hint">(determinístico)</span></label>
             <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="rubrica"/> Critério detalhado <span class="hint">(rubrica)</span></label>
           </div>
-          <div id="rubric-items-oral"></div>
+          <!-- Critério de penalidade (opt-in), dobrado no início do card. -->
+          <details class="penalty-inline">
+            <summary data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de proctoring/voz e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de violação fragrante).">Critério de penalidade (alertas de proctoring)</summary>
+            <div class="penalty-inline-body">
+              <p class="card-sub">Opcional. Quando ligado, aplica uma penalidade à nota final conforme os alertas de proctoring e a política abaixo.</p>
+              <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled-oral"/> Ativar penalidade por alertas de proctoring</label>
+              <label class="label" for="penalty-prompt-oral" style="margin-top: var(--sp-2)">Política (como transformar alertas em penalidade)</label>
+              <textarea id="penalty-prompt-oral" class="textarea" rows="3"></textarea>
+              <div class="row" style="margin-top: var(--sp-2)">
+                <button id="save-penalty-oral" class="btn btn-sm" type="button">Salvar critério</button>
+                <span class="hint" id="penalty-msg-oral"></span>
+              </div>
+            </div>
+          </details>
+          <div id="rubric-items-oral" style="margin-top: var(--sp-3)"></div>
           <div id="rubric-warnings-oral"></div>
-          <div class="row" style="margin-top: var(--sp-3); gap: var(--sp-2)">
-            <span class="spacer"></span>
-            <button id="save-rubric-oral" class="btn btn-primary" type="button">Salvar rubrica</button>
-            <span class="hint" id="rubric-msg-oral"></span>
-          </div>
-          <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px solid var(--ink-100); padding-top: var(--sp-3)">
-            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
-            <span class="spacer"></span>
-            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
-          </div>
-          <div id="pub-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
         </div>
       </details>
 
-      <!-- 3. Critério de penalidade por alertas de proctoring (opt-in) -->
-      <details class="card card-collapsible">
-        <summary><span class="card-title" data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de proctoring/voz e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de violação fragrante).">Critério de penalidade (alertas de proctoring)</span></summary>
-        <div class="card-collapsible-body">
-          <p class="card-sub">Opcional. Quando ligado, aplica uma penalidade à nota final conforme os alertas de proctoring e a política abaixo.</p>
-          <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled-oral"/> Ativar penalidade por alertas de proctoring</label>
-          <label class="label" for="penalty-prompt-oral" style="margin-top: var(--sp-3)">Política (como transformar alertas em penalidade)</label>
-          <textarea id="penalty-prompt-oral" class="textarea" rows="3"></textarea>
-          <div class="row" style="margin-top: var(--sp-2)">
-            <button id="save-penalty-oral" class="btn" type="button">Salvar critério</button>
-            <span class="hint" id="penalty-msg-oral"></span>
-          </div>
-        </div>
-      </details>
-
-      <!-- 4. Alunos (inclui o proctoring por vídeo, que alimenta a coluna Alertas) -->
+      <!-- 3. Alunos (inclui o proctoring por vídeo, que alimenta a coluna Alertas) -->
       <details class="card card-collapsible" open>
         <summary><span class="card-title">Alunos</span></summary>
         <div class="card-collapsible-body">
