@@ -14,7 +14,7 @@ import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
-import { oralExamExtractorAgent, oralExamEvaluatorAgent } from "../lib/agents.js";
+import { oralExamExtractorAgent, oralExamEvaluatorAgent, rubricCriterionCheckAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
@@ -23,6 +23,8 @@ import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.j
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
 import { mapPool } from "../lib/concurrency.js";
 import { weightedFinal } from "../lib/rubric.js";
+import { deriveOralDevolutivaNow } from "../lib/oralFeedbackOps.js";
+import { applyPenaltyToGrades } from "../lib/gradePenalty.js";
 import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
 import log from "../lib/logger.js";
 
@@ -72,30 +74,17 @@ function gradesFromReport(report, questions, mode) {
     });
     return { criteria, final: weightedFinal(criteria), computed_at: new Date().toISOString(), mode };
 }
-// Devolutiva-padrão derivada da avaliação (texto legível para o aluno). NÃO inclui
-// o 2º campo ("expected") por default — o professor pode acrescentar ao editar.
-const ASSESS_LABEL = { correct: "correta", partial: "parcial", incorrect: "incorreta", not_answered: "não respondida" };
-function devolutivaFromEval(report) {
-    if (!report) return "";
-    const pq = Array.isArray(report.per_question) ? report.per_question : [];
-    const blocks = pq.map((q, i) => {
-        const parts = [`${i + 1}. ${q.question}`];
-        if (q.student_answer) parts.push(`   Sua resposta: ${q.student_answer}`);
-        const veredito = q.assessment != null ? (ASSESS_LABEL[q.assessment] || q.assessment) : (Number.isFinite(Number(q.score)) ? `${Number(q.score)}/10` : "");
-        parts.push(`   Avaliação: ${veredito}${q.comment ? " — " + q.comment : ""}`);
-        return parts.join("\n");
-    });
-    return (report.summary ? report.summary + "\n\n" : "") + blocks.join("\n\n");
-}
-// Após avaliar: preenche devolutiva e notas como DEFAULT (= avaliação), sem
-// sobrescrever ajustes já feitos pelo professor. Ambos seguem editáveis.
-async function applyEvalDefaults(submissionId, detail, report, questions, mode) {
-    if (!detail || !detail.oral_devolutiva || !String(detail.oral_devolutiva).trim()) {
-        await db.setOralDevolutiva(submissionId, devolutivaFromEval(report));
-    }
+// Após avaliar: preenche a NOTA como default (= rubrica per-questão), sem
+// sobrescrever ajuste já feito pelo professor. A DEVOLUTIVA não é preenchida
+// aqui — passou a ser um passo à parte ("Gerar devolutivas", via LLM), espelhando
+// a entrevista. Aplica o critério de penalidade (se ligado) na nota final.
+async function applyEvalDefaults(work, submissionId, detail, report, questions, mode) {
     if (!detail || detail.grade_final == null) {
         const grades = gradesFromReport(report, questions, mode);
-        if (grades) await db.setSubmissionGrades(submissionId, grades);
+        if (grades) {
+            await applyPenaltyToGrades(work, submissionId, grades, "oral");
+            await db.setSubmissionGrades(submissionId, grades);
+        }
     }
 }
 
@@ -129,6 +118,12 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 question_count: req.work.question_count,
                 voice: req.work.voice,
                 grading_mode,
+                feedback_guidelines: req.work.feedback_guidelines || "",
+                include_interviewer_opinion: req.work.include_interviewer_opinion !== false,
+                include_strengths: req.work.include_strengths !== false,
+                include_improvement_areas: req.work.include_improvement_areas !== false,
+                include_study_suggestions: req.work.include_study_suggestions !== false,
+                grade_penalty: req.work.grade_penalty_json || null,
             },
             questions,
             submissions: (subs || []).map(s => ({
@@ -234,7 +229,16 @@ router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async
         }
         await db.setOralQuestions(req.work.id, cleaned);
         log.info("ORAL", `questões salvas work=${req.work.work_token} n=${cleaned.length} mode=${req.body?.mode || "-"}`);
-        res.json({ ok: true, count: cleaned.length, questions: cleaned });
+        // No modo rubrica: checagem ADVISORY dos critérios de pontuação (não bloqueia
+        // o salvamento). Devolve avisos por questão para a UI destacar.
+        let rubric_warnings = null;
+        if (req.body?.mode === "rubrica" && cleaned.some(q => q.answer)) {
+            try {
+                const items = await rubricCriterionCheckAgent.check({ criteria: cleaned, meterCtx: { workId: req.work.id } });
+                rubric_warnings = items.filter(it => !it.adequate);
+            } catch (e) { log.error("ORAL", `rubric check failed (advisory): ${e.message}`); }
+        }
+        res.json({ ok: true, count: cleaned.length, questions: cleaned, rubric_warnings });
     } catch (err) {
         log.error("ORAL", `save questions failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar as perguntas" });
@@ -266,8 +270,8 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
             questions, transcript, mode, meterCtx: { workId: req.work.id, submissionId: req.submission.id },
         });
         await db.setOralEvaluation(req.submission.id, report);
-        await applyEvalDefaults(req.submission.id, detail, report, questions, mode); // devolutiva + notas default
-        const grades = gradesFromReport(report, questions, mode);
+        await applyEvalDefaults(req.work, req.submission.id, detail, report, questions, mode); // nota default (+ penalidade)
+        const grades = await db.getSubmissionGrades(req.submission.id); // já com penalidade, se ligada
         res.json({ ok: true, evaluation: report, grade: grades?.final ?? null, grades });
     } catch (err) {
         log.error("ORAL", `evaluate failed: ${err.message}`);
@@ -278,11 +282,20 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
 router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
-        const [d, grades, grading_mode] = await Promise.all([
+        const [d, grades, grading_mode, asked, workQ] = await Promise.all([
             db.getOralSubmissionDetail(req.submission.id),
             db.getSubmissionGrades(req.submission.id),
             db.getOralGradingMode(req.work.id),
+            db.getOralAsked(req.submission.id),
+            db.getOralQuestions(req.work.id),
         ]);
+        // Questões feitas a este aluno, enriquecidas com peso/enunciado atuais (por
+        // id) — usadas p/ semear o grid de nota manual antes de avaliar.
+        const wById = {}; for (const q of workQ) wById[q.id] = q;
+        const questions = (asked && asked.length ? asked : workQ).map(q => ({
+            id: q.id, question: (wById[q.id]?.question ?? q.question) || "",
+            weight: Number(wById[q.id]?.weight) > 0 ? Number(wById[q.id].weight) : (Number(q.weight) > 0 ? Number(q.weight) : 1),
+        }));
         res.set("Cache-Control", "no-store");
         res.json({
             student_label: req.submission.student_label,
@@ -293,6 +306,7 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             devolutiva: d?.oral_devolutiva || "",
             grade: d?.grade_final ?? null,
             grades: grades || null,
+            questions,
             grading_mode,
             devolutiva_published: !!d?.evaluation_published_at,
             grade_published: !!d?.grade_published_at,
@@ -309,6 +323,23 @@ router.put("/w/:workToken/oral/submissions/:subToken/devolutiva", requireWorkTok
     catch (err) { log.error("ORAL", `devolutiva failed: ${err.message}`); res.status(500).json({ error: "falha ao salvar devolutiva" }); }
 });
 
+// Gera a devolutiva de UM aluno via LLM (StudentFeedbackAgent), a partir da
+// avaliação + diretrizes do trabalho. Espelha /student-version da entrevista.
+// Com ?force=1 sobrescreve a devolutiva atual; sem force, exige que esteja vazia.
+router.post("/w/:workToken/oral/submissions/:subToken/devolutiva/derive", requireWorkToken, requireProfessorSubmission, requireWithinBudget, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    const force = req.query.force === "1" || req.body?.force === true;
+    try {
+        const r = await deriveOralDevolutivaNow(req.work, req.submission.id, { force });
+        if (r.reason === "no_eval") return res.status(409).json({ error: "avalie a prova antes de gerar a devolutiva" });
+        const d = await db.getOralSubmissionDetail(req.submission.id);
+        res.json({ ok: true, generated: !!r.generated, devolutiva: d?.oral_devolutiva || "" });
+    } catch (err) {
+        log.error("ORAL", `devolutiva derive failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar a devolutiva", detail: err.message });
+    }
+});
+
 
 // Edição manual dos scores por questão (grid de nota). Sobrescreve os scores em
 // grades_json, marca como manual, recomputa a nota final ponderada.
@@ -317,8 +348,19 @@ router.put("/w/:workToken/oral/submissions/:subToken/grades", requireWorkToken, 
     const scores = Array.isArray(req.body?.scores) ? req.body.scores : null;
     if (!scores) return res.status(400).json({ error: "scores (array) required" });
     try {
-        const grades = await db.getSubmissionGrades(req.submission.id);
-        if (!grades || !Array.isArray(grades.criteria)) return res.status(409).json({ error: "calcule as notas antes de editar" });
+        let grades = await db.getSubmissionGrades(req.submission.id);
+        if (!grades || !Array.isArray(grades.criteria)) {
+            // Sem cálculo automático: semeia as questões (feitas ao aluno) com notas
+            // em branco para o professor lançar à mão. Pesos = os atuais do trabalho.
+            const [asked, workQ] = await Promise.all([db.getOralAsked(req.submission.id), db.getOralQuestions(req.work.id)]);
+            const wById = {}; for (const q of workQ) wById[q.id] = Number(q.weight) > 0 ? Number(q.weight) : 1;
+            const base = (asked && asked.length ? asked : workQ);
+            if (!base.length) return res.status(409).json({ error: "a prova não tem perguntas" });
+            grades = {
+                criteria: base.map(q => ({ id: q.id, name: q.question, weight: wById[q.id] != null ? wById[q.id] : 1, score: null, justification: "" })),
+                final: null, computed_at: new Date().toISOString(), mode: await db.getOralGradingMode(req.work.id),
+            };
+        }
         const byId = {};
         for (const s of scores) { const v = Number(s.score); if (Number.isFinite(v)) byId[s.id] = Math.max(0, Math.min(10, Math.round(v * 10) / 10)); }
         const criteria = grades.criteria.map(c => (byId[c.id] != null ? { ...c, score: byId[c.id], manual: true } : c));
@@ -400,7 +442,7 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
                     questions, transcript, mode, meterCtx: { workId: req.work.id, submissionId: s.id },
                 });
                 await db.setOralEvaluation(s.id, report);
-                await applyEvalDefaults(s.id, detail, report, questions, mode); // devolutiva + notas default
+                await applyEvalDefaults(req.work, s.id, detail, report, questions, mode); // nota default (+ penalidade)
                 evaluated++;
                 // Lê a nota efetivamente gravada (applyEvalDefaults não sobrescreve
                 // ajuste manual do professor, então o default pode não valer).
@@ -419,6 +461,43 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
         log.error("ORAL", `evaluate-all failed: ${err.message}`);
         if (started) { try { res.end(); } catch {} return; } // headers já enviados: só encerra
         res.status(500).json({ error: "falha na avaliação em lote", detail: err.message });
+    }
+});
+
+// Lote: gera as devolutivas (LLM) das provas já avaliadas. Sem force, pula quem
+// já tem devolutiva escrita; com ?force=1, regenera todas. Concorrência limitada,
+// streaming NDJSON como o evaluate-all.
+router.post("/w/:workToken/oral/evaluations/student-versions", requireWorkToken, requireOral, requireWithinBudget, async (req, res) => {
+    let started = false;
+    try {
+        const force = req.query.force === "1" || req.body?.force === true;
+        const subs = await db.listOralSubmissionsForDevolutiva(req.work.id, force);
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+        started = true;
+        const send = (obj) => res.write(JSON.stringify(obj) + "\n");
+        send({ type: "start", tokens: subs.map(s => s.submission_token) });
+
+        let generated = 0;
+        const errors = [];
+        const CONC = 4;
+        await mapPool(subs, CONC, async (s) => {
+            try {
+                const r = await deriveOralDevolutivaNow(req.work, s.id, { force });
+                if (r.generated) generated++;
+                send({ type: "item", submission_token: s.submission_token, ok: true, generated: !!r.generated, skipped: !!r.skipped });
+            } catch (e) {
+                errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
+                log.error("ORAL", `student-versions item failed sub=${s.submission_token}: ${e.message}`);
+                send({ type: "item", submission_token: s.submission_token, ok: false, error: e.message });
+            }
+        });
+        log.info("ORAL", `student-versions work=${req.work.work_token} geradas=${generated}/${subs.length} force=${force}`);
+        send({ type: "done", generated, candidates: subs.length, errors });
+        res.end();
+    } catch (err) {
+        log.error("ORAL", `student-versions failed: ${err.message}`);
+        if (started) { try { res.end(); } catch {} return; }
+        res.status(500).json({ error: "falha ao gerar devolutivas em lote", detail: err.message });
     }
 });
 

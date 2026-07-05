@@ -367,6 +367,15 @@
         <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
       </div>
       <div id="eval-batch-status-notas" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+      <div style="margin-top: var(--sp-4); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled"/> <strong>Critério de penalidade por alertas de autoria</strong></label>
+        <p class="card-sub" style="margin-top:4px">Opcional. Aplicado <em>após</em> o cálculo da nota: um agente lê os alertas de autoria da avaliação e a política abaixo e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de forte suspeita). Reflete na próxima vez que você calcular as notas.</p>
+        <textarea id="penalty-prompt" class="textarea" rows="3"></textarea>
+        <div class="row" style="margin-top: var(--sp-2)">
+          <button id="save-penalty-btn" class="btn" type="button">Salvar critério</button>
+          <span id="penalty-msg" class="hint"></span>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -541,6 +550,7 @@ async function load() {
   document.getElementById('fb-include-opinion').checked = j.work.include_interviewer_opinion !== false;
   document.getElementById('expect-spontaneous').checked = j.work.expect_spontaneous === true;
   renderRubricEditor(j.work.grading_rubric || []);
+  fillPenaltySettings(j.work.grade_penalty || null);
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -583,6 +593,15 @@ let lastSubmissions = [];
 
 // Tabela de notas (aba Notas): aluno → nota final + status de publicação, com
 // link para o cockpit. Só alunos com entrevista (status != pending).
+// Alerta de autoria na lista: derivado de evaluation_json.overall.authorship_confidence.
+// low → alerta (vermelho); medium → atenção (amarelo); high/sem avaliação → ok/—.
+function authorshipAlertBadge(s) {
+  if (!s.has_evaluation) return '<span class="muted">—</span>';
+  const c = s.authorship_confidence;
+  if (c === 'low') return '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3" title="Baixa confiança de autoria própria — revise a entrevista">autoria</span>';
+  if (c === 'medium') return '<span class="pill" style="background:#fff6e0;border:1px solid #ecc874" title="Confiança de autoria intermediária">atenção</span>';
+  return '<span class="hint">ok</span>';
+}
 function renderGradesTable() {
   const el = document.getElementById('grades-table');
   if (!el) return;
@@ -597,6 +616,7 @@ function renderGradesTable() {
     const statusPill = `<span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>`;
     const avalPill = s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>' : '<span class="muted">—</span>';
     const nota = (s.grade_final != null) ? `<strong>${escapeHtml(String(s.grade_final))}</strong>` : '<span class="muted">—</span>';
+    const alerta = authorshipAlertBadge(s);
     const pub = [
       s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva visível ao aluno">devolutiva</span>' : '',
       s.grade_published_at ? '<span class="badge badge-accent" title="Nota visível ao aluno">nota</span>' : '',
@@ -606,11 +626,12 @@ function renderGradesTable() {
       <td>${statusPill}</td>
       <td>${avalPill}</td>
       <td style="text-align:right">${nota}</td>
+      <td>${alerta}</td>
       <td>${pub}</td>
       <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação, escrever a devolutiva e publicar a nota">gerenciar ▸</a></td>
     </tr>`;
   }).join('');
-  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Publicado</th><th>Ações</th></tr></thead><tbody>${body}</tbody></table>`;
+  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th>Ações</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderSubmissionsTable() {
@@ -1421,6 +1442,25 @@ document.getElementById('save-rubric-btn').onclick = async () => {
     renderRubricEditor(j.rubric || criteria); // re-render com ids estáveis do servidor
     msg.textContent = 'Rubrica salva.'; setTimeout(() => { msg.textContent = ''; }, 3000);
   } catch (err) { msg.textContent = 'Falha ao salvar: ' + err.message; }
+};
+// Critério de penalidade por alertas de autoria (opt-in). Rota genérica /grade-penalty.
+const DEFAULT_PENALTY_PROMPT = 'Aplique penalidade SOMENTE em caso de forte e inequívoca suspeita de autoria não-própria (vários sinais convergentes questionando a autoria). Nesse caso, reduza a nota em até 50% (multiplicador 0,5). Se os sinais forem fracos, pontuais ou ambíguos, NÃO penalize (multiplicador 1,0). Na dúvida, não penalize — os alertas são para revisão humana, não prova.';
+function fillPenaltySettings(gp) {
+  document.getElementById('penalty-enabled').checked = !!(gp && gp.enabled);
+  document.getElementById('penalty-prompt').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
+}
+document.getElementById('save-penalty-btn').onclick = async () => {
+  const msg = document.getElementById('penalty-msg'); msg.textContent = 'Salvando…';
+  const enabled = document.getElementById('penalty-enabled').checked;
+  const prompt = document.getElementById('penalty-prompt').value.trim();
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/grade-penalty`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, prompt }),
+    });
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = r.ok ? (enabled ? 'Critério ligado e salvo.' : 'Critério desligado.') : 'Falha: ' + (j.error || r.status);
+    setTimeout(() => { msg.textContent = ''; }, 3000);
+  } catch (err) { msg.textContent = 'Falha: ' + err.message; }
 };
 document.getElementById('grade-all-btn').onclick = () =>
   startBatch('evaluations/grades', { force: false }, 'Calcular as notas das entrevistas avaliadas que ainda não têm nota, usando a rubrica salva? Cada critério consome orçamento do trabalho.');

@@ -821,3 +821,24 @@ h2 { font-size: var(--fs-2xl); }
   margin-right: 0.45em;
   flex: 0 0 auto;
 }
+
+/* Card retrátil (details/summary) — usado na aba "Avaliação & notas" da prova
+   oral. O <summary> vira o cabeçalho clicável, com chevron; o corpo é .oral-card-body. */
+details.oral-card > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+details.oral-card > summary::-webkit-details-marker { display: none; }
+details.oral-card > summary::before {
+  content: "\25B8"; /* ▸ */
+  color: var(--ink-500);
+  font-size: 0.9em;
+  transition: transform 0.12s ease;
+}
+details.oral-card[open] > summary::before { transform: rotate(90deg); }
+details.oral-card > summary .card-title { margin: 0; }
+details.oral-card > .oral-card-body { margin-top: var(--sp-3); }

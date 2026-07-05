@@ -166,66 +166,105 @@
       </div>
     </div>
 
-    <!-- ABA: AVALIAÇÃO & NOTAS (rubrica + lote + tabela de alunos) -->
+    <!-- ABA: AVALIAÇÃO & NOTAS (cards retráteis, na ordem: avaliações+devolutivas → rubrica → penalidade → proctoring → alunos) -->
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
-      <div class="card">
-        <h3 class="card-title">Rubrica por questão</h3>
-        <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
-        <div class="row" style="gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3)">
-          <span class="label" style="margin:0">Modo de pontuação:</span>
-          <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="deterministico"/> Resposta esperada <span class="hint">(determinístico)</span></label>
-          <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="rubrica"/> Critério detalhado <span class="hint">(rubrica)</span></label>
-        </div>
-        <div id="rubric-items-oral"></div>
-        <div class="row" style="margin-top: var(--sp-3); gap: var(--sp-2)">
-          <span class="spacer"></span>
-          <button id="save-rubric-oral" class="btn btn-primary" type="button">Salvar rubrica</button>
-          <span class="hint" id="rubric-msg-oral"></span>
-        </div>
-      </div>
 
-      <div class="card">
-        <h3 class="card-title" data-help="A avaliação compara, pergunta a pergunta, as respostas do aluno (transcrição) com o material do professor (resposta esperada ou critério). É um relatório interno, só você vê. A nota é calculada pela rubrica acima; a devolutiva é escrita na página de cada aluno.">Avaliação em lote</h3>
-        <p class="card-sub">Gera o relatório de comparação com o gabarito das provas realizadas. Relatório interno — o aluno não vê.</p>
-        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
-          <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">Avaliar provas</button>
-          <button id="eval-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reavalia TODAS as provas realizadas, inclusive as já avaliadas">Reavaliar todas</button>
+      <!-- 1. Avaliações e devolutivas (pipeline em lote + diretrizes) -->
+      <details class="card oral-card" open>
+        <summary><span class="card-title" data-help="Três passos, todos em lote: (1) avaliar compara a transcrição de cada aluno ao gabarito; (2) gerar devolutivas escreve, com IA, a devolutiva formativa a partir da avaliação, seguindo suas diretrizes; (3) publicar torna as devolutivas visíveis ao aluno.">Avaliações e devolutivas</span></summary>
+        <div class="oral-card-body">
+          <p class="card-sub">Avalie as provas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
+          <div class="row" style="margin-bottom: var(--sp-3)">
+            <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
+          </div>
+          <label class="label" for="fb-guidelines-oral">Diretrizes para a devolutiva (opcional) — tom, formato, o que destacar</label>
+          <textarea id="fb-guidelines-oral" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; destaque o domínio dos conceitos e termine com um encorajamento."></textarea>
+          <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
+            <input type="checkbox" id="fb-include-opinion-oral" checked style="margin-top: 3px"/>
+            <span class="card-sub">Incluir a <strong>opinião do examinador</strong> nas devolutivas.</span>
+          </label>
+          <div class="row" style="margin-top: var(--sp-3)">
+            <button id="save-feedback-oral" class="btn" type="button">Salvar configurações</button>
+            <span class="hint" id="fb-settings-msg-oral"></span>
+          </div>
+          <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap">
+            <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">1 · Avaliar provas</button>
+            <button id="derive-all-btn" class="btn btn-primary" type="button" title="Gera (com IA) a devolutiva das provas já avaliadas">2 · Gerar devolutivas</button>
+            <button id="pub-dev-btn" class="btn btn-primary" type="button" title="Torna visíveis as devolutivas já escritas">3 · Publicar devolutivas</button>
+            <span class="spacer"></span>
+            <button id="eval-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reavalia TODAS as provas realizadas">Reavaliar todas</button>
+            <button id="unpub-dev-btn" class="btn btn-ghost btn-sm" type="button">Despublicar</button>
+          </div>
+          <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
         </div>
-        <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-      </div>
+      </details>
 
-      <div class="card">
-        <h3 class="card-title">Publicação em lote</h3>
-        <p class="card-sub">Devolutivas e notas são escritas aluno a aluno (sem geração por IA). Aqui você só publica/despublica em massa o que já foi escrito.</p>
-        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
-          <button id="pub-dev-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já escritas">Publicar devolutivas</button>
-          <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
-          <span class="spacer"></span>
-          <button id="unpub-dev-btn" class="btn btn-ghost btn-sm" type="button">Despublicar devolutivas</button>
-          <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+      <!-- 2. Rubrica por questão + publicação das notas -->
+      <details class="card oral-card" open>
+        <summary><span class="card-title">Rubrica por questão</span></summary>
+        <div class="oral-card-body">
+          <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
+          <div class="row" style="gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3)">
+            <span class="label" style="margin:0">Modo de pontuação:</span>
+            <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="deterministico"/> Resposta esperada <span class="hint">(determinístico)</span></label>
+            <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="rubrica"/> Critério detalhado <span class="hint">(rubrica)</span></label>
+          </div>
+          <div id="rubric-items-oral"></div>
+          <div id="rubric-warnings-oral"></div>
+          <div class="row" style="margin-top: var(--sp-3); gap: var(--sp-2)">
+            <span class="spacer"></span>
+            <button id="save-rubric-oral" class="btn btn-primary" type="button">Salvar rubrica</button>
+            <span class="hint" id="rubric-msg-oral"></span>
+          </div>
+          <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px solid var(--ink-100); padding-top: var(--sp-3)">
+            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
+            <span class="spacer"></span>
+            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+          </div>
+          <div id="pub-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
         </div>
-        <div id="pub-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-      </div>
+      </details>
 
-      <div class="card">
-        <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. São indícios para revisão humana, nunca acusação — o professor assiste ao trecho e decide. A latência da voz é capturada automaticamente durante a prova.">Proctoring por vídeo (em lote)</h3>
-        <p class="card-sub">Roda a análise do vídeo das provas realizadas. Os alertas aparecem na lista abaixo; clique em <strong>gerenciar</strong> para ver os trechos.</p>
-        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
-          <button id="proctor-all-btn" class="btn btn-primary" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
-          <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
+      <!-- 3. Critério de penalidade por alertas de proctoring (opt-in) -->
+      <details class="card oral-card">
+        <summary><span class="card-title" data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de proctoring/voz e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de violação fragrante).">Critério de penalidade (alertas de proctoring)</span></summary>
+        <div class="oral-card-body">
+          <p class="card-sub">Opcional. Quando ligado, aplica uma penalidade à nota final conforme os alertas de proctoring e a política abaixo.</p>
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled-oral"/> Ativar penalidade por alertas de proctoring</label>
+          <label class="label" for="penalty-prompt-oral" style="margin-top: var(--sp-3)">Política (como transformar alertas em penalidade)</label>
+          <textarea id="penalty-prompt-oral" class="textarea" rows="3"></textarea>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="save-penalty-oral" class="btn" type="button">Salvar critério</button>
+            <span class="hint" id="penalty-msg-oral"></span>
+          </div>
         </div>
-        <div id="proctor-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-      </div>
+      </details>
 
-      <div class="card">
-        <h3 class="card-title">Alunos</h3>
-        <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
-        <table id="eval-table" class="table hidden">
-          <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
-      </div>
+      <!-- 4. Proctoring por vídeo (em lote) -->
+      <details class="card oral-card">
+        <summary><span class="card-title" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. São indícios para revisão humana, nunca acusação — o professor assiste ao trecho e decide. A latência da voz é capturada automaticamente durante a prova.">Proctoring por vídeo (em lote)</span></summary>
+        <div class="oral-card-body">
+          <p class="card-sub">Roda a análise do vídeo das provas realizadas. Os alertas aparecem na lista abaixo; clique em <strong>gerenciar</strong> para ver os trechos.</p>
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
+            <button id="proctor-all-btn" class="btn btn-primary" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
+            <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
+          </div>
+          <div id="proctor-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
+        </div>
+      </details>
+
+      <!-- 5. Alunos -->
+      <details class="card oral-card" open>
+        <summary><span class="card-title">Alunos</span></summary>
+        <div class="oral-card-body">
+          <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
+          <table id="eval-table" class="table hidden">
+            <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -504,9 +543,20 @@
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
     renderQuestions(j.questions || []);
     renderRubric(j.questions || [], j.work.grading_mode);
+    fillSettings(j.work);
     renderSubsTable();
     renderEvalTable();
     cfgWarn();
+  }
+  // Política default do critério de penalidade (espelha lib/gradePenalty.js /
+  // agents/GradePenaltyAgent.js — mostrada quando o professor ainda não escreveu a sua).
+  const DEFAULT_PENALTY_PROMPT = 'Aplique penalidade SOMENTE em caso de violação FRAGRANTE e inequívoca dos critérios de integridade (ex.: ausência prolongada do candidato, presença clara de outra pessoa, uso de celular durante boa parte da prova). Nesses casos, reduza a nota em até 50% (multiplicador 0,5). Se os alertas forem leves, pontuais ou ambíguos, NÃO penalize (multiplicador 1,0). Na dúvida, não penalize.';
+  function fillSettings(work) {
+    document.getElementById('fb-guidelines-oral').value = work.feedback_guidelines || '';
+    document.getElementById('fb-include-opinion-oral').checked = work.include_interviewer_opinion !== false;
+    const gp = work.grade_penalty || null;
+    document.getElementById('penalty-enabled-oral').checked = !!(gp && gp.enabled);
+    document.getElementById('penalty-prompt-oral').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
   }
   document.getElementById('cfg-n').addEventListener('input', cfgWarn);
 
@@ -564,8 +614,24 @@
       msg.textContent = 'Rubrica salva.';
       renderQuestions(j.questions || []);
       renderRubric(j.questions || [], mode);
+      renderRubricWarnings(j.rubric_warnings, j.questions || []);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
+  // Avisos ADVISORY sobre os critérios de pontuação (só modo rubrica). Não bloqueia.
+  function renderRubricWarnings(warnings, questions) {
+    const el = document.getElementById('rubric-warnings-oral');
+    if (!Array.isArray(warnings) || !warnings.length) { el.innerHTML = ''; return; }
+    const qById = {}; (questions || []).forEach(q => { qById[q.id] = q; });
+    const rows = warnings.map(w => {
+      const qn = qById[w.id] ? esc(qById[w.id].question.slice(0, 70)) : `questão ${w.id}`;
+      const issues = (w.issues || []).map(i => esc(i)).join('; ');
+      const sug = w.suggestion ? ` <em>Sugestão: ${esc(w.suggestion)}</em>` : '';
+      return `<li style="margin-bottom:4px"><strong>${qn}</strong>${issues ? ' — ' + issues : ''}.${sug}</li>`;
+    }).join('');
+    el.innerHTML = `<div class="callout" style="margin-top: var(--sp-3); padding: var(--sp-3); border:1px solid #ecc874; background:#fff9e8; border-radius: var(--r-md)">
+      <strong>Critérios de pontuação a revisar</strong> <span class="hint">(aviso — a rubrica foi salva mesmo assim)</span>
+      <ul style="margin: var(--sp-2) 0 0; padding-left: var(--sp-4)">${rows}</ul></div>`;
+  }
   // Trocar o modo re-renderiza os rótulos preservando o que já foi digitado.
   document.querySelectorAll('input[name="grading-mode-oral"]').forEach(radio => {
     radio.addEventListener('change', () => { const cur = collectRubric(); renderRubric(cur.questions, cur.mode); });
@@ -712,20 +778,79 @@
   document.getElementById('proctor-all-btn').onclick = () => runProctorAll(false);
   document.getElementById('proctor-all-force-btn').onclick = () => { if (confirm('Reanalisar TODOS os vídeos, inclusive os já analisados?')) runProctorAll(true); };
 
-  async function runPublishAll(target, on) {
-    batchStatus('pub-batch-status', (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));
+  async function runPublishAll(target, on, statusId) {
+    batchStatus(statusId, (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));
     try {
       const r = await fetch(`${API}/oral/publish-all`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target, on }) });
       const j = await r.json();
-      if (!r.ok) { batchStatus('pub-batch-status', 'Falha: ' + (j.error || r.status)); return; }
-      batchStatus('pub-batch-status', `${j.affected} ${target === 'devolutiva' ? 'devolutiva(s)' : 'nota(s)'} ${on ? 'publicada(s)' : 'despublicada(s)'}.`);
+      if (!r.ok) { batchStatus(statusId, 'Falha: ' + (j.error || r.status)); return; }
+      batchStatus(statusId, `${j.affected} ${target === 'devolutiva' ? 'devolutiva(s)' : 'nota(s)'} ${on ? 'publicada(s)' : 'despublicada(s)'}.`);
       await load();
-    } catch (e) { batchStatus('pub-batch-status', 'Falha de comunicação.'); }
+    } catch (e) { batchStatus(statusId, 'Falha de comunicação.'); }
   }
-  document.getElementById('pub-dev-btn').onclick = () => runPublishAll('devolutiva', true);
-  document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true);
-  document.getElementById('unpub-dev-btn').onclick = () => { if (confirm('Despublicar TODAS as devolutivas?')) runPublishAll('devolutiva', false); };
-  document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false); };
+  document.getElementById('pub-dev-btn').onclick = () => runPublishAll('devolutiva', true, 'eval-batch-status');
+  document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true, 'pub-batch-status');
+  document.getElementById('unpub-dev-btn').onclick = () => { if (confirm('Despublicar TODAS as devolutivas?')) runPublishAll('devolutiva', false, 'eval-batch-status'); };
+  document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false, 'pub-batch-status'); };
+
+  // 2 · Gerar devolutivas (LLM) em lote — NDJSON como o evaluate-all.
+  async function runDeriveAll(force) {
+    const btn = document.getElementById('derive-all-btn'); btn.disabled = true;
+    batchStatus('eval-batch-status', force ? 'Regerando todas as devolutivas…' : 'Gerando as devolutivas…');
+    await refreshSubs();
+    try {
+      const r = await fetch(`${API}/oral/evaluations/student-versions${force ? '?force=1' : ''}`, { method: 'POST' });
+      if (!r.ok || !r.body) {
+        let msg = r.status; try { msg = (await r.json()).error || r.status; } catch (e) {}
+        batchStatus('eval-batch-status', 'Falha: ' + msg); return;
+      }
+      let generated = 0;
+      await readNdjson(r, (m) => {
+        if (m.type === 'done') {
+          let t = m.candidates === 0
+            ? 'Nenhuma devolutiva nova a gerar (avalie as provas antes, ou todas já têm devolutiva).'
+            : `${m.generated} devolutiva(s) gerada(s) de ${m.candidates} candidata(s).`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          batchStatus('eval-batch-status', t);
+        }
+      });
+    } catch (e) { batchStatus('eval-batch-status', 'Falha de comunicação.'); }
+    finally { btn.disabled = false; }
+  }
+  document.getElementById('derive-all-btn').onclick = () => runDeriveAll(false);
+
+  // Configurações de devolutiva (diretrizes + opinião do examinador). Reusa a
+  // rota genérica /feedback-settings (vale para os dois kinds de trabalho).
+  document.getElementById('save-feedback-oral').onclick = async () => {
+    const msg = document.getElementById('fb-settings-msg-oral'); msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/feedback-settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback_guidelines: document.getElementById('fb-guidelines-oral').value, interviewer_opinion: document.getElementById('fb-include-opinion-oral').checked }) });
+      const j = await r.json();
+      msg.textContent = r.ok ? 'Configurações salvas.' : 'Falha: ' + (j.error || r.status);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  // Critério de penalidade (opt-in). Rota genérica /grade-penalty.
+  document.getElementById('save-penalty-oral').onclick = async () => {
+    const msg = document.getElementById('penalty-msg-oral'); msg.textContent = 'Salvando…';
+    const enabled = document.getElementById('penalty-enabled-oral').checked;
+    const prompt = document.getElementById('penalty-prompt-oral').value.trim();
+    try {
+      const r = await fetch(`${API}/grade-penalty`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, prompt }) });
+      const j = await r.json();
+      msg.textContent = r.ok ? (enabled ? 'Critério ligado e salvo.' : 'Critério desligado.') : 'Falha: ' + (j.error || r.status);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  // Abrir avaliações lado a lado: leva ao primeiro aluno com prova realizada
+  // (a página do aluno tem navegação ◀/▶ entre os alunos).
+  document.getElementById('open-cockpit-oral').onclick = () => {
+    const list = SUBS || [];
+    const first = list.find(s => s.status === 'completed') || list[0];
+    if (!first) { alert('Nenhum aluno ainda.'); return; }
+    window.open(`${API}/oral/s/${first.submission_token}`, '_blank');
+  };
 
   load();
 </script>
