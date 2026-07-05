@@ -319,8 +319,9 @@
     </div><!-- /tab-alunos -->
 
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
-    <div class="card">
-      <h3 class="card-title" data-help="Três passos, todos em lote: 1) avaliar as entrevistas (relatório interno, só você vê); 2) gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa); 3) publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.">Avaliações e devolutivas</h3>
+    <details class="card card-collapsible" open>
+      <summary><span class="card-title" data-help="Três passos, todos em lote: 1) avaliar as entrevistas (relatório interno, só você vê); 2) gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa); 3) publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.">Avaliações e devolutivas</span></summary>
+      <div class="card-collapsible-body">
       <p class="card-sub">Avalie as entrevistas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
 
       <div class="row" style="margin-bottom: var(--sp-3)">
@@ -347,10 +348,12 @@
         <button id="eval-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regenera o relatório interno de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-    </div>
+      </div>
+    </details>
 
-    <div class="card">
-      <h3 class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</h3>
+    <details class="card card-collapsible" open>
+      <summary><span class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</span></summary>
+      <div class="card-collapsible-body">
       <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
       <div id="rubric-items"></div>
       <div class="row" style="margin-top: var(--sp-2); gap: var(--sp-2); flex-wrap: wrap">
@@ -376,13 +379,16 @@
           <span id="penalty-msg" class="hint"></span>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
 
-    <div class="card">
-      <h3 class="card-title">Alunos</h3>
+    <details class="card card-collapsible" open>
+      <summary><span class="card-title">Alunos</span></summary>
+      <div class="card-collapsible-body">
       <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a conversa, a avaliação, escrever a devolutiva e atribuir a nota.</p>
       <div id="grades-table"></div>
-    </div>
+      </div>
+    </details>
     </div><!-- /tab-avaliacao -->
   </div>
 

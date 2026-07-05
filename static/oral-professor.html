@@ -170,9 +170,9 @@
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
 
       <!-- 1. Avaliações e devolutivas (pipeline em lote + diretrizes) -->
-      <details class="card oral-card" open>
+      <details class="card card-collapsible" open>
         <summary><span class="card-title" data-help="Três passos, todos em lote: (1) avaliar compara a transcrição de cada aluno ao gabarito; (2) gerar devolutivas escreve, com IA, a devolutiva formativa a partir da avaliação, seguindo suas diretrizes; (3) publicar torna as devolutivas visíveis ao aluno.">Avaliações e devolutivas</span></summary>
-        <div class="oral-card-body">
+        <div class="card-collapsible-body">
           <p class="card-sub">Avalie as provas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
           <div class="row" style="margin-bottom: var(--sp-3)">
             <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
@@ -200,9 +200,9 @@
       </details>
 
       <!-- 2. Rubrica por questão + publicação das notas -->
-      <details class="card oral-card" open>
+      <details class="card card-collapsible" open>
         <summary><span class="card-title">Rubrica por questão</span></summary>
-        <div class="oral-card-body">
+        <div class="card-collapsible-body">
           <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
           <div class="row" style="gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3)">
             <span class="label" style="margin:0">Modo de pontuação:</span>
@@ -226,9 +226,9 @@
       </details>
 
       <!-- 3. Critério de penalidade por alertas de proctoring (opt-in) -->
-      <details class="card oral-card">
+      <details class="card card-collapsible">
         <summary><span class="card-title" data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de proctoring/voz e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de violação fragrante).">Critério de penalidade (alertas de proctoring)</span></summary>
-        <div class="oral-card-body">
+        <div class="card-collapsible-body">
           <p class="card-sub">Opcional. Quando ligado, aplica uma penalidade à nota final conforme os alertas de proctoring e a política abaixo.</p>
           <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled-oral"/> Ativar penalidade por alertas de proctoring</label>
           <label class="label" for="penalty-prompt-oral" style="margin-top: var(--sp-3)">Política (como transformar alertas em penalidade)</label>
@@ -240,24 +240,19 @@
         </div>
       </details>
 
-      <!-- 4. Proctoring por vídeo (em lote) -->
-      <details class="card oral-card">
-        <summary><span class="card-title" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. São indícios para revisão humana, nunca acusação — o professor assiste ao trecho e decide. A latência da voz é capturada automaticamente durante a prova.">Proctoring por vídeo (em lote)</span></summary>
-        <div class="oral-card-body">
-          <p class="card-sub">Roda a análise do vídeo das provas realizadas. Os alertas aparecem na lista abaixo; clique em <strong>gerenciar</strong> para ver os trechos.</p>
-          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
-            <button id="proctor-all-btn" class="btn btn-primary" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
-            <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
-          </div>
-          <div id="proctor-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-        </div>
-      </details>
-
-      <!-- 5. Alunos -->
-      <details class="card oral-card" open>
+      <!-- 4. Alunos (inclui o proctoring por vídeo, que alimenta a coluna Alertas) -->
+      <details class="card card-collapsible" open>
         <summary><span class="card-title">Alunos</span></summary>
-        <div class="oral-card-body">
+        <div class="card-collapsible-body">
           <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
+          <!-- Proctoring por vídeo: análise anti-fraude do VÍDEO (distinta de "Avaliar
+               provas", que avalia a transcrição). Alimenta a coluna Alertas abaixo. -->
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-3)">
+            <span class="label" style="margin:0" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. É diferente de 'Avaliar provas' (que avalia a transcrição): aqui roda visão computacional sobre o vídeo. São indícios para revisão humana, nunca acusação.">Proctoring por vídeo:</span>
+            <button id="proctor-all-btn" class="btn btn-sm" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
+            <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
+            <span id="proctor-batch-status" class="hint hidden"></span>
+          </div>
           <table id="eval-table" class="table hidden">
             <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
             <tbody></tbody>
@@ -371,14 +366,14 @@
     list.forEach((q, i) => {
       const div = document.createElement('div');
       div.className = 'rubric-q';
-      div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-3) 0';
+      div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-2) 0';
       div.dataset.question = q.question || '';
       div.innerHTML =
-        '<div style="display:flex; gap: var(--sp-3); align-items:flex-start">' +
+        '<div style="display:flex; gap: var(--sp-3); align-items:center">' +
           '<div style="flex:1; font-weight:600">' + (i + 1) + '. ' + esc(q.question || '') + '</div>' +
-          '<div style="width:96px"><label class="label" style="font-size:var(--fs-xs)">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1"/></div>' +
+          '<div style="display:flex; align-items:center; gap:6px; flex:none"><label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/></div>' +
         '</div>' +
-        '<label class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-2)">' + secondLabel() + '</label>' +
+        '<label class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-1)">' + secondLabel() + '</label>' +
         '<textarea class="textarea rq-answer" rows="2" placeholder="' + ph + '"></textarea>';
       div.querySelector('.rq-weight').value = Number(q.weight) > 0 ? Number(q.weight) : 1;
       div.querySelector('.rq-answer').value = q.answer || '';

@@ -823,8 +823,8 @@ h2 { font-size: var(--fs-2xl); }
 }
 
 /* Card retrátil (details/summary) — usado na aba "Avaliação & notas" da prova
-   oral. O <summary> vira o cabeçalho clicável, com chevron; o corpo é .oral-card-body. */
-details.oral-card > summary {
+   oral. O <summary> vira o cabeçalho clicável, com chevron; o corpo é .card-collapsible-body. */
+details.card-collapsible > summary {
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -832,13 +832,13 @@ details.oral-card > summary {
   align-items: center;
   gap: var(--sp-2);
 }
-details.oral-card > summary::-webkit-details-marker { display: none; }
-details.oral-card > summary::before {
+details.card-collapsible > summary::-webkit-details-marker { display: none; }
+details.card-collapsible > summary::before {
   content: "\25B8"; /* ▸ */
   color: var(--ink-500);
   font-size: 0.9em;
   transition: transform 0.12s ease;
 }
-details.oral-card[open] > summary::before { transform: rotate(90deg); }
-details.oral-card > summary .card-title { margin: 0; }
-details.oral-card > .oral-card-body { margin-top: var(--sp-3); }
+details.card-collapsible[open] > summary::before { transform: rotate(90deg); }
+details.card-collapsible > summary .card-title { margin: 0; }
+details.card-collapsible > .card-collapsible-body { margin-top: var(--sp-3); }
