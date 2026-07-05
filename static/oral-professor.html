@@ -149,7 +149,8 @@
           <select id="sub-filter" class="select">
             <option value="all" selected>Todos</option>
             <option value="done">Concluídas</option>
-            <option value="pending">Não concluídas</option>
+            <option value="notdone">Não concluídas</option>
+            <option value="blocked">Bloqueadas</option>
             <option value="test">De teste</option>
             <option value="real">Reais</option>
           </select>
@@ -313,7 +314,8 @@
     const f = document.getElementById('sub-filter').value;
     return SUBS.filter(s => {
       if (f === 'done') return s.status === 'completed';
-      if (f === 'pending') return s.status !== 'completed';
+      if (f === 'notdone') return s.status !== 'completed';
+      if (f === 'blocked') return !!s.is_blocked;
       if (f === 'test') return s.is_test;
       if (f === 'real') return !s.is_test;
       return true;
@@ -338,15 +340,31 @@
         : s.has_oral_video
           ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
           : '<span class="hint">—</span>';
-      return `<tr>
+      const abrir = s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : '';
+      const blockBtn = s.is_blocked
+        ? `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta prova">Liberar</button>`
+        : `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', true)" title="Pausa a prova; o aluno perde acesso até você liberar">Bloquear</button>`;
+      return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
         <td>${esc(s.student_label || '')}${test}</td>
-        <td><code class="tok">${s.submission_token}</code></td>
-        <td>${STATUS_PILL[s.status] || esc(s.status)}</td>
+        <td><code class="tok">${s.submission_token}</code> <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button></td>
+        <td>${STATUS_PILL[s.status] || esc(s.status)}${s.is_blocked ? ' <span class="badge-blocked">bloqueada</span>' : ''}</td>
         <td>${vid}</td>
-        <td>${s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : ''}<a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+        <td>${abrir}${blockBtn}</td>
       </tr>`;
     }).join('');
   }
+  window.copyStudentLink = async (btn, token) => {
+    try { await navigator.clipboard.writeText(location.origin + '/s/' + token); } catch { return; }
+    const prev = btn.textContent; btn.textContent = '✓'; btn.disabled = true;
+    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
+  };
+
+  window.toggleBlockOral = async (token, block) => {
+    const r = await fetch(`${API}/submissions/${token}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_blocked: block }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao alterar bloqueio')); return; }
+    await refreshSubs();
+  };
+
   document.getElementById('sub-filter').onchange = renderSubsTable;
   document.getElementById('download-csv').onclick = () => {
     const lines = [['rotulo', 'token', 'url'].join(',')].concat(

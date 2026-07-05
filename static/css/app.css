@@ -413,6 +413,11 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
 .cell-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #cfd8e3; border-top-color: #2a6df4; border-radius: 50%; animation: cellspin .8s linear infinite; vertical-align: -2px; }
 @keyframes cellspin { to { transform: rotate(360deg); } }
 
+/* Bloqueio de submissão (professor pausa o acesso do aluno) — compartilhado. */
+.badge-blocked { background: #fde2e2; color: #8a1c1c; border: 1px solid #f3b8b8; border-radius: var(--r-sm); padding: 0 var(--sp-2); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--sp-1); }
+tr.row-blocked td { opacity: 0.65; }
+tr.row-blocked td:last-child { opacity: 1; }
+
 /* ====================================================================
  * Token display (copy-paste friendly)
  * ================================================================= */

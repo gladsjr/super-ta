@@ -52,19 +52,6 @@
   .tab-btn:hover { color: var(--ink-900); }
   .tab-btn.is-active { color: var(--ink-900); border-bottom-color: var(--gold-500); font-weight: 700; }
 
-  .badge-blocked {
-    background: #fde2e2;
-    color: #8a1c1c;
-    border: 1px solid #f3b8b8;
-    border-radius: var(--r-sm);
-    padding: 0 var(--sp-2);
-    font-size: var(--fs-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-left: var(--sp-1);
-  }
-  tr.row-blocked td { opacity: 0.65; }
-  tr.row-blocked td:last-child { opacity: 1; }
 
   /* Entrevistador: alternância Simples/Avançado + galeria de personas */
   .mode-switch { display: inline-flex; border: 1px solid var(--ink-200); border-radius: var(--r-sm); overflow: hidden; }
@@ -312,8 +299,9 @@
       <div class="table-toolbar">
         <label class="filter-label" for="sub-filter">Mostrar:</label>
         <select id="sub-filter" class="select">
-          <option value="all">Todos</option>
-          <option value="active" selected>Ativas</option>
+          <option value="all" selected>Todos</option>
+          <option value="done">Concluídas</option>
+          <option value="notdone">Não concluídas</option>
           <option value="blocked">Bloqueadas</option>
           <option value="test">De teste</option>
           <option value="real">Reais</option>
@@ -322,7 +310,7 @@
         <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
       </div>
       <table id="sub-table" class="table hidden">
-        <thead><tr><th>Token de envio</th><th>Rótulo</th><th>Status</th><th>Conversa</th><th>Avaliação</th><th>Ações</th></tr></thead>
+        <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Conversa</th><th>Ações</th></tr></thead>
         <tbody></tbody>
       </table>
       <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
@@ -382,8 +370,8 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">Notas dos alunos</h3>
-      <p class="card-sub">Nota final de cada aluno. Clique no aluno para ver o detalhamento e publicar individualmente.</p>
+      <h3 class="card-title">Alunos</h3>
+      <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a conversa, a avaliação, escrever a devolutiva e atribuir a nota.</p>
       <div id="grades-table"></div>
     </div>
     </div><!-- /tab-avaliacao -->
@@ -605,19 +593,24 @@ function renderGradesTable() {
   }
   const body = rows.map(s => {
     const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token) + '?view=avaliacao';
-    const nota = (s.grade_final != null) ? String(s.grade_final) : '—';
-    let status;
-    if (s.grade_published_at) status = `<span class="badge badge-accent" title="Visível ao aluno desde ${new Date(s.grade_published_at).toLocaleString()}">publicada</span>`;
-    else if (s.has_grades) status = `<span class="badge badge-pending" title="Nota calculada, ainda não publicada — o aluno não vê">calculada</span>`;
-    else if (s.has_evaluation) status = `<span class="muted">sem nota</span>`;
-    else status = `<span class="muted">sem avaliação</span>`;
+    const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
+    const statusPill = `<span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>`;
+    const avalPill = s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>' : '<span class="muted">—</span>';
+    const nota = (s.grade_final != null) ? `<strong>${escapeHtml(String(s.grade_final))}</strong>` : '<span class="muted">—</span>';
+    const pub = [
+      s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva visível ao aluno">devolutiva</span>' : '',
+      s.grade_published_at ? '<span class="badge badge-accent" title="Nota visível ao aluno">nota</span>' : '',
+    ].filter(Boolean).join(' ') || '<span class="muted">—</span>';
     return `<tr>
-      <td><a href="${convUrl}" target="_blank" title="Abrir o detalhamento da nota deste aluno">${escapeHtml(s.student_label || '—')} ↗</a></td>
-      <td style="text-align:right; font-weight:600">${escapeHtml(nota)}</td>
-      <td>${status}</td>
+      <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
+      <td>${statusPill}</td>
+      <td>${avalPill}</td>
+      <td style="text-align:right">${nota}</td>
+      <td>${pub}</td>
+      <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação, escrever a devolutiva e publicar a nota">gerenciar ▸</a></td>
     </tr>`;
   }).join('');
-  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th style="text-align:right">Nota final</th><th>Status</th></tr></thead><tbody>${body}</tbody></table>`;
+  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Publicado</th><th>Ações</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderSubmissionsTable() {
@@ -636,7 +629,8 @@ function renderSubmissionsTable() {
   emptyEl.classList.add('hidden');
 
   const filtered = lastSubmissions.filter(s => {
-    if (filter === 'active') return !s.is_blocked;
+    if (filter === 'done') return s.status === 'completed';
+    if (filter === 'notdone') return s.status !== 'completed';
     if (filter === 'blocked') return !!s.is_blocked;
     if (filter === 'test') return !!s.is_test;
     if (filter === 'real') return !s.is_test;
@@ -658,35 +652,25 @@ function renderSubmissionsTable() {
     const convCell = hasConv
       ? `<a href="${convUrl}?view=conversa" target="_blank" title="Ver só a conversa (sem avaliação)">Ver conversa ↗</a>`
       : `<span class="muted">—</span>`;
-    const feedbackBadge = s.evaluation_published_at
-      ? ` <span class="badge badge-accent" title="Devolutiva visível para o aluno desde ${new Date(s.evaluation_published_at).toLocaleString()}">publicada</span>`
-      : (s.has_student_version
-        ? ` <span class="badge badge-pending" title="Devolutiva gerada, aguardando revisão/publicação — o aluno ainda não vê">devolutiva pronta</span>`
-        : '');
-    const evalCell = s.has_evaluation
-      ? `<a href="${convUrl}?view=avaliacao" target="_blank" title="Avaliada em ${s.evaluation_at ? new Date(s.evaluation_at).toLocaleString() : '—'} — abrir avaliação lado a lado"><span class="badge badge-completed">avaliada</span></a>${feedbackBadge}`
-      : `<span class="muted">—</span>`;
     const blockedBadge = s.is_blocked ? `<span class="badge-blocked">bloqueada</span>` : '';
     const actionBtn = s.is_blocked
       ? `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta entrevista">Liberar</button>`
       : `<button class="btn btn-sm" onclick="toggleBlock('${s.submission_token}', true)" title="Pausa a entrevista; o aluno perde acesso até você liberar">Bloquear</button>`;
     const abrirLink = s.is_test
-      ? `<a href="${url}" target="_blank" title="Abrir e simular o aluno (entrevista de teste)">abrir ↗</a>`
+      ? `<a href="${url}" target="_blank" title="Abrir e simular o aluno (entrevista de teste)">abrir ↗</a> · `
       : '';
     const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
     return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
+      <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td>
         <div class="row-tight">
           <code class="token-chip">${escapeHtml(s.submission_token)}</code>
-          <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${s.submission_token}')">📋</button>
-          ${abrirLink}
+          <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button>
         </div>
       </td>
-      <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge}</td>
       <td>${convCell}</td>
-      <td>${evalCell}</td>
-      <td>${actionBtn}</td>
+      <td>${abrirLink}${actionBtn}</td>
     </tr>`;
   }).join('');
 }
@@ -1843,8 +1827,8 @@ async function sendChat() {
   }
 }
 
-async function copyToken(btn, token) {
-  try { await navigator.clipboard.writeText(token); }
+async function copyStudentLink(btn, token) {
+  try { await navigator.clipboard.writeText(location.origin + '/s/' + token); }
   catch { return; }
   const prev = btn.textContent;
   btn.textContent = '✓';
