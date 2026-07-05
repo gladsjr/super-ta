@@ -45,9 +45,11 @@ function proctorAlerts(p) {
     const f = p.flags, a = [];
     if (f.absent && f.absent.pct >= 20) a.push("ausência");
     if (f.multiple_people && f.multiple_people.pct >= 20) a.push("+1 pessoa");
-    // Celular: alerta em uso BREVE também — 2+ frames amostrados com telefone
-    // (um relance de ~6s já cai em 2 frames a 3s) OU 25% da prova. Um único frame
-    // não alerta (evita fluke), mas aparece no detalhe por aluno para revisão.
+    // Celular: 2+ frames com telefone confiável (a detecção é intermitente mesmo
+    // com o celular presente — some/reaparece por ângulo — então "duração" por
+    // frames engana; ≥2 detecções já indica que não é fluke de 1 frame) OU 25% da
+    // prova. O limiar por frame (confiança+área) é a defesa contra falso-positivo;
+    // um blip de 1 frame não alerta, mas aparece no detalhe por aluno.
     if (f.phone && (f.phone.count >= 2 || f.phone.pct >= 25)) a.push("celular");
     if (f.hands && f.hands.flag) a.push("mãos fora");
     return a;
