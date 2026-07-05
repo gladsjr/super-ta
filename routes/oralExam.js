@@ -45,7 +45,10 @@ function proctorAlerts(p) {
     const f = p.flags, a = [];
     if (f.absent && f.absent.pct >= 20) a.push("ausência");
     if (f.multiple_people && f.multiple_people.pct >= 20) a.push("+1 pessoa");
-    if (f.phone && f.phone.pct >= 25) a.push("celular");
+    // Celular: alerta em uso BREVE também — 2+ frames amostrados com telefone
+    // (um relance de ~6s já cai em 2 frames a 3s) OU 25% da prova. Um único frame
+    // não alerta (evita fluke), mas aparece no detalhe por aluno para revisão.
+    if (f.phone && (f.phone.count >= 2 || f.phone.pct >= 25)) a.push("celular");
     if (f.hands && f.hands.flag) a.push("mãos fora");
     return a;
 }

@@ -192,7 +192,7 @@
         return;
       }
       el.innerHTML = `<h3 style="text-align:center">Comentário ao professor (opcional)</h3>`
-        + `<p class="sub" style="text-align:center">Você pode deixar um comentário sobre a prova — enviado uma única vez.</p>`
+        + `<p class="sub" style="text-align:center">Sua prova já foi concluída. Se quiser, deixe um comentário — é opcional e enviado uma única vez. Você também pode simplesmente fechar a página.</p>`
         + `<textarea id="oral-comment" maxlength="2000" rows="4" style="width:100%;box-sizing:border-box;font:inherit;padding:8px" placeholder="Escreva aqui (opcional)…"></textarea>`
         + `<div style="text-align:center;margin-top:8px"><button id="oral-comment-btn" class="btn">Confirmar e enviar</button> <span class="sub" id="oral-comment-msg"></span></div>`;
       $('oral-comment-btn').onclick = submitOralComment;
@@ -201,7 +201,12 @@
     async function submitOralComment() {
       const ta = $('oral-comment'), btn = $('oral-comment-btn'), msg = $('oral-comment-msg');
       const text = (ta.value || '').trim();
-      if (!text) { msg.textContent = 'Escreva algo antes de enviar.'; return; }
+      if (!text) {
+        // Comentário é OPCIONAL: sem texto, apenas confirma a conclusão (nada a enviar).
+        btn.disabled = true; ta.disabled = true;
+        msg.textContent = 'Tudo certo — sua prova foi concluída. Você pode fechar a página.';
+        return;
+      }
       btn.disabled = true; msg.textContent = 'Enviando…';
       try {
         const r = await fetch(`/s/${SUB}/oral/comment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comment: text }) });

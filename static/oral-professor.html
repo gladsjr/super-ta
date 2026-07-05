@@ -158,7 +158,7 @@
           <button id="download-csv" class="btn btn-sm" type="button" title="Baixar lista (rótulo, token, URL) em CSV">⬇ Baixar CSV</button>
         </div>
         <table id="sub-table" class="table hidden">
-          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Vídeo</th><th>Ações</th></tr></thead>
+          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Prova</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
@@ -420,12 +420,12 @@
     tbody.innerHTML = rows.map(s => {
       const url = `${location.origin}/s/${s.submission_token}`;
       const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
-      const nParts = s.oral_video_parts || (s.has_oral_video ? 1 : 0);
-      const vid = nParts > 1
-        ? '🎥 ' + Array.from({ length: nParts }, (_, i) => `<a href="${API}/oral/video/${s.submission_token}/${i}" target="_blank" title="Segmento ${i + 1} de ${nParts} (a prova foi retomada)">${i + 1}</a>`).join(' · ')
-        : s.has_oral_video
-          ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
-          : '<span class="hint">—</span>';
+      // Acesso à prova COMPLETA (como na entrevista): transcrição + vídeo + alertas
+      // + devolutiva + nota, na página de gerenciamento. Antes só linkava o vídeo cru.
+      const canView = s.has_oral_video || s.status === 'completed' || s.status === 'gave_up';
+      const vid = canView
+        ? `<a href="${API}/oral/s/${s.submission_token}" target="_blank" title="Ver a prova: transcrição, vídeo, alertas, devolutiva e nota">${s.has_oral_video ? '🎥 ' : ''}ver prova ▸</a>`
+        : '<span class="hint">—</span>';
       const abrir = s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : '';
       const blockBtn = s.is_blocked
         ? `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta prova">Liberar</button>`
