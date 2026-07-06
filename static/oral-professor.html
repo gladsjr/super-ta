@@ -279,6 +279,9 @@
       if (panel) panel.classList.toggle('hidden', !active);
       if (btn) { btn.classList.toggle('is-active', active); btn.setAttribute('aria-selected', String(active)); }
     });
+    // Ao entrar na aba de avaliação, re-renderiza a rubrica a partir da lista
+    // compartilhada — reflete perguntas editadas/adicionadas/apagadas na Configuração.
+    if (name === 'avaliacao' && typeof renderRubric === 'function') renderRubric();
     if (history.replaceState) history.replaceState(null, '', '#' + name);
   }
   TAB_NAMES.forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.onclick = () => setTab(t); });
@@ -290,7 +293,7 @@
   // ---------- Editor de perguntas (lista recolhível) ----------
   function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .q-item').length; cfgWarn(); }
   function cfgWarn() {
-    const total = collectQuestions().length;
+    const total = QUESTIONS.filter(q => (q.question || '').trim()).length;
     const n = Number(document.getElementById('cfg-n').value) || 0;
     const el = document.getElementById('cfg-hint'); if (!el) return;
     if (!total) { el.textContent = ''; el.style.color = ''; return; }
@@ -302,69 +305,56 @@
       el.style.color = '';
     }
   }
-  function syncHead(item) {
-    const q = item.querySelector('.q-q').value.trim();
+  // ---------- Lista COMPARTILHADA de questões (fonte única) ----------
+  // A Configuração (aba 1) edita SÓ o enunciado; a "Rubrica por questão" (aba 3)
+  // edita peso + 2º campo. Os DOIS editores leem/escrevem o MESMO array QUESTIONS,
+  // então apagar/editar numa reflete na outra (sem atropelo). A rubrica NÃO inclui
+  // nem exclui itens — só a Configuração mexe no conjunto. Cada questão carrega um
+  // `id` ESTÁVEL do servidor; novas nascem com id:null e o servidor atribui ao salvar.
+  let QUESTIONS = [];
+  let GRADING_MODE = 'deterministico';
+
+  function syncHead(item, q) {
     const txt = item.querySelector('.q-text');
-    if (q) { txt.textContent = q; txt.classList.remove('q-empty'); }
+    const val = (q.question || '').trim();
+    if (val) { txt.textContent = val; txt.classList.remove('q-empty'); }
     else { txt.textContent = '(pergunta vazia)'; txt.classList.add('q-empty'); }
   }
-  function renumber() {
-    [...document.querySelectorAll('#questions .q-item')].forEach((it, i) => { it.querySelector('.q-num').textContent = (i + 1) + '.'; });
-  }
-  // A Configuração edita SÓ o enunciado. O 2º campo (resposta/critério) e o peso
-  // são editados na "Rubrica por questão" (aba Avaliação); aqui eles viajam como
-  // data-* para não se perderem ao salvar. Ao carregar, ambos os editores partem
-  // do mesmo /oral/info.
-  function makeItem(q = '', a = '', weight = 1, open = false) {
+  // Configuração: um item recolhível por questão (só o enunciado). Escreve DIRETO no
+  // objeto q (identidade estável), que é o mesmo lido pela rubrica.
+  function makeItem(q) {
     const div = document.createElement('div');
-    div.className = 'q-item' + (open ? ' open' : '');
-    div.dataset.answer = a || '';
-    div.dataset.weight = Number(weight) > 0 ? Number(weight) : 1;
+    div.className = 'q-item' + (q._open ? ' open' : '');
     div.innerHTML =
       '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num"></span>' +
       '<span class="q-text"></span><button class="q-del" title="remover">✕</button></div>' +
-      '<div class="q-body">' +
-      '<label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
-      '</div>';
-    div.querySelector('.q-q').value = q;
-    div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; div.classList.toggle('open'); };
-    div.querySelector('.q-del').onclick = () => { div.remove(); renumber(); updateQCount(); };
-    div.querySelector('.q-q').addEventListener('input', () => { syncHead(div); cfgWarn(); });
-    document.getElementById('questions').appendChild(div);
-    syncHead(div); renumber();
+      '<div class="q-body"><label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea></div>';
+    div.querySelector('.q-q').value = q.question || '';
+    div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; q._open = !q._open; div.classList.toggle('open', q._open); };
+    div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderQuestions(); renderRubric(); };
+    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; syncHead(div, q); cfgWarn(); });
+    syncHead(div, q);
     return div;
   }
-  function renderQuestions(qs) {
+  function renderQuestions() {
     const c = document.getElementById('questions'); c.innerHTML = '';
-    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', q.weight, false));
-    if (!(qs || []).length) makeItem('', '', 1, true);
+    if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', weight: 1, _open: true });
+    QUESTIONS.forEach((q, i) => { const it = makeItem(q); c.appendChild(it); it.querySelector('.q-num').textContent = (i + 1) + '.'; });
     updateQCount();
-  }
-  function collectQuestions() {
-    return [...document.querySelectorAll('#questions .q-item')]
-      .map(r => ({
-        question: r.querySelector('.q-q').value.trim(),
-        answer: r.dataset.answer || '',
-        weight: Number(r.dataset.weight) > 0 ? Number(r.dataset.weight) : 1,
-      }))
-      .filter(q => q.question);
   }
 
   // ---------- Rubrica por questão (aba Avaliação): peso + 2º campo + modo ----------
-  let GRADING_MODE = 'deterministico';
   function secondLabel() { return GRADING_MODE === 'rubrica' ? 'Critério de pontuação (como dar 0–10; só o professor vê)' : 'Resposta esperada (gabarito; só o professor vê)'; }
-  function renderRubric(qs, mode) {
-    GRADING_MODE = (mode === 'rubrica') ? 'rubrica' : 'deterministico';
+  function renderRubric() {
     document.querySelectorAll('input[name="grading-mode-oral"]').forEach(r => { r.checked = (r.value === GRADING_MODE); });
     const c = document.getElementById('rubric-items-oral'); c.innerHTML = '';
-    const list = (qs && qs.length) ? qs : [];
+    const list = QUESTIONS.filter(q => (q.question || '').trim());
     if (!list.length) { c.innerHTML = '<p class="hint">Defina as perguntas na aba Configuração primeiro.</p>'; return; }
     const ph = GRADING_MODE === 'rubrica' ? 'ex.: 10 se citou os 3 aspectos com exemplos; 5 se citou 2; 0 se genérico' : 'resposta esperada';
     list.forEach((q, i) => {
       const div = document.createElement('div');
       div.className = 'rubric-q';
       div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-2) 0';
-      div.dataset.question = q.question || '';
       div.innerHTML =
         '<div style="display:flex; gap: var(--sp-3); align-items:center">' +
           '<div style="flex:1; font-weight:600">' + (i + 1) + '. ' + esc(q.question || '') + '</div>' +
@@ -372,19 +362,24 @@
         '</div>' +
         '<label class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-1)">' + secondLabel() + '</label>' +
         '<textarea class="textarea rq-answer" rows="2" placeholder="' + ph + '"></textarea>';
-      div.querySelector('.rq-weight').value = Number(q.weight) > 0 ? Number(q.weight) : 1;
-      div.querySelector('.rq-answer').value = q.answer || '';
+      const w = div.querySelector('.rq-weight'); w.value = Number(q.weight) > 0 ? Number(q.weight) : 1;
+      w.addEventListener('input', () => { q.weight = Number(w.value) > 0 ? Number(w.value) : 1; });
+      const a = div.querySelector('.rq-answer'); a.value = q.answer || '';
+      a.addEventListener('input', () => { q.answer = a.value; });
       c.appendChild(div);
     });
   }
-  function collectRubric() {
-    const mode = [...document.querySelectorAll('input[name="grading-mode-oral"]')].find(r => r.checked)?.value || GRADING_MODE;
-    const questions = [...document.querySelectorAll('#rubric-items-oral .rubric-q')].map(d => ({
-      question: d.dataset.question || '',
-      answer: d.querySelector('.rq-answer').value.trim(),
-      weight: Number(d.querySelector('.rq-weight').value) > 0 ? Number(d.querySelector('.rq-weight').value) : 1,
-    })).filter(q => q.question);
-    return { mode, questions };
+  function currentMode() { return [...document.querySelectorAll('input[name="grading-mode-oral"]')].find(r => r.checked)?.value || GRADING_MODE; }
+  // Payload de save: as questões COM enunciado (com id estável), na ordem atual.
+  function questionsPayload() {
+    return QUESTIONS.filter(q => (q.question || '').trim())
+      .map(q => ({ id: q.id ?? null, question: q.question, answer: q.answer || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1 }));
+  }
+  // Adota as questões salvas (com ids do servidor) como nova fonte; preserva o estado
+  // de expansão casando por id.
+  function adoptSaved(saved) {
+    const openById = {}; QUESTIONS.forEach(q => { if (q.id != null) openById[q.id] = q._open; });
+    QUESTIONS = (saved || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, _open: !!openById[q.id] }));
   }
 
   // ---------- Status helpers ----------
@@ -533,8 +528,10 @@
     document.getElementById('cfg-n').value = j.work.question_count || 6;
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
-    renderQuestions(j.questions || []);
-    renderRubric(j.questions || [], j.work.grading_mode);
+    GRADING_MODE = (j.work.grading_mode === 'rubrica') ? 'rubrica' : 'deterministico';
+    QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, _open: false }));
+    renderQuestions();
+    renderRubric();
     fillSettings(j.work);
     renderSubsTable();
     renderEvalTable();
@@ -565,8 +562,9 @@
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
       msg.textContent = `${j.count} pergunta(s) extraída(s).`;
       document.getElementById('exam-status').textContent = 'Prova enviada. As perguntas abaixo podem ser editadas.';
-      renderQuestions(j.questions || []);
-      renderRubric(j.questions || [], GRADING_MODE);
+      adoptSaved(j.questions);
+      renderQuestions();
+      renderRubric();
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
     finally { btn.disabled = false; }
   };
@@ -580,9 +578,15 @@
       msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
-  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', 1, true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
+  document.getElementById('q-add').onclick = () => {
+    QUESTIONS.push({ id: null, question: '', answer: '', weight: 1, _open: true });
+    renderQuestions();
+    const items = document.querySelectorAll('#questions .q-item');
+    const last = items[items.length - 1];
+    if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.q-q').focus(); }
+  };
   document.getElementById('q-save').onclick = async () => {
-    const qs = collectQuestions(); const msg = document.getElementById('q-msg');
+    const qs = questionsPayload(); const msg = document.getElementById('q-msg');
     if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
     msg.textContent = 'Salvando…';
     try {
@@ -591,21 +595,21 @@
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
       msg.textContent = `${j.count} pergunta(s) salva(s).`;
       document.getElementById('exam-status').textContent = 'Perguntas definidas.';
-      renderRubric(j.questions || [], GRADING_MODE);  // mantém a rubrica em sincronia
+      adoptSaved(j.questions); renderQuestions(); renderRubric();  // lista compartilhada em sincronia
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
-  // Salvar rubrica (peso + 2º campo + modo). Sincroniza os dois editores.
+  // Salvar rubrica (peso + 2º campo + modo). Mesma lista compartilhada.
   document.getElementById('save-rubric-oral').onclick = async () => {
-    const { mode, questions } = collectRubric(); const msg = document.getElementById('rubric-msg-oral');
-    if (!questions.length) { msg.textContent = 'Defina as perguntas primeiro (aba Configuração).'; return; }
+    const qs = questionsPayload(); const mode = currentMode(); const msg = document.getElementById('rubric-msg-oral');
+    if (!qs.length) { msg.textContent = 'Defina as perguntas primeiro (aba Configuração).'; return; }
     msg.textContent = 'Salvando…';
     try {
-      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions, mode }) });
+      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs, mode }) });
       const j = await r.json();
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
       msg.textContent = 'Rubrica salva.';
-      renderQuestions(j.questions || []);
-      renderRubric(j.questions || [], mode);
+      GRADING_MODE = mode;
+      adoptSaved(j.questions); renderQuestions(); renderRubric();
       renderRubricWarnings(j.rubric_warnings, j.questions || []);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
@@ -624,9 +628,10 @@
       <strong>Critérios de pontuação a revisar</strong> <span class="hint">(aviso — a rubrica foi salva mesmo assim)</span>
       <ul style="margin: var(--sp-2) 0 0; padding-left: var(--sp-4)">${rows}</ul></div>`;
   }
-  // Trocar o modo re-renderiza os rótulos preservando o que já foi digitado.
+  // Trocar o modo re-renderiza os rótulos preservando o que já foi digitado (os
+  // valores vivem em QUESTIONS, então re-renderizar não perde nada).
   document.querySelectorAll('input[name="grading-mode-oral"]').forEach(radio => {
-    radio.addEventListener('change', () => { const cur = collectRubric(); renderRubric(cur.questions, cur.mode); });
+    radio.addEventListener('change', () => { GRADING_MODE = currentMode(); renderRubric(); });
   });
 
   // ---------- Ações: ALUNOS ----------

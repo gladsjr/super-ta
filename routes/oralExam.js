@@ -182,11 +182,12 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
             });
             questions = await oralExamExtractorAgent.extract({ examFileId: examFile.id, mode, meterCtx: { workId: req.work.id } });
         }
-        // Toda questão nasce com peso 1 (o professor ajusta na rubrica).
+        // Toda questão nasce com peso 1 (o professor ajusta na rubrica). A extração
+        // substitui as questões: são novas (sem id) → recebem ids frescos do contador.
         questions = questions.map(q => ({ ...q, weight: 1 }));
-        await db.setOralQuestions(req.work.id, questions);
-        log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} type=${isTxt ? "txt" : "pdf"} questions=${questions.length}`);
-        res.json({ ok: true, count: questions.length, questions });
+        const cleaned = await db.setOralQuestions(req.work.id, questions);
+        log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} type=${isTxt ? "txt" : "pdf"} questions=${cleaned.length}`);
+        res.json({ ok: true, count: cleaned.length, questions: cleaned });
     } catch (err) {
         log.error("ORAL", `exam-pdf failed: ${err.message}`);
         res.status(500).json({ error: "falha ao processar a prova", detail: err.message });
@@ -210,29 +211,22 @@ router.post("/w/:workToken/oral/config", requireWorkToken, requireOral, async (r
     }
 });
 
-// Perguntas digitadas/editadas à mão (alternativa ou complemento ao PDF). O
-// corpo é [{question, answer}]; re-indexamos e gravamos em oral_questions.
-// Salva o array COMPLETO de questões + (opcional) o modo de pontuação. Serve aos
-// dois editores: a Configuração (edita só o enunciado) e a "Rubrica por questão"
-// na aba de avaliação (edita peso + 2º campo). Ambos enviam os objetos inteiros
-// {question, answer, weight}. Sem aspectos.
+// Perguntas digitadas/editadas à mão (alternativa ou complemento ao PDF). Salva o
+// array COMPLETO de questões + (opcional) o modo de pontuação. Serve aos dois
+// editores, que COMPARTILHAM a mesma lista: a Configuração (edita só o enunciado) e
+// a "Rubrica por questão" na aba de avaliação (edita peso + 2º campo). Cada questão
+// carrega seu `id` estável; db.setOralQuestions preserva ids existentes e atribui
+// novos aos itens sem id (nunca reusa). Sem aspectos.
 router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async (req, res) => {
     const raw = Array.isArray(req.body?.questions) ? req.body.questions : null;
     if (!raw) return res.status(400).json({ error: "questions (array) required" });
-    const cleaned = raw
-        .map(q => ({
-            question: String(q?.question || "").trim(),
-            answer: String(q?.answer || "").trim(),
-            weight: Number(q?.weight) > 0 ? Number(q.weight) : 1,
-        }))
-        .filter(q => q.question)
-        .map((q, i) => ({ id: i + 1, ...q }));
-    if (cleaned.length === 0) return res.status(400).json({ error: "nenhuma pergunta válida (cada pergunta precisa de enunciado)" });
+    if (!raw.some(q => String(q?.question || "").trim())) return res.status(400).json({ error: "nenhuma pergunta válida (cada pergunta precisa de enunciado)" });
     try {
         if (req.body?.mode === "rubrica" || req.body?.mode === "deterministico") {
             await db.setOralGradingMode(req.work.id, req.body.mode);
         }
-        await db.setOralQuestions(req.work.id, cleaned);
+        // IDs estáveis atribuídos no db (preserva existentes, novos do contador).
+        const cleaned = await db.setOralQuestions(req.work.id, raw);
         log.info("ORAL", `questões salvas work=${req.work.work_token} n=${cleaned.length} mode=${req.body?.mode || "-"}`);
         // No modo rubrica: checagem ADVISORY dos critérios de pontuação (não bloqueia
         // o salvamento). Devolve avisos por questão para a UI destacar.
