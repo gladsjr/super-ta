@@ -360,29 +360,35 @@
     const c = document.getElementById('rubric-items-oral'); c.innerHTML = '';
     if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
     QUESTIONS.forEach((q, i) => {
+      // Cada questão é RECOLHÍVEL (reusa .q-item): fechada mostra só a pergunta;
+      // aberta edita pergunta + resposta + rubrica + peso. _ropen guarda o estado.
       const div = document.createElement('div');
-      div.className = 'rubric-q';
-      div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-3) 0';
+      div.className = 'q-item' + (q._ropen ? ' open' : '');
       const stale = q.rubric_stale || !(q.rubric || '').trim();
-      const badge = stale ? ' <span class="pill" style="background:#fff6e0;border:1px solid #ecc874; font-size:var(--fs-xs)">revisar</span>' : '';
+      const badge = stale ? '<span class="pill" style="background:#fff6e0;border:1px solid #ecc874; font-size:var(--fs-xs)">revisar</span>' : '';
       const genBtn = (q.answer || '').trim() ? '<button class="btn btn-ghost btn-sm rq-gen" type="button" title="Gerar a rubrica a partir da resposta esperada">gerar</button>' : '';
-      const L = 'class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-1)"';
       div.innerHTML =
-        '<div style="display:flex; gap:6px; align-items:center; margin-bottom:4px">' +
-          '<span style="font-weight:700; color:var(--ink-500)">' + (i + 1) + '.</span>' + badge +
-          '<span style="flex:1"></span>' + genBtn +
-          '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
-          '<button class="btn btn-ghost btn-sm rq-del" type="button" title="remover questão">✕</button>' +
-        '</div>' +
-        '<label ' + L + ' style="margin-top:0">Pergunta</label><textarea class="textarea rq-question" rows="2" placeholder="Enunciado da pergunta"></textarea>' +
-        '<label ' + L + '>Resposta esperada (opcional)</label><textarea class="textarea rq-answer" rows="2" placeholder="Gabarito — insumo para gerar a rubrica; o aluno não vê"></textarea>' +
-        '<label ' + L + '>Rubrica — como pontuar (5 níveis: 0 / 2,5 / 5 / 7,5 / 10); só o professor vê</label><textarea class="textarea rq-rubric" rows="3" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>';
-      const qq = div.querySelector('.rq-question'); qq.value = q.question || ''; qq.addEventListener('input', () => { q.question = qq.value; q.rubric_stale = true; });
+        '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num">' + (i + 1) + '.</span>' +
+          '<span class="q-text"></span><span class="rq-badge" style="margin-left:6px">' + badge + '</span></div>' +
+        '<div class="q-body">' +
+          '<label>Pergunta</label><textarea class="rq-question" placeholder="Enunciado da pergunta"></textarea>' +
+          '<label>Resposta esperada (opcional)</label><textarea class="rq-answer" placeholder="Gabarito — insumo para gerar a rubrica; o aluno não vê"></textarea>' +
+          '<label>Rubrica — como pontuar (5 níveis: 0 / 2,5 / 5 / 7,5 / 10); só o professor vê</label><textarea class="rq-rubric" style="min-height:4.5rem" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>' +
+          '<div class="row" style="margin-top: var(--sp-2); align-items:center">' + genBtn +
+            '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
+            '<span class="spacer" style="flex:1"></span>' +
+            '<button class="btn btn-ghost btn-sm rq-del" type="button" title="remover questão">✕ excluir</button>' +
+          '</div>' +
+        '</div>';
+      const setHead = () => { const t = div.querySelector('.q-text'); const v = (q.question || '').trim(); if (v) { t.textContent = v; t.classList.remove('q-empty'); } else { t.textContent = '(pergunta vazia)'; t.classList.add('q-empty'); } };
+      div.querySelector('.q-head').onclick = (e) => { q._ropen = !q._ropen; div.classList.toggle('open', q._ropen); };
+      const qq = div.querySelector('.rq-question'); qq.value = q.question || ''; qq.addEventListener('input', () => { q.question = qq.value; q.rubric_stale = true; setHead(); });
       const a = div.querySelector('.rq-answer'); a.value = q.answer || ''; a.addEventListener('input', () => { q.answer = a.value; q.rubric_stale = true; });
       const w = div.querySelector('.rq-weight'); w.value = Number(q.weight) > 0 ? Number(q.weight) : 1; w.addEventListener('input', () => { q.weight = Number(w.value) > 0 ? Number(w.value) : 1; });
       const rub = div.querySelector('.rq-rubric'); rub.value = q.rubric || ''; rub.addEventListener('input', () => { q.rubric = rub.value; q.rubric_stale = false; });
       div.querySelector('.rq-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderRubric(); renderQuestions(); };
       const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
+      setHead();
       c.appendChild(div);
     });
   }
