@@ -65,3 +65,9 @@ id = "IbdGq29bkg7JAp1SUgE72"
 uri = "file://reports/relatorio-custos-0f260729a5ed.pdf"
 type = "pdf"
 title = "Relatório de Custos — Mackenzie 06 (PDF)"
+
+[[outputs]]
+id = "XL-mSbbIbLDNmDewnJJnV"
+uri = "file://tmp/vozes-fgv-mineracao.zip"
+type = "unspecified"
+title = "Vozes e transcrições — FGV Trabalho de Mineração (165 MB)"
