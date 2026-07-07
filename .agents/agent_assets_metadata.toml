@@ -71,3 +71,9 @@ id = "XL-mSbbIbLDNmDewnJJnV"
 uri = "file://tmp/vozes-fgv-mineracao.zip"
 type = "unspecified"
 title = "Vozes e transcrições — FGV Trabalho de Mineração (165 MB)"
+
+[[outputs]]
+id = "1PxZOJjxXAyzSpQI-4JUJ"
+uri = "file://tmp/download-link.txt"
+type = "text"
+title = "Link temporário para baixar o ZIP (válido por 6h)"
