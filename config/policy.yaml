@@ -15,11 +15,12 @@ models:
   stt_model: "gpt-4o-transcribe"
   tts_model: "gpt-4o-mini-tts"
   # Realtime (fala-a-fala) — usado só pelo tipo de trabalho "prova oral".
-  # gpt-realtime-2.1 (jul/2026): melhor reconhecimento alfanumérico (números/percentuais/
-  # siglas que o aluno cita), melhor tratamento de silêncio/ruído e interrupção, ~25%
-  # menos latência p95. Custo de ÁUDIO igual ao gpt-realtime (in $32/out $64 por 1M).
-  # O alias antigo "gpt-realtime" resolvia p/ o snapshot gpt-realtime-2025-08-28.
-  realtime_model: "gpt-realtime-2.1"
+  # gpt-realtime-2025-08-28: a geração ORIGINAL (contexto 32k). Voz em português do
+  # Brasil soa NATIVA. Fixado no snapshot (não no alias "gpt-realtime") p/ não
+  # migrar sozinho para a linha "2.x" (128k), que soa com sotaque americano no
+  # português (regressão de voz da geração nova; ver histórico de commits).
+  # Trade: abre mão do reconhecimento alfanumérico melhor da 2.x — priorizamos a voz.
+  realtime_model: "gpt-realtime-2025-08-28"
   # Future context-specific models can be configured here
   # comprehension_evaluator_model: "gpt-5.3"
   # clarification_evaluator_model: "gpt-5.3"
