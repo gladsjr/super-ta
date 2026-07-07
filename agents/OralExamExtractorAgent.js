@@ -30,23 +30,18 @@ const SCHEMA = {
     required: ["questions"],
 };
 
-// O 2º campo ("answer") muda de significado conforme o MODO de pontuação da prova:
-// - deterministico: é a RESPOSTA ESPERADA (gabarito).
-// - rubrica: é o CRITÉRIO de pontuação (como dar 0–10) daquela questão.
-function sysFor(mode) {
-    const second = mode === "rubrica"
-        ? `- "answer": o CRITÉRIO DE PONTUAÇÃO daquela questão — a instrução de como atribuir uma nota de 0 a 10 à resposta do aluno (ex.: "10 se citou os três aspectos com exemplos; 5 se citou dois; 0 se genérico"). Se o documento trouxer uma rubrica/critério por questão, extraia-o; se trouxer apenas a resposta esperada, use-a como base do critério; se não houver nada, devolva string vazia (o professor escreve depois).`
-        : `- "answer": a RESPOSTA ESPERADA (gabarito) correspondente àquela pergunta. Se uma pergunta não tiver resposta no PDF, devolva string vazia.`;
-    return `Você extrai a LISTA DE PERGUNTAS de um PDF de prova ou lista de exercícios, em português do Brasil, junto com um segundo campo por pergunta. O documento mistura perguntas e, para cada uma, um conteúdo de correção (que pode estar logo abaixo da pergunta, numa seção ao final, etc.).
+// "answer" é sempre a RESPOSTA ESPERADA (gabarito) da questão. A rubrica de
+// pontuação (critério detalhado) é gerada depois, a partir da resposta, pelo
+// OralRubricBuilderAgent — não sai do PDF.
+const SYS = `Você extrai a LISTA DE PERGUNTAS de um PDF de prova ou lista de exercícios, em português do Brasil, junto com a resposta esperada de cada uma. O documento mistura perguntas e, para cada uma, um conteúdo de correção (que pode estar logo abaixo da pergunta, numa seção ao final, etc.).
 
 Regras:
 - Extraia CADA pergunta como um item, na ORDEM em que aparecem no documento.
 - "question": o enunciado da pergunta, limpo (sem o número/marcador), pronto para ser FALADO a um aluno numa arguição oral.
-${second}
-- NÃO invente perguntas nem respostas/critérios. Use exclusivamente o conteúdo do PDF.
+- "answer": a RESPOSTA ESPERADA (gabarito) correspondente àquela pergunta. Se uma pergunta não tiver resposta no PDF, devolva string vazia.
+- NÃO invente perguntas nem respostas. Use exclusivamente o conteúdo do PDF.
 - Se o documento não for uma prova com perguntas, devolva questions como lista vazia.
 Retorne SOMENTE o JSON do schema.`;
-}
 
 export class OralExamExtractorAgent {
     static TYPE = "oral_exam_extractor";
@@ -65,22 +60,23 @@ export class OralExamExtractorAgent {
      * @param {object|null} p.meterCtx
      * @returns {Promise<Array<{id:number,question:string,answer:string}>>}
      */
-    async extract({ examFileId = null, examText = null, mode = "deterministico", meterCtx = null }) {
+    async extract({ examFileId = null, examText = null, meterCtx = null }) {
         if (!examFileId && !examText) throw new Error("OralExamExtractor.extract: missing examFileId/examText");
         const content = examText
-            ? [{ type: "input_text", text: `Extraia as perguntas e o segundo campo do texto de prova abaixo.\n\n---\n${examText}\n---` }]
+            ? [{ type: "input_text", text: `Extraia as perguntas e as respostas esperadas do texto de prova abaixo.\n\n---\n${examText}\n---` }]
             : [
-                { type: "input_text", text: "Extraia as perguntas e o segundo campo do PDF anexo." },
+                { type: "input_text", text: "Extraia as perguntas e as respostas esperadas do PDF anexo." },
                 { type: "input_file", file_id: examFileId },
             ];
         const out = await runStructured({
             client: this.client, model: this.model, label: "AGENT:OralExamExtractor",
-            instructions: sysFor(mode), input: [{ role: "user", content }],
+            instructions: SYS, input: [{ role: "user", content }],
             schema: SCHEMA, schemaName: "oral_exam_questions", meterCtx,
+            // Sem id aqui: quem atribui id ESTÁVEL (do contador, sem reuso) é
+            // db.setOralQuestions. Assim re-extrair não reusa ids de questões antigas.
             validate: (parsed) => (Array.isArray(parsed.questions) ? parsed.questions : [])
                 .map(q => ({ question: String(q.question || "").trim(), answer: String(q.answer || "").trim() }))
-                .filter(q => q.question)
-                .map((q, i) => ({ id: i + 1, ...q })),
+                .filter(q => q.question),
         });
         log.info("AGENT:OralExamExtractor", `extracted ${out.length} questions`);
         return out;

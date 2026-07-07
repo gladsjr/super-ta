@@ -252,9 +252,10 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - [StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_ui`. Deriva do relatório interno a devolutiva FORMATIVA ao aluno: sem nota/juízo interno cru, sem follow-ups do professor. Professor SOBERANO sobre o conteúdo: por default fica no conteúdo, mas se as diretrizes pedirem, comenta forma/entrega/espontaneidade (observação calibrada, nunca acusação) — não depende de `expect_spontaneous`. Sanitização — regras de conteúdo no prompt (regra inviolável: não imputar causa/acusar) + varredura `FORBIDDEN_PATTERNS` no código (conjunto único de ACUSAÇÃO; se vazar, re-tenta apontando o vazamento; persistindo, falha). FLUXO EM DOIS PASSOS: gerar a prévia (`/evaluation/student-version` individual, `/evaluations/student-versions` em lote — único ponto que chama o agente) e, depois da revisão do professor, publicar (`/evaluation/publish`, `/evaluations/publish` — só marca visibilidade, sem LLM). O professor pode EDITAR a devolutiva (PUT `/evaluation/student-version`; validação de forma + warnings de vocabulário interno, sem bloquear): a edição vive em `student_evaluation_edited_json`, a automática fica preservada em `student_evaluation_json`, e a efetiva (editada ?? automática) é o que se publica. Aluno lê em `GET /s/:t/evaluation`, sem expirar com a janela de revisão.
    - [GradingAgent.js](../agents/GradingAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Calcula a nota (0–10) de UM critério da rubrica aplicando o prompt do critério sobre o relatório interno completo; devolve `{score, justification}`. Uma chamada por critério (em paralelo); a nota FINAL é a média ponderada pelos pesos, calculada em código ([lib/rubric.js](../lib/rubric.js)#weightedFinal), nunca pelo LLM. A rubrica do trabalho vive em `works.grading_rubric` (`NULL` ⇒ `DEFAULT_RUBRIC`: "avaliação do entrevistador" + "avaliação do professor", peso igual); o professor edita no painel e pode ajustar ad-hoc por aluno (`rubricOverride`) ou sobrescrever a nota manualmente (PUT). Notas em `submissions.grades_json`/`grade_final`. A nota é uma PUBLICAÇÃO À PARTE da devolutiva (`grade_published_at`, independente de `evaluation_published_at`): o professor publica a devolutiva subjetiva, pode receber o comentário do aluno e só então publicar a nota — ou tudo junto. Ao aluno vão nota final + critérios (nome/peso/nota), SEM justificativas (professor-only). Rotas: calcular `/evaluation/grades` (POST individual com `rubricOverride`, PUT override manual; lote `/evaluations/grades`); publicar `/evaluation/grade-publish` (POST/DELETE; lote `/evaluations/grade-publish`). A rota do aluno `GET /s/:t/evaluation` devolve devolutiva e nota independentes.
    - **Prova oral (Realtime)** — subsistema à parte (`kind='oral_realtime'`), desenhado no diagrama dedicado em *Prova oral (Realtime) — relay e prompts* (abaixo):
-     - [OralExamExtractorAgent.js](../agents/OralExamExtractorAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`. Lê o PDF da prova via `input_file` e extrai a lista estruturada `{question, answer, weight}`. É CIENTE DO MODO de pontuação da prova (`works.oral_grading_mode`): em **determinístico** o `answer` é a resposta esperada (gabarito literal); em **rubrica** o `answer` é o critério de pontuação (como dar 0–10). O 2º campo fica só no servidor; só a pergunta vai ao aluno.
-     - [OralExamEvaluatorAgent.js](../agents/OralExamEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Compara a transcrição das respostas do aluno ao material do professor, pergunta a pergunta (rota `/w/:t/oral/submissions/:sub/evaluate` e lote). Schema e prompt RAMIFICAM pelo modo: **determinístico** → classifica cada resposta em `correct/partial/incorrect` (→ 10/5/0); **rubrica** → dá um `score` 0–10 aplicando o critério. A nota da prova é a **média ponderada** por pesos das questões (reusa [lib/rubric.js](../lib/rubric.js)#weightedFinal), gravada em `submissions.grades_json` como a rubrica da entrevista.
-     - [RubricCriterionCheckAgent.js](../agents/RubricCriterionCheckAgent.js) — modelo: `fast_model`, audience: `professor_via_ui`. Só no modo **rubrica**: ao salvar as questões (`POST /w/:t/oral/questions`), revisa se cada critério de pontuação (o 2º campo) especifica bem como pontuar 0–10. **Advisory** — devolve avisos por questão (`rubric_warnings`) que a UI destaca; NÃO bloqueia o salvamento.
+     - [OralExamExtractorAgent.js](../agents/OralExamExtractorAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`. Lê o PDF da prova via `input_file` e extrai `{question, answer}` — `answer` é sempre a **resposta esperada** (gabarito). A rubrica de pontuação é gerada depois, a partir da resposta. O 2º campo fica só no servidor; só a pergunta vai ao aluno.
+     - [OralRubricBuilderAgent.js](../agents/OralRubricBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Gera, a partir de `{question, answer}`, a **RUBRICA detalhada** (mini-prompt com 5 níveis ancorados em 0/2,5/5/7,5/10) + um **peso** sugerido pela complexidade. O professor gera em lote (`POST /w/:t/oral/rubrics/generate?scope=stale|all`, NDJSON) ou por questão (`.../questions/:qid/rubric/generate`), ou escreve a rubrica à mão. Requer resposta esperada não-vazia.
+     - [OralExamEvaluatorAgent.js](../agents/OralExamEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Modelo ÚNICO (sem modo): aplica a **rubrica** de cada questão à transcrição e dá um `score` ancorado em 0/2,5/5/7,5/10 (rota `/w/:t/oral/submissions/:sub/evaluate` e lote — que RECUSAM questões sem rubrica). Nota da prova = **média ponderada** por pesos (reusa [lib/rubric.js](../lib/rubric.js)#weightedFinal), gravada em `submissions.grades_json` como a rubrica da entrevista.
+     - [RubricCriterionCheckAgent.js](../agents/RubricCriterionCheckAgent.js) — modelo: `fast_model`, audience: `professor_via_ui`. Ao salvar as questões (`POST /w/:t/oral/questions`), revisa (advisory) se cada **rubrica** preenchida especifica bem como pontuar. Devolve avisos por questão (`rubric_warnings`); NÃO bloqueia o salvamento.
      - [StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js) (reuso na oral) — a devolutiva da prova oral é GERADA por LLM (não mais só template), via um shim em [lib/oralFeedbackOps.js](../lib/oralFeedbackOps.js) que converte `oral_eval_json` (per-questão) no relatório interno que o agente espera, passando `feedback_guidelines` + seções do trabalho. Rotas: individual `POST /w/:t/oral/submissions/:sub/devolutiva/derive`, lote `POST /w/:t/oral/evaluations/student-versions` (NDJSON). O proctoring NÃO entra na devolutiva do aluno (regra de não-acusação); seu efeito é a penalidade e a visão do professor.
      - Instruções do examinador (persona fixa + protocolo de condução + perguntas) — string montada em [lib/oralRealtime.js](../lib/oralRealtime.js)#buildExamInstructions, enviada como `instructions` da sessão Realtime (fala-a-fala). O gabarito NUNCA entra na sessão; só as perguntas. Cobertura: o examinador só aponta lacuna a partir do ENUNCIADO e só quando ele deixa óbvio (ex.: pediu N itens e o aluno deu menos) — nunca revela nem corrige.
    - [GradePenaltyAgent.js](../agents/GradePenaltyAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Critério FIXO de penalidade por alertas (proctoring na oral; autoria na entrevista), **opt-in** por trabalho (`works.grade_penalty_json = {enabled, prompt}`). Roda DEPOIS do cálculo da nota: lê os alertas resumidos ([lib/gradePenalty.js](../lib/gradePenalty.js) renderiza a partir de `oral_proctor_json`/`oral_voice_json` ou dos sinais de autoria) + a política do professor, e devolve um `multiplier` 0..1; a nota final vira `base*multiplier`. Sem alertas ⇒ multiplicador 1 (sem chamar o LLM). Guardado em `grades_json.penalty`.
@@ -267,10 +268,12 @@ Subsistema à parte do `/chat` da entrevista (`works.kind = 'oral_realtime'`). *
 
 ```mermaid
 flowchart TD
-  %% PROFESSOR: sobe a prova → extrai perguntas + 2º campo (ciente do modo).
+  %% PROFESSOR: sobe a prova → extrai perguntas + respostas → gera rubricas.
   ExamUp([Professor sobe PDF/TXT]) --> ExamPdf["/w/:t/oral/exam-pdf"]
-  ExamPdf --> Extractor["OralExamExtractorAgent<br/>(fast: perguntas + gabarito/critério<br/>ciente do modo de pontuação)"]
-  Extractor --> Questions[("oral_questions<br/>2º campo fica no servidor")]
+  ExamPdf --> Extractor["OralExamExtractorAgent<br/>(fast: perguntas + respostas esperadas)"]
+  Extractor --> Questions[("oral_questions<br/>resposta + rubrica no servidor")]
+  Questions --> RubricGen["OralRubricBuilderAgent<br/>(principal: resposta → rubrica 5 níveis + peso)"]
+  RubricGen --> Questions
 
   %% ALUNO: consentimento → portão no NAVEGADOR → relay Realtime.
   StuStart([Aluno abre o link]) --> Setup["Portão de setup (NAVEGADOR)<br/>MediaPipe WASM: posição + celular<br/>+ ruído + teste de conexão"]
@@ -282,7 +285,7 @@ flowchart TD
   RT --> Video[("vídeo → object storage")]
 
   %% PÓS-PROVA: avaliação + proctoring (lote, com streaming NDJSON).
-  Transcript --> Evaluator["OralExamEvaluatorAgent<br/>(principal: transcrição x gabarito)"]
+  Transcript --> Evaluator["OralExamEvaluatorAgent<br/>(principal: transcrição x rubrica → score 0/2,5/5/7,5/10)"]
   Evaluator --> Devol[("devolutiva + nota (editáveis)")]
   Video --> Proctor["lib/proctor.js<br/>YOLO + MediaPipe hands"]
   Proctor --> Flags[("flags p/ revisão humana")]
@@ -290,16 +293,17 @@ flowchart TD
   classDef agent fill:#eaf0f7,stroke:#1e3a5f,color:#0f1b2d;
   classDef state fill:#f3f5f8,stroke:#5a6b80,color:#0f1b2d,stroke-dasharray: 4 2;
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
-  class ExamPdf,Extractor,Setup,Relay,BuildInstr,RT,Evaluator,Proctor agent
+  class ExamPdf,Extractor,RubricGen,Setup,Relay,BuildInstr,RT,Evaluator,Proctor agent
   class Questions,Transcript,Video,Devol,Flags state
   class ExamUp,StuStart entry
 
   click ExamPdf "vscode://file/c:/Users/glads/src/super-ta/routes/oralExam.js" "Handler /oral/exam-pdf (PDF ou TXT)"
-  click Extractor "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamExtractorAgent.js:36" "sysFor(mode) do OralExamExtractorAgent"
+  click Extractor "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamExtractorAgent.js" "SYS do OralExamExtractorAgent"
+  click RubricGen "vscode://file/c:/Users/glads/src/super-ta/agents/OralRubricBuilderAgent.js" "systemPromptBody do OralRubricBuilderAgent"
   click Relay "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "attachOralRelay (relay WebSocket)"
   click BuildInstr "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "buildExamInstructions"
   click RT "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "Sessão Realtime"
-  click Evaluator "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamEvaluatorAgent.js:45" "sysFor(mode) do OralExamEvaluatorAgent"
+  click Evaluator "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamEvaluatorAgent.js" "SYS do OralExamEvaluatorAgent"
   click Proctor "vscode://file/c:/Users/glads/src/super-ta/lib/proctor.js" "analyzeOralVideo (proctoring de vídeo)"
 ```
 

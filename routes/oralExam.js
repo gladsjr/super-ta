@@ -14,7 +14,7 @@ import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
-import { oralExamExtractorAgent, oralExamEvaluatorAgent, rubricCriterionCheckAgent } from "../lib/agents.js";
+import { oralExamExtractorAgent, oralExamEvaluatorAgent, rubricCriterionCheckAgent, oralRubricBuilderAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
@@ -57,35 +57,34 @@ function proctorAlerts(p) {
 // Alerta de VOZ: houve pausa longa antes de resposta substancial.
 function voiceAlert(v) { return !!(v && v.latency && v.latency.flagged_count > 0); }
 
-// grades_json (mesma forma da entrevista) a partir do relatório do avaliador +
-// os pesos das questões. Nota por questão: no modo determinístico, mapeia o
-// assessment (correta=10, parcial=5, incorreta/não respondida=0); no modo
-// rubrica, usa o score 0–10 do avaliador. Nota final = média ponderada pelos
-// pesos (weightedFinal), sobre as questões feitas ao aluno.
-const ASSESS_SCORE = { correct: 10, partial: 5, incorrect: 0, not_answered: 0 };
-function gradesFromReport(report, questions, mode) {
+// grades_json (mesma forma da entrevista) a partir do relatório do avaliador + os
+// pesos das questões. Um único modelo: o avaliador dá um score ANCORADO nos 5
+// níveis (0/2,5/5/7,5/10); aqui só arredondamos à âncora mais próxima por robustez.
+// Nota final = média ponderada pelos pesos (weightedFinal), sobre as questões do aluno.
+const ANCHORS = [0, 2.5, 5, 7.5, 10];
+function toAnchor(raw) {
+    const s = Number(raw);
+    if (!Number.isFinite(s)) return 0;
+    return ANCHORS.reduce((best, a) => (Math.abs(a - s) < Math.abs(best - s) ? a : best), 0);
+}
+function gradesFromReport(report, questions) {
     const pq = report && Array.isArray(report.per_question) ? report.per_question : [];
     if (!pq.length) return null;
     const wById = {};
     for (const q of (questions || [])) wById[q.id] = Number(q.weight) > 0 ? Number(q.weight) : 1;
-    const criteria = pq.map(q => {
-        const weight = wById[q.id] != null ? wById[q.id] : 1;
-        let score;
-        if (mode === "rubrica") {
-            const s = Number(q.score);
-            score = Number.isFinite(s) ? Math.max(0, Math.min(10, Math.round(s * 10) / 10)) : 0;
-        } else score = ASSESS_SCORE[q.assessment] != null ? ASSESS_SCORE[q.assessment] : 0;
-        return { id: q.id, name: q.question, weight, score, justification: q.comment || "" };
-    });
-    return { criteria, final: weightedFinal(criteria), computed_at: new Date().toISOString(), mode };
+    const criteria = pq.map(q => ({
+        id: q.id, name: q.question, weight: wById[q.id] != null ? wById[q.id] : 1,
+        score: toAnchor(q.score), justification: q.comment || "",
+    }));
+    return { criteria, final: weightedFinal(criteria), computed_at: new Date().toISOString() };
 }
 // Após avaliar: preenche a NOTA como default (= rubrica per-questão), sem
 // sobrescrever ajuste já feito pelo professor. A DEVOLUTIVA não é preenchida
 // aqui — passou a ser um passo à parte ("Gerar devolutivas", via LLM), espelhando
 // a entrevista. Aplica o critério de penalidade (se ligado) na nota final.
-async function applyEvalDefaults(work, submissionId, detail, report, questions, mode) {
+async function applyEvalDefaults(work, submissionId, detail, report, questions) {
     if (!detail || detail.grade_final == null) {
-        const grades = gradesFromReport(report, questions, mode);
+        const grades = gradesFromReport(report, questions);
         if (grades) {
             await applyPenaltyToGrades(work, submissionId, grades, "oral");
             await db.setSubmissionGrades(submissionId, grades);
@@ -109,10 +108,9 @@ router.get("/oral/ping", (_req, res) => { res.set("Cache-Control", "no-store"); 
 // perguntas E respostas — é a prova dele) + lista de vozes.
 router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req, res) => {
     try {
-        const [questions, subs, grading_mode] = await Promise.all([
+        const [questions, subs] = await Promise.all([
             db.getOralQuestions(req.work.id),
             db.listSubmissionsForWork(req.work.id),
-            db.getOralGradingMode(req.work.id),
         ]);
         res.set("Cache-Control", "no-store");
         res.json({
@@ -122,7 +120,6 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 has_exam: req.work.has_exam,
                 question_count: req.work.question_count,
                 voice: req.work.voice,
-                grading_mode,
                 feedback_guidelines: req.work.feedback_guidelines || "",
                 include_interviewer_opinion: req.work.include_interviewer_opinion !== false,
                 include_strengths: req.work.include_strengths !== false,
@@ -167,24 +164,23 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
     try {
         // Guarda os bytes da fonte (serve de flag has_exam; col. exam_pdf é genérica).
         await db.setExamPdf(req.work.id, req.file.buffer, req.file.originalname);
-        // O 2º campo extraído depende do modo (resposta esperada no determinístico;
-        // critério de pontuação no modo rubrica).
-        const mode = await db.getOralGradingMode(req.work.id);
+        // Extrai perguntas + respostas esperadas (gabarito). A rubrica de pontuação é
+        // gerada depois, a partir das respostas (OralRubricBuilderAgent).
         let questions;
         if (isTxt) {
             const text = req.file.buffer.toString("utf-8").replace(/^\uFEFF/, "").trim();
             if (!text) return res.status(400).json({ error: "o arquivo .txt está vazio" });
-            questions = await oralExamExtractorAgent.extract({ examText: text, mode, meterCtx: { workId: req.work.id } });
+            questions = await oralExamExtractorAgent.extract({ examText: text, meterCtx: { workId: req.work.id } });
         } else {
             const examFile = await openai.files.create({
                 file: await OpenAI.toFile(req.file.buffer, req.file.originalname || "prova.pdf"),
                 purpose: "user_data",
             });
-            questions = await oralExamExtractorAgent.extract({ examFileId: examFile.id, mode, meterCtx: { workId: req.work.id } });
+            questions = await oralExamExtractorAgent.extract({ examFileId: examFile.id, meterCtx: { workId: req.work.id } });
         }
-        // Toda questão nasce com peso 1 (o professor ajusta na rubrica). A extração
-        // substitui as questões: são novas (sem id) → recebem ids frescos do contador.
-        questions = questions.map(q => ({ ...q, weight: 1 }));
+        // Peso 1 default; rubrica vazia → rubric_stale=true (o professor gera). Novas
+        // (sem id) recebem ids frescos do contador.
+        questions = questions.map(q => ({ ...q, rubric: "", weight: 1 }));
         const cleaned = await db.setOralQuestions(req.work.id, questions);
         log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} type=${isTxt ? "txt" : "pdf"} questions=${cleaned.length}`);
         res.json({ ok: true, count: cleaned.length, questions: cleaned });
@@ -211,29 +207,24 @@ router.post("/w/:workToken/oral/config", requireWorkToken, requireOral, async (r
     }
 });
 
-// Perguntas digitadas/editadas à mão (alternativa ou complemento ao PDF). Salva o
-// array COMPLETO de questões + (opcional) o modo de pontuação. Serve aos dois
-// editores, que COMPARTILHAM a mesma lista: a Configuração (edita só o enunciado) e
-// a "Rubrica por questão" na aba de avaliação (edita peso + 2º campo). Cada questão
-// carrega seu `id` estável; db.setOralQuestions preserva ids existentes e atribui
-// novos aos itens sem id (nunca reusa). Sem aspectos.
+// Perguntas + respostas + rubricas, editadas nos dois editores que COMPARTILHAM a
+// mesma lista: a Configuração (enunciado + resposta) e a "Rubrica por questão" na
+// aba de avaliação (peso + rubrica). Salva o array COMPLETO. Cada questão carrega
+// seu `id` estável; db.setOralQuestions preserva ids, calcula rubric_stale por diff.
 router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async (req, res) => {
     const raw = Array.isArray(req.body?.questions) ? req.body.questions : null;
     if (!raw) return res.status(400).json({ error: "questions (array) required" });
     if (!raw.some(q => String(q?.question || "").trim())) return res.status(400).json({ error: "nenhuma pergunta válida (cada pergunta precisa de enunciado)" });
     try {
-        if (req.body?.mode === "rubrica" || req.body?.mode === "deterministico") {
-            await db.setOralGradingMode(req.work.id, req.body.mode);
-        }
-        // IDs estáveis atribuídos no db (preserva existentes, novos do contador).
         const cleaned = await db.setOralQuestions(req.work.id, raw);
-        log.info("ORAL", `questões salvas work=${req.work.work_token} n=${cleaned.length} mode=${req.body?.mode || "-"}`);
-        // No modo rubrica: checagem ADVISORY dos critérios de pontuação (não bloqueia
-        // o salvamento). Devolve avisos por questão para a UI destacar.
+        log.info("ORAL", `questões salvas work=${req.work.work_token} n=${cleaned.length}`);
+        // Checagem ADVISORY das rubricas preenchidas (não bloqueia; avisa quais rever).
+        // O check lê a rubrica como o "critério" (campo answer do agente).
         let rubric_warnings = null;
-        if (req.body?.mode === "rubrica" && cleaned.some(q => q.answer)) {
+        const withRubric = cleaned.filter(q => q.rubric).map(q => ({ id: q.id, question: q.question, answer: q.rubric }));
+        if (withRubric.length) {
             try {
-                const items = await rubricCriterionCheckAgent.check({ criteria: cleaned, meterCtx: { workId: req.work.id } });
+                const items = await rubricCriterionCheckAgent.check({ criteria: withRubric, meterCtx: { workId: req.work.id } });
                 rubric_warnings = items.filter(it => !it.adequate);
             } catch (e) { log.error("ORAL", `rubric check failed (advisory): ${e.message}`); }
         }
@@ -244,6 +235,59 @@ router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async
     }
 });
 
+// Geração de RUBRICAS (a partir das respostas esperadas), em lote — NDJSON, espelha
+// evaluate-all. scope=stale → só as pendentes/vazias (com resposta); scope=all →
+// todas com resposta (regenera). Requer resposta esperada não-vazia por questão.
+router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral, requireWithinBudget, async (req, res) => {
+    let started = false;
+    try {
+        const scope = req.query.scope === "all" || req.body?.scope === "all" ? "all" : "stale";
+        const all = await db.getOralQuestions(req.work.id);
+        const targets = all.filter(q => String(q.answer || "").trim() && (scope === "all" || q.rubric_stale || !String(q.rubric || "").trim()));
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+        started = true;
+        const send = (o) => res.write(JSON.stringify(o) + "\n");
+        send({ type: "start", ids: targets.map(q => q.id) });
+        let generated = 0; const errors = [];
+        await mapPool(targets, 4, async (q) => {
+            try {
+                const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { workId: req.work.id } });
+                await db.updateOralQuestionRubric(req.work.id, q.id, { rubric, weight });
+                generated++;
+                send({ type: "item", id: q.id, ok: true });
+            } catch (e) {
+                errors.push({ id: q.id, error: e.message });
+                log.error("ORAL", `rubric gen item failed q=${q.id}: ${e.message}`);
+                send({ type: "item", id: q.id, ok: false, error: e.message });
+            }
+        });
+        const questions = await db.getOralQuestions(req.work.id);
+        log.info("ORAL", `rubrics generate work=${req.work.work_token} scope=${scope} geradas=${generated}/${targets.length}`);
+        send({ type: "done", generated, candidates: targets.length, errors, questions });
+        res.end();
+    } catch (err) {
+        log.error("ORAL", `rubrics generate failed: ${err.message}`);
+        if (started) { try { res.end(); } catch {} return; }
+        res.status(500).json({ error: "falha ao gerar rubricas", detail: err.message });
+    }
+});
+
+// Geração de rubrica de UMA questão (botão por linha). Requer resposta esperada.
+router.post("/w/:workToken/oral/questions/:qid/rubric/generate", requireWorkToken, requireOral, requireWithinBudget, async (req, res) => {
+    try {
+        const qid = Number(req.params.qid);
+        const q = (await db.getOralQuestions(req.work.id)).find(x => Number(x.id) === qid);
+        if (!q) return res.status(404).json({ error: "questão não encontrada" });
+        if (!String(q.answer || "").trim()) return res.status(409).json({ error: "esta questão não tem resposta esperada — escreva a rubrica à mão ou preencha a resposta" });
+        const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { workId: req.work.id } });
+        const updated = await db.updateOralQuestionRubric(req.work.id, qid, { rubric, weight });
+        res.json({ ok: true, question: updated });
+    } catch (err) {
+        log.error("ORAL", `rubric gen (single) failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar a rubrica", detail: err.message });
+    }
+});
+
 // --- Avaliação por aluno (professor) — espelha a entrevista, mas a devolutiva
 // e a nota são MANUAIS (sem geração por IA). A avaliação compara a transcrição
 // das respostas do aluno com o gabarito. ---
@@ -251,25 +295,26 @@ router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async
 router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToken, requireProfessorSubmission, requireWithinBudget, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
-        const [asked, detail, workQ, mode] = await Promise.all([
+        const [asked, detail, workQ] = await Promise.all([
             db.getOralAsked(req.submission.id),
             db.getOralSubmissionDetail(req.submission.id),
             db.getOralQuestions(req.work.id),
-            db.getOralGradingMode(req.work.id),
         ]);
         // Avalia SÓ as perguntas feitas a este aluno (fallback: todas, p/ provas
-        // antigas), enriquecidas com o peso + 2º campo ATUAIS do trabalho (por id).
+        // antigas), enriquecidas com a rubrica + peso ATUAIS do trabalho (por id).
         const byId = {}; for (const q of workQ) byId[q.id] = q;
         const questions = (asked && asked.length ? asked : workQ)
-            .map(q => byId[q.id] ? { ...q, answer: byId[q.id].answer, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
+            .map(q => byId[q.id] ? { ...q, rubric: byId[q.id].rubric, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
         const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
         if (!questions.length) return res.status(409).json({ error: "a prova não tem perguntas" });
         if (!transcript.length) return res.status(409).json({ error: "sem transcrição — o aluno ainda não realizou a prova" });
+        const semRubrica = questions.filter(q => !String(q.rubric || "").trim());
+        if (semRubrica.length) return res.status(409).json({ error: `gere ou escreva a rubrica de ${semRubrica.length} questão(ões) antes de avaliar (aba Avaliação & notas)` });
         const report = await oralExamEvaluatorAgent.evaluate({
-            questions, transcript, mode, meterCtx: { workId: req.work.id, submissionId: req.submission.id },
+            questions, transcript, meterCtx: { workId: req.work.id, submissionId: req.submission.id },
         });
         await db.setOralEvaluation(req.submission.id, report);
-        await applyEvalDefaults(req.work, req.submission.id, detail, report, questions, mode); // nota default (+ penalidade)
+        await applyEvalDefaults(req.work, req.submission.id, detail, report, questions); // nota default (+ penalidade)
         const grades = await db.getSubmissionGrades(req.submission.id); // já com penalidade, se ligada
         res.json({ ok: true, evaluation: report, grade: grades?.final ?? null, grades });
     } catch (err) {
@@ -281,10 +326,9 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
 router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
-        const [d, grades, grading_mode, asked, workQ] = await Promise.all([
+        const [d, grades, asked, workQ] = await Promise.all([
             db.getOralSubmissionDetail(req.submission.id),
             db.getSubmissionGrades(req.submission.id),
-            db.getOralGradingMode(req.work.id),
             db.getOralAsked(req.submission.id),
             db.getOralQuestions(req.work.id),
         ]);
@@ -306,7 +350,6 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             grade: d?.grade_final ?? null,
             grades: grades || null,
             questions,
-            grading_mode,
             devolutiva_published: !!d?.evaluation_published_at,
             grade_published: !!d?.grade_published_at,
             proctor: d?.oral_proctor_json || null,
@@ -357,7 +400,7 @@ router.put("/w/:workToken/oral/submissions/:subToken/grades", requireWorkToken, 
             if (!base.length) return res.status(409).json({ error: "a prova não tem perguntas" });
             grades = {
                 criteria: base.map(q => ({ id: q.id, name: q.question, weight: wById[q.id] != null ? wById[q.id] : 1, score: null, justification: "" })),
-                final: null, computed_at: new Date().toISOString(), mode: await db.getOralGradingMode(req.work.id),
+                final: null, computed_at: new Date().toISOString(),
             };
         }
         const byId = {};
@@ -403,7 +446,7 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
     let started = false; // se já mandamos headers (streaming), não dá mais p/ responder 500
     try {
         const force = req.query.force === "1" || req.body?.force === true;
-        const [allQuestions, mode] = await Promise.all([db.getOralQuestions(req.work.id), db.getOralGradingMode(req.work.id)]);
+        const allQuestions = await db.getOralQuestions(req.work.id);
         if (!allQuestions.length) return res.status(409).json({ error: "a prova não tem perguntas" });
         const byId = {}; for (const q of allQuestions) byId[q.id] = q;
         const subs = await db.listOralSubmissionsForEval(req.work.id, force);
@@ -428,20 +471,24 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
         await mapPool(subs, ORAL_EVAL_CONCURRENCY, async (s) => {
             try {
                 const [asked, detail] = await Promise.all([db.getOralAsked(s.id), db.getOralSubmissionDetail(s.id)]);
-                // só as perguntas feitas a este aluno, com peso + 2º campo atuais (por id)
+                // só as perguntas feitas a este aluno, com rubrica + peso atuais (por id)
                 const questions = (asked && asked.length ? asked : allQuestions)
-                    .map(q => byId[q.id] ? { ...q, answer: byId[q.id].answer, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
+                    .map(q => byId[q.id] ? { ...q, rubric: byId[q.id].rubric, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
                 const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
                 if (!transcript.length) {
                     // Item pulado: avisa o cliente p/ tirar a ampulheta dessa linha.
                     send({ type: "item", submission_token: s.submission_token, ok: false, error: "sem transcrição" });
                     return;
                 }
+                if (questions.some(q => !String(q.rubric || "").trim())) {
+                    send({ type: "item", submission_token: s.submission_token, ok: false, error: "rubrica faltando" });
+                    return;
+                }
                 const report = await oralExamEvaluatorAgent.evaluate({
-                    questions, transcript, mode, meterCtx: { workId: req.work.id, submissionId: s.id },
+                    questions, transcript, meterCtx: { workId: req.work.id, submissionId: s.id },
                 });
                 await db.setOralEvaluation(s.id, report);
-                await applyEvalDefaults(req.work, s.id, detail, report, questions, mode); // nota default (+ penalidade)
+                await applyEvalDefaults(req.work, s.id, detail, report, questions); // nota default (+ penalidade)
                 evaluated++;
                 // Lê a nota efetivamente gravada (applyEvalDefaults não sobrescreve
                 // ajuste manual do professor, então o default pode não valer).

@@ -213,10 +213,11 @@
             <span class="hint" id="rubric-msg-oral"></span>
           </div>
           <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
-          <div class="row" style="gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-2)">
-            <span class="label" style="margin:0">Modo de pontuação:</span>
-            <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="deterministico"/> Resposta esperada <span class="hint">(determinístico)</span></label>
-            <label style="display:flex; gap:6px; align-items:center; cursor:pointer"><input type="radio" name="grading-mode-oral" value="rubrica"/> Critério detalhado <span class="hint">(rubrica)</span></label>
+          <p class="card-sub" data-help="A rubrica é a instrução de como pontuar cada questão, em 5 níveis (0 / 2,5 / 5 / 7,5 / 10). Você pode escrevê-la à mão OU, se a questão tiver resposta esperada (aba Configuração), gerar automaticamente. O agente que calcula a nota usa sempre a rubrica.">Escreva a rubrica de cada questão ou <strong>gere</strong> a partir da resposta esperada. Ao mudar pergunta/resposta, a rubrica fica marcada para <strong>revisar</strong>.</p>
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
+            <button id="gen-rubrics-stale-btn" class="btn" type="button" title="Gera a rubrica das questões pendentes/vazias que têm resposta esperada">Gerar rubricas (pendentes)</button>
+            <button id="gen-rubrics-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regera a rubrica de TODAS as questões que têm resposta esperada">Gerar todas</button>
+            <span class="hint" id="gen-rubrics-status"></span>
           </div>
           <!-- Critério de penalidade (opt-in), dobrado no início do card. -->
           <details class="penalty-inline">
@@ -312,74 +313,79 @@
   // nem exclui itens — só a Configuração mexe no conjunto. Cada questão carrega um
   // `id` ESTÁVEL do servidor; novas nascem com id:null e o servidor atribui ao salvar.
   let QUESTIONS = [];
-  let GRADING_MODE = 'deterministico';
-
   function syncHead(item, q) {
     const txt = item.querySelector('.q-text');
     const val = (q.question || '').trim();
     if (val) { txt.textContent = val; txt.classList.remove('q-empty'); }
     else { txt.textContent = '(pergunta vazia)'; txt.classList.add('q-empty'); }
   }
-  // Configuração: um item recolhível por questão (só o enunciado). Escreve DIRETO no
-  // objeto q (identidade estável), que é o mesmo lido pela rubrica.
+  // Configuração: um item recolhível por questão — enunciado + resposta esperada
+  // (opcional). Escreve DIRETO no objeto q (identidade estável), o mesmo lido pela
+  // rubrica. Mudar pergunta/resposta marca a rubrica para revisão (rubric_stale).
   function makeItem(q) {
     const div = document.createElement('div');
     div.className = 'q-item' + (q._open ? ' open' : '');
     div.innerHTML =
       '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num"></span>' +
       '<span class="q-text"></span><button class="q-del" title="remover">✕</button></div>' +
-      '<div class="q-body"><label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea></div>';
+      '<div class="q-body"><label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
+      '<label>Resposta esperada (opcional)</label><textarea class="q-a" placeholder="Gabarito — insumo para gerar a rubrica; o aluno nunca vê"></textarea></div>';
     div.querySelector('.q-q').value = q.question || '';
+    div.querySelector('.q-a').value = q.answer || '';
     div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; q._open = !q._open; div.classList.toggle('open', q._open); };
     div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderQuestions(); renderRubric(); };
-    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; syncHead(div, q); cfgWarn(); });
+    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; syncHead(div, q); cfgWarn(); });
+    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; });
     syncHead(div, q);
     return div;
   }
   function renderQuestions() {
     const c = document.getElementById('questions'); c.innerHTML = '';
-    if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', weight: 1, _open: true });
+    if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
     QUESTIONS.forEach((q, i) => { const it = makeItem(q); c.appendChild(it); it.querySelector('.q-num').textContent = (i + 1) + '.'; });
     updateQCount();
   }
 
-  // ---------- Rubrica por questão (aba Avaliação): peso + 2º campo + modo ----------
-  function secondLabel() { return GRADING_MODE === 'rubrica' ? 'Critério de pontuação (como dar 0–10; só o professor vê)' : 'Resposta esperada (gabarito; só o professor vê)'; }
+  // ---------- Rubrica por questão (aba Avaliação): peso + rubrica (5 níveis) ----------
   function renderRubric() {
-    document.querySelectorAll('input[name="grading-mode-oral"]').forEach(r => { r.checked = (r.value === GRADING_MODE); });
     const c = document.getElementById('rubric-items-oral'); c.innerHTML = '';
     const list = QUESTIONS.filter(q => (q.question || '').trim());
     if (!list.length) { c.innerHTML = '<p class="hint">Defina as perguntas na aba Configuração primeiro.</p>'; return; }
-    const ph = GRADING_MODE === 'rubrica' ? 'ex.: 10 se citou os 3 aspectos com exemplos; 5 se citou 2; 0 se genérico' : 'resposta esperada';
     list.forEach((q, i) => {
       const div = document.createElement('div');
       div.className = 'rubric-q';
       div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-2) 0';
+      const stale = q.rubric_stale || !(q.rubric || '').trim();
+      const badge = stale ? ' <span class="pill" style="background:#fff6e0;border:1px solid #ecc874; font-size:var(--fs-xs)">revisar</span>' : '';
+      const genBtn = (q.answer || '').trim() ? '<button class="btn btn-ghost btn-sm rq-gen" type="button" title="Gerar a rubrica a partir da resposta esperada">gerar</button>' : '';
       div.innerHTML =
         '<div style="display:flex; gap: var(--sp-3); align-items:center">' +
-          '<div style="flex:1; font-weight:600">' + (i + 1) + '. ' + esc(q.question || '') + '</div>' +
-          '<div style="display:flex; align-items:center; gap:6px; flex:none"><label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/></div>' +
+          '<div style="flex:1; font-weight:600">' + (i + 1) + '. ' + esc(q.question || '') + badge + '</div>' +
+          '<div style="display:flex; align-items:center; gap:6px; flex:none">' + genBtn + '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/></div>' +
         '</div>' +
-        '<label class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-1)">' + secondLabel() + '</label>' +
-        '<textarea class="textarea rq-answer" rows="2" placeholder="' + ph + '"></textarea>';
+        '<label class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-1)">Rubrica — como pontuar (5 níveis: 0 / 2,5 / 5 / 7,5 / 10); só o professor vê</label>' +
+        '<textarea class="textarea rq-rubric" rows="3" placeholder="Escreva a rubrica dos 5 níveis ou clique em gerar (se houver resposta esperada)…"></textarea>';
       const w = div.querySelector('.rq-weight'); w.value = Number(q.weight) > 0 ? Number(q.weight) : 1;
       w.addEventListener('input', () => { q.weight = Number(w.value) > 0 ? Number(w.value) : 1; });
-      const a = div.querySelector('.rq-answer'); a.value = q.answer || '';
-      a.addEventListener('input', () => { q.answer = a.value; });
+      const rub = div.querySelector('.rq-rubric'); rub.value = q.rubric || '';
+      rub.addEventListener('input', () => { q.rubric = rub.value; q.rubric_stale = false; });
+      const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
       c.appendChild(div);
     });
   }
-  function currentMode() { return [...document.querySelectorAll('input[name="grading-mode-oral"]')].find(r => r.checked)?.value || GRADING_MODE; }
   // Payload de save: as questões COM enunciado (com id estável), na ordem atual.
   function questionsPayload() {
     return QUESTIONS.filter(q => (q.question || '').trim())
-      .map(q => ({ id: q.id ?? null, question: q.question, answer: q.answer || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1 }));
+      .map(q => ({ id: q.id ?? null, question: q.question, answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1 }));
   }
-  // Adota as questões salvas (com ids do servidor) como nova fonte; preserva o estado
-  // de expansão casando por id.
+  // Adota as questões salvas (com ids + rubric_stale do servidor) como nova fonte;
+  // preserva o estado de expansão casando por id.
   function adoptSaved(saved) {
     const openById = {}; QUESTIONS.forEach(q => { if (q.id != null) openById[q.id] = q._open; });
-    QUESTIONS = (saved || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, _open: !!openById[q.id] }));
+    QUESTIONS = (saved || []).map(q => ({
+      id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '',
+      weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: !!openById[q.id],
+    }));
   }
 
   // ---------- Status helpers ----------
@@ -528,8 +534,7 @@
     document.getElementById('cfg-n').value = j.work.question_count || 6;
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
-    GRADING_MODE = (j.work.grading_mode === 'rubrica') ? 'rubrica' : 'deterministico';
-    QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, _open: false }));
+    QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: false }));
     renderQuestions();
     renderRubric();
     fillSettings(j.work);
@@ -585,34 +590,78 @@
     const last = items[items.length - 1];
     if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.q-q').focus(); }
   };
+  // Salva a lista COMPARTILHADA (perguntas + respostas + rubricas). Devolve j (ou null).
+  async function saveQuestions() {
+    const qs = questionsPayload();
+    if (!qs.length) return { error: 'Adicione ao menos uma pergunta (com enunciado).' };
+    const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { error: j.error || String(r.status) };
+    adoptSaved(j.questions); renderQuestions(); renderRubric();
+    return j;
+  }
   document.getElementById('q-save').onclick = async () => {
-    const qs = questionsPayload(); const msg = document.getElementById('q-msg');
-    if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
-    msg.textContent = 'Salvando…';
+    const msg = document.getElementById('q-msg'); msg.textContent = 'Salvando…';
     try {
-      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
-      const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      const j = await saveQuestions();
+      if (j.error) { msg.textContent = 'Falha: ' + j.error; return; }
       msg.textContent = `${j.count} pergunta(s) salva(s).`;
       document.getElementById('exam-status').textContent = 'Perguntas definidas.';
-      adoptSaved(j.questions); renderQuestions(); renderRubric();  // lista compartilhada em sincronia
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
-  // Salvar rubrica (peso + 2º campo + modo). Mesma lista compartilhada.
   document.getElementById('save-rubric-oral').onclick = async () => {
-    const qs = questionsPayload(); const mode = currentMode(); const msg = document.getElementById('rubric-msg-oral');
-    if (!qs.length) { msg.textContent = 'Defina as perguntas primeiro (aba Configuração).'; return; }
-    msg.textContent = 'Salvando…';
+    const msg = document.getElementById('rubric-msg-oral'); msg.textContent = 'Salvando…';
     try {
-      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs, mode }) });
-      const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      const j = await saveQuestions();
+      if (j.error) { msg.textContent = 'Falha: ' + j.error; return; }
       msg.textContent = 'Rubrica salva.';
-      GRADING_MODE = mode;
-      adoptSaved(j.questions); renderQuestions(); renderRubric();
       renderRubricWarnings(j.rubric_warnings, j.questions || []);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
+  // Gera a rubrica de UMA questão (a partir da resposta). Salva antes (para o servidor
+  // ter a resposta atual) e adota o resultado.
+  async function generateOneRubric(q, btn) {
+    const prev = btn.textContent; btn.disabled = true; btn.textContent = 'gerando…';
+    const qText = (q.question || '').trim();
+    try {
+      const s = await saveQuestions(); // persiste a resposta atual antes de gerar
+      if (s.error) { alert('Falha ao salvar antes de gerar: ' + s.error); return; }
+      const it = QUESTIONS.find(x => x.id != null && (x.question || '').trim() === qText);
+      if (!it) { alert('Não encontrei a questão após salvar.'); return; }
+      const r = await fetch(`${API}/oral/questions/${it.id}/rubric/generate`, { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert('Falha: ' + (j.error || r.status)); return; }
+      it.rubric = j.question.rubric; it.weight = Number(j.question.weight) > 0 ? Number(j.question.weight) : it.weight; it.rubric_stale = false;
+      renderRubric();
+    } catch (e) { alert('Falha de comunicação.'); }
+    finally { btn.disabled = false; btn.textContent = prev; }
+  }
+  // Gera rubricas em LOTE (NDJSON). scope=stale (pendentes/vazias) | all (todas com resposta).
+  async function runGenerateRubrics(scope) {
+    const status = document.getElementById('gen-rubrics-status');
+    const btns = ['gen-rubrics-stale-btn', 'gen-rubrics-all-btn'];
+    btns.forEach(i => document.getElementById(i).disabled = true);
+    status.textContent = 'Salvando…';
+    try {
+      const s = await saveQuestions();
+      if (s.error) { status.textContent = 'Falha: ' + s.error; return; }
+      status.textContent = scope === 'all' ? 'Gerando todas as rubricas…' : 'Gerando rubricas pendentes…';
+      const r = await fetch(`${API}/oral/rubrics/generate?scope=${scope}`, { method: 'POST' });
+      if (!r.ok || !r.body) { let m = r.status; try { m = (await r.json()).error || r.status; } catch (e) {} status.textContent = 'Falha: ' + m; return; }
+      await readNdjson(r, (m) => {
+        if (m.type === 'done') {
+          if (Array.isArray(m.questions)) { adoptSaved(m.questions); renderQuestions(); renderRubric(); }
+          let t = m.candidates === 0 ? 'Nenhuma rubrica a gerar (as questões precisam de resposta esperada).'
+            : `${m.generated} rubrica(s) gerada(s) de ${m.candidates}.`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          status.textContent = t;
+        }
+      });
+    } catch (e) { status.textContent = 'Falha de comunicação.'; }
+    finally { btns.forEach(i => document.getElementById(i).disabled = false); }
+  }
+  document.getElementById('gen-rubrics-stale-btn').onclick = () => runGenerateRubrics('stale');
+  document.getElementById('gen-rubrics-all-btn').onclick = () => { if (confirm('Regerar a rubrica de TODAS as questões com resposta esperada? Sobrescreve as rubricas atuais.')) runGenerateRubrics('all'); };
   // Avisos ADVISORY sobre os critérios de pontuação (só modo rubrica). Não bloqueia.
   function renderRubricWarnings(warnings, questions) {
     const el = document.getElementById('rubric-warnings-oral');
@@ -628,12 +677,6 @@
       <strong>Critérios de pontuação a revisar</strong> <span class="hint">(aviso — a rubrica foi salva mesmo assim)</span>
       <ul style="margin: var(--sp-2) 0 0; padding-left: var(--sp-4)">${rows}</ul></div>`;
   }
-  // Trocar o modo re-renderiza os rótulos preservando o que já foi digitado (os
-  // valores vivem em QUESTIONS, então re-renderizar não perde nada).
-  document.querySelectorAll('input[name="grading-mode-oral"]').forEach(radio => {
-    radio.addEventListener('change', () => { GRADING_MODE = currentMode(); renderRubric(); });
-  });
-
   // ---------- Ações: ALUNOS ----------
   document.getElementById('toggle-create').onclick = () => {
     const panel = document.getElementById('create-panel');
