@@ -54,8 +54,9 @@ Depois, um "summary" (3-5 frases) do desempenho geral.
 
 Regras:
 - Baseie-se EXCLUSIVAMENTE na transcrição e na rubrica do professor. Não invente respostas que o aluno não deu.
-- A transcrição vem de fala (pode ter hesitações, repetições, erros de transcrição) — avalie o CONTEÚDO, não a forma.
-- Seja justo e fiel à rubrica.
+- Avalie o ENTENDIMENTO, não a redação. É uma prova ORAL: aceite paráfrases, sinônimos, exemplos próprios e explicações informais. NÃO exija que o aluno use os mesmos termos, o mesmo vocabulário técnico ou a mesma formulação do gabarito/rubrica — se ele demonstra a ideia correta com as próprias palavras, dê o crédito. Não desconte por "não ter dito o termo X" quando o conceito está claramente presente.
+- Seja generoso com a FORMA (hesitações, ordem, repetições, erros de transcrição de fala) e criterioso com o CONTEÚDO (a ideia está certa? completa?). Uma resposta correta em linguagem coloquial vale tanto quanto uma formal.
+- Ao escolher o nível, pergunte "o aluno mostrou que entende isto?", não "ele repetiu o gabarito?". Fique no nível mais alto compatível com o que ele de fato demonstrou.
 Retorne SOMENTE o JSON do schema.`;
 
 export class OralExamEvaluatorAgent {

@@ -14,7 +14,7 @@ import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
-import { oralExamExtractorAgent, oralExamEvaluatorAgent, rubricCriterionCheckAgent, oralRubricBuilderAgent } from "../lib/agents.js";
+import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
@@ -216,19 +216,11 @@ router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async
     if (!raw) return res.status(400).json({ error: "questions (array) required" });
     if (!raw.some(q => String(q?.question || "").trim())) return res.status(400).json({ error: "nenhuma pergunta válida (cada pergunta precisa de enunciado)" });
     try {
+        // Salvar é RÁPIDO (sem LLM): só persiste. (A checagem advisory das rubricas
+        // não roda mais a cada save — deixava o salvar lento.)
         const cleaned = await db.setOralQuestions(req.work.id, raw);
         log.info("ORAL", `questões salvas work=${req.work.work_token} n=${cleaned.length}`);
-        // Checagem ADVISORY das rubricas preenchidas (não bloqueia; avisa quais rever).
-        // O check lê a rubrica como o "critério" (campo answer do agente).
-        let rubric_warnings = null;
-        const withRubric = cleaned.filter(q => q.rubric).map(q => ({ id: q.id, question: q.question, answer: q.rubric }));
-        if (withRubric.length) {
-            try {
-                const items = await rubricCriterionCheckAgent.check({ criteria: withRubric, meterCtx: { workId: req.work.id } });
-                rubric_warnings = items.filter(it => !it.adequate);
-            } catch (e) { log.error("ORAL", `rubric check failed (advisory): ${e.message}`); }
-        }
-        res.json({ ok: true, count: cleaned.length, questions: cleaned, rubric_warnings });
+        res.json({ ok: true, count: cleaned.length, questions: cleaned });
     } catch (err) {
         log.error("ORAL", `save questions failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar as perguntas" });
@@ -339,8 +331,12 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             id: q.id, question: (wById[q.id]?.question ?? q.question) || "",
             weight: Number(wById[q.id]?.weight) > 0 ? Number(wById[q.id].weight) : (Number(q.weight) > 0 ? Number(q.weight) : 1),
         }));
+        // Número de exibição por questão = POSIÇÃO na lista completa (1..N), igual ao
+        // que o professor vê nos editores. Assim o relatório do aluno bate com a rubrica.
+        const question_numbers = {}; workQ.forEach((q, i) => { question_numbers[q.id] = i + 1; });
         res.set("Cache-Control", "no-store");
         res.json({
+            question_numbers,
             student_label: req.submission.student_label,
             completion_reason: d?.completion_reason || null,
             has_oral_video: !!d?.has_oral_video,

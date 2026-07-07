@@ -132,16 +132,17 @@
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   document.getElementById('back-link').href = `${API}/oral#avaliacao`;
 
-  const ASSESS = { correct: '✓ correta', partial: '~ parcial', incorrect: '✗ incorreta', not_answered: '— não respondeu' };
+  let QNUMS = {}; // id da questão → número de exibição (posição na lista completa)
   function renderReport(ev) {
     const el = document.getElementById('report');
     if (!ev || !Array.isArray(ev.per_question)) { el.innerHTML = '<p class="hint">Ainda não avaliado. Clique em “Avaliar / reavaliar”.</p>'; return; }
-    el.innerHTML = ev.per_question.map(q =>
-      `<div class="q"><div class="qt">${q.id}. ${esc(q.question)} <span class="pill assess-${q.assessment || 'not_answered'}">${ASSESS[q.assessment] || esc(q.assessment)}</span></div>` +
-      `<div class="qa"><strong>Aluno:</strong> ${esc(q.student_answer || '(sem resposta)')}</div>` +
-      (q.expected ? `<div class="qa"><strong>Esperado:</strong> ${esc(q.expected)}</div>` : '') +
-      `<div class="qa">${esc(q.comment || '')}</div></div>`
-    ).join('') + (ev.summary ? `<p style="margin-top: var(--sp-3)"><strong>Resumo:</strong> ${esc(ev.summary)}</p>` : '');
+    el.innerHTML = ev.per_question.map(q => {
+      const num = QNUMS[q.id] != null ? QNUMS[q.id] : q.id;
+      const score = (q.score != null) ? `<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">${q.score}/10</span>` : '';
+      return `<div class="q"><div class="qt">${num}. ${esc(q.question)} ${score}</div>` +
+        `<div class="qa"><strong>Aluno:</strong> ${esc(q.student_answer || '(sem resposta)')}</div>` +
+        `<div class="qa">${esc(q.comment || '')}</div></div>`;
+    }).join('') + (ev.summary ? `<p style="margin-top: var(--sp-3)"><strong>Resumo:</strong> ${esc(ev.summary)}</p>` : '');
   }
   function renderTranscript(turns) {
     const el = document.getElementById('transcript');
@@ -166,6 +167,7 @@
     if (d.grade_published) pills.push('<span class="pill pill-pub">nota publicada</span>');
     document.getElementById('meta').innerHTML = pills.join(' ');
 
+    QNUMS = d.question_numbers || {};
     renderReport(d.evaluation);
     document.getElementById('devolutiva').value = d.devolutiva || '';
     CUR_QUESTIONS = d.questions || [];
@@ -374,7 +376,7 @@
       <div class="grade-q" data-id="${c.id}" data-weight="${Number(c.weight) || 1}" data-orig="${has ? c.score : ''}" style="border-top:1px solid var(--ink-200); padding: var(--sp-3) 0">
         <div style="display:flex; gap: var(--sp-3); align-items:flex-start">
           <div style="flex:1; min-width:0">
-            <div style="font-weight:600">${i + 1}. ${esc(c.name || '')}</div>
+            <div style="font-weight:600">${QNUMS[c.id] != null ? QNUMS[c.id] : (i + 1)}. ${esc(c.name || '')}</div>
             ${c.justification ? `<div class="hint" style="margin-top:4px">${esc(c.justification)}</div>` : ''}
             ${c.manual ? '<div class="hint" style="margin-top:2px; color:var(--accent-700, #92400e)">nota ajustada manualmente</div>' : ''}
           </div>

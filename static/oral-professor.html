@@ -234,7 +234,10 @@
             </div>
           </details>
           <div id="rubric-items-oral" style="margin-top: var(--sp-3)"></div>
-          <div id="rubric-warnings-oral"></div>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="rubric-add-oral" class="btn btn-ghost btn-sm" type="button">+ adicionar questão</button>
+            <span class="hint">Adicionar/remover aqui reflete na aba Configuração.</span>
+          </div>
         </div>
       </details>
 
@@ -268,6 +271,11 @@
   const API = `/w/${WORK}`;
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   let SUBS = [];   // cache da última listagem
+  // Fonte única compartilhada pelos dois editores (Configuração e Rubrica). Declarada
+  // AQUI, no topo, porque o initTab() abaixo pode chamar renderRubric() (que a lê)
+  // quando a URL vem com #avaliacao — se ela fosse declarada mais abaixo, cairia na
+  // TDZ do `let` e o script inteiro quebraria no load (tela em branco).
+  let QUESTIONS = [];
 
   // ---------- Abas ----------
   const TAB_NAMES = ['prova', 'alunos', 'avaliacao'];
@@ -280,9 +288,10 @@
       if (panel) panel.classList.toggle('hidden', !active);
       if (btn) { btn.classList.toggle('is-active', active); btn.setAttribute('aria-selected', String(active)); }
     });
-    // Ao entrar na aba de avaliação, re-renderiza a rubrica a partir da lista
-    // compartilhada — reflete perguntas editadas/adicionadas/apagadas na Configuração.
+    // Re-renderiza o editor da aba ativa a partir da lista compartilhada — assim
+    // edições/adições/exclusões feitas na outra aba aparecem na hora ao trocar.
     if (name === 'avaliacao' && typeof renderRubric === 'function') renderRubric();
+    if (name === 'prova' && typeof renderQuestions === 'function' && QUESTIONS.length) renderQuestions();
     if (history.replaceState) history.replaceState(null, '', '#' + name);
   }
   TAB_NAMES.forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.onclick = () => setTab(t); });
@@ -306,13 +315,10 @@
       el.style.color = '';
     }
   }
-  // ---------- Lista COMPARTILHADA de questões (fonte única) ----------
-  // A Configuração (aba 1) edita SÓ o enunciado; a "Rubrica por questão" (aba 3)
-  // edita peso + 2º campo. Os DOIS editores leem/escrevem o MESMO array QUESTIONS,
-  // então apagar/editar numa reflete na outra (sem atropelo). A rubrica NÃO inclui
-  // nem exclui itens — só a Configuração mexe no conjunto. Cada questão carrega um
-  // `id` ESTÁVEL do servidor; novas nascem com id:null e o servidor atribui ao salvar.
-  let QUESTIONS = [];
+  // ---------- Lista COMPARTILHADA de questões (fonte única; QUESTIONS declarada no topo) ----------
+  // Os DOIS editores (Configuração e Rubrica) leem/escrevem o MESMO array QUESTIONS,
+  // então apagar/editar/adicionar numa reflete na outra. Cada questão carrega um `id`
+  // ESTÁVEL do servidor; novas nascem com id:null e o servidor atribui ao salvar.
   function syncHead(item, q) {
     const txt = item.querySelector('.q-text');
     const val = (q.question || '').trim();
@@ -346,29 +352,36 @@
     updateQCount();
   }
 
-  // ---------- Rubrica por questão (aba Avaliação): peso + rubrica (5 níveis) ----------
+  // ---------- Rubrica por questão (aba Avaliação): EDITOR COMPLETO ----------
+  // Mostra e edita pergunta + resposta + rubrica + peso, permite adicionar/excluir —
+  // tudo sobre a MESMA lista compartilhada, então reflete na Configuração. Editar
+  // pergunta/resposta marca a rubrica p/ revisão; editar a rubrica limpa a marca.
   function renderRubric() {
     const c = document.getElementById('rubric-items-oral'); c.innerHTML = '';
-    const list = QUESTIONS.filter(q => (q.question || '').trim());
-    if (!list.length) { c.innerHTML = '<p class="hint">Defina as perguntas na aba Configuração primeiro.</p>'; return; }
-    list.forEach((q, i) => {
+    if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    QUESTIONS.forEach((q, i) => {
       const div = document.createElement('div');
       div.className = 'rubric-q';
-      div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-2) 0';
+      div.style = 'border-top:1px solid var(--ink-200); padding: var(--sp-3) 0';
       const stale = q.rubric_stale || !(q.rubric || '').trim();
       const badge = stale ? ' <span class="pill" style="background:#fff6e0;border:1px solid #ecc874; font-size:var(--fs-xs)">revisar</span>' : '';
       const genBtn = (q.answer || '').trim() ? '<button class="btn btn-ghost btn-sm rq-gen" type="button" title="Gerar a rubrica a partir da resposta esperada">gerar</button>' : '';
+      const L = 'class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-1)"';
       div.innerHTML =
-        '<div style="display:flex; gap: var(--sp-3); align-items:center">' +
-          '<div style="flex:1; font-weight:600">' + (i + 1) + '. ' + esc(q.question || '') + badge + '</div>' +
-          '<div style="display:flex; align-items:center; gap:6px; flex:none">' + genBtn + '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/></div>' +
+        '<div style="display:flex; gap:6px; align-items:center; margin-bottom:4px">' +
+          '<span style="font-weight:700; color:var(--ink-500)">' + (i + 1) + '.</span>' + badge +
+          '<span style="flex:1"></span>' + genBtn +
+          '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
+          '<button class="btn btn-ghost btn-sm rq-del" type="button" title="remover questão">✕</button>' +
         '</div>' +
-        '<label class="label" style="font-size:var(--fs-xs); margin-top: var(--sp-1)">Rubrica — como pontuar (5 níveis: 0 / 2,5 / 5 / 7,5 / 10); só o professor vê</label>' +
-        '<textarea class="textarea rq-rubric" rows="3" placeholder="Escreva a rubrica dos 5 níveis ou clique em gerar (se houver resposta esperada)…"></textarea>';
-      const w = div.querySelector('.rq-weight'); w.value = Number(q.weight) > 0 ? Number(q.weight) : 1;
-      w.addEventListener('input', () => { q.weight = Number(w.value) > 0 ? Number(w.value) : 1; });
-      const rub = div.querySelector('.rq-rubric'); rub.value = q.rubric || '';
-      rub.addEventListener('input', () => { q.rubric = rub.value; q.rubric_stale = false; });
+        '<label ' + L + ' style="margin-top:0">Pergunta</label><textarea class="textarea rq-question" rows="2" placeholder="Enunciado da pergunta"></textarea>' +
+        '<label ' + L + '>Resposta esperada (opcional)</label><textarea class="textarea rq-answer" rows="2" placeholder="Gabarito — insumo para gerar a rubrica; o aluno não vê"></textarea>' +
+        '<label ' + L + '>Rubrica — como pontuar (5 níveis: 0 / 2,5 / 5 / 7,5 / 10); só o professor vê</label><textarea class="textarea rq-rubric" rows="3" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>';
+      const qq = div.querySelector('.rq-question'); qq.value = q.question || ''; qq.addEventListener('input', () => { q.question = qq.value; q.rubric_stale = true; });
+      const a = div.querySelector('.rq-answer'); a.value = q.answer || ''; a.addEventListener('input', () => { q.answer = a.value; q.rubric_stale = true; });
+      const w = div.querySelector('.rq-weight'); w.value = Number(q.weight) > 0 ? Number(q.weight) : 1; w.addEventListener('input', () => { q.weight = Number(w.value) > 0 ? Number(w.value) : 1; });
+      const rub = div.querySelector('.rq-rubric'); rub.value = q.rubric || ''; rub.addEventListener('input', () => { q.rubric = rub.value; q.rubric_stale = false; });
+      div.querySelector('.rq-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderRubric(); renderQuestions(); };
       const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
       c.appendChild(div);
     });
@@ -584,11 +597,19 @@
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
   document.getElementById('q-add').onclick = () => {
-    QUESTIONS.push({ id: null, question: '', answer: '', weight: 1, _open: true });
+    QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
     renderQuestions();
     const items = document.querySelectorAll('#questions .q-item');
     const last = items[items.length - 1];
     if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.q-q').focus(); }
+  };
+  // Adicionar questão a partir da aba Avaliação (mesma lista compartilhada).
+  document.getElementById('rubric-add-oral').onclick = () => {
+    QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    renderRubric();
+    const rows = document.querySelectorAll('#rubric-items-oral .rubric-q');
+    const last = rows[rows.length - 1];
+    if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.rq-question').focus(); }
   };
   // Salva a lista COMPARTILHADA (perguntas + respostas + rubricas). Devolve j (ou null).
   async function saveQuestions() {
@@ -615,7 +636,6 @@
       const j = await saveQuestions();
       if (j.error) { msg.textContent = 'Falha: ' + j.error; return; }
       msg.textContent = 'Rubrica salva.';
-      renderRubricWarnings(j.rubric_warnings, j.questions || []);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
   // Gera a rubrica de UMA questão (a partir da resposta). Salva antes (para o servidor
@@ -662,21 +682,6 @@
   }
   document.getElementById('gen-rubrics-stale-btn').onclick = () => runGenerateRubrics('stale');
   document.getElementById('gen-rubrics-all-btn').onclick = () => { if (confirm('Regerar a rubrica de TODAS as questões com resposta esperada? Sobrescreve as rubricas atuais.')) runGenerateRubrics('all'); };
-  // Avisos ADVISORY sobre os critérios de pontuação (só modo rubrica). Não bloqueia.
-  function renderRubricWarnings(warnings, questions) {
-    const el = document.getElementById('rubric-warnings-oral');
-    if (!Array.isArray(warnings) || !warnings.length) { el.innerHTML = ''; return; }
-    const qById = {}; (questions || []).forEach(q => { qById[q.id] = q; });
-    const rows = warnings.map(w => {
-      const qn = qById[w.id] ? esc(qById[w.id].question.slice(0, 70)) : `questão ${w.id}`;
-      const issues = (w.issues || []).map(i => esc(i)).join('; ');
-      const sug = w.suggestion ? ` <em>Sugestão: ${esc(w.suggestion)}</em>` : '';
-      return `<li style="margin-bottom:4px"><strong>${qn}</strong>${issues ? ' — ' + issues : ''}.${sug}</li>`;
-    }).join('');
-    el.innerHTML = `<div class="callout" style="margin-top: var(--sp-3); padding: var(--sp-3); border:1px solid #ecc874; background:#fff9e8; border-radius: var(--r-md)">
-      <strong>Critérios de pontuação a revisar</strong> <span class="hint">(aviso — a rubrica foi salva mesmo assim)</span>
-      <ul style="margin: var(--sp-2) 0 0; padding-left: var(--sp-4)">${rows}</ul></div>`;
-  }
   // ---------- Ações: ALUNOS ----------
   document.getElementById('toggle-create').onclick = () => {
     const panel = document.getElementById('create-panel');

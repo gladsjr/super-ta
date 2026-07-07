@@ -39,7 +39,8 @@ A rubrica é um texto curto e objetivo que define CINCO níveis de qualidade, an
 
 REGRAS:
 - Baseie os critérios na RESPOSTA ESPERADA fornecida; NÃO invente fatos fora dela. Se a resposta esperada for curta, ainda assim distribua os níveis de forma sensata (ex.: por quantidade de elementos corretos citados).
-- Escreva em português do Brasil, direto, no formato de instrução para quem vai pontuar (ex.: "10 se o aluno explica X e Y com exemplo; 7,5 se explica X e Y sem exemplo; 5 se explica só X; 2,5 se menciona o tema sem explicar; 0 se não aborda ou erra").
+- É uma prova ORAL: os níveis devem premiar o ENTENDIMENTO, não a redação. Escreva critérios que aceitem paráfrases, sinônimos e explicações com as próprias palavras — NÃO exija termos técnicos específicos nem a formulação exata do gabarito. Foque no que o aluno precisa DEMONSTRAR que entende, não em palavras que ele precisa dizer.
+- Escreva em português do Brasil, direto, no formato de instrução para quem vai pontuar (ex.: "10 se o aluno demonstra entender X e Y e dá um exemplo; 7,5 se demonstra X e Y sem exemplo; 5 se demonstra só X; 2,5 se tangencia o tema sem explicar; 0 se não aborda ou erra o conceito").
 - A rubrica é para o PROFESSOR/avaliador — pode citar o gabarito à vontade (nunca vai ao aluno).
 - "weight": um inteiro de 1 a 5 sugerindo o peso da questão pela complexidade da pergunta e da profundidade esperada da resposta (1 = pergunta simples/factual; 5 = pergunta complexa/dissertativa). Na dúvida, 1.
 
