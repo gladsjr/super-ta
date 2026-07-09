@@ -30,12 +30,15 @@ const SCHEMA = {
     required: ["questions"],
 };
 
-const SYS = `Você extrai a LISTA DE PERGUNTAS (e suas respostas/gabarito) de um PDF de prova ou lista de exercícios, em português do Brasil. O PDF mistura perguntas e, para cada uma, a resposta esperada (que pode estar logo abaixo da pergunta, numa seção de gabarito ao final, etc.).
+// "answer" é sempre a RESPOSTA ESPERADA (gabarito) da questão. A rubrica de
+// pontuação (critério detalhado) é gerada depois, a partir da resposta, pelo
+// OralRubricBuilderAgent — não sai do PDF.
+const SYS = `Você extrai a LISTA DE PERGUNTAS de um PDF de prova ou lista de exercícios, em português do Brasil, junto com a resposta esperada de cada uma. O documento mistura perguntas e, para cada uma, um conteúdo de correção (que pode estar logo abaixo da pergunta, numa seção ao final, etc.).
 
 Regras:
 - Extraia CADA pergunta como um item, na ORDEM em que aparecem no documento.
 - "question": o enunciado da pergunta, limpo (sem o número/marcador), pronto para ser FALADO a um aluno numa arguição oral.
-- "answer": a resposta/gabarito correspondente àquela pergunta. Se uma pergunta não tiver resposta no PDF, devolva string vazia.
+- "answer": a RESPOSTA ESPERADA (gabarito) correspondente àquela pergunta. Se uma pergunta não tiver resposta no PDF, devolva string vazia.
 - NÃO invente perguntas nem respostas. Use exclusivamente o conteúdo do PDF.
 - Se o documento não for uma prova com perguntas, devolva questions como lista vazia.
 Retorne SOMENTE o JSON do schema.`;
@@ -60,19 +63,20 @@ export class OralExamExtractorAgent {
     async extract({ examFileId = null, examText = null, meterCtx = null }) {
         if (!examFileId && !examText) throw new Error("OralExamExtractor.extract: missing examFileId/examText");
         const content = examText
-            ? [{ type: "input_text", text: `Extraia as perguntas e respostas do texto de prova abaixo.\n\n---\n${examText}\n---` }]
+            ? [{ type: "input_text", text: `Extraia as perguntas e as respostas esperadas do texto de prova abaixo.\n\n---\n${examText}\n---` }]
             : [
-                { type: "input_text", text: "Extraia as perguntas e respostas do PDF anexo." },
+                { type: "input_text", text: "Extraia as perguntas e as respostas esperadas do PDF anexo." },
                 { type: "input_file", file_id: examFileId },
             ];
         const out = await runStructured({
             client: this.client, model: this.model, label: "AGENT:OralExamExtractor",
             instructions: SYS, input: [{ role: "user", content }],
             schema: SCHEMA, schemaName: "oral_exam_questions", meterCtx,
+            // Sem id aqui: quem atribui id ESTÁVEL (do contador, sem reuso) é
+            // db.setOralQuestions. Assim re-extrair não reusa ids de questões antigas.
             validate: (parsed) => (Array.isArray(parsed.questions) ? parsed.questions : [])
                 .map(q => ({ question: String(q.question || "").trim(), answer: String(q.answer || "").trim() }))
-                .filter(q => q.question)
-                .map((q, i) => ({ id: i + 1, ...q })),
+                .filter(q => q.question),
         });
         log.info("AGENT:OralExamExtractor", `extracted ${out.length} questions`);
         return out;

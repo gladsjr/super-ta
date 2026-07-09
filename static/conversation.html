@@ -909,36 +909,45 @@ function gradesBodyHtml(grades) {
       ${c.justification ? `<div class="sf-text" style="margin-top: var(--sp-1); color: var(--ink-600); font-size: var(--fs-sm);">${escapeHtml(c.justification)}</div>` : ''}
     </div>`).join('');
   const final = grades.final != null ? grades.final : '—';
+  const pen = grades.penalty;
+  const penHtml = (pen && Number(pen.multiplier) < 1)
+    ? `<div class="hint" style="margin-top:6px; color: var(--accent-700);">Penalidade por alertas de autoria: nota base ${escapeHtml(String(pen.base))} × ${escapeHtml(String(pen.multiplier))}${pen.justification ? ' — ' + escapeHtml(pen.justification) : ''}</div>`
+    : '';
   return `${rows}
     <div class="row" style="gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); border-top: 2px solid var(--ink-300); padding-top: var(--sp-2);">
       <strong style="flex:1">Nota final (média ponderada)</strong>
       <strong id="grade-final" style="font-size: var(--fs-lg)">${escapeHtml(String(final))}</strong>
-    </div>
+    </div>${penHtml}
     <div class="eval-publish-row" style="margin-top: var(--sp-2);">
       <button class="btn btn-primary btn-sm" id="grades-save-btn">Salvar notas</button>
       <span class="hint">Edite as notas e salve. A nota só vai ao aluno quando você <strong>publicar</strong> (abaixo).</span>
     </div>`;
 }
 
-// Prévia DESABILITADA da rubrica (antes de calcular): mostra os critérios
-// (nome + peso) com nota "—", para o professor ver os passos que virão.
+// Prévia EDITÁVEL da rubrica (antes de calcular): mostra os critérios (nome +
+// peso) com nota em branco, permitindo LANÇAMENTO MANUAL da nota sem rodar o
+// cálculo automático (o backend semeia a rubrica ao salvar). Também é a forma de
+// pontuar quando não se quer/precisa da avaliação do entrevistador.
 function gradesPreviewHtml(rubric) {
   const crit = Array.isArray(rubric) ? rubric : [];
   if (!crit.length) return '<p class="eval-publish-help">Nenhum critério na rubrica. Defina a rubrica no painel do professor.</p>';
   const rows = crit.map(c => `
-    <div class="grade-row" data-weight="${escapeHtml(String(c.weight ?? 1))}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0; opacity: 0.6;">
+    <div class="grade-row" data-id="${escapeHtml(c.id || '')}" data-weight="${escapeHtml(String(c.weight ?? 1))}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0;">
       <div class="row" style="gap: var(--sp-2); align-items:center; flex-wrap:wrap">
         <strong style="flex:1; min-width:140px">${escapeHtml(c.name || '')}</strong>
         <span class="eval-meta">peso ${escapeHtml(String(c.weight ?? 1))}</span>
-        <input class="input" type="number" placeholder="—" disabled style="width:80px"/>
+        <input class="input grade-score" type="number" min="0" max="10" step="0.1" placeholder="—" style="width:80px"/>
       </div>
     </div>`).join('');
   return `${rows}
-    <div class="row" style="gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); border-top: 2px solid var(--ink-300); padding-top: var(--sp-2); opacity: 0.6;">
+    <div class="row" style="gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); border-top: 2px solid var(--ink-300); padding-top: var(--sp-2);">
       <strong style="flex:1">Nota final (média ponderada)</strong>
-      <strong style="font-size: var(--fs-lg)">—</strong>
+      <strong id="grade-final" style="font-size: var(--fs-lg)">—</strong>
     </div>
-    <p class="eval-publish-help" style="margin-top: var(--sp-2);">Clique em <strong>Calcular notas</strong> para gerar a nota de cada critério sobre a avaliação do entrevistador.</p>`;
+    <div class="eval-publish-row" style="margin-top: var(--sp-2);">
+      <button class="btn btn-primary btn-sm" id="grades-save-btn">Salvar notas</button>
+      <span class="hint">Lance as notas à mão e salve, ou use <strong>Calcular notas</strong> para gerar automaticamente sobre a avaliação do entrevistador.</span>
+    </div>`;
 }
 
 function recomputeFinalPreview() {
@@ -981,7 +990,7 @@ function renderGrades(j) {
   body.innerHTML = gradesPreviewHtml(j.rubric || []);
   renderGradePublishState(null);
   if (!hasInternal) {
-    empty.textContent = 'A nota é calculada sobre a Avaliação do entrevistador (abaixo) — gere-a primeiro.';
+    empty.textContent = 'Você pode lançar as notas à mão acima e salvar. Para o cálculo automático, gere antes a Avaliação do entrevistador (abaixo).';
     empty.classList.remove('hidden');
   } else {
     empty.classList.add('hidden');

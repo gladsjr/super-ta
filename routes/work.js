@@ -83,6 +83,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 include_improvement_areas: req.work.include_improvement_areas,
                 include_study_suggestions: req.work.include_study_suggestions,
                 grading_rubric: getEffectiveRubric(req.work),   // rubrica efetiva (do trabalho ou DEFAULT_RUBRIC)
+                grade_penalty: req.work.grade_penalty_json || null,   // critério de penalidade por alertas (opt-in)
                 budget_usd: balance?.budget_usd ?? 0,
                 spent_usd: balance?.spent_usd ?? 0,
                 remaining_usd: balance?.remaining_usd ?? 0,
@@ -434,6 +435,22 @@ router.patch("/w/:workToken/feedback-settings", requireWorkToken, express.json({
     }
 });
 
+// Critério FIXO de penalidade por alertas (opt-in), aplicado APÓS a nota da
+// rubrica. Genérico p/ os dois kinds (entrevista: autoria; oral: proctoring).
+// Body: { enabled:bool, prompt?:string }. prompt vazio => usa o default do agente.
+router.patch("/w/:workToken/grade-penalty", requireWorkToken, express.json({ limit: "16kb" }), async (req, res) => {
+    const enabled = req.body?.enabled === true;
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+    try {
+        const saved = await db.setWorkGradePenalty(req.work.id, enabled ? { enabled, prompt } : { enabled: false, prompt });
+        log.info("GRADING", `grade penalty work=${req.work.work_token} enabled=${enabled}`);
+        res.json({ ok: true, grade_penalty: saved });
+    } catch (err) {
+        log.error("GRADING", `grade penalty save failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar o critério de penalidade" });
+    }
+});
+
 // Rubrica de notas do TRABALHO: critérios (nome, peso, prompt) que o
 // GradingAgent aplica sobre a avaliação interna. Vale como padrão de todos os
 // alunos (ajuste ad-hoc por aluno vem na rota de notas). Substitui a rubrica
@@ -580,9 +597,17 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkT
         return res.status(400).json({ error: "scores deve ser um array de { criterion_id, score }" });
     }
     try {
-        const existing = await db.getSubmissionGrades(found.id);
+        let existing = await db.getSubmissionGrades(found.id);
         if (!existing || !Array.isArray(existing.criteria)) {
-            return res.status(409).json({ error: "não há notas calculadas para editar — calcule primeiro" });
+            // Sem cálculo automático: semeia a rubrica efetiva com notas em branco
+            // para o professor lançar as notas à mão. A final é a média ponderada
+            // das que ele preencher (weightedFinal ignora as vazias).
+            const rubric = getEffectiveRubric(req.work);
+            existing = {
+                criteria: rubric.map(c => ({ id: c.id, name: c.name, weight: c.weight, score: null, justification: "" })),
+                final: null,
+                computed_at: new Date().toISOString(),
+            };
         }
         const byId = new Map(scores.map(s => [String(s.criterion_id), s.score]));
         const criteria = existing.criteria.map(c => {

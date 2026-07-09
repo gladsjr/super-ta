@@ -319,8 +319,9 @@
     </div><!-- /tab-alunos -->
 
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
-    <div class="card">
-      <h3 class="card-title" data-help="Três passos, todos em lote: 1) avaliar as entrevistas (relatório interno, só você vê); 2) gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa); 3) publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.">Avaliações e devolutivas</h3>
+    <details class="card card-collapsible" open>
+      <summary><span class="card-title" data-help="Três passos, todos em lote: 1) avaliar as entrevistas (relatório interno, só você vê); 2) gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa); 3) publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.">Avaliações e devolutivas</span></summary>
+      <div class="card-collapsible-body">
       <p class="card-sub">Avalie as entrevistas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
 
       <div class="row" style="margin-bottom: var(--sp-3)">
@@ -347,33 +348,52 @@
         <button id="eval-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regenera o relatório interno de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-    </div>
-
-    <div class="card">
-      <h3 class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</h3>
-      <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
-      <div id="rubric-items"></div>
-      <div class="row" style="margin-top: var(--sp-2); gap: var(--sp-2); flex-wrap: wrap">
-        <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
-        <span class="spacer"></span>
-        <button id="save-rubric-btn" class="btn" type="button">Salvar rubrica</button>
-        <span id="rubric-msg" class="hint"></span>
       </div>
-      <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
+    </details>
+
+    <details class="card card-collapsible" open>
+      <summary><span class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</span></summary>
+      <div class="card-collapsible-body">
+      <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
+      <!-- Ações no topo: não obriga a rolar a lista de critérios só para salvar/calcular. -->
+      <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
+        <button id="save-rubric-btn" class="btn btn-primary" type="button">Salvar rubrica</button>
         <button id="grade-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das entrevistas já avaliadas que ainda não têm nota — usa a rubrica salva">Calcular notas</button>
         <button id="grade-publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as notas já calculadas que ainda não foram publicadas">Publicar notas</button>
         <span class="spacer"></span>
         <button id="grade-unpublish-all-btn" class="btn btn-ghost btn-sm" type="button" title="Retira da página de cada aluno todas as notas publicadas (as notas ficam guardadas)">Despublicar notas</button>
         <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
       </div>
-      <div id="eval-batch-status-notas" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-    </div>
+      <div id="rubric-msg" class="hint" style="margin-bottom: var(--sp-1)"></div>
+      <div id="eval-batch-status-notas" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+      <!-- Critério de penalidade (opt-in), dobrado no início do card. -->
+      <details class="penalty-inline">
+        <summary data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de autoria da avaliação e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de forte suspeita).">Critério de penalidade (alertas de autoria)</summary>
+        <div class="penalty-inline-body">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled"/> Ativar penalidade por alertas de autoria</label>
+          <p class="card-sub" style="margin-top:4px">Aplicado <em>após</em> o cálculo da nota; reflete na próxima vez que você calcular as notas.</p>
+          <label class="label" for="penalty-prompt">Política (como transformar alertas em penalidade)</label>
+          <textarea id="penalty-prompt" class="textarea" rows="3"></textarea>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="save-penalty-btn" class="btn btn-sm" type="button">Salvar critério</button>
+            <span id="penalty-msg" class="hint"></span>
+          </div>
+        </div>
+      </details>
+      <div id="rubric-items" style="margin-top: var(--sp-3)"></div>
+      <div class="row" style="margin-top: var(--sp-2)">
+        <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
+      </div>
+      </div>
+    </details>
 
-    <div class="card">
-      <h3 class="card-title">Alunos</h3>
+    <details class="card card-collapsible" open>
+      <summary><span class="card-title">Alunos</span></summary>
+      <div class="card-collapsible-body">
       <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a conversa, a avaliação, escrever a devolutiva e atribuir a nota.</p>
       <div id="grades-table"></div>
-    </div>
+      </div>
+    </details>
     </div><!-- /tab-avaliacao -->
   </div>
 
@@ -541,6 +561,7 @@ async function load() {
   document.getElementById('fb-include-opinion').checked = j.work.include_interviewer_opinion !== false;
   document.getElementById('expect-spontaneous').checked = j.work.expect_spontaneous === true;
   renderRubricEditor(j.work.grading_rubric || []);
+  fillPenaltySettings(j.work.grade_penalty || null);
 
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
@@ -583,6 +604,15 @@ let lastSubmissions = [];
 
 // Tabela de notas (aba Notas): aluno → nota final + status de publicação, com
 // link para o cockpit. Só alunos com entrevista (status != pending).
+// Alerta de autoria na lista: derivado de evaluation_json.overall.authorship_confidence.
+// low → alerta (vermelho); medium → atenção (amarelo); high/sem avaliação → ok/—.
+function authorshipAlertBadge(s) {
+  if (!s.has_evaluation) return '<span class="muted">—</span>';
+  const c = s.authorship_confidence;
+  if (c === 'low') return '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3" title="Baixa confiança de autoria própria — revise a entrevista">autoria</span>';
+  if (c === 'medium') return '<span class="pill" style="background:#fff6e0;border:1px solid #ecc874" title="Confiança de autoria intermediária">atenção</span>';
+  return '<span class="hint">ok</span>';
+}
 function renderGradesTable() {
   const el = document.getElementById('grades-table');
   if (!el) return;
@@ -597,6 +627,7 @@ function renderGradesTable() {
     const statusPill = `<span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>`;
     const avalPill = s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>' : '<span class="muted">—</span>';
     const nota = (s.grade_final != null) ? `<strong>${escapeHtml(String(s.grade_final))}</strong>` : '<span class="muted">—</span>';
+    const alerta = authorshipAlertBadge(s);
     const pub = [
       s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva visível ao aluno">devolutiva</span>' : '',
       s.grade_published_at ? '<span class="badge badge-accent" title="Nota visível ao aluno">nota</span>' : '',
@@ -606,11 +637,12 @@ function renderGradesTable() {
       <td>${statusPill}</td>
       <td>${avalPill}</td>
       <td style="text-align:right">${nota}</td>
+      <td>${alerta}</td>
       <td>${pub}</td>
       <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação, escrever a devolutiva e publicar a nota">gerenciar ▸</a></td>
     </tr>`;
   }).join('');
-  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Publicado</th><th>Ações</th></tr></thead><tbody>${body}</tbody></table>`;
+  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th>Ações</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderSubmissionsTable() {
@@ -1421,6 +1453,25 @@ document.getElementById('save-rubric-btn').onclick = async () => {
     renderRubricEditor(j.rubric || criteria); // re-render com ids estáveis do servidor
     msg.textContent = 'Rubrica salva.'; setTimeout(() => { msg.textContent = ''; }, 3000);
   } catch (err) { msg.textContent = 'Falha ao salvar: ' + err.message; }
+};
+// Critério de penalidade por alertas de autoria (opt-in). Rota genérica /grade-penalty.
+const DEFAULT_PENALTY_PROMPT = 'Aplique penalidade SOMENTE em caso de forte e inequívoca suspeita de autoria não-própria (vários sinais convergentes questionando a autoria). Nesse caso, reduza a nota em até 50% (multiplicador 0,5). Se os sinais forem fracos, pontuais ou ambíguos, NÃO penalize (multiplicador 1,0). Na dúvida, não penalize — os alertas são para revisão humana, não prova.';
+function fillPenaltySettings(gp) {
+  document.getElementById('penalty-enabled').checked = !!(gp && gp.enabled);
+  document.getElementById('penalty-prompt').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
+}
+document.getElementById('save-penalty-btn').onclick = async () => {
+  const msg = document.getElementById('penalty-msg'); msg.textContent = 'Salvando…';
+  const enabled = document.getElementById('penalty-enabled').checked;
+  const prompt = document.getElementById('penalty-prompt').value.trim();
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/grade-penalty`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, prompt }),
+    });
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = r.ok ? (enabled ? 'Critério ligado e salvo.' : 'Critério desligado.') : 'Falha: ' + (j.error || r.status);
+    setTimeout(() => { msg.textContent = ''; }, 3000);
+  } catch (err) { msg.textContent = 'Falha: ' + err.message; }
 };
 document.getElementById('grade-all-btn').onclick = () =>
   startBatch('evaluations/grades', { force: false }, 'Calcular as notas das entrevistas avaliadas que ainda não têm nota, usando a rubrica salva? Cada critério consome orçamento do trabalho.');

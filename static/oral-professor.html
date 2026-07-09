@@ -91,6 +91,19 @@
       </div>
 
       <div class="card">
+        <h3 class="card-title">Calibração de fala <span class="hint" style="font-weight: 400">(opcional)</span></h3>
+        <p class="card-sub" data-help="Antes da prova, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — usando o MESMO gpt-4o-transcribe que gera a transcrição da correção. Serve para orientar o aluno (volume/ritmo) e sinalizar, para você, provas cuja captação ficou ruim. Deixe em branco para desligar o teste.">Frase que o aluno repete num pré-teste de captação, antes da prova. <strong>Gere</strong> a partir das perguntas ou escreva à mão. Em branco = teste desligado.</p>
+        <textarea id="calib-sentence" class="input" rows="2" style="width: 100%" placeholder="Ex.: As questões desta prova falam de halving, hashrate e VPL do fluxo de caixa."></textarea>
+        <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
+        <div class="row" style="margin-top: var(--sp-2); align-items: center">
+          <button class="btn" id="calib-gen" type="button">Gerar a partir das perguntas</button>
+          <span class="spacer"></span>
+          <button class="btn btn-primary" id="calib-save" type="button">Salvar</button>
+          <span class="hint" id="calib-msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
         <h3 class="card-title">Prova — perguntas e gabarito <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
         <p class="card-sub" id="exam-status">—</p>
         <!-- Fonte: sobe um PDF/TXT de perguntas e respostas; a extração popula a lista abaixo. -->
@@ -106,7 +119,7 @@
           <button class="btn btn-primary" id="q-save" type="button">Salvar perguntas</button>
           <span class="hint" id="q-msg"></span>
         </div>
-        <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas e o gabarito, ou edite o que veio do arquivo. O <strong>gabarito fica só no servidor</strong> — não vai à voz do aluno; serve para a avaliação. Clique numa linha para editar.</p>
+        <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas (ou edite o que veio do arquivo) — só o <strong>enunciado</strong>, que é falado ao aluno. O peso e o critério/gabarito de cada questão ficam na aba <strong>Avaliação &amp; notas</strong>. Clique numa linha para editar.</p>
         <div id="questions" class="q-list"></div>
       </div>
     </div>
@@ -158,7 +171,7 @@
           <button id="download-csv" class="btn btn-sm" type="button" title="Baixar lista (rótulo, token, URL) em CSV">⬇ Baixar CSV</button>
         </div>
         <table id="sub-table" class="table hidden">
-          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Vídeo</th><th>Ações</th></tr></thead>
+          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Prova</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
@@ -166,50 +179,101 @@
       </div>
     </div>
 
-    <!-- ABA: AVALIAÇÃO & NOTAS (lote + tabela de alunos) -->
+    <!-- ABA: AVALIAÇÃO & NOTAS (cards retráteis, na ordem: avaliações+devolutivas → rubrica → penalidade → proctoring → alunos) -->
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
-      <div class="card">
-        <h3 class="card-title" data-help="A avaliação compara, pergunta a pergunta, as respostas do aluno (transcrição) com o gabarito. É um relatório interno, só você vê. A devolutiva e a nota são MANUAIS — não há geração por IA: você escreve a devolutiva e atribui a nota na página de cada aluno.">Avaliação em lote</h3>
-        <p class="card-sub">Gera o relatório de comparação com o gabarito das provas realizadas. Relatório interno — o aluno não vê.</p>
-        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
-          <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">Avaliar provas</button>
-          <button id="eval-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reavalia TODAS as provas realizadas, inclusive as já avaliadas">Reavaliar todas</button>
-        </div>
-        <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-      </div>
 
-      <div class="card">
-        <h3 class="card-title">Publicação em lote</h3>
-        <p class="card-sub">Devolutivas e notas são escritas aluno a aluno (sem geração por IA). Aqui você só publica/despublica em massa o que já foi escrito.</p>
-        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
-          <button id="pub-dev-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já escritas">Publicar devolutivas</button>
-          <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
-          <span class="spacer"></span>
-          <button id="unpub-dev-btn" class="btn btn-ghost btn-sm" type="button">Despublicar devolutivas</button>
-          <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+      <!-- 1. Avaliações e devolutivas (pipeline em lote + diretrizes) -->
+      <details class="card card-collapsible" open>
+        <summary><span class="card-title" data-help="Três passos, todos em lote: (1) avaliar compara a transcrição de cada aluno ao gabarito; (2) gerar devolutivas escreve, com IA, a devolutiva formativa a partir da avaliação, seguindo suas diretrizes; (3) publicar torna as devolutivas visíveis ao aluno.">Avaliações e devolutivas</span></summary>
+        <div class="card-collapsible-body">
+          <p class="card-sub">Avalie as provas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
+          <div class="row" style="margin-bottom: var(--sp-3)">
+            <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
+          </div>
+          <label class="label" for="fb-guidelines-oral">Diretrizes para a devolutiva (opcional) — tom, formato, o que destacar</label>
+          <textarea id="fb-guidelines-oral" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; destaque o domínio dos conceitos e termine com um encorajamento."></textarea>
+          <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
+            <input type="checkbox" id="fb-include-opinion-oral" checked style="margin-top: 3px"/>
+            <span class="card-sub">Incluir a <strong>opinião do examinador</strong> nas devolutivas.</span>
+          </label>
+          <div class="row" style="margin-top: var(--sp-3)">
+            <button id="save-feedback-oral" class="btn" type="button">Salvar configurações</button>
+            <span class="hint" id="fb-settings-msg-oral"></span>
+          </div>
+          <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap">
+            <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">1 · Avaliar provas</button>
+            <button id="derive-all-btn" class="btn btn-primary" type="button" title="Gera (com IA) a devolutiva das provas já avaliadas">2 · Gerar devolutivas</button>
+            <button id="pub-dev-btn" class="btn btn-primary" type="button" title="Torna visíveis as devolutivas já escritas">3 · Publicar devolutivas</button>
+            <span class="spacer"></span>
+            <button id="eval-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reavalia TODAS as provas realizadas">Reavaliar todas</button>
+            <button id="unpub-dev-btn" class="btn btn-ghost btn-sm" type="button">Despublicar</button>
+          </div>
+          <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
         </div>
-        <div id="pub-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-      </div>
+      </details>
 
-      <div class="card">
-        <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. São indícios para revisão humana, nunca acusação — o professor assiste ao trecho e decide. A latência da voz é capturada automaticamente durante a prova.">Proctoring por vídeo (em lote)</h3>
-        <p class="card-sub">Roda a análise do vídeo das provas realizadas. Os alertas aparecem na lista abaixo; clique em <strong>gerenciar</strong> para ver os trechos.</p>
-        <div class="row" style="gap: var(--sp-2); flex-wrap: wrap">
-          <button id="proctor-all-btn" class="btn btn-primary" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
-          <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
+      <!-- 2. Rubrica por questão — ações + penalidade no topo; itens da rubrica abaixo -->
+      <details class="card card-collapsible" open>
+        <summary><span class="card-title">Rubrica por questão</span></summary>
+        <div class="card-collapsible-body">
+          <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
+          <!-- Ações no topo: não obriga a rolar a lista inteira só para salvar/publicar. -->
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
+            <button id="save-rubric-oral" class="btn btn-primary" type="button">Salvar rubrica</button>
+            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
+            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+            <span class="spacer"></span>
+            <span class="hint" id="rubric-msg-oral"></span>
+          </div>
+          <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+          <p class="card-sub" data-help="A rubrica é a instrução de como pontuar cada questão, em 5 níveis (0 / 2,5 / 5 / 7,5 / 10). Você pode escrevê-la à mão OU, se a questão tiver resposta esperada (aba Configuração), gerar automaticamente. O agente que calcula a nota usa sempre a rubrica.">Escreva a rubrica de cada questão ou <strong>gere</strong> a partir da resposta esperada. Ao mudar pergunta/resposta, a rubrica fica marcada para <strong>revisar</strong>.</p>
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
+            <button id="gen-rubrics-stale-btn" class="btn" type="button" title="Gera a rubrica das questões pendentes/vazias que têm resposta esperada">Gerar rubricas (pendentes)</button>
+            <button id="gen-rubrics-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regera a rubrica de TODAS as questões que têm resposta esperada">Gerar todas</button>
+            <span class="hint" id="gen-rubrics-status"></span>
+          </div>
+          <!-- Critério de penalidade (opt-in), dobrado no início do card. -->
+          <details class="penalty-inline">
+            <summary data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de proctoring/voz e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de violação fragrante).">Critério de penalidade (alertas de proctoring)</summary>
+            <div class="penalty-inline-body">
+              <p class="card-sub">Opcional. Quando ligado, aplica uma penalidade à nota final conforme os alertas de proctoring e a política abaixo.</p>
+              <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled-oral"/> Ativar penalidade por alertas de proctoring</label>
+              <label class="label" for="penalty-prompt-oral" style="margin-top: var(--sp-2)">Política (como transformar alertas em penalidade)</label>
+              <textarea id="penalty-prompt-oral" class="textarea" rows="3"></textarea>
+              <div class="row" style="margin-top: var(--sp-2)">
+                <button id="save-penalty-oral" class="btn btn-sm" type="button">Salvar critério</button>
+                <span class="hint" id="penalty-msg-oral"></span>
+              </div>
+            </div>
+          </details>
+          <div id="rubric-items-oral" style="margin-top: var(--sp-3)"></div>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="rubric-add-oral" class="btn btn-ghost btn-sm" type="button">+ adicionar questão</button>
+            <span class="hint">Adicionar/remover aqui reflete na aba Configuração.</span>
+          </div>
         </div>
-        <div id="proctor-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-      </div>
+      </details>
 
-      <div class="card">
-        <h3 class="card-title">Alunos</h3>
-        <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
-        <table id="eval-table" class="table hidden">
-          <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
-      </div>
+      <!-- 3. Alunos (inclui o proctoring por vídeo, que alimenta a coluna Alertas) -->
+      <details class="card card-collapsible" open>
+        <summary><span class="card-title">Alunos</span></summary>
+        <div class="card-collapsible-body">
+          <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
+          <!-- Proctoring por vídeo: análise anti-fraude do VÍDEO (distinta de "Avaliar
+               provas", que avalia a transcrição). Alimenta a coluna Alertas abaixo. -->
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-3)">
+            <span class="label" style="margin:0" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. É diferente de 'Avaliar provas' (que avalia a transcrição): aqui roda visão computacional sobre o vídeo. São indícios para revisão humana, nunca acusação.">Proctoring por vídeo:</span>
+            <button id="proctor-all-btn" class="btn btn-sm" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
+            <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
+            <span id="proctor-batch-status" class="hint hidden"></span>
+          </div>
+          <table id="eval-table" class="table hidden">
+            <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -220,6 +284,11 @@
   const API = `/w/${WORK}`;
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   let SUBS = [];   // cache da última listagem
+  // Fonte única compartilhada pelos dois editores (Configuração e Rubrica). Declarada
+  // AQUI, no topo, porque o initTab() abaixo pode chamar renderRubric() (que a lê)
+  // quando a URL vem com #avaliacao — se ela fosse declarada mais abaixo, cairia na
+  // TDZ do `let` e o script inteiro quebraria no load (tela em branco).
+  let QUESTIONS = [];
 
   // ---------- Abas ----------
   const TAB_NAMES = ['prova', 'alunos', 'avaliacao'];
@@ -232,6 +301,10 @@
       if (panel) panel.classList.toggle('hidden', !active);
       if (btn) { btn.classList.toggle('is-active', active); btn.setAttribute('aria-selected', String(active)); }
     });
+    // Re-renderiza o editor da aba ativa a partir da lista compartilhada — assim
+    // edições/adições/exclusões feitas na outra aba aparecem na hora ao trocar.
+    if (name === 'avaliacao' && typeof renderRubric === 'function') renderRubric();
+    if (name === 'prova' && typeof renderQuestions === 'function' && QUESTIONS.length) renderQuestions();
     if (history.replaceState) history.replaceState(null, '', '#' + name);
   }
   TAB_NAMES.forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.onclick = () => setTab(t); });
@@ -243,7 +316,7 @@
   // ---------- Editor de perguntas (lista recolhível) ----------
   function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .q-item').length; cfgWarn(); }
   function cfgWarn() {
-    const total = collectQuestions().length;
+    const total = QUESTIONS.filter(q => (q.question || '').trim()).length;
     const n = Number(document.getElementById('cfg-n').value) || 0;
     const el = document.getElementById('cfg-hint'); if (!el) return;
     if (!total) { el.textContent = ''; el.style.color = ''; return; }
@@ -255,50 +328,96 @@
       el.style.color = '';
     }
   }
-  function syncHead(item) {
-    const q = item.querySelector('.q-q').value.trim();
+  // ---------- Lista COMPARTILHADA de questões (fonte única; QUESTIONS declarada no topo) ----------
+  // Os DOIS editores (Configuração e Rubrica) leem/escrevem o MESMO array QUESTIONS,
+  // então apagar/editar/adicionar numa reflete na outra. Cada questão carrega um `id`
+  // ESTÁVEL do servidor; novas nascem com id:null e o servidor atribui ao salvar.
+  function syncHead(item, q) {
     const txt = item.querySelector('.q-text');
-    if (q) { txt.textContent = q; txt.classList.remove('q-empty'); }
+    const val = (q.question || '').trim();
+    if (val) { txt.textContent = val; txt.classList.remove('q-empty'); }
     else { txt.textContent = '(pergunta vazia)'; txt.classList.add('q-empty'); }
   }
-  function renumber() {
-    [...document.querySelectorAll('#questions .q-item')].forEach((it, i) => { it.querySelector('.q-num').textContent = (i + 1) + '.'; });
-  }
-  function makeItem(q = '', a = '', aspects = [], open = false) {
+  // Configuração: um item recolhível por questão — enunciado + resposta esperada
+  // (opcional). Escreve DIRETO no objeto q (identidade estável), o mesmo lido pela
+  // rubrica. Mudar pergunta/resposta marca a rubrica para revisão (rubric_stale).
+  function makeItem(q) {
     const div = document.createElement('div');
-    div.className = 'q-item' + (open ? ' open' : '');
+    div.className = 'q-item' + (q._open ? ' open' : '');
     div.innerHTML =
       '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num"></span>' +
       '<span class="q-text"></span><button class="q-del" title="remover">✕</button></div>' +
-      '<div class="q-body">' +
-      '<label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
-      '<label>Resposta / gabarito (só o professor vê)</label><textarea class="q-a" placeholder="Resposta esperada"></textarea>' +
-      '<label>Aspectos a cobrir — um por linha (tópicos, não respostas). O examinador usa só para apontar o que o aluno não abordou. Sugeridos automaticamente; edite à vontade.</label><textarea class="q-asp" placeholder="ex.: número de camadas&#10;um exemplo de aplicação"></textarea>' +
-      '</div>';
-    div.querySelector('.q-q').value = q;
-    div.querySelector('.q-a').value = a;
-    div.querySelector('.q-asp').value = (Array.isArray(aspects) ? aspects : []).join('\n');
-    div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; div.classList.toggle('open'); };
-    div.querySelector('.q-del').onclick = () => { div.remove(); renumber(); updateQCount(); };
-    div.querySelector('.q-q').addEventListener('input', () => { syncHead(div); cfgWarn(); });
-    document.getElementById('questions').appendChild(div);
-    syncHead(div); renumber();
+      '<div class="q-body"><label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
+      '<label>Resposta esperada (opcional)</label><textarea class="q-a" placeholder="Gabarito — insumo para gerar a rubrica; o aluno nunca vê"></textarea></div>';
+    div.querySelector('.q-q').value = q.question || '';
+    div.querySelector('.q-a').value = q.answer || '';
+    div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; q._open = !q._open; div.classList.toggle('open', q._open); };
+    div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderQuestions(); renderRubric(); };
+    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; syncHead(div, q); cfgWarn(); });
+    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; });
+    syncHead(div, q);
     return div;
   }
-  function renderQuestions(qs) {
+  function renderQuestions() {
     const c = document.getElementById('questions'); c.innerHTML = '';
-    (qs || []).forEach(q => makeItem(q.question || '', q.answer || '', q.aspects || [], false));
-    if (!(qs || []).length) makeItem('', '', [], true);
+    if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    QUESTIONS.forEach((q, i) => { const it = makeItem(q); c.appendChild(it); it.querySelector('.q-num').textContent = (i + 1) + '.'; });
     updateQCount();
   }
-  function collectQuestions() {
-    return [...document.querySelectorAll('#questions .q-item')]
-      .map(r => ({
-        question: r.querySelector('.q-q').value.trim(),
-        answer: r.querySelector('.q-a').value.trim(),
-        aspects: r.querySelector('.q-asp').value.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 3),
-      }))
-      .filter(q => q.question);
+
+  // ---------- Rubrica por questão (aba Avaliação): EDITOR COMPLETO ----------
+  // Mostra e edita pergunta + resposta + rubrica + peso, permite adicionar/excluir —
+  // tudo sobre a MESMA lista compartilhada, então reflete na Configuração. Editar
+  // pergunta/resposta marca a rubrica p/ revisão; editar a rubrica limpa a marca.
+  function renderRubric() {
+    const c = document.getElementById('rubric-items-oral'); c.innerHTML = '';
+    if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    QUESTIONS.forEach((q, i) => {
+      // Cada questão é RECOLHÍVEL (reusa .q-item): fechada mostra só a pergunta;
+      // aberta edita pergunta + resposta + rubrica + peso. _ropen guarda o estado.
+      const div = document.createElement('div');
+      div.className = 'q-item' + (q._ropen ? ' open' : '');
+      const stale = q.rubric_stale || !(q.rubric || '').trim();
+      const badge = stale ? '<span class="pill" style="background:#fff6e0;border:1px solid #ecc874; font-size:var(--fs-xs)">revisar</span>' : '';
+      const genBtn = (q.answer || '').trim() ? '<button class="btn btn-ghost btn-sm rq-gen" type="button" title="Gerar a rubrica a partir da resposta esperada">gerar</button>' : '';
+      div.innerHTML =
+        '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num">' + (i + 1) + '.</span>' +
+          '<span class="q-text"></span><span class="rq-badge" style="margin-left:6px">' + badge + '</span></div>' +
+        '<div class="q-body">' +
+          '<label>Pergunta</label><textarea class="rq-question" placeholder="Enunciado da pergunta"></textarea>' +
+          '<label>Resposta esperada (opcional)</label><textarea class="rq-answer" placeholder="Gabarito — insumo para gerar a rubrica; o aluno não vê"></textarea>' +
+          '<label>Rubrica — como pontuar (5 níveis: 0 / 2,5 / 5 / 7,5 / 10); só o professor vê</label><textarea class="rq-rubric" style="min-height:4.5rem" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>' +
+          '<div class="row" style="margin-top: var(--sp-2); align-items:center">' + genBtn +
+            '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
+            '<span class="spacer" style="flex:1"></span>' +
+            '<button class="btn btn-ghost btn-sm rq-del" type="button" title="remover questão">✕ excluir</button>' +
+          '</div>' +
+        '</div>';
+      const setHead = () => { const t = div.querySelector('.q-text'); const v = (q.question || '').trim(); if (v) { t.textContent = v; t.classList.remove('q-empty'); } else { t.textContent = '(pergunta vazia)'; t.classList.add('q-empty'); } };
+      div.querySelector('.q-head').onclick = (e) => { q._ropen = !q._ropen; div.classList.toggle('open', q._ropen); };
+      const qq = div.querySelector('.rq-question'); qq.value = q.question || ''; qq.addEventListener('input', () => { q.question = qq.value; q.rubric_stale = true; setHead(); });
+      const a = div.querySelector('.rq-answer'); a.value = q.answer || ''; a.addEventListener('input', () => { q.answer = a.value; q.rubric_stale = true; });
+      const w = div.querySelector('.rq-weight'); w.value = Number(q.weight) > 0 ? Number(q.weight) : 1; w.addEventListener('input', () => { q.weight = Number(w.value) > 0 ? Number(w.value) : 1; });
+      const rub = div.querySelector('.rq-rubric'); rub.value = q.rubric || ''; rub.addEventListener('input', () => { q.rubric = rub.value; q.rubric_stale = false; });
+      div.querySelector('.rq-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderRubric(); renderQuestions(); };
+      const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
+      setHead();
+      c.appendChild(div);
+    });
+  }
+  // Payload de save: as questões COM enunciado (com id estável), na ordem atual.
+  function questionsPayload() {
+    return QUESTIONS.filter(q => (q.question || '').trim())
+      .map(q => ({ id: q.id ?? null, question: q.question, answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1 }));
+  }
+  // Adota as questões salvas (com ids + rubric_stale do servidor) como nova fonte;
+  // preserva o estado de expansão casando por id.
+  function adoptSaved(saved) {
+    const openById = {}; QUESTIONS.forEach(q => { if (q.id != null) openById[q.id] = q._open; });
+    QUESTIONS = (saved || []).map(q => ({
+      id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '',
+      weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: !!openById[q.id],
+    }));
   }
 
   // ---------- Status helpers ----------
@@ -334,12 +453,12 @@
     tbody.innerHTML = rows.map(s => {
       const url = `${location.origin}/s/${s.submission_token}`;
       const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
-      const nParts = s.oral_video_parts || (s.has_oral_video ? 1 : 0);
-      const vid = nParts > 1
-        ? '🎥 ' + Array.from({ length: nParts }, (_, i) => `<a href="${API}/oral/video/${s.submission_token}/${i}" target="_blank" title="Segmento ${i + 1} de ${nParts} (a prova foi retomada)">${i + 1}</a>`).join(' · ')
-        : s.has_oral_video
-          ? `<a href="${API}/oral/video/${s.submission_token}" target="_blank" title="Vídeo gravado">🎥 vídeo</a>`
-          : '<span class="hint">—</span>';
+      // Acesso à prova COMPLETA (como na entrevista): transcrição + vídeo + alertas
+      // + devolutiva + nota, na página de gerenciamento. Antes só linkava o vídeo cru.
+      const canView = s.has_oral_video || s.status === 'completed' || s.status === 'gave_up';
+      const vid = canView
+        ? `<a href="${API}/oral/s/${s.submission_token}" target="_blank" title="Ver a prova: transcrição, vídeo, alertas, devolutiva e nota">${s.has_oral_video ? '🎥 ' : ''}ver prova ▸</a>`
+        : '<span class="hint">—</span>';
       const abrir = s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : '';
       const blockBtn = s.is_blocked
         ? `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta prova">Liberar</button>`
@@ -395,6 +514,7 @@
       ].filter(Boolean).join(' ') || '<span class="hint">—</span>';
       const alertPills = (s.proctor_alerts || []).map(a => `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">${esc(a)}</span>`);
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
+      if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
       const alerts = s._proctorPending ? SPIN
         : (alertPills.length ? alertPills.join(' ')
           : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>' : '<span class="hint">—</span>'));
@@ -447,10 +567,25 @@
     document.getElementById('cfg-n').value = j.work.question_count || 6;
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
-    renderQuestions(j.questions || []);
+    QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: false }));
+    renderQuestions();
+    renderRubric();
+    fillSettings(j.work);
+    CALIB = j.work.oral_calibration || null;
+    renderCalib();
     renderSubsTable();
     renderEvalTable();
     cfgWarn();
+  }
+  // Política default do critério de penalidade (espelha lib/gradePenalty.js /
+  // agents/GradePenaltyAgent.js — mostrada quando o professor ainda não escreveu a sua).
+  const DEFAULT_PENALTY_PROMPT = 'Aplique penalidade SOMENTE em caso de violação FRAGRANTE e inequívoca dos critérios de integridade (ex.: ausência prolongada do candidato, presença clara de outra pessoa, uso de celular durante boa parte da prova). Nesses casos, reduza a nota em até 50% (multiplicador 0,5). Se os alertas forem leves, pontuais ou ambíguos, NÃO penalize (multiplicador 1,0). Na dúvida, não penalize.';
+  function fillSettings(work) {
+    document.getElementById('fb-guidelines-oral').value = work.feedback_guidelines || '';
+    document.getElementById('fb-include-opinion-oral').checked = work.include_interviewer_opinion !== false;
+    const gp = work.grade_penalty || null;
+    document.getElementById('penalty-enabled-oral').checked = !!(gp && gp.enabled);
+    document.getElementById('penalty-prompt-oral').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
   }
   document.getElementById('cfg-n').addEventListener('input', cfgWarn);
 
@@ -467,7 +602,9 @@
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
       msg.textContent = `${j.count} pergunta(s) extraída(s).`;
       document.getElementById('exam-status').textContent = 'Prova enviada. As perguntas abaixo podem ser editadas.';
-      renderQuestions(j.questions || []);
+      adoptSaved(j.questions);
+      renderQuestions();
+      renderRubric();
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
     finally { btn.disabled = false; }
   };
@@ -481,20 +618,123 @@
       msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
-  document.getElementById('q-add').onclick = () => { const it = makeItem('', '', [], true); it.scrollIntoView({ block: 'nearest' }); it.querySelector('.q-q').focus(); updateQCount(); };
-  document.getElementById('q-save').onclick = async () => {
-    const qs = collectQuestions(); const msg = document.getElementById('q-msg');
-    if (!qs.length) { msg.textContent = 'Adicione ao menos uma pergunta (com enunciado).'; return; }
+  // ---------- Calibração de fala ----------
+  let CALIB = null;
+  function renderCalib() {
+    document.getElementById('calib-sentence').value = CALIB?.sentence || '';
+    const terms = (CALIB?.key_terms || []);
+    document.getElementById('calib-terms').textContent = terms.length ? ('Termos-chave verificados na transcrição: ' + terms.join(', ')) : '';
+  }
+  document.getElementById('calib-gen').onclick = async () => {
+    const msg = document.getElementById('calib-msg'), btn = document.getElementById('calib-gen');
+    btn.disabled = true; msg.textContent = 'Gerando…';
+    try {
+      const r = await fetch(`${API}/oral/calibration/generate`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
+      CALIB = j.calibration; renderCalib(); msg.textContent = 'Frase gerada e salva.';
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
+  };
+  document.getElementById('calib-save').onclick = async () => {
+    const msg = document.getElementById('calib-msg');
+    const sentence = document.getElementById('calib-sentence').value.trim();
+    // Se a frase foi editada à mão, mantém só os termos-chave que ainda aparecem nela.
+    const key_terms = (CALIB?.key_terms || []).filter(t => sentence.toLowerCase().includes(String(t).toLowerCase()));
     msg.textContent = 'Salvando…';
     try {
-      const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
+      const r = await fetch(`${API}/oral/calibration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sentence, key_terms }) });
       const j = await r.json();
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      CALIB = j.calibration; renderCalib(); msg.textContent = sentence ? 'Salvo.' : 'Salvo (teste desligado).';
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+  document.getElementById('q-add').onclick = () => {
+    QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    renderQuestions();
+    const items = document.querySelectorAll('#questions .q-item');
+    const last = items[items.length - 1];
+    if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.q-q').focus(); }
+  };
+  // Adicionar questão a partir da aba Avaliação (mesma lista compartilhada).
+  document.getElementById('rubric-add-oral').onclick = () => {
+    QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    renderRubric();
+    const rows = document.querySelectorAll('#rubric-items-oral .rubric-q');
+    const last = rows[rows.length - 1];
+    if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.rq-question').focus(); }
+  };
+  // Salva a lista COMPARTILHADA (perguntas + respostas + rubricas). Devolve j (ou null).
+  async function saveQuestions() {
+    const qs = questionsPayload();
+    if (!qs.length) return { error: 'Adicione ao menos uma pergunta (com enunciado).' };
+    const r = await fetch(`${API}/oral/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: qs }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { error: j.error || String(r.status) };
+    adoptSaved(j.questions); renderQuestions(); renderRubric();
+    return j;
+  }
+  document.getElementById('q-save').onclick = async () => {
+    const msg = document.getElementById('q-msg'); msg.textContent = 'Salvando…';
+    try {
+      const j = await saveQuestions();
+      if (j.error) { msg.textContent = 'Falha: ' + j.error; return; }
       msg.textContent = `${j.count} pergunta(s) salva(s).`;
       document.getElementById('exam-status').textContent = 'Perguntas definidas.';
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
-
+  document.getElementById('save-rubric-oral').onclick = async () => {
+    const msg = document.getElementById('rubric-msg-oral'); msg.textContent = 'Salvando…';
+    try {
+      const j = await saveQuestions();
+      if (j.error) { msg.textContent = 'Falha: ' + j.error; return; }
+      msg.textContent = 'Rubrica salva.';
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+  // Gera a rubrica de UMA questão (a partir da resposta). Salva antes (para o servidor
+  // ter a resposta atual) e adota o resultado.
+  async function generateOneRubric(q, btn) {
+    const prev = btn.textContent; btn.disabled = true; btn.textContent = 'gerando…';
+    const qText = (q.question || '').trim();
+    try {
+      const s = await saveQuestions(); // persiste a resposta atual antes de gerar
+      if (s.error) { alert('Falha ao salvar antes de gerar: ' + s.error); return; }
+      const it = QUESTIONS.find(x => x.id != null && (x.question || '').trim() === qText);
+      if (!it) { alert('Não encontrei a questão após salvar.'); return; }
+      const r = await fetch(`${API}/oral/questions/${it.id}/rubric/generate`, { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert('Falha: ' + (j.error || r.status)); return; }
+      it.rubric = j.question.rubric; it.weight = Number(j.question.weight) > 0 ? Number(j.question.weight) : it.weight; it.rubric_stale = false;
+      renderRubric();
+    } catch (e) { alert('Falha de comunicação.'); }
+    finally { btn.disabled = false; btn.textContent = prev; }
+  }
+  // Gera rubricas em LOTE (NDJSON). scope=stale (pendentes/vazias) | all (todas com resposta).
+  async function runGenerateRubrics(scope) {
+    const status = document.getElementById('gen-rubrics-status');
+    const btns = ['gen-rubrics-stale-btn', 'gen-rubrics-all-btn'];
+    btns.forEach(i => document.getElementById(i).disabled = true);
+    status.textContent = 'Salvando…';
+    try {
+      const s = await saveQuestions();
+      if (s.error) { status.textContent = 'Falha: ' + s.error; return; }
+      status.textContent = scope === 'all' ? 'Gerando todas as rubricas…' : 'Gerando rubricas pendentes…';
+      const r = await fetch(`${API}/oral/rubrics/generate?scope=${scope}`, { method: 'POST' });
+      if (!r.ok || !r.body) { let m = r.status; try { m = (await r.json()).error || r.status; } catch (e) {} status.textContent = 'Falha: ' + m; return; }
+      await readNdjson(r, (m) => {
+        if (m.type === 'done') {
+          if (Array.isArray(m.questions)) { adoptSaved(m.questions); renderQuestions(); renderRubric(); }
+          let t = m.candidates === 0 ? 'Nenhuma rubrica a gerar (as questões precisam de resposta esperada).'
+            : `${m.generated} rubrica(s) gerada(s) de ${m.candidates}.`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          status.textContent = t;
+        }
+      });
+    } catch (e) { status.textContent = 'Falha de comunicação.'; }
+    finally { btns.forEach(i => document.getElementById(i).disabled = false); }
+  }
+  document.getElementById('gen-rubrics-stale-btn').onclick = () => runGenerateRubrics('stale');
+  document.getElementById('gen-rubrics-all-btn').onclick = () => { if (confirm('Regerar a rubrica de TODAS as questões com resposta esperada? Sobrescreve as rubricas atuais.')) runGenerateRubrics('all'); };
   // ---------- Ações: ALUNOS ----------
   document.getElementById('toggle-create').onclick = () => {
     const panel = document.getElementById('create-panel');
@@ -636,20 +876,79 @@
   document.getElementById('proctor-all-btn').onclick = () => runProctorAll(false);
   document.getElementById('proctor-all-force-btn').onclick = () => { if (confirm('Reanalisar TODOS os vídeos, inclusive os já analisados?')) runProctorAll(true); };
 
-  async function runPublishAll(target, on) {
-    batchStatus('pub-batch-status', (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));
+  async function runPublishAll(target, on, statusId) {
+    batchStatus(statusId, (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));
     try {
       const r = await fetch(`${API}/oral/publish-all`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target, on }) });
       const j = await r.json();
-      if (!r.ok) { batchStatus('pub-batch-status', 'Falha: ' + (j.error || r.status)); return; }
-      batchStatus('pub-batch-status', `${j.affected} ${target === 'devolutiva' ? 'devolutiva(s)' : 'nota(s)'} ${on ? 'publicada(s)' : 'despublicada(s)'}.`);
+      if (!r.ok) { batchStatus(statusId, 'Falha: ' + (j.error || r.status)); return; }
+      batchStatus(statusId, `${j.affected} ${target === 'devolutiva' ? 'devolutiva(s)' : 'nota(s)'} ${on ? 'publicada(s)' : 'despublicada(s)'}.`);
       await load();
-    } catch (e) { batchStatus('pub-batch-status', 'Falha de comunicação.'); }
+    } catch (e) { batchStatus(statusId, 'Falha de comunicação.'); }
   }
-  document.getElementById('pub-dev-btn').onclick = () => runPublishAll('devolutiva', true);
-  document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true);
-  document.getElementById('unpub-dev-btn').onclick = () => { if (confirm('Despublicar TODAS as devolutivas?')) runPublishAll('devolutiva', false); };
-  document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false); };
+  document.getElementById('pub-dev-btn').onclick = () => runPublishAll('devolutiva', true, 'eval-batch-status');
+  document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true, 'pub-batch-status');
+  document.getElementById('unpub-dev-btn').onclick = () => { if (confirm('Despublicar TODAS as devolutivas?')) runPublishAll('devolutiva', false, 'eval-batch-status'); };
+  document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false, 'pub-batch-status'); };
+
+  // 2 · Gerar devolutivas (LLM) em lote — NDJSON como o evaluate-all.
+  async function runDeriveAll(force) {
+    const btn = document.getElementById('derive-all-btn'); btn.disabled = true;
+    batchStatus('eval-batch-status', force ? 'Regerando todas as devolutivas…' : 'Gerando as devolutivas…');
+    await refreshSubs();
+    try {
+      const r = await fetch(`${API}/oral/evaluations/student-versions${force ? '?force=1' : ''}`, { method: 'POST' });
+      if (!r.ok || !r.body) {
+        let msg = r.status; try { msg = (await r.json()).error || r.status; } catch (e) {}
+        batchStatus('eval-batch-status', 'Falha: ' + msg); return;
+      }
+      let generated = 0;
+      await readNdjson(r, (m) => {
+        if (m.type === 'done') {
+          let t = m.candidates === 0
+            ? 'Nenhuma devolutiva nova a gerar (avalie as provas antes, ou todas já têm devolutiva).'
+            : `${m.generated} devolutiva(s) gerada(s) de ${m.candidates} candidata(s).`;
+          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          batchStatus('eval-batch-status', t);
+        }
+      });
+    } catch (e) { batchStatus('eval-batch-status', 'Falha de comunicação.'); }
+    finally { btn.disabled = false; }
+  }
+  document.getElementById('derive-all-btn').onclick = () => runDeriveAll(false);
+
+  // Configurações de devolutiva (diretrizes + opinião do examinador). Reusa a
+  // rota genérica /feedback-settings (vale para os dois kinds de trabalho).
+  document.getElementById('save-feedback-oral').onclick = async () => {
+    const msg = document.getElementById('fb-settings-msg-oral'); msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/feedback-settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback_guidelines: document.getElementById('fb-guidelines-oral').value, interviewer_opinion: document.getElementById('fb-include-opinion-oral').checked }) });
+      const j = await r.json();
+      msg.textContent = r.ok ? 'Configurações salvas.' : 'Falha: ' + (j.error || r.status);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  // Critério de penalidade (opt-in). Rota genérica /grade-penalty.
+  document.getElementById('save-penalty-oral').onclick = async () => {
+    const msg = document.getElementById('penalty-msg-oral'); msg.textContent = 'Salvando…';
+    const enabled = document.getElementById('penalty-enabled-oral').checked;
+    const prompt = document.getElementById('penalty-prompt-oral').value.trim();
+    try {
+      const r = await fetch(`${API}/grade-penalty`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, prompt }) });
+      const j = await r.json();
+      msg.textContent = r.ok ? (enabled ? 'Critério ligado e salvo.' : 'Critério desligado.') : 'Falha: ' + (j.error || r.status);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  // Abrir avaliações lado a lado: leva ao primeiro aluno com prova realizada
+  // (a página do aluno tem navegação ◀/▶ entre os alunos).
+  document.getElementById('open-cockpit-oral').onclick = () => {
+    const list = SUBS || [];
+    const first = list.find(s => s.status === 'completed') || list[0];
+    if (!first) { alert('Nenhum aluno ainda.'); return; }
+    window.open(`${API}/oral/s/${first.submission_token}`, '_blank');
+  };
 
   load();
 </script>
