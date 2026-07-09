@@ -110,6 +110,7 @@ export function renderTranscriptForEvaluation(conversation, audioArtifacts = [])
             parts.push(`disfluências: ${d.disfluencies}`);
             parts.push(`registro escrito: ${d.written_register}`);
             parts.push(`polimento: ${d.polish}`);
+            if (d.echo != null) parts.push(`eco da dica: ${d.echo}`);
             lines.push(`FORMA DA RESPOSTA: ${parts.join("; ")}.`);
             for (const f of d.flags) {
                 lines.push(`SINAL AUTOMÁTICO DE FORMA: ${f}`);
@@ -173,6 +174,7 @@ COMO AVALIAR — encarne o olhar da persona:
 - Confronte cada resposta com o que está NA ENTREGA: resposta que contradiz o próprio documento (número diferente, premissa trocada, recomendação incompatível) é sinal forte — classifique "inconsistent" e cite onde.
 - Resposta que repete o documento sem conseguir ir além quando provocada, ou que escapa da pergunta, é "evasive" ou "partial" conforme o grau.
 - Pondere as INTERVENÇÕES do turno: pedir esclarecimento é legítimo; precisar de vários follow-ups para chegar a uma resposta simples enfraquece a defesa.
+- RESPOSTA PÓS-DICA (induzida): quando a resposta final veio DEPOIS de um follow-up do entrevistador que descreveu o que faltava (ou ofereceu alternativas), compare você mesmo as duas falas — e olhe o "eco da dica" na linha FORMA. Resposta que essencialmente devolve a formulação do entrevistador NÃO é demonstração de domínio: classifique o mérito pelo que o respondente trouxe POR CONTA PRÓPRIA (antes da dica), tipicamente "partial", e registre o padrão em weaknesses/caveats quando se repetir. Elogio do entrevistador na transição ("agora sim...") NÃO é evidência de mérito.
 
 ${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
 
@@ -185,6 +187,7 @@ Um entrevistador de verdade não ouve só o conteúdo: percebe ritmo, hesitaçã
 - "tempo de pensamento por par" (modo voz) = o silêncio entre o áudio de CADA pergunta terminar de tocar e o respondente apertar gravar — medido por par (pergunta principal e cada follow-up), não só na resposta final. É o trecho que de fato representa "pensar antes de responder" (exclui o áudio da pergunta, rede, upload e transcrição). "(medido)" é preciso (instrumentado no navegador); "~Ns (aproximado)" é estimado por timestamps em entrevistas antigas e inclui a escuta da pergunta — mais ruidoso. Pensar um pouco é normal; um silêncio longo antes de uma resposta longa e polida — em qualquer par, inclusive follow-up — pode indicar consulta externa, e dispara um "SINAL AUTOMÁTICO DE FORMA" identificando o par. O número de "latência" da linha FORMA é o tempo GROSSO do turno inteiro (inclui playback/follow-ups) — informativo, não use como sinal de consulta.
 - "gravou Xs mas disse quase nada" = abriu o microfone e quase não falou — possível tentativa de "começar" só para ganhar tempo (anti-gaming do início rápido).
 - "mudança de registro" = resposta muito mais estruturada que a mediana do próprio respondente — sugere ajuda seletiva nas perguntas difíceis.
+- "eco da dica" (0..1) = fração do vocabulário NOVO da resposta final que veio do follow-up do PRÓPRIO entrevistador (só existe quando houve follow-up). DIFERENTE dos demais sinais de forma, o eco fala da PROVENIÊNCIA do conteúdo: alto (≥0.4) indica que o conteúdo aceito foi ditado pela dica, não produzido pelo respondente — e aí a exceção: este sinal PODE rebaixar o mérito da resposta em per_question (ver "RESPOSTA PÓS-DICA" acima), porque não é forma, é autoria do conteúdo daquele turno.
 Incorpore essas percepções na sua avaliação como a persona faria: comente-as em "delivery", deixe-as colorir o interviewer_impression e, quando convergirem com sinais de conteúdo, alimente os authorship_signals. São heurísticas com risco real de falso positivo (gente que digita rápido, fala formal por hábito, pensa devagar) — então NUNCA rebaixe o mérito de conteúdo de uma resposta (per_question) por sinal de forma, e NUNCA conclua autoria a partir de tempo isolado. Forma corrobora; conteúdo decide.
 
 SOBRE AUTORIA (authorship_confidence e authorship_signals):
