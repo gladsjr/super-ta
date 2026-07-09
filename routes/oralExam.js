@@ -14,10 +14,12 @@ import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { openai } from "../lib/openaiClient.js";
-import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent } from "../lib/agents.js";
+import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
+import { transcribeAudio } from "../lib/audio.js";
+import { scoreCalibration } from "../lib/speechCalib.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
-import { isValidQuestionCount, REALTIME_MODEL } from "../lib/config.js";
+import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
@@ -37,6 +39,10 @@ const examUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize:
 // (lenta no mobile). Em disco, a transferência não pesa na RAM; só lemos o arquivo
 // na hora de mandar pro storage, e apagamos o temporário em seguida.
 const videoUpload = multer({ dest: os.tmpdir(), limits: { fileSize: 300 * 1024 * 1024 } });
+// Clipe curto de áudio do pré-teste de calibração de fala (em memória; poucos segundos).
+const calibUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+// Nº máximo de tentativas do pré-teste de calibração antes de o aluno seguir mesmo assim.
+const MAX_CALIB_ATTEMPTS = 2;
 
 // Alertas de proctoring por VÍDEO para a lista do professor (resumo conservador,
 // calculado dos flags brutos — limiares ajustáveis sem reprocessar o vídeo).
@@ -56,6 +62,8 @@ function proctorAlerts(p) {
 }
 // Alerta de VOZ: houve pausa longa antes de resposta substancial.
 function voiceAlert(v) { return !!(v && v.latency && v.latency.flagged_count > 0); }
+// Alerta de CALIBRAÇÃO DE FALA: o pré-teste de captação foi feito e NÃO passou.
+function calibrationAlert(c) { return !!(c && c.passed === false); }
 
 // grades_json (mesma forma da entrevista) a partir do relatório do avaliador + os
 // pesos das questões. Um único modelo: o avaliador dá um score ANCORADO nos 5
@@ -108,9 +116,10 @@ router.get("/oral/ping", (_req, res) => { res.set("Cache-Control", "no-store"); 
 // perguntas E respostas — é a prova dele) + lista de vozes.
 router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req, res) => {
     try {
-        const [questions, subs] = await Promise.all([
+        const [questions, subs, calibration] = await Promise.all([
             db.getOralQuestions(req.work.id),
             db.listSubmissionsForWork(req.work.id),
+            db.getOralCalibration(req.work.id),
         ]);
         res.set("Cache-Control", "no-store");
         res.json({
@@ -126,6 +135,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 include_improvement_areas: req.work.include_improvement_areas !== false,
                 include_study_suggestions: req.work.include_study_suggestions !== false,
                 grade_penalty: req.work.grade_penalty_json || null,
+                oral_calibration: calibration || null,
             },
             questions,
             submissions: (subs || []).map(s => ({
@@ -143,6 +153,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 has_oral_proctor: !!s.has_oral_proctor,
                 proctor_alerts: proctorAlerts(s.oral_proctor_json),
                 voice_alert: voiceAlert(s.oral_voice_json),
+                calibration_alert: calibrationAlert(s.oral_calibration_json),
             })),
             voices: VOICES,
         });
@@ -280,6 +291,39 @@ router.post("/w/:workToken/oral/questions/:qid/rubric/generate", requireWorkToke
     }
 });
 
+// --- Frase de CALIBRAÇÃO DE FALA (pré-teste de captação). Salvar (edição do
+// professor) e Gerar (a partir das perguntas/respostas). Vazio = pré-teste
+// desligado para o trabalho. ---
+router.post("/w/:workToken/oral/calibration", requireWorkToken, requireOral, express.json({ limit: "16kb" }), async (req, res) => {
+    try {
+        const saved = await db.setOralCalibration(req.work.id, {
+            sentence: String(req.body?.sentence ?? ""),
+            key_terms: Array.isArray(req.body?.key_terms) ? req.body.key_terms : [],
+        });
+        log.info("ORAL", `calibration saved work=${req.work.work_token} ${saved ? "on" : "off"}`);
+        res.json({ ok: true, calibration: saved });
+    } catch (err) {
+        log.error("ORAL", `save calibration failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar a frase de calibração" });
+    }
+});
+router.post("/w/:workToken/oral/calibration/generate", requireWorkToken, requireOral, requireWithinBudget, async (req, res) => {
+    try {
+        const qs = await db.getOralQuestions(req.work.id);
+        const items = qs
+            .map(q => ({ question: q.question, answer: q.answer }))
+            .filter(it => String(it.question || "").trim() || String(it.answer || "").trim());
+        if (!items.length) return res.status(409).json({ error: "a prova não tem perguntas para extrair termos" });
+        const { sentence, key_terms } = await oralCalibrationAgent.build({ items, meterCtx: { workId: req.work.id } });
+        const saved = await db.setOralCalibration(req.work.id, { sentence, key_terms });
+        log.info("ORAL", `calibration generated work=${req.work.work_token} terms=${key_terms.length}`);
+        res.json({ ok: true, calibration: saved });
+    } catch (err) {
+        log.error("ORAL", `gen calibration failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar a frase de calibração", detail: err.message });
+    }
+});
+
 // --- Avaliação por aluno (professor) — espelha a entrevista, mas a devolutiva
 // e a nota são MANUAIS (sem geração por IA). A avaliação compara a transcrição
 // das respostas do aluno com o gabarito. ---
@@ -350,7 +394,9 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             grade_published: !!d?.grade_published_at,
             proctor: d?.oral_proctor_json || null,
             voice: d?.oral_voice_json || null,
+            calibration: d?.oral_calibration_json || null,
             student_comment: d?.student_comment || null,
+            feedback_guidelines: req.work.feedback_guidelines || "",
         });
     } catch (err) { log.error("ORAL", `detail failed: ${err.message}`); res.status(500).json({ error: "falha ao carregar" }); }
 });
@@ -362,13 +408,23 @@ router.put("/w/:workToken/oral/submissions/:subToken/devolutiva", requireWorkTok
 });
 
 // Gera a devolutiva de UM aluno via LLM (StudentFeedbackAgent), a partir da
-// avaliação + diretrizes do trabalho. Espelha /student-version da entrevista.
+// avaliação + diretrizes. Espelha /student-version da entrevista, inclusive o
+// override ad-hoc: body { guidelines: string|null } vale SÓ para esta geração
+// (não altera o padrão do trabalho). Sem o campo, usa as diretrizes do trabalho.
 // Com ?force=1 sobrescreve a devolutiva atual; sem force, exige que esteja vazia.
-router.post("/w/:workToken/oral/submissions/:subToken/devolutiva/derive", requireWorkToken, requireProfessorSubmission, requireWithinBudget, async (req, res) => {
+router.post("/w/:workToken/oral/submissions/:subToken/devolutiva/derive", requireWorkToken, requireProfessorSubmission, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     const force = req.query.force === "1" || req.body?.force === true;
+    const hasOverride = req.body && Object.prototype.hasOwnProperty.call(req.body, "guidelines");
+    const rawOverride = req.body?.guidelines;
+    if (hasOverride && rawOverride !== null && typeof rawOverride !== "string") {
+        return res.status(400).json({ error: "guidelines deve ser string ou null" });
+    }
+    const guidelinesOverride = hasOverride
+        ? (typeof rawOverride === "string" && rawOverride.trim() ? rawOverride.trim() : null)
+        : undefined;
     try {
-        const r = await deriveOralDevolutivaNow(req.work, req.submission.id, { force });
+        const r = await deriveOralDevolutivaNow(req.work, req.submission.id, { force, guidelinesOverride });
         if (r.reason === "no_eval") return res.status(409).json({ error: "avalie a prova antes de gerar a devolutiva" });
         const d = await db.getOralSubmissionDetail(req.submission.id);
         res.json({ ok: true, generated: !!r.generated, devolutiva: d?.oral_devolutiva || "" });
@@ -699,6 +755,63 @@ router.get("/s/:submissionToken/oral/status", requireSubmissionToken, (req, res)
     res.json({ done, is_test: !!req.submission.is_test });
 });
 
+// --- Calibração de fala (pré-teste de captação, ANTES da sessão de voz) ---
+// Config p/ a tela do aluno: a frase-alvo a ler e quantas tentativas. Sem frase
+// no trabalho, enabled=false → o aluno pula direto para a prova (fail-open).
+router.get("/s/:submissionToken/oral/calibrate-config", requireSubmissionToken, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        const calib = await db.getOralCalibration(req.work.id);
+        res.set("Cache-Control", "no-store");
+        res.json({ enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS });
+    } catch (err) { log.error("ORAL", `calibrate-config failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
+});
+
+// Recebe a repetição gravada do aluno, transcreve (o MESMO gpt-4o-transcribe da
+// correção) e pontua contra a frase-alvo. NUNCA bloqueia: após MAX_CALIB_ATTEMPTS
+// o aluno segue mesmo assim; o resultado fica registrado para o professor.
+const CALIB_ADVICE = "Fale em volume médio, num ritmo tranquilo (sem correr) e sem cortar o fim das palavras — assim a captação transcreve melhor a sua fala.";
+router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibUpload.single("file"), async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        const calib = await db.getOralCalibration(req.work.id);
+        if (!calib) return res.status(409).json({ error: "sem frase de calibração" });
+        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        let attempt = Number(req.body?.attempt);
+        if (!Number.isInteger(attempt) || attempt < 1) attempt = 1;
+        if (attempt > MAX_CALIB_ATTEMPTS) attempt = MAX_CALIB_ATTEMPTS;
+
+        // Extensão pelo mimetype real: MediaRecorder varia por navegador (webm no
+        // Chrome/Firefox, mp4/m4a no Safari) e o STT infere o formato pela extensão.
+        const { text } = await transcribeAudio(openai, STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
+        const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
+
+        // Acumula o registro (todas as tentativas) para o professor.
+        const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
+        const transcripts = (Array.isArray(prev?.transcripts) ? prev.transcripts : []).slice(-3);
+        transcripts.push({ attempt, wer: wer == null ? null : Math.round(wer * 1000) / 1000, missed: missedTerms, text });
+        const worst = Math.max(Number(prev?.worst_wer) || 0, wer == null ? 0 : wer);
+        await db.setOralCalibrationResult(req.submission.id, {
+            passed: ok || prev?.passed === true,
+            attempts: attempt,
+            worst_wer: Math.round(worst * 1000) / 1000,
+            missed_terms: missedTerms,
+            target: calib.sentence,
+            transcripts,
+            updated_at: new Date().toISOString(),
+        });
+
+        log.info("ORAL", `calibrate submission=${req.submission.submission_token} attempt=${attempt} ok=${ok} wer=${wer == null ? "—" : wer.toFixed(2)} missed=${missedTerms.length}`);
+        res.json({
+            ok, attempt, attempts_left: Math.max(0, MAX_CALIB_ATTEMPTS - attempt),
+            wer, missed_terms: missedTerms, transcript: text, advice: ok ? null : CALIB_ADVICE,
+        });
+    } catch (err) {
+        log.error("ORAL", `calibrate failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao verificar a captação", detail: err.message });
+    }
+});
+
 // Aluno lê o que foi PUBLICADO (devolutiva e/ou nota). O relatório de
 // comparação ao gabarito é professor-only e nunca é exposto aqui.
 router.get("/s/:submissionToken/oral/result", requireSubmissionToken, async (req, res) => {
@@ -738,6 +851,7 @@ router.get("/s/:submissionToken/oral/review", requireSubmissionToken, async (req
                 locked: !!d?.student_comment,
             },
             transcript: Array.isArray(d?.oral_transcript) ? d.oral_transcript : [],
+            calibration_flagged: calibrationAlert(d?.oral_calibration_json),
         });
     } catch (err) {
         log.error("ORAL", `review failed token=${req.submission.submission_token}: ${err.message}`);

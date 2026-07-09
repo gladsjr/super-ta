@@ -254,6 +254,7 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - **Prova oral (Realtime)** — subsistema à parte (`kind='oral_realtime'`), desenhado no diagrama dedicado em *Prova oral (Realtime) — relay e prompts* (abaixo):
      - [OralExamExtractorAgent.js](../agents/OralExamExtractorAgent.js) — modelo: `fast_model`, audience: `orchestrator_only`. Lê o PDF da prova via `input_file` e extrai `{question, answer}` — `answer` é sempre a **resposta esperada** (gabarito). A rubrica de pontuação é gerada depois, a partir da resposta. O 2º campo fica só no servidor; só a pergunta vai ao aluno.
      - [OralRubricBuilderAgent.js](../agents/OralRubricBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Gera, a partir de `{question, answer}`, a **RUBRICA detalhada** (mini-prompt com 5 níveis ancorados em 0/2,5/5/7,5/10) + um **peso** sugerido pela complexidade. O professor gera em lote (`POST /w/:t/oral/rubrics/generate?scope=stale|all`, NDJSON) ou por questão (`.../questions/:qid/rubric/generate`), ou escreve a rubrica à mão. Requer resposta esperada não-vazia.
+     - [OralCalibrationAgent.js](../agents/OralCalibrationAgent.js) — modelo: `fast_model`, audience: `professor_via_ui`. Gera, das `{question, answer}` da prova, a **frase de calibração de fala** (uma frase natural com 2–4 termos do domínio) + os `key_terms` a checar. Guardada em `works.oral_calibration_json` (editável pelo professor na Configuração: `POST /w/:t/oral/calibration/generate` e `.../calibration`). Alimenta o **pré-teste de captação** do aluno ANTES da sessão de voz: o aluno repete a frase, o servidor transcreve com o MESMO `gpt-4o-transcribe` da correção (`POST /s/:t/oral/calibrate`) e pontua com [lib/speechCalib.js](../lib/speechCalib.js) (WER + sobrevivência fuzzy dos termos — sem LLM); NUNCA bloqueia (2 tentativas), registra o resultado em `submissions.oral_calibration_json` e sinaliza ao professor ("captação"). Vazio ⇒ pré-teste desligado (fail-open).
      - [OralExamEvaluatorAgent.js](../agents/OralExamEvaluatorAgent.js) — modelo: `principal_reasoning_model`, audience: `professor_via_ui`. Modelo ÚNICO (sem modo): aplica a **rubrica** de cada questão à transcrição e dá um `score` ancorado em 0/2,5/5/7,5/10 (rota `/w/:t/oral/submissions/:sub/evaluate` e lote — que RECUSAM questões sem rubrica). Nota da prova = **média ponderada** por pesos (reusa [lib/rubric.js](../lib/rubric.js)#weightedFinal), gravada em `submissions.grades_json` como a rubrica da entrevista.
      - [StudentFeedbackAgent.js](../agents/StudentFeedbackAgent.js) (reuso na oral) — a devolutiva da prova oral é GERADA por LLM (não mais só template), via um shim em [lib/oralFeedbackOps.js](../lib/oralFeedbackOps.js) que converte `oral_eval_json` (per-questão) no relatório interno que o agente espera, passando `feedback_guidelines` + seções do trabalho. Rotas: individual `POST /w/:t/oral/submissions/:sub/devolutiva/derive`, lote `POST /w/:t/oral/evaluations/student-versions` (NDJSON). O proctoring NÃO entra na devolutiva do aluno (regra de não-acusação); seu efeito é a penalidade e a visão do professor.
      - Instruções do examinador (persona fixa + protocolo de condução + perguntas) — string montada em [lib/oralRealtime.js](../lib/oralRealtime.js)#buildExamInstructions, enviada como `instructions` da sessão Realtime (fala-a-fala). O gabarito NUNCA entra na sessão; só as perguntas. Cobertura: o examinador só aponta lacuna a partir do ENUNCIADO e só quando ele deixa óbvio (ex.: pediu N itens e o aluno deu menos) — nunca revela nem corrige.
@@ -273,10 +274,14 @@ flowchart TD
   Extractor --> Questions[("oral_questions<br/>resposta + rubrica no servidor")]
   Questions --> RubricGen["OralRubricBuilderAgent<br/>(principal: resposta → rubrica 5 níveis + peso)"]
   RubricGen --> Questions
+  Questions --> CalibGen["OralCalibrationAgent<br/>(fast: perguntas → frase de calibração + termos)"]
+  CalibGen --> Calib[("oral_calibration_json<br/>frase + termos-chave")]
 
-  %% ALUNO: consentimento → portão no NAVEGADOR → relay Realtime.
+  %% ALUNO: consentimento → portão no NAVEGADOR → calibração de fala → relay Realtime.
   StuStart([Aluno abre o link]) --> Setup["Portão de setup (NAVEGADOR)<br/>MediaPipe WASM: posição + celular<br/>+ ruído + teste de conexão"]
-  Setup --> Relay["lib/oralRealtime.js<br/>relay WebSocket (PCM repassado)"]
+  Setup --> Calibrate["Calibração de fala (NAVEGADOR)<br/>aluno repete a frase → /oral/calibrate<br/>gpt-4o-transcribe + WER (lib/speechCalib.js)"]
+  Calib -.->|"frase-alvo"| Calibrate
+  Calibrate --> Relay["lib/oralRealtime.js<br/>relay WebSocket (PCM repassado)"]
   Questions -.->|"só as perguntas"| BuildInstr
   Relay --> BuildInstr["buildExamInstructions<br/>persona + protocolo + perguntas"]
   BuildInstr --> RT["Sessão Realtime (gpt-realtime)<br/>fala-a-fala"]
@@ -292,13 +297,15 @@ flowchart TD
   classDef agent fill:#eaf0f7,stroke:#1e3a5f,color:#0f1b2d;
   classDef state fill:#f3f5f8,stroke:#5a6b80,color:#0f1b2d,stroke-dasharray: 4 2;
   classDef entry fill:#ffffff,stroke:#5a6b80,color:#0f1b2d;
-  class ExamPdf,Extractor,RubricGen,Setup,Relay,BuildInstr,RT,Evaluator,Proctor agent
-  class Questions,Transcript,Video,Devol,Flags state
+  class ExamPdf,Extractor,RubricGen,CalibGen,Setup,Calibrate,Relay,BuildInstr,RT,Evaluator,Proctor agent
+  class Questions,Transcript,Video,Devol,Flags,Calib state
   class ExamUp,StuStart entry
 
   click ExamPdf "vscode://file/c:/Users/glads/src/super-ta/routes/oralExam.js" "Handler /oral/exam-pdf (PDF ou TXT)"
   click Extractor "vscode://file/c:/Users/glads/src/super-ta/agents/OralExamExtractorAgent.js" "SYS do OralExamExtractorAgent"
   click RubricGen "vscode://file/c:/Users/glads/src/super-ta/agents/OralRubricBuilderAgent.js" "systemPromptBody do OralRubricBuilderAgent"
+  click CalibGen "vscode://file/c:/Users/glads/src/super-ta/agents/OralCalibrationAgent.js" "systemPromptBody do OralCalibrationAgent"
+  click Calibrate "vscode://file/c:/Users/glads/src/super-ta/routes/oralExam.js" "Handler /oral/calibrate (pontuação em lib/speechCalib.js)"
   click Relay "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "attachOralRelay (relay WebSocket)"
   click BuildInstr "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "buildExamInstructions"
   click RT "vscode://file/c:/Users/glads/src/super-ta/lib/oralRealtime.js" "Sessão Realtime"

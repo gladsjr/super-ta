@@ -91,6 +91,19 @@
       </div>
 
       <div class="card">
+        <h3 class="card-title">Calibração de fala <span class="hint" style="font-weight: 400">(opcional)</span></h3>
+        <p class="card-sub" data-help="Antes da prova, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — usando o MESMO gpt-4o-transcribe que gera a transcrição da correção. Serve para orientar o aluno (volume/ritmo) e sinalizar, para você, provas cuja captação ficou ruim. Deixe em branco para desligar o teste.">Frase que o aluno repete num pré-teste de captação, antes da prova. <strong>Gere</strong> a partir das perguntas ou escreva à mão. Em branco = teste desligado.</p>
+        <textarea id="calib-sentence" class="input" rows="2" style="width: 100%" placeholder="Ex.: As questões desta prova falam de halving, hashrate e VPL do fluxo de caixa."></textarea>
+        <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
+        <div class="row" style="margin-top: var(--sp-2); align-items: center">
+          <button class="btn" id="calib-gen" type="button">Gerar a partir das perguntas</button>
+          <span class="spacer"></span>
+          <button class="btn btn-primary" id="calib-save" type="button">Salvar</button>
+          <span class="hint" id="calib-msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
         <h3 class="card-title">Prova — perguntas e gabarito <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
         <p class="card-sub" id="exam-status">—</p>
         <!-- Fonte: sobe um PDF/TXT de perguntas e respostas; a extração popula a lista abaixo. -->
@@ -501,6 +514,7 @@
       ].filter(Boolean).join(' ') || '<span class="hint">—</span>';
       const alertPills = (s.proctor_alerts || []).map(a => `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">${esc(a)}</span>`);
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
+      if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
       const alerts = s._proctorPending ? SPIN
         : (alertPills.length ? alertPills.join(' ')
           : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>' : '<span class="hint">—</span>'));
@@ -557,6 +571,8 @@
     renderQuestions();
     renderRubric();
     fillSettings(j.work);
+    CALIB = j.work.oral_calibration || null;
+    renderCalib();
     renderSubsTable();
     renderEvalTable();
     cfgWarn();
@@ -600,6 +616,37 @@
       const r = await fetch(`${API}/oral/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json();
       msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+  // ---------- Calibração de fala ----------
+  let CALIB = null;
+  function renderCalib() {
+    document.getElementById('calib-sentence').value = CALIB?.sentence || '';
+    const terms = (CALIB?.key_terms || []);
+    document.getElementById('calib-terms').textContent = terms.length ? ('Termos-chave verificados na transcrição: ' + terms.join(', ')) : '';
+  }
+  document.getElementById('calib-gen').onclick = async () => {
+    const msg = document.getElementById('calib-msg'), btn = document.getElementById('calib-gen');
+    btn.disabled = true; msg.textContent = 'Gerando…';
+    try {
+      const r = await fetch(`${API}/oral/calibration/generate`, { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
+      CALIB = j.calibration; renderCalib(); msg.textContent = 'Frase gerada e salva.';
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
+  };
+  document.getElementById('calib-save').onclick = async () => {
+    const msg = document.getElementById('calib-msg');
+    const sentence = document.getElementById('calib-sentence').value.trim();
+    // Se a frase foi editada à mão, mantém só os termos-chave que ainda aparecem nela.
+    const key_terms = (CALIB?.key_terms || []).filter(t => sentence.toLowerCase().includes(String(t).toLowerCase()));
+    msg.textContent = 'Salvando…';
+    try {
+      const r = await fetch(`${API}/oral/calibration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sentence, key_terms }) });
+      const j = await r.json();
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      CALIB = j.calibration; renderCalib(); msg.textContent = sentence ? 'Salvo.' : 'Salvo (teste desligado).';
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
   };
   document.getElementById('q-add').onclick = () => {

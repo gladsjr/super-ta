@@ -55,34 +55,39 @@
         <div class="err" id="pre-err"></div>
       </div>
 
-      <!-- Página 1: instruções (ler com calma) + exemplos -->
+      <!-- Página 1: verificações que NÃO dependem da câmera — conexão, silêncio e
+           captação da fala (agrupadas). As fotos de posição ficam na página 2. -->
       <div id="instr" style="display:none">
         <p style="margin-top:0; background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:8px 12px"><strong>🎧 Use fones de ouvido.</strong></p>
-        <p style="margin:8px 0"><strong>Posição:</strong> tronco à cabeça no quadro; ~1,5 m da câmera; mãos à mostra.</p>
-        <div style="display:flex; gap:10px; margin-top:10px; max-width:380px; margin-left:auto; margin-right:auto">
-          <figure style="margin:0; flex:1"><img id="pose-a" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a-cap"></figcaption></figure>
-          <figure style="margin:0; flex:1"><img id="pose-b" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b-cap"></figcaption></figure>
-        </div>
-        <div class="note-warn"><strong>Importante:</strong> a prova não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
-        <div class="banner wait" id="conn-banner" style="margin-bottom:14px">Testando a conexão…</div>
-        <button class="btn" id="to-check-btn">Continuar</button>
-      </div>
-
-      <!-- Página 2: verificação de posição + silêncio (a prova começa sozinha) -->
-      <div id="setup" style="display:none">
-        <p class="hint" style="text-align:center; margin-top:0">Quando a <strong>posição</strong> e o <strong>silêncio</strong> ficarem ok, a prova começa sozinha.</p>
-        <div style="display:flex; gap:10px; max-width:300px; margin:6px auto 10px">
-          <figure style="margin:0; flex:1"><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
-          <figure style="margin:0; flex:1"><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
-        </div>
-        <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
-        <video id="setup-cam" autoplay muted playsinline style="margin:0 auto"></video>
-        <!-- Nível de ruído: medidor CONTÍNUO -->
-        <div style="max-width:380px; margin:10px auto 0">
+        <!-- Conexão -->
+        <div class="banner wait" id="conn-banner">Testando a conexão…</div>
+        <!-- Silêncio: medidor de ruído CONTÍNUO -->
+        <div style="max-width:380px; margin:14px auto 0">
           <div class="hint" style="text-align:center; margin-bottom:4px">Nível de ruído do ambiente</div>
           <div style="height:10px; background:#e5e7eb; border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:var(--ok); transition:width .1s linear"></div></div>
           <div class="banner wait" id="noise-verdict" style="margin-top:6px">Medindo o ambiente…</div>
         </div>
+        <!-- Captação da fala (calibração) — só aparece se o professor configurou -->
+        <div id="calib-block" style="display:none; margin-top:18px; border-top:1px solid var(--line); padding-top:14px">
+          <p style="margin:0 0 4px"><strong>Teste de captação da sua fala.</strong> Vamos conferir se o sistema transcreve bem o que você fala — a sua nota sai da transcrição, então isso ajuda a avaliação a refletir a sua resposta.</p>
+          <p class="hint" style="margin:0 0 8px">Fale em <strong>volume médio</strong>, num <strong>ritmo tranquilo</strong> (sem correr) e <strong>sem cortar o fim das palavras</strong>. Leia a frase abaixo em voz alta:</p>
+          <div class="card" style="text-align:center; font-size:18px; line-height:1.5; margin:0 0 10px" id="calib-sentence">…</div>
+          <div style="text-align:center"><button class="btn" id="calib-rec-btn">🎤 Gravar e ler a frase</button></div>
+          <div class="banner wait" id="calib-status" style="margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
+        </div>
+        <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
+      </div>
+
+      <!-- Página 2: posicionamento na câmera (a prova começa sozinha quando ok) -->
+      <div id="setup" style="display:none">
+        <p style="margin:0"><strong>Posição:</strong> tronco à cabeça no quadro; ~1,5 m da câmera; mãos à mostra. A prova começa sozinha quando estiver tudo certo.</p>
+        <div style="display:flex; gap:10px; max-width:300px; margin:8px auto 10px">
+          <figure style="margin:0; flex:1"><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
+          <figure style="margin:0; flex:1"><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
+        </div>
+        <div class="note-warn"><strong>Importante:</strong> a prova não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
+        <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
+        <video id="setup-cam" autoplay muted playsinline style="margin:0 auto"></video>
         <!-- Posição: verificação CONTÍNUA, em destaque -->
         <div class="banner wait" id="pos-guidance" style="margin-top:10px">Iniciando a câmera…</div>
         <div style="margin-top:14px; text-align:center">
@@ -158,7 +163,7 @@
           if (rv.ok) {
             const j = await rv.json();
             renderReviewTranscript(j.transcript || []);
-            renderCommentBox(j.comment || {});
+            renderCommentBox(j.comment || {}, { calibFlagged: !!j.calibration_flagged });
           } else if (rv.status === 410) {
             $('review-transcript').innerHTML = '<p class="sub" style="text-align:center">A janela de revisão (7 dias) já se encerrou.</p>';
           }
@@ -185,14 +190,19 @@
       el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${rows}</div>`;
     }
 
-    function renderCommentBox(comment) {
+    function renderCommentBox(comment, opts) {
+      opts = opts || {};
       const el = $('review-comment');
       if (comment.locked && comment.value) {
         el.innerHTML = `<h3 style="text-align:center">Seu comentário</h3><div class="card" style="text-align:left;white-space:pre-wrap">${esc(comment.value)}</div><p class="sub" style="text-align:center">Comentário enviado. Não é mais editável.</p>`;
         return;
       }
+      const warn = opts.calibFlagged
+        ? `<div class="note-warn" style="text-align:left">⚠ No teste inicial, a captação da sua fala foi <strong>sinalizada</strong> como difícil de transcrever. Reveja a transcrição acima com atenção e, se algo que você disse saiu errado, avise no comentário — isso ajuda o professor a corrigir com justiça.</div>`
+        : '';
       el.innerHTML = `<h3 style="text-align:center">Comentário ao professor (opcional)</h3>`
-        + `<p class="sub" style="text-align:center">Sua prova já foi concluída. Se quiser, deixe um comentário — é opcional e enviado uma única vez. Você também pode simplesmente fechar a página.</p>`
+        + warn
+        + `<p class="sub" style="text-align:center">Confira a transcrição acima. Se algo que você disse saiu diferente do que quis dizer, deixe um comentário — é opcional e enviado uma única vez. Você também pode simplesmente fechar a página.</p>`
         + `<textarea id="oral-comment" maxlength="2000" rows="4" style="width:100%;box-sizing:border-box;font:inherit;padding:8px" placeholder="Escreva aqui (opcional)…"></textarea>`
         + `<div style="text-align:center;margin-top:8px"><button id="oral-comment-btn" class="btn">Confirmar e enviar</button> <span class="sub" id="oral-comment-msg"></span></div>`;
       $('oral-comment-btn').onclick = submitOralComment;
@@ -284,14 +294,16 @@
       //    medidores só entram na página 2 (continueToCheck).
       show('instr');
       pickAndShowPoses();
-      connTest(); // mede a conexão em segundo plano enquanto o aluno lê
+      connTest();       // conexão (em segundo plano)
+      startNoiseMeter(); // silêncio: medidor contínuo, já na página 1
+      initCalibration(); // captação da fala (se o professor configurou)
     }
     // Página 2: liga a câmera no preview e começa a verificação CONTÍNUA de
-    // ruído + posição. Com tudo ok, a prova começa sozinha (1-2-3).
+    // posição. Com posição ok (e silêncio, medido desde a página 1), a prova
+    // começa sozinha (1-2-3).
     function continueToCheck() {
       show('setup');
       $('setup-cam').srcObject = micStream;
-      startNoiseMeter();
       startPositionLoop();
     }
 
@@ -317,8 +329,7 @@
       const base = '/static/oral-poses/';
       // Mesmo par mostrado nas DUAS páginas (instruções e verificação).
       const setPair = (a, b) => { $(a).src = base + pair[0].f; $(a + '-cap').textContent = 'Com mesa'; $(b).src = base + pair[1].f; $(b + '-cap').textContent = 'Sem mesa'; };
-      setPair('pose-a', 'pose-b');   // página 1
-      setPair('pose-a2', 'pose-b2'); // página 2
+      setPair('pose-a2', 'pose-b2'); // exemplos na página de posição
     }
 
     // TESTE DE CONEXÃO: mede o RTT (ida-e-volta) até o servidor algumas vezes. Numa
@@ -555,6 +566,64 @@
       try { poseLm && poseLm.close(); } catch {}
       poseLm = null;
     }
+
+    // --- Calibração de fala: pré-teste de captação NA PÁGINA 1 (junto de conexão e
+    // silêncio). NON-BLOCKING: o aluno pode seguir sem fazer; o resultado fica
+    // registrado p/ o professor e, no fim, reforça a conferência da transcrição.
+    // Pontua contra a frase-alvo pelo MESMO gpt-4o-transcribe da correção. ---
+    let calibRec = null, calibChunks = [], calibAttempt = 0;
+    async function initCalibration() {
+      let cfg = null;
+      try { cfg = await (await fetch(`/s/${SUB}/oral/calibrate-config`)).json(); } catch {}
+      if (!cfg || !cfg.enabled || !cfg.sentence) { $('calib-block').style.display = 'none'; return; } // fail-open
+      $('calib-sentence').textContent = cfg.sentence;
+      $('calib-block').style.display = '';
+    }
+    function calibToggleRecord() {
+      const btn = $('calib-rec-btn');
+      if (calibRec && calibRec.state === 'recording') { calibRec.stop(); return; }
+      if (!micStream) return;
+      calibChunks = [];
+      let stream; try { stream = new MediaStream(micStream.getAudioTracks()); } catch { stream = micStream; }
+      try { calibRec = new MediaRecorder(stream); } catch { return; }
+      calibRec.ondataavailable = e => { if (e.data && e.data.size) calibChunks.push(e.data); };
+      calibRec.onstop = calibSubmit;
+      calibRec.start();
+      btn.textContent = '⏹ Parar e verificar';
+      const st = $('calib-status'); st.className = 'banner wait'; st.textContent = '🎤 Gravando… leia a frase e toque em “Parar e verificar”.';
+    }
+    async function calibSubmit() {
+      const btn = $('calib-rec-btn'), st = $('calib-status');
+      btn.textContent = '🎤 Gravar e ler a frase'; btn.disabled = true;
+      st.className = 'banner wait'; st.textContent = 'Verificando a captação…';
+      calibAttempt++;
+      let j = null;
+      try {
+        const blob = new Blob(calibChunks, { type: (calibRec && calibRec.mimeType) || 'audio/webm' });
+        const form = new FormData(); form.append('file', blob, 'calib.webm'); form.append('attempt', String(calibAttempt));
+        j = await (await fetch(`/s/${SUB}/oral/calibrate`, { method: 'POST', body: form })).json();
+      } catch {}
+      btn.disabled = false;
+      renderCalibResult(j);
+    }
+    function renderCalibResult(j) {
+      const st = $('calib-status'), rec = $('calib-rec-btn');
+      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui verificar agora. Você pode tentar de novo ou seguir (Continuar).'; return; }
+      if (j.ok) {
+        st.className = 'banner ok'; st.textContent = 'Captação ok ✓ Sua fala foi transcrita corretamente. Pode Continuar.';
+        rec.style.display = 'none'; return;
+      }
+      const left = Number(j.attempts_left) || 0;
+      if (left > 0) {
+        st.className = 'banner adjust';
+        st.textContent = (j.advice || 'A captação não ficou boa.') + ` Toque em “Gravar e ler a frase” e tente de novo (${left} tentativa(s) restante(s)).`;
+      } else {
+        st.className = 'banner adjust';
+        st.innerHTML = esc(j.advice || 'A captação não ficou ideal.') + ' <strong>Você pode seguir assim mesmo.</strong> Ao final, confira a transcrição da prova e, se algo tiver saído errado, avise o professor no comentário.';
+        rec.style.display = 'none';
+      }
+    }
+    $('calib-rec-btn').onclick = calibToggleRecord;
 
     // Começa a prova de fato: grava o vídeo + conecta ao relay.
     function beginExam() {

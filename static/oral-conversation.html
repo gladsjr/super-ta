@@ -65,8 +65,10 @@
 
     <div class="card">
       <h3 class="card-title">Devolutiva</h3>
-      <p class="card-sub">Texto que o aluno verá quando publicado. Gere com IA a partir da avaliação (segue as diretrizes do trabalho) e edite à vontade.</p>
-      <textarea id="devolutiva" class="textarea" rows="6" placeholder="Gere a devolutiva ou escreva à mão…"></textarea>
+      <p class="card-sub">Texto que o aluno verá quando publicado. Gere com IA a partir da avaliação e edite à vontade.</p>
+      <label class="label" for="dev-guidelines" style="margin-top: var(--sp-2)">Diretrizes para a devolutiva — tom, formato, o que destacar (vale só para esta geração; o padrão do trabalho fica na aba Avaliação do painel)</label>
+      <textarea id="dev-guidelines" class="textarea" rows="2" placeholder="Ex.: tom acolhedor e direto; destaque o domínio dos conceitos e termine com um encorajamento."></textarea>
+      <textarea id="devolutiva" class="textarea" rows="6" style="margin-top: var(--sp-2)" placeholder="Gere a devolutiva ou escreva à mão…"></textarea>
       <div class="row" style="margin-top: var(--sp-2)">
         <button class="btn" id="dev-gen" type="button" title="Gera a devolutiva a partir da avaliação (sobrescreve o texto atual)">Gerar devolutiva</button>
         <button class="btn" id="dev-save" type="button">Salvar devolutiva</button>
@@ -121,6 +123,11 @@
       <p class="card-sub">Sinais de "cola" por voz, para revisão humana. A latência é capturada automaticamente durante a prova.</p>
       <div id="voice-result"></div>
     </div>
+
+    <div class="card" id="calib-card" style="display:none">
+      <h3 class="card-title" data-help="Pré-teste de captação feito pelo aluno ANTES da prova: ele repetiu uma frase-alvo e o sistema comparou a transcrição (o MESMO gpt-4o-transcribe da correção). WER alto ou termos-chave perdidos indicam que a fala do aluno é difícil de transcrever — vale reler a transcrição da prova com atenção.">Calibração de fala (pré-teste)</h3>
+      <div id="calib-result"></div>
+    </div>
   </div>
 </main>
 
@@ -133,6 +140,7 @@
   document.getElementById('back-link').href = `${API}/oral#avaliacao`;
 
   let QNUMS = {}; // id da questão → número de exibição (posição na lista completa)
+  let GUIDE_INIT = false; // diretrizes da devolutiva pré-preenchidas só na 1ª carga
   function renderReport(ev) {
     const el = document.getElementById('report');
     if (!ev || !Array.isArray(ev.per_question)) { el.innerHTML = '<p class="hint">Ainda não avaliado. Clique em “Avaliar / reavaliar”.</p>'; return; }
@@ -170,6 +178,9 @@
     QNUMS = d.question_numbers || {};
     renderReport(d.evaluation);
     document.getElementById('devolutiva').value = d.devolutiva || '';
+    // Diretrizes pré-preenchidas com o padrão do trabalho UMA vez (não sobrescreve
+    // o que o professor digitar em recargas, ex.: após avaliar).
+    if (!GUIDE_INIT) { document.getElementById('dev-guidelines').value = d.feedback_guidelines || ''; GUIDE_INIT = true; }
     CUR_QUESTIONS = d.questions || [];
     renderGrades(d.grades, d.grading_mode, CUR_QUESTIONS);
     document.getElementById('dev-pub').checked = !!d.devolutiva_published;
@@ -193,6 +204,7 @@
     document.getElementById('proctor-btn').disabled = !d.has_oral_video;
     renderProctor(d.proctor);
     renderVoice(d.voice);
+    renderCalibration(d.calibration);
     setupOralCockpit();
   }
 
@@ -250,6 +262,26 @@
         </div>`;
       }).join('');
     }
+    el.innerHTML = html;
+  }
+
+  function renderCalibration(c) {
+    const card = document.getElementById('calib-card'), el = document.getElementById('calib-result');
+    if (!c || typeof c !== 'object' || !c.target) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    const passed = c.passed === true;
+    const wer = (c.worst_wer == null) ? '—' : Number(c.worst_wer).toFixed(2);
+    const missed = Array.isArray(c.missed_terms) ? c.missed_terms : [];
+    const badge = passed
+      ? '<span class="pill pill-done">captação ok</span>'
+      : '<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação sinalizada</span>';
+    let html = `<p style="margin:0 0 var(--sp-2)">${badge} <span class="hint">${c.attempts || 1} tentativa(s), WER ${wer}${missed.length ? `, termos não captados: ${esc(missed.join(', '))}` : ''}</span></p>`;
+    html += `<p class="hint" style="margin:0 0 var(--sp-1)"><strong>Frase-alvo:</strong> ${esc(c.target)}</p>`;
+    const tr = Array.isArray(c.transcripts) ? c.transcripts : [];
+    if (tr.length) {
+      html += tr.map(t => `<div style="padding:6px 10px;border:1px solid var(--ink-200);background:var(--bg-muted);border-radius:var(--r-sm);margin-bottom:4px"><span class="hint">tentativa ${t.attempt}${t.wer == null ? '' : ` — WER ${Number(t.wer).toFixed(2)}`}</span><div>${esc(t.text || '')}</div></div>`).join('');
+    }
+    if (!passed) html += `<p class="hint" style="margin-top:var(--sp-2)">A fala pode ter saído mal transcrita — considere reler a transcrição da prova com atenção.</p>`;
     el.innerHTML = html;
   }
 
@@ -340,7 +372,11 @@
     if (ta.value.trim() && !confirm('Isto vai sobrescrever a devolutiva atual. Continuar?')) return;
     btn.disabled = true; msg.textContent = 'Gerando devolutiva…';
     try {
-      const r = await fetch(`${API}/oral/submissions/${SUB}/devolutiva/derive?force=1`, { method: 'POST' });
+      // Diretrizes do campo = override ad-hoc SÓ desta geração (espelha a entrevista).
+      const guidelines = document.getElementById('dev-guidelines').value.trim() || null;
+      const r = await fetch(`${API}/oral/submissions/${SUB}/devolutiva/derive?force=1`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guidelines }),
+      });
       const j = await r.json();
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
       ta.value = j.devolutiva || '';
