@@ -890,3 +890,53 @@ details.penalty-inline > summary::before {
 }
 details.penalty-inline[open] > summary::before { transform: rotate(90deg); }
 details.penalty-inline > .penalty-inline-body { margin-top: var(--sp-2); }
+
+/* ====================================================================
+ * TEMA ESCURO (MVP) — override dos tokens base. ~83% da UI usa var(--token),
+ * então este bloco vira quase tudo. Aplicado via <html data-theme="dark">
+ * (ver static/js/theme.js). Superfícies em navy profundo; tinta invertida
+ * (claro sobre escuro); acento navy clareado p/ ler sobre fundo escuro.
+ * FASE 2 (não neste MVP): pastéis de badge/notice hardcoded, remap fino de
+ * teal/gold/success/danger, e elevação por borda no lugar de sombra.
+ * ================================================================= */
+:root[data-theme="dark"] {
+  --bg:        #141a2e;
+  --bg-muted:  #0e1322;   /* página (mais fundo) */
+  --bg-raised: #1c2340;   /* cards/topbar (elevado) */
+
+  --ink-900: #f1f2ee;     /* texto primário (quase cream) */
+  --ink-700: #d2d7e0;
+  --ink-600: #b4bcc9;
+  --ink-500: #8e96a6;     /* texto secundário */
+  --ink-400: #6b7488;
+  --ink-300: #515a6d;
+  --ink-200: #39415a;     /* bordas visíveis */
+  --ink-100: #29314b;     /* bordas sutis */
+  --ink-50:  #20273f;     /* preenchimento de hover */
+
+  --accent-900: #cdd9f0;
+  --accent-700: #3f5f96;  /* btn-primary bg (texto branco lê) */
+  --accent-600: #5a7fab;  /* hover / links */
+  --accent-500: #7396c4;
+  --accent-400: #93b0d8;
+  --accent-50:  #1d2744;  /* fundo de acento sutil */
+}
+
+/* Botão de alternância de tema (injetado no topbar por theme.js). */
+.theme-toggle {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink-200);
+  background: var(--bg-raised);
+  color: var(--ink-600);
+  border-radius: var(--r-md, 8px);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.theme-toggle:hover { color: var(--ink-900); border-color: var(--ink-300); }
