@@ -1,14 +1,24 @@
 /* ORATIA — shared visual system.
  * Tokens, base styles and component primitives. Each HTML page links this
  * file first and then adds only page-specific overrides.
- * Palette derived from the brand mark: navy (main), gold + teal (accents).
+ * Palette: brand cream + navy (identity); gold + teal são cores utilitárias (estado / IA / ornamento).
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+
+/* Display serif da marca — Hardcover (variável), self-hosted.
+   Coloque o(s) arquivo(s) em static/fonts/. Enquanto não carrega, cai para
+   uma serifa do sistema (fallback no --font-display). */
+@font-face {
+  font-family: "Hardcover";
+  src: url("/static/fonts/Hardcover.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
 
 :root {
   /* Color — slate ink + ORATIA navy. */
-  --ink-900: #0f1b2d;
+  --ink-900: #181f39;
   --ink-700: #2c3e55;
   --ink-600: #3f5570;
   --ink-500: #5a6b80;
@@ -18,28 +28,28 @@
   --ink-100: #e4e9ee;
   --ink-50:  #f3f5f8;
 
-  --bg:        #ffffff;
-  --bg-muted:  #f7f9fb;
-  --bg-raised: #ffffff;
+  --bg:        #f4f4e9;   /* cream */
+  --bg-muted:  #edeadd;   /* cream mais fundo (página) */
+  --bg-raised: #fcfbf4;   /* warm-white (cards/topbar) */
 
   /* Navy from the ORATIA wordmark. --accent-700 é o tom canônico da marca. */
-  --accent-900: #0e2447;
-  --accent-700: #1d2e57;
-  --accent-600: #2a4078;
+  --accent-900: #0f1730;
+  --accent-700: #181f39;
+  --accent-600: #28325c;
   --accent-500: #3a5a93;
   --accent-400: #5a7fab;
   --accent-50:  #eaf0f7;
 
-  /* Gold (livro + dots na logo). Acento quente — usar com parcimônia em
-     CTAs secundários, divisórias, ornamentos. NÃO usar como texto sobre
-     fundo branco (contraste insuficiente para corpo). */
+  /* Gold (livro + dots na logo). Cor UTILITÁRIA de UI (não mais acento de
+     marca) — estado/ornamento: CTAs secundários, divisórias. NÃO usar como
+     texto sobre fundo claro (contraste insuficiente para corpo). */
   --gold-700: #8c6f2a;
   --gold-500: #b8964f;
   --gold-300: #d4b779;
   --gold-50:  #faf3e2;
 
-  /* Teal (galhos do circuito na logo). Acento frio — destaque de "AI" /
-     features avançadas, badges, links secundários. */
+  /* Teal (galhos do circuito na logo). Cor UTILITÁRIA de UI (não mais acento
+     de marca) — sinal de "IA" / features avançadas, badges, links secundários. */
   --teal-700: #2a7382;
   --teal-500: #3a8a9e;
   --teal-300: #7cbecc;
@@ -53,7 +63,7 @@
   --danger-50:   #fce9e9;
 
   /* Typography */
-  --font-display: "Spectral", Georgia, "Times New Roman", serif;
+  --font-display: "Hardcover", "Spectral", Georgia, serif;
   --font-sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --fs-xs:   0.78rem;
@@ -179,6 +189,14 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
 .brand-mark {
   display: inline-block;
   height: 32px;
+  width: auto;
+  vertical-align: middle;
+}
+/* Wordmark "ORATIA" (serifa Hardcover, imagem) ao lado do ícone — substitui o
+   texto no topbar para não depender da fonte carregar. Navy, sobre topbar claro. */
+.brand-word {
+  display: inline-block;
+  height: 22px;
   width: auto;
   vertical-align: middle;
 }
@@ -774,7 +792,7 @@ dialog.coherence-dialog { max-width: 640px; }
 
 /* ====================================================================
  * Camada de identidade de marca — consolidação
- * Tipografia de marca (Spectral display + Hanken Grotesk corpo) e acentos
+ * Tipografia de marca (Hardcover display + Hanken Grotesk corpo) e acentos
  * gold/teal. Este bloco carrega por último: vence empates de especificidade
  * sobre os primitivos acima sem precisar editá-los.
  * ================================================================= */
