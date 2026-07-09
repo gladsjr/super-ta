@@ -15,10 +15,12 @@
   root.dataset.theme = theme; // aplica cedo (html já existe)
 
   // Logos: navy = arquivo base; cream = mesmo nome com sufixo "-cream".
+  // No tema escuro só a logo do HERO troca para cream (fica sobre o canvas
+  // escuro). A BARRA é creme, então o ícone/wordmark do topbar seguem navy.
   function baseNavy(src) { return src.replace("-cream.png", ".png"); }
   function forTheme(src, t) { var b = baseNavy(src); return t === "dark" ? b.replace(".png", "-cream.png") : b; }
   function swapLogos(t) {
-    var imgs = document.querySelectorAll("img.brand-mark, img.brand-word, img.hero-logo");
+    var imgs = document.querySelectorAll("img.hero-logo");
     for (var i = 0; i < imgs.length; i++) {
       var cur = imgs[i].getAttribute("src") || "";
       var next = forTheme(cur, t);
