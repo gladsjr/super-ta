@@ -890,3 +890,44 @@ details.penalty-inline > summary::before {
 }
 details.penalty-inline[open] > summary::before { transform: rotate(90deg); }
 details.penalty-inline > .penalty-inline-body { margin-top: var(--sp-2); }
+
+/* ====================================================================
+ * TEMA ESCURO — "canvas escuro + ilhas cremes" (direção do designer).
+ * SÓ o FUNDO da página vira azul escuro (o navy da marca). A barra, os cards
+ * e tudo o que é token-based (fundos --bg-raised/tints, texto navy, badges,
+ * sombras, os pastéis hardcoded dentro dos cards) NÃO mudam — seguem cremes,
+ * como no claro. Por isso o conteúdo não precisa de retrabalho.
+ * Único ajuste: o texto que fica SOLTO sobre o canvas escuro clareia.
+ * Aplicado via <html data-theme="dark"> (static/js/theme.js); a logo do HERO
+ * (sobre o canvas) troca p/ a variante cream.
+ * ================================================================= */
+:root[data-theme="dark"] body,
+:root[data-theme="dark"] .page { background: #181f39; }
+
+/* Texto solto sobre o canvas escuro → claro (fora de cards/barra). */
+:root[data-theme="dark"] .page > h1,
+:root[data-theme="dark"] .page-header h1,
+:root[data-theme="dark"] .page-header h2,
+:root[data-theme="dark"] .page-header .sub,
+:root[data-theme="dark"] .page-header .hint,
+:root[data-theme="dark"] .hero-value { color: #eef0ea; }
+:root[data-theme="dark"] .eyebrow { color: #86c4d1; }  /* teal clareado, lê no navy */
+
+/* Botão de alternância de tema (injetado no topbar por theme.js). */
+.theme-toggle {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink-200);
+  background: var(--bg-raised);
+  color: var(--ink-600);
+  border-radius: var(--r-md, 8px);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.theme-toggle:hover { color: var(--ink-900); border-color: var(--ink-300); }
