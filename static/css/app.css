@@ -893,25 +893,46 @@ details.penalty-inline > .penalty-inline-body { margin-top: var(--sp-2); }
 
 /* ====================================================================
  * TEMA ESCURO — "canvas escuro + ilhas cremes" (direção do designer).
- * SÓ o FUNDO da página vira azul escuro (o navy da marca). A barra, os cards
- * e tudo o que é token-based (fundos --bg-raised/tints, texto navy, badges,
- * sombras, os pastéis hardcoded dentro dos cards) NÃO mudam — seguem cremes,
- * como no claro. Por isso o conteúdo não precisa de retrabalho.
- * Único ajuste: o texto que fica SOLTO sobre o canvas escuro clareia.
- * Aplicado via <html data-theme="dark"> (static/js/theme.js); a logo do HERO
- * (sobre o canvas) troca p/ a variante cream.
+ * O FUNDO da página vira azul escuro (navy da marca); a BARRA e os CARDS
+ * ficam CREME. Modelo por token: no CANVAS a rampa --ink-* é CLARA (títulos,
+ * subtítulos, metas, abas e labels soltos sobre o escuro herdam claro); dentro
+ * das ILHAS claras (barra/cards/notices/…) a rampa é REANCORADA ESCURA — então
+ * o conteúdo (com badges/sombras/pastéis) segue idêntico ao tema claro, sem
+ * retrabalho. O fundo é pintado em body/.page (NÃO no token --bg-muted, que é
+ * usado DENTRO dos cards). Via <html data-theme="dark"> (theme.js); a logo do
+ * HERO (sobre o canvas) troca p/ a variante cream.
  * ================================================================= */
+:root[data-theme="dark"] {
+  /* Rampa CLARA para o texto solto sobre o canvas escuro. */
+  --ink-900: #eef0ea;   /* títulos de página / abas ativas */
+  --ink-700: #d3d8e1;
+  --ink-600: #bcc3d0;
+  --ink-500: #a3abba;   /* secundário: metas, abas, labels, hints */
+  --ink-400: #838ca0;
+  --ink-300: #697488;
+  --ink-200: #495573;   /* linhas sutis sobre o canvas */
+  --ink-100: #38415c;
+  --ink-50:  #2a3450;
+  --teal-700: #86c4d1;  /* eyebrow no canvas */
+}
 :root[data-theme="dark"] body,
 :root[data-theme="dark"] .page { background: #181f39; }
 
-/* Texto solto sobre o canvas escuro → claro (fora de cards/barra). */
-:root[data-theme="dark"] .page > h1,
-:root[data-theme="dark"] .page-header h1,
-:root[data-theme="dark"] .page-header h2,
-:root[data-theme="dark"] .page-header .sub,
-:root[data-theme="dark"] .page-header .hint,
-:root[data-theme="dark"] .hero-value { color: #eef0ea; }
-:root[data-theme="dark"] .eyebrow { color: #86c4d1; }  /* teal clareado, lê no navy */
+/* ILHAS CLARAS: barra, cards e contêineres de conteúdo reancoram a rampa ESCURA
+   (fundo creme via --bg-raised, inalterado; texto navy). */
+:root[data-theme="dark"] .topbar,
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .entry-card,
+:root[data-theme="dark"] .notice,
+:root[data-theme="dark"] .cockpit-nav,
+:root[data-theme="dark"] .create-panel,
+:root[data-theme="dark"] .drawer,
+:root[data-theme="dark"] .help-pop {
+  --ink-900: #181f39; --ink-700: #2c3e55; --ink-600: #3f5570; --ink-500: #5a6b80;
+  --ink-400: #7a8a9c; --ink-300: #a3aebc; --ink-200: #ced6de; --ink-100: #e4e9ee; --ink-50: #f3f5f8;
+  --teal-700: #2a7382;
+  color: var(--ink-900);
+}
 
 /* Botão de alternância de tema (injetado no topbar por theme.js). */
 .theme-toggle {
