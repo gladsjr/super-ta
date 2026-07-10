@@ -39,6 +39,9 @@
     .q-item.open .q-body { display: block; }
     .q-body label { display: block; font-size: var(--fs-xs); color: var(--ink-500); margin: var(--sp-2) 0 2px; }
     .q-body textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--ink-200); border-radius: var(--r-sm); }
+    /* Recolhido: mostra só as 2 primeiras perguntas (o resto fica oculto atrás do botão). */
+    .q-list.collapsed .q-item:nth-child(n+3) { display: none; }
+    .q-collapse-foot { margin-top: var(--sp-1); text-align: center; }
 
     code.tok { background: var(--bg-muted); padding: 1px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
 
@@ -73,6 +76,7 @@
 
     <!-- ABA: PROVA (config + PDF + perguntas) -->
     <div class="tab-panel" id="tab-prova" role="tabpanel" aria-labelledby="tab-btn-prova">
+      <!-- 1. Configuração: voz (com prévia) + nº de perguntas. O salvar fica no fim da aba. -->
       <div class="card">
         <h3 class="card-title">Configuração</h3>
         <p class="card-sub">A voz do examinador e quantas perguntas cada aluno recebe (sorteadas do gabarito).</p>
@@ -81,29 +85,18 @@
             <label class="label" for="cfg-voice">Voz do examinador</label>
             <select id="cfg-voice" class="select"></select>
           </div>
+          <button class="btn" id="cfg-voice-preview" type="button" title="Ouvir uma frase de exemplo">▶ Ouvir prévia</button>
+          <audio id="cfg-voice-audio" preload="none" style="display:none"></audio>
           <div class="field" style="margin: 0">
             <label class="label" for="cfg-n">Nº de perguntas por aluno</label>
             <input type="number" id="cfg-n" class="input" min="3" max="20" value="6" style="width: 110px"/>
           </div>
-          <button class="btn btn-primary" id="cfg-btn" type="button">Salvar</button>
-          <span class="hint" id="cfg-msg"></span>
         </div>
         <p class="hint" id="cfg-hint" style="margin-top: var(--sp-3)"></p>
       </div>
 
-      <div class="card">
-        <h3 class="card-title">Calibração de fala <span class="hint" style="font-weight: 400">(opcional)</span></h3>
-        <p class="card-sub" data-help="Antes da prova, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — usando o MESMO gpt-4o-transcribe que gera a transcrição da correção. Serve para orientar o aluno (volume/ritmo) e sinalizar, para você, provas cuja captação ficou ruim. Deixe em branco para desligar o teste.">Frase que o aluno repete num pré-teste de captação, antes da prova. <strong>Gere</strong> a partir das perguntas ou escreva à mão. Em branco = teste desligado.</p>
-        <textarea id="calib-sentence" class="input" rows="2" style="width: 100%" placeholder="Ex.: As questões desta prova falam de halving, hashrate e VPL do fluxo de caixa."></textarea>
-        <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
-        <div class="row" style="margin-top: var(--sp-2); align-items: center">
-          <button class="btn" id="calib-gen" type="button">Gerar a partir das perguntas</button>
-          <span class="spacer"></span>
-          <button class="btn btn-primary" id="calib-save" type="button">Salvar</button>
-          <span class="hint" id="calib-msg"></span>
-        </div>
-      </div>
-
+      <!-- 2. Prova — perguntas e gabarito. A lista é colapsável (pode ser longa);
+           recolhida, mostra só as 2 primeiras perguntas. -->
       <div class="card">
         <h3 class="card-title">Prova — perguntas e gabarito <span class="pill" id="q-count" style="background: var(--bg-muted); border: 1px solid var(--ink-200)">0</span></h3>
         <p class="card-sub" id="exam-status">—</p>
@@ -122,6 +115,32 @@
         </div>
         <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas (ou edite o que veio do arquivo) — só o <strong>enunciado</strong>, que é falado ao aluno. O peso e o critério/gabarito de cada questão ficam na aba <strong>Avaliação &amp; notas</strong>. Clique numa linha para editar.</p>
         <div id="questions" class="q-list"></div>
+        <div class="q-collapse-foot hidden" id="q-collapse-foot">
+          <button class="btn btn-ghost btn-sm" id="q-collapse-toggle" type="button"></button>
+        </div>
+      </div>
+
+      <!-- 3. Calibração de fala: pré-teste de captação, depois das perguntas. -->
+      <div class="card">
+        <h3 class="card-title">Calibração de fala <span class="hint" style="font-weight: 400">(opcional)</span></h3>
+        <p class="card-sub" data-help="Antes da prova, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — usando o MESMO gpt-4o-transcribe que gera a transcrição da correção. Serve para orientar o aluno (volume/ritmo) e sinalizar, para você, provas cuja captação ficou ruim. Deixe em branco para desligar o teste.">Frase que o aluno repete num pré-teste de captação, antes da prova. <strong>Gere</strong> a partir das perguntas ou escreva à mão. Em branco = teste desligado.</p>
+        <textarea id="calib-sentence" class="input" rows="2" style="width: 100%" placeholder="Ex.: As questões desta prova falam de halving, hashrate e VPL do fluxo de caixa."></textarea>
+        <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
+        <div class="row" style="margin-top: var(--sp-2); align-items: center">
+          <button class="btn" id="calib-gen" type="button">Gerar a partir das perguntas</button>
+          <span class="spacer"></span>
+          <button class="btn btn-primary" id="calib-save" type="button">Salvar</button>
+          <span class="hint" id="calib-msg"></span>
+        </div>
+      </div>
+
+      <!-- 4. Salvar configurações: card à parte, no fim da aba (espelha a entrevista por mensagem). -->
+      <div class="card">
+        <div class="row" style="align-items: center; gap: var(--sp-3)">
+          <button class="btn btn-primary" id="cfg-save" type="button">Salvar configurações</button>
+          <span class="hint" id="cfg-msg"></span>
+        </div>
+        <p class="card-sub" style="margin-top: var(--sp-2)">Salva a <strong>voz do examinador</strong> e o <strong>nº de perguntas por aluno</strong>. As <strong>perguntas</strong> e a <strong>frase de calibração</strong> são salvas à parte, nos próprios cards.</p>
       </div>
     </div>
 
@@ -364,7 +383,22 @@
     if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
     QUESTIONS.forEach((q, i) => { const it = makeItem(q); c.appendChild(it); it.querySelector('.q-num').textContent = (i + 1) + '.'; });
     updateQCount();
+    applyQCollapse();
   }
+  // Colapso da lista de perguntas: recolhida mostra só as 2 primeiras (CSS). O botão
+  // de rodapé só aparece quando há mais de 2 perguntas (senão não há o que recolher).
+  let qCollapsed = true;
+  function applyQCollapse() {
+    const list = document.getElementById('questions');
+    const foot = document.getElementById('q-collapse-foot');
+    const toggle = document.getElementById('q-collapse-toggle');
+    const n = QUESTIONS.length;
+    if (n <= 2) { list.classList.remove('collapsed'); foot.classList.add('hidden'); return; }
+    foot.classList.remove('hidden');
+    list.classList.toggle('collapsed', qCollapsed);
+    toggle.textContent = qCollapsed ? `▸ Mostrar todas as ${n} perguntas` : '▾ Recolher lista';
+  }
+  document.getElementById('q-collapse-toggle').onclick = () => { qCollapsed = !qCollapsed; applyQCollapse(); };
 
   // ---------- Rubrica por questão (aba Avaliação): EDITOR COMPLETO ----------
   // Mostra e edita pergunta + resposta + rubrica + peso, permite adicionar/excluir —
@@ -609,15 +643,32 @@
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
     finally { btn.disabled = false; }
   };
-  document.getElementById('cfg-btn').onclick = async () => {
+  document.getElementById('cfg-save').onclick = async () => {
     const msg = document.getElementById('cfg-msg');
     const body = { question_count: Number(document.getElementById('cfg-n').value), voice: document.getElementById('cfg-voice').value };
     msg.textContent = 'Salvando…';
     try {
       const r = await fetch(`${API}/oral/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json();
-      msg.textContent = r.ok ? 'Salvo.' : 'Falha: ' + (j.error || r.status);
+      msg.textContent = r.ok ? 'Configurações salvas.' : 'Falha: ' + (j.error || r.status);
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  };
+  // Prévia da voz do examinador — reusa o endpoint work-scoped da entrevista por
+  // mensagem (mode-agnóstico: sintetiza uma frase de exemplo com o tts_model).
+  document.getElementById('cfg-voice-preview').onclick = async () => {
+    const btn = document.getElementById('cfg-voice-preview');
+    const audioEl = document.getElementById('cfg-voice-audio');
+    const voiceId = document.getElementById('cfg-voice').value;
+    if (!voiceId) { document.getElementById('cfg-msg').textContent = 'Escolha uma voz primeiro.'; return; }
+    btn.disabled = true; const prev = btn.textContent; btn.textContent = 'Carregando…';
+    try {
+      const r = await fetch(`${API}/voices/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voiceId }) });
+      if (!r.ok) { btn.textContent = 'Falha'; setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500); return; }
+      const blob = await r.blob();
+      audioEl.src = URL.createObjectURL(blob);
+      await audioEl.play();
+      btn.textContent = prev; btn.disabled = false;
+    } catch (e) { btn.textContent = 'Falha'; setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500); }
   };
   // ---------- Calibração de fala ----------
   let CALIB = null;
@@ -652,6 +703,7 @@
   };
   document.getElementById('q-add').onclick = () => {
     QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    qCollapsed = false; // expande para a nova pergunta aparecer
     renderQuestions();
     const items = document.querySelectorAll('#questions .q-item');
     const last = items[items.length - 1];
