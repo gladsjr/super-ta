@@ -231,6 +231,27 @@
     </div>
 
     <div class="card">
+      <h3 class="card-title" data-help="Liga a câmera durante a entrevista, grava o vídeo e o analisa após o envio (presença, celular, outra pessoa, enquadramento). Exige modo áudio: o aluno responde por voz e comanda gravar/enviar/cancelar por GESTO, longe do teclado.">Proctoring por vídeo</h3>
+      <p class="card-sub">Câmera ligada + análise do vídeo após o envio. Ativar exige o <strong>modo áudio</strong> (respostas por voz).</p>
+      <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
+        <input type="checkbox" id="proctoring-enabled" style="margin-top: 3px"/>
+        <span class="card-sub" style="margin:0">Ativar <strong>proctoring por vídeo</strong> nesta entrevista.</span>
+      </label>
+
+      <div id="calib-block" style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
+        <p class="card-sub" data-help="Antes da entrevista, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — mesmo gpt-4o-transcribe da correção. Orienta o aluno (volume/ritmo) e sinaliza, para você, captação ruim. Em branco = teste desligado.">Frase de <strong>calibração de fala</strong> (pré-teste de captação). <strong>Gere</strong> a partir do enunciado ou escreva à mão. Em branco = desligada.</p>
+        <textarea id="calib-sentence" class="textarea" rows="2" placeholder="Ex.: As questões deste trabalho falam de halving, hashrate e fluxo de caixa descontado."></textarea>
+        <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
+        <div class="row" style="margin-top: var(--sp-2); align-items:center">
+          <button class="btn" id="calib-gen" type="button">Gerar a partir do enunciado</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-primary" id="calib-save" type="button">Salvar frase</button>
+          <span class="hint" id="calib-msg"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h3 class="card-title" data-help="O entrevistador ainda pode aprofundar com follow-ups além desse número. Vale para novas submissões — entrevistas já em andamento mantêm o número com que começaram.">Número de perguntas da entrevista</h3>
       <p class="card-sub">Quantas perguntas planejadas o entrevistador fará (entre 3 e 20).</p>
       <div class="row" style="align-items: end; gap: var(--sp-3)">
@@ -547,6 +568,9 @@ async function load() {
     : 'Envie o enunciado antes de avaliar';
 
   applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
+  applyProctoringStateToUI(j.work.proctoring_enabled === true);
+  CALIB = j.work.oral_calibration || null;
+  renderCalib();
   document.getElementById('question-count').value = j.work.question_count ?? 6;
   // A sugestão de identidade é cosmética. Ela NUNCA pode derrubar o load() e
   // impedir a renderização da lista de alunos (que vem logo abaixo) — foi
@@ -1118,12 +1142,63 @@ document.getElementById('voice-preview').onclick = async () => {
 // Salvar ÚNICO da aba Cenário: modo+voz, identidade, nº de perguntas e
 // espontaneidade de uma vez. O entrevistador (galeria/avançado) e o enunciado
 // têm seus próprios saves (não são "config escalar").
+// ---- Proctoring por vídeo + calibração de fala (entrevista) ----
+let CALIB = null;
+function renderCalib() {
+  const el = document.getElementById('calib-sentence');
+  if (el) el.value = CALIB?.sentence || '';
+  const t = document.getElementById('calib-terms');
+  const terms = (CALIB?.key_terms || []);
+  if (t) t.textContent = terms.length ? ('Termos-chave verificados na transcrição: ' + terms.join(', ')) : '';
+}
+// Proctoring exige modo áudio (o aluno responde por voz e comanda por gesto).
+function applyProctoringStateToUI(on) {
+  const chk = document.getElementById('proctoring-enabled');
+  if (chk) chk.checked = !!on;
+  document.getElementById('calib-block').classList.toggle('hidden', !on);
+  if (on) {
+    document.getElementById('mode-audio').checked = true;
+    document.getElementById('voice-row').classList.remove('hidden');
+  }
+}
+document.getElementById('proctoring-enabled').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  document.getElementById('calib-block').classList.toggle('hidden', !on);
+  if (on) { document.getElementById('mode-audio').checked = true; document.getElementById('voice-row').classList.remove('hidden'); }
+});
+document.getElementById('calib-gen').onclick = async () => {
+  const msg = document.getElementById('calib-msg'), btn = document.getElementById('calib-gen');
+  btn.disabled = true; msg.textContent = 'Gerando…';
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/calibration/generate`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+    CALIB = j.calibration; renderCalib(); msg.textContent = 'Frase gerada e salva.';
+  } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+  finally { btn.disabled = false; }
+};
+document.getElementById('calib-save').onclick = async () => {
+  const msg = document.getElementById('calib-msg');
+  const sentence = document.getElementById('calib-sentence').value.trim();
+  // Mantém só os termos-chave que ainda aparecem na frase (se ela foi editada à mão).
+  const key_terms = (CALIB?.key_terms || []).filter(t => sentence.toLowerCase().includes(String(t).toLowerCase()));
+  msg.textContent = 'Salvando…';
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/calibration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sentence, key_terms }) });
+    const j = await r.json();
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+    CALIB = j.calibration; renderCalib(); msg.textContent = sentence ? 'Salva.' : 'Salva (teste desligado).';
+  } catch (e) { msg.textContent = 'Falha de comunicação.'; }
+};
+
 document.getElementById('save-cenario').onclick = async () => {
   const msg = document.getElementById('cenario-save-msg');
   msg.textContent = '';
-  const mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
+  const proctoringOn = document.getElementById('proctoring-enabled').checked;
+  let mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
+  if (proctoringOn) mode = 'audio'; // proctoring exige áudio
   const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
-  if (mode === 'audio' && !voice) { msg.textContent = 'Escolha uma voz para o modo áudio.'; return; }
+  if (mode === 'audio' && !voice) { msg.textContent = proctoringOn ? 'Proctoring exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'; return; }
   const name = document.getElementById('interviewer-name').value.trim();
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
   // Identidade só persiste se foi DEFINIDA pelo professor; o rascunho sugerido
@@ -1148,6 +1223,7 @@ document.getElementById('save-cenario').onclick = async () => {
       fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(setIdentity ? { name, gender } : { name: null, gender: null }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/question-count`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_count: count }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/expect-spontaneous`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expect_spontaneous: expect }) }),
+      fetch(`/w/${encodeURIComponent(workToken)}/proctoring`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: proctoringOn }) }),
     ]);
     const bad = reqs.find(r => !r.ok);
     if (bad) { const j = await bad.json().catch(() => ({})); msg.textContent = 'Erro ao salvar: ' + (j.error || bad.status); }

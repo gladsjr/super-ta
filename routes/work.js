@@ -23,7 +23,7 @@ import {
 } from "../lib/billing.js";
 import { openai } from "../lib/openaiClient.js";
 import { uploadPdf } from "../lib/openaiFiles.js";
-import { configAssistantAgent, enunciadoCoherenceAgent } from "../lib/agents.js";
+import { configAssistantAgent, enunciadoCoherenceAgent, oralCalibrationAgent } from "../lib/agents.js";
 import { validateStudentFeedbackShape, findForbiddenLeaks } from "../agents/StudentFeedbackAgent.js";
 import { validateRubricShape, weightedFinal, getEffectiveRubric } from "../lib/rubric.js";
 import {
@@ -61,6 +61,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
     try {
         const submissions = await db.listSubmissionsForWork(req.work.id);
         const balance = await getWorkBalance(req.work.id);
+        const calibration = await db.getOralCalibration(req.work.id);
         // Lista dinâmica que precisa refletir criações/bloqueios na hora. Sem
         // isto, em produção (atrás do Google Frontend) o navegador pode servir
         // uma cópia em cache e o professor não vê o token recém-gerado.
@@ -84,6 +85,9 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 include_study_suggestions: req.work.include_study_suggestions,
                 grading_rubric: getEffectiveRubric(req.work),   // rubrica efetiva (do trabalho ou DEFAULT_RUBRIC)
                 grade_penalty: req.work.grade_penalty_json || null,   // critério de penalidade por alertas (opt-in)
+                proctoring_enabled: !!req.work.proctoring_enabled,    // proctoring por vídeo na entrevista (opt-in)
+                devolutiva_proctor_prompt: req.work.devolutiva_proctor_prompt || null,
+                oral_calibration: calibration || null,               // frase de calibração de fala (reusa a coluna da oral)
                 budget_usd: balance?.budget_usd ?? 0,
                 spent_usd: balance?.spent_usd ?? 0,
                 remaining_usd: balance?.remaining_usd ?? 0,
@@ -207,6 +211,52 @@ router.post("/w/:workToken/interaction", requireWorkToken, express.json({ limit:
     } catch (err) {
         log.error("WORK", `set interaction failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar modo de interação", detail: err.message });
+    }
+});
+
+// ---- Proctoring por vídeo na entrevista (opt-in do professor) ----
+// Ligar implica modo áudio (o aluno responde por voz e comanda por gesto). O
+// frontend garante isso ao salvar; aqui só persistimos o flag.
+router.post("/w/:workToken/proctoring", requireWorkToken, express.json({ limit: "4kb" }), async (req, res) => {
+    try {
+        const enabled = req.body?.enabled === true;
+        await db.setProctoringEnabled(req.work.id, enabled);
+        log.info("WORK", `proctoring ${enabled ? "on" : "off"} work=${req.work.work_token}`);
+        res.json({ ok: true, proctoring_enabled: enabled });
+    } catch (err) {
+        log.error("WORK", `set proctoring failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar proctoring", detail: err.message });
+    }
+});
+
+// ---- Frase de calibração de fala da ENTREVISTA (reusa oral_calibration_json) ----
+// Salvar (editada à mão ou gerada) e Gerar a partir do ENUNCIADO do trabalho. Vazio
+// = pré-teste desligado. As rotas orais equivalentes ficam em /oral/calibration.
+router.post("/w/:workToken/calibration", requireWorkToken, express.json({ limit: "16kb" }), async (req, res) => {
+    try {
+        const saved = await db.setOralCalibration(req.work.id, {
+            sentence: String(req.body?.sentence ?? ""),
+            key_terms: Array.isArray(req.body?.key_terms) ? req.body.key_terms : [],
+        });
+        log.info("WORK", `calibration saved work=${req.work.work_token} ${saved ? "on" : "off"}`);
+        res.json({ ok: true, calibration: saved });
+    } catch (err) {
+        log.error("WORK", `save calibration failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar a frase de calibração" });
+    }
+});
+router.post("/w/:workToken/calibration/generate", requireWorkToken, requireWithinBudget, async (req, res) => {
+    try {
+        const enunciadoBlob = await db.getEnunciadoBlob(req.work.id);
+        if (!enunciadoBlob) return res.status(409).json({ error: "envie o enunciado do trabalho antes de gerar a frase" });
+        const fileUpload = await uploadPdf(enunciadoBlob, "enunciado.pdf");
+        const { sentence, key_terms } = await oralCalibrationAgent.build({ openaiFileId: fileUpload.id, meterCtx: { workId: req.work.id } });
+        const saved = await db.setOralCalibration(req.work.id, { sentence, key_terms });
+        log.info("WORK", `calibration generated work=${req.work.work_token} terms=${key_terms.length}`);
+        res.json({ ok: true, calibration: saved });
+    } catch (err) {
+        log.error("WORK", `gen calibration failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar a frase de calibração", detail: err.message });
     }
 });
 
