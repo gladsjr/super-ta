@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>PoC — Controle por gesto (MediaPipe Hands)</title>
+<title>PoC — Controle por gesto v2 (mão levantada + transição)</title>
 <style>
   :root { --bg:#0f1220; --panel:#181c2e; --line:#2b3150; --ink:#e8ebf5; --muted:#9aa3bd;
           --ok:#2f9e56; --warn:#c9a227; --bad:#c0453b; --accent:#3f6fe0; }
@@ -12,14 +12,14 @@
   header { padding:14px 20px; border-bottom:1px solid var(--line); }
   header h1 { margin:0 0 3px; font-size:18px; }
   header p { margin:0; color:var(--muted); font-size:13px; }
-  main { display:grid; grid-template-columns: minmax(360px, 1fr) 380px; gap:18px; padding:18px 20px; align-items:start; }
-  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  main { display:grid; grid-template-columns: minmax(360px, 1fr) 390px; gap:18px; padding:18px 20px; align-items:start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
   .stage { position:relative; background:#000; border:1px solid var(--line); border-radius:12px; overflow:hidden; aspect-ratio:4/3; }
   .stage video, .stage canvas { position:absolute; inset:0; width:100%; height:100%; }
   .stage video { transform: scaleX(-1); object-fit:cover; }
   .stage canvas { transform: scaleX(-1); }
-  .big-pose { position:absolute; left:0; right:0; bottom:0; padding:10px 14px; font-size:22px; font-weight:700;
-              background:linear-gradient(transparent, rgba(0,0,0,.72)); display:flex; align-items:center; gap:12px; }
+  .big-pose { position:absolute; left:0; right:0; bottom:0; padding:10px 14px; font-size:20px; font-weight:700;
+              background:linear-gradient(transparent, rgba(0,0,0,.75)); display:flex; align-items:center; gap:12px; }
   .ring { --p:0; width:34px; height:34px; border-radius:50%; flex:none;
           background: conic-gradient(var(--accent) calc(var(--p)*1%), #ffffff22 0); position:relative; }
   .ring::after { content:''; position:absolute; inset:5px; border-radius:50%; background:#000a; }
@@ -27,6 +27,7 @@
   .panel h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
   .kv { display:flex; justify-content:space-between; gap:10px; padding:3px 0; font-variant-numeric:tabular-nums; }
   .kv b { font-weight:600; }
+  .kv b.yes { color:var(--ok); } .kv b.no { color:var(--muted); }
   .fingers { display:flex; gap:6px; margin-top:6px; }
   .fingers span { flex:1; text-align:center; padding:4px 0; border-radius:6px; background:#ffffff10; font-size:12px; color:var(--muted); }
   .fingers span.on { background:var(--ok); color:#fff; }
@@ -36,11 +37,12 @@
   .pill.start { background:#204a2e; color:#8be0a6; }
   .pill.send  { background:#1f2f57; color:#9dbcff; }
   .pill.cancel{ background:#4a2320; color:#f0a79f; }
-  .events { max-height:200px; overflow:auto; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; }
+  .events { max-height:180px; overflow:auto; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; }
   .events div { padding:2px 0; border-bottom:1px solid #ffffff0d; }
   .events .ev-start { color:#8be0a6; } .events .ev-send { color:#9dbcff; } .events .ev-cancel { color:#f0a79f; }
   .controls label { display:block; margin:10px 0 3px; font-size:12px; color:var(--muted); }
   .controls input[type=range] { width:100%; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:13px; color:var(--ink); cursor:pointer; }
   button { font:inherit; border:1px solid var(--line); background:#232a45; color:var(--ink); border-radius:8px; padding:8px 12px; cursor:pointer; }
   button:hover { border-color:var(--accent); }
   button.primary { background:var(--accent); border-color:var(--accent); }
@@ -48,13 +50,12 @@
   .banner { padding:8px 10px; border-radius:8px; margin-top:8px; font-size:13px; }
   .banner.ok { background:#173a24; color:#9ee6b4; } .banner.warn { background:#3a3413; color:#e6d78a; }
   .fp-num { font-size:26px; font-weight:800; }
-  code { background:#ffffff12; padding:1px 5px; border-radius:4px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>PoC — Controle por gesto (MediaPipe Hands, self-hosted)</h1>
-  <p>Objetivo: avaliar se dá para comandar a resposta por GESTO a ~1,5 m da câmera, sem tocar no teclado. Nada aqui envia dados: roda 100% no navegador.</p>
+  <h1>PoC — Controle por gesto v2 · mão levantada + transição</h1>
+  <p>Fix dos falsos positivos: só conta gesto com a mão LEVANTADA (na faixa de cima) e feito por TRANSIÇÃO (você precisa relaxar a mão entre comandos). Mão em repouso no colo/mesa não dispara. Roda 100% no navegador.</p>
 </header>
 
 <main>
@@ -67,8 +68,8 @@
     <div class="panel" style="margin-top:14px">
       <h2>Como testar</h2>
       <div class="status">
-        1) Afaste-se ~1,5 m (tronco+cabeça no quadro, como na prova). 2) Faça cada gesto e <b>segure</b> até o anel completar — aí dispara o evento.
-        3) Depois rode o <b>teste de falso positivo</b> ao lado: fale normalmente com as mãos em repouso e veja se algo dispara sozinho.
+        1) Afaste-se ~1,5 m (tronco+cabeça no quadro). 2) A linha tracejada é o "chão" do gesto: a mão só é lida <b>acima</b> dela — <b>levante a mão</b> perto do rosto para comandar e <b>segure</b> até o anel completar.
+        3) Para repetir, <b>abaixe a mão</b> (relaxe) e levante de novo. 4) Rode o <b>teste de falso positivo</b> com as mãos em repouso no colo/mesa.
       </div>
       <div class="banner warn" id="load-msg">Carregando MediaPipe…</div>
     </div>
@@ -76,22 +77,22 @@
 
   <div>
     <div class="panel">
-      <h2>Gestos → ações (candidato)</h2>
+      <h2>Gestos → ações (levantados)</h2>
       <div class="legend">
-        <div class="row"><span class="pill start">COMEÇAR</span> <b>Palma aberta</b> — os 5 dedos abertos</div>
-        <div class="row"><span class="pill send">ENVIAR</span> <b>Punho</b> — mão fechada</div>
-        <div class="row"><span class="pill cancel">CANCELAR</span> <b>Joia</b> 👍 — polegar para cima</div>
+        <div class="row"><span class="pill start">COMEÇAR</span> <b>🖐 Palma aberta</b> — virada para a câmera</div>
+        <div class="row"><span class="pill send">ENVIAR</span> <b>✌️ V (paz)</b> — indicador + médio</div>
+        <div class="row"><span class="pill cancel">CANCELAR</span> <b>👍 Joia</b> — polegar para cima</div>
       </div>
     </div>
 
     <div class="panel">
       <h2>Ao vivo</h2>
       <div class="kv"><span>Mão detectada</span><b id="m-hand">—</b></div>
+      <div class="kv"><span>Mão levantada (acima da linha)</span><b id="m-raised">—</b></div>
+      <div class="kv"><span>Palma virada p/ câmera</span><b id="m-facing">—</b></div>
+      <div class="kv"><span>Armado (relaxou desde o último)</span><b id="m-armed">—</b></div>
       <div class="kv"><span>Pose (crua)</span><b id="m-pose">—</b></div>
-      <div class="kv"><span>Confiança da mão</span><b id="m-conf">—</b></div>
-      <div class="kv"><span>Tamanho da mão (proxy de distância)</span><b id="m-size">—</b></div>
-      <div class="kv"><span>Latência da detecção</span><b id="m-lat">—</b></div>
-      <div class="kv"><span>Dedos estendidos</span><b id="m-n">—</b></div>
+      <div class="kv"><span>Confiança / tamanho / latência</span><b id="m-misc">—</b></div>
       <div class="fingers" id="fingers">
         <span data-f="0">👍</span><span data-f="1">index</span><span data-f="2">mid</span><span data-f="3">ring</span><span data-f="4">pink</span>
       </div>
@@ -99,7 +100,7 @@
 
     <div class="panel">
       <h2>Teste de falso positivo</h2>
-      <div class="status">Fale normalmente por 20 s com as mãos em repouso (no colo/mesa). O contador registra qualquer evento disparado sem querer.</div>
+      <div class="status">Fale normalmente por 20 s com as mãos em repouso (colo/mesa). O contador registra qualquer disparo acidental.</div>
       <div style="display:flex; align-items:center; gap:14px; margin-top:10px">
         <button id="fp-btn" class="primary">▶ Iniciar teste (20 s)</button>
         <div>disparos: <span class="fp-num" id="fp-count">0</span></div>
@@ -109,13 +110,17 @@
 
     <div class="panel controls">
       <h2>Ajustes</h2>
-      <label>Tempo de "segurar" para confirmar: <b id="hold-val">900</b> ms</label>
-      <input type="range" id="hold" min="300" max="2000" step="50" value="900"/>
+      <label>Linha do gesto (altura mínima): <b id="raise-val">0.55</b> <span style="color:var(--muted)">(menor = mais alto)</span></label>
+      <input type="range" id="raise" min="0.30" max="0.90" step="0.01" value="0.55"/>
+      <label>Tempo de "segurar" para confirmar: <b id="hold-val">800</b> ms</label>
+      <input type="range" id="hold" min="300" max="2000" step="50" value="800"/>
       <label>Confiança mínima de detecção: <b id="conf-val">0.40</b></label>
       <input type="range" id="minconf" min="0.1" max="0.9" step="0.05" value="0.40"/>
-      <div style="margin-top:12px; display:flex; gap:8px">
-        <button id="clear-ev">Limpar eventos</button>
-      </div>
+      <label class="chk"><input type="checkbox" id="gate-raise" checked/> Exigir mão levantada</label>
+      <label class="chk"><input type="checkbox" id="gate-trans" checked/> Exigir transição (relaxar entre comandos)</label>
+      <label class="chk"><input type="checkbox" id="gate-facing"/> Exigir palma p/ câmera (só COMEÇAR)</label>
+      <label class="chk"><input type="checkbox" id="facing-inv"/> Inverter sinal da palma (se marcar errado)</label>
+      <div style="margin-top:12px"><button id="clear-ev">Limpar eventos</button></div>
     </div>
 
     <div class="panel">
@@ -130,11 +135,16 @@ const MP_BASE = '/static/vision';
 const $ = id => document.getElementById(id);
 const video = $('cam'), overlay = $('overlay'), octx = overlay.getContext('2d');
 
-let HOLD_MS = 900, MIN_CONF = 0.40;
+let HOLD_MS = 800, MIN_CONF = 0.40, RAISE_Y = 0.55;
+let GATE_RAISE = true, GATE_TRANS = true, GATE_FACING = false, FACING_INV = false;
 $('hold').oninput = e => { HOLD_MS = +e.target.value; $('hold-val').textContent = HOLD_MS; };
 $('minconf').oninput = e => { MIN_CONF = +e.target.value; $('conf-val').textContent = MIN_CONF.toFixed(2); };
+$('raise').oninput = e => { RAISE_Y = +e.target.value; $('raise-val').textContent = RAISE_Y.toFixed(2); };
+$('gate-raise').onchange = e => GATE_RAISE = e.target.checked;
+$('gate-trans').onchange = e => GATE_TRANS = e.target.checked;
+$('gate-facing').onchange = e => GATE_FACING = e.target.checked;
+$('facing-inv').onchange = e => FACING_INV = e.target.checked;
 
-// ---- Câmera ----
 async function initCam() {
   const stream = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:640}, height:{ideal:480} }, audio:false });
   video.srcObject = stream;
@@ -142,7 +152,6 @@ async function initCam() {
   overlay.width = video.videoWidth; overlay.height = video.videoHeight;
 }
 
-// ---- MediaPipe HandLandmarker (mesmos assets da prova oral) ----
 let handLm = null;
 async function initHands() {
   const mp = await import(`${MP_BASE}/vision_bundle.mjs`);
@@ -153,130 +162,144 @@ async function initHands() {
   });
 }
 
-// ---- Classificação geométrica de poses estáticas ----
-// Landmarks MediaPipe Hands (21): 0 wrist; polegar 1-4; indicador 5-8; médio 9-12;
-// anelar 13-16; mínimo 17-20 (cada dedo MCP,PIP,DIP,TIP).
+// Landmarks (21): 0 wrist; polegar 1-4; indicador 5-8; médio 9-12; anelar 13-16; mínimo 17-20.
 const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-// Dedo (não-polegar) estendido: a ponta está MAIS longe do pulso que a junta PIP.
-// Curvado → a ponta volta para a palma (mais perto do pulso). Independe da orientação.
 function fingerExtended(L, tip, pip) { return d(L[tip], L[0]) > d(L[pip], L[0]) * 1.03; }
+// Winding do triângulo (pulso, base do indicador, base do mínimo): o SINAL vira quando a
+// palma gira de frente p/ a câmera para de frente p/ a pessoa. Combinado com a lateralidade.
+function palmFacingCamera(L, handedness) {
+  const a = { x: L[5].x - L[0].x, y: L[5].y - L[0].y };
+  const b = { x: L[17].x - L[0].x, y: L[17].y - L[0].y };
+  const nz = a.x * b.y - a.y * b.x;
+  let facing = handedness === 'Right' ? nz > 0 : nz < 0;
+  if (FACING_INV) facing = !facing;
+  return { facing, nz };
+}
 function classify(L) {
   const idx = fingerExtended(L, 8, 6);
   const mid = fingerExtended(L, 12, 10);
   const ring = fingerExtended(L, 16, 14);
   const pink = fingerExtended(L, 20, 18);
   const n = [idx, mid, ring, pink].filter(Boolean).length;
-  // Polegar para cima: ponta (4) bem acima do pulso (menor y) e acima da base do
-  // indicador (5); e os quatro dedos curvados.
   const thumbUp = (L[0].y - L[4].y) > 0.15 && (L[5].y - L[4].y) > 0.05;
   let pose = 'NONE';
-  if (n >= 4) pose = 'OPEN_PALM';
+  if (idx && mid && ring && pink) pose = 'OPEN_PALM';
+  else if (idx && mid && !ring && !pink) pose = 'V_SIGN';
   else if (n === 0 && thumbUp) pose = 'THUMB_UP';
-  else if (n === 0 && !thumbUp) pose = 'FIST';
   return { pose, n, fingers: [thumbUp, idx, mid, ring, pink] };
 }
 
-const POSE_LABEL = { OPEN_PALM:'Palma aberta', FIST:'Punho', THUMB_UP:'Joia 👍', NONE:'—' };
-const ACTION = { OPEN_PALM:{k:'start', t:'COMEÇAR'}, FIST:{k:'send', t:'ENVIAR'}, THUMB_UP:{k:'cancel', t:'CANCELAR'} };
+const POSE_LABEL = { OPEN_PALM:'Palma aberta', V_SIGN:'V (paz)', THUMB_UP:'Joia 👍', NONE:'—' };
+const ACTION = { OPEN_PALM:{k:'start', t:'COMEÇAR'}, V_SIGN:{k:'send', t:'ENVIAR'}, THUMB_UP:{k:'cancel', t:'CANCELAR'} };
 
-// ---- Hold-to-confirm + release ----
-let heldPose = 'NONE', heldSince = 0, firedForHold = false, cooldownPose = null;
+let heldPose = 'NONE', heldSince = 0, canFire = false;
 let lastT = performance.now();
 let fpActive = false, fpCount = 0, fpEndsAt = 0;
 
 function fireEvent(pose) {
   const a = ACTION[pose]; if (!a) return;
   const ts = new Date();
-  const hh = String(ts.getHours()).padStart(2,'0'), mm = String(ts.getMinutes()).padStart(2,'0'), ss = String(ts.getSeconds()).padStart(2,'0');
+  const p2 = n => String(n).padStart(2,'0');
   const line = document.createElement('div');
   line.className = 'ev-' + a.k;
-  line.textContent = `${hh}:${mm}:${ss}  ▶ ${a.t}  (${POSE_LABEL[pose]})`;
+  line.textContent = `${p2(ts.getHours())}:${p2(ts.getMinutes())}:${p2(ts.getSeconds())}  ▶ ${a.t}  (${POSE_LABEL[pose]})`;
   $('events').prepend(line);
   if (fpActive) { fpCount++; $('fp-count').textContent = fpCount; }
 }
 
-function drawLandmarks(L) {
+function setYesNo(el, yes, txt) { el.textContent = txt ?? (yes ? 'sim' : 'não'); el.className = yes ? 'yes' : 'no'; }
+
+function drawOverlay(L, raiseYpx) {
   octx.clearRect(0, 0, overlay.width, overlay.height);
+  // linha do gesto
+  octx.strokeStyle = '#ffffff55'; octx.lineWidth = 2; octx.setLineDash([8,6]);
+  octx.beginPath(); octx.moveTo(0, raiseYpx); octx.lineTo(overlay.width, raiseYpx); octx.stroke(); octx.setLineDash([]);
+  if (!L) return;
   octx.fillStyle = '#3f6fe0'; octx.strokeStyle = '#8be0a6'; octx.lineWidth = 2;
   const P = i => ({ x: L[i].x * overlay.width, y: L[i].y * overlay.height });
   const bones = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
-  octx.beginPath();
-  for (const [a,b] of bones) { const p=P(a), q=P(b); octx.moveTo(p.x,p.y); octx.lineTo(q.x,q.y); }
-  octx.stroke();
+  octx.beginPath(); for (const [a,b] of bones){ const p=P(a),q=P(b); octx.moveTo(p.x,p.y); octx.lineTo(q.x,q.y); } octx.stroke();
   for (let i=0;i<L.length;i++){ const p=P(i); octx.beginPath(); octx.arc(p.x,p.y,3,0,7); octx.fill(); }
 }
 
 function loop() {
   const now = performance.now();
   const dt = now - lastT; lastT = now;
-  let pose = 'NONE', res = null, lat = 0;
+  let res = null, lat = 0;
   if (handLm && video.readyState >= 2) {
     const t0 = performance.now();
     res = handLm.detectForVideo(video, now);
     lat = performance.now() - t0;
   }
   const has = res && res.landmarks && res.landmarks.length > 0;
+  let validPose = 'NONE';
+
   if (has) {
     const L = res.landmarks[0];
+    const handed = res.handedness?.[0]?.[0]?.categoryName || 'Right';
     const conf = (res.handedness?.[0]?.[0]?.score) ?? 1;
     const cls = classify(L);
-    pose = conf >= MIN_CONF ? cls.pose : 'NONE';
+    const raised = L[0].y < RAISE_Y; // pulso acima da linha
+    const pf = palmFacingCamera(L, handed);
+
+    // pose bruta só se confiança ok
+    const rawPose = conf >= MIN_CONF ? cls.pose : 'NONE';
+    // aplica guardas
+    let ok = rawPose !== 'NONE' && !!ACTION[rawPose];
+    if (ok && GATE_RAISE && !raised) ok = false;
+    if (ok && GATE_FACING && rawPose === 'OPEN_PALM' && !pf.facing) ok = false;
+    validPose = ok ? rawPose : 'NONE';
+
     // métricas
+    setYesNo($('m-hand'), true, 'sim');
+    setYesNo($('m-raised'), raised);
+    setYesNo($('m-facing'), pf.facing, `${pf.facing ? 'sim' : 'não'} (${pf.nz.toFixed(3)})`);
+    $('m-pose').textContent = POSE_LABEL[cls.pose] || cls.pose;
     let minx=1,miny=1,maxx=0,maxy=0; for (const p of L){ minx=Math.min(minx,p.x); maxx=Math.max(maxx,p.x); miny=Math.min(miny,p.y); maxy=Math.max(maxy,p.y); }
     const size = Math.round(Math.max(maxx-minx, maxy-miny) * 100);
-    $('m-hand').textContent = 'sim'; $('m-hand').style.color = 'var(--ok)';
-    $('m-pose').textContent = POSE_LABEL[cls.pose] || cls.pose;
-    $('m-conf').textContent = conf.toFixed(2);
-    $('m-size').textContent = size + '% do quadro';
-    $('m-lat').textContent = lat.toFixed(0) + ' ms';
-    $('m-n').textContent = cls.n;
-    const fEls = $('fingers').children;
-    for (let i=0;i<5;i++) fEls[i].classList.toggle('on', !!cls.fingers[i]);
-    drawLandmarks(L);
+    $('m-misc').textContent = `${conf.toFixed(2)} / ${size}% / ${lat.toFixed(0)}ms`;
+    const fEls = $('fingers').children; for (let i=0;i<5;i++) fEls[i].classList.toggle('on', !!cls.fingers[i]);
+    drawOverlay(L, RAISE_Y * overlay.height);
   } else {
-    $('m-hand').textContent = 'não'; $('m-hand').style.color = 'var(--muted)';
-    $('m-pose').textContent = '—'; $('m-conf').textContent='—'; $('m-size').textContent='—'; $('m-lat').textContent = lat ? lat.toFixed(0)+' ms':'—'; $('m-n').textContent='—';
+    setYesNo($('m-hand'), false, 'não');
+    $('m-raised').textContent='—'; $('m-raised').className=''; $('m-facing').textContent='—'; $('m-facing').className='';
+    $('m-pose').textContent='—'; $('m-misc').textContent = lat ? `— / — / ${lat.toFixed(0)}ms` : '—';
     for (const el of $('fingers').children) el.classList.remove('on');
-    octx.clearRect(0,0,overlay.width,overlay.height);
+    drawOverlay(null, RAISE_Y * overlay.height);
   }
 
-  // Hold-to-confirm
+  // Máquina de disparo: precisa RELAXAR (validPose=NONE) para re-armar; pose mantida não repete.
   let progress = 0;
-  if (pose !== 'NONE' && ACTION[pose]) {
-    if (pose === heldPose) {
+  if (validPose === 'NONE') {
+    canFire = true; heldPose = 'NONE'; heldSince = 0;
+  } else {
+    if (validPose === heldPose) {
       heldSince += dt;
       progress = Math.min(100, (heldSince / HOLD_MS) * 100);
-      if (heldSince >= HOLD_MS && !firedForHold && pose !== cooldownPose) {
-        fireEvent(pose); firedForHold = true; cooldownPose = pose;
+      const transitionOk = GATE_TRANS ? canFire : true;
+      if (heldSince >= HOLD_MS && transitionOk) {
+        fireEvent(validPose); canFire = false; heldSince = 0; progress = 0;
       }
-    } else { heldPose = pose; heldSince = 0; firedForHold = false; }
-  } else {
-    heldPose = 'NONE'; heldSince = 0; firedForHold = false; cooldownPose = null; // release
+    } else { heldPose = validPose; heldSince = 0; }
   }
+  setYesNo($('m-armed'), canFire);
   $('ring').style.setProperty('--p', progress.toFixed(0));
-  $('pose-big').textContent = pose !== 'NONE' && ACTION[pose] ? `${POSE_LABEL[pose]} → ${ACTION[pose].t}` : (has ? 'Mão detectada' : '—');
+  $('pose-big').textContent = validPose !== 'NONE' ? `${POSE_LABEL[validPose]} → ${ACTION[validPose].t}` : (has ? 'Mão detectada (baixe/levante p/ comandar)' : '—');
 
-  // Teste de falso positivo (contagem regressiva)
   if (fpActive) {
     const left = Math.max(0, fpEndsAt - now);
     $('fp-timer').textContent = (left/1000).toFixed(0) + ' s restantes';
     if (left <= 0) { fpActive = false; $('fp-btn').textContent = '▶ Iniciar teste (20 s)'; $('fp-timer').textContent = `fim — ${fpCount} disparo(s) em 20 s`; }
   }
-
   requestAnimationFrame(loop);
 }
 
-$('fp-btn').onclick = () => {
-  if (fpActive) return;
-  fpActive = true; fpCount = 0; $('fp-count').textContent = '0';
-  fpEndsAt = performance.now() + 20000;
-  $('fp-btn').textContent = '● medindo…';
-};
+$('fp-btn').onclick = () => { if (fpActive) return; fpActive = true; fpCount = 0; $('fp-count').textContent = '0'; fpEndsAt = performance.now() + 20000; $('fp-btn').textContent = '● medindo…'; };
 $('clear-ev').onclick = () => { $('events').innerHTML = ''; };
 
 (async () => {
-  try { await initCam(); } catch (e) { $('load-msg').textContent = 'Falha ao abrir a câmera: ' + e.message; $('load-msg').className='banner warn'; return; }
-  try { await initHands(); $('load-msg').textContent = 'Pronto. Faça os gestos na frente da câmera.'; $('load-msg').className = 'banner ok'; }
+  try { await initCam(); } catch (e) { $('load-msg').textContent = 'Falha ao abrir a câmera: ' + e.message; return; }
+  try { await initHands(); $('load-msg').textContent = 'Pronto. Levante a mão acima da linha e faça o gesto.'; $('load-msg').className = 'banner ok'; }
   catch (e) { $('load-msg').textContent = 'Falha ao carregar o MediaPipe: ' + e.message; return; }
   requestAnimationFrame(loop);
 })();
