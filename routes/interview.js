@@ -393,6 +393,12 @@ const audioUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: AUDIO_UPLOAD_LIMIT_BYTES },
 });
+// Vídeo do proctoring (entrevista): gravação contínua cam+mic, bitrate baixo (só
+// revisão humana). Limite generoso para entrevistas longas.
+const videoUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
+});
 
 // ============================================================================
 // POST /s/:submissionToken/start
@@ -564,6 +570,30 @@ router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload
     } catch (err) {
         log.error("SUBMISSION", `calibrate failed: ${err.message}`);
         res.status(500).json({ error: "falha ao verificar a captação", detail: err.message });
+    }
+});
+
+// Vídeo do proctoring da ENTREVISTA: gravação contínua (cam+mic) enviada no fim.
+// Armazena via putAudio (reusa o adaptador de storage) e acumula a chave em
+// submissions.oral_video_key (mesma coluna/parts da prova oral). O proctoring em
+// lote (Fase 4) analisa esse vídeo. Best-effort: falha aqui não quebra a entrevista.
+router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
+    try {
+        if (req.work.proctoring_enabled !== true) return res.status(400).json({ error: "proctoring desligado" });
+        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        const ext = extFromMimetype(req.file.mimetype) || "webm";
+        const key = `proctor-video/${req.submission.submission_token}-${Date.now()}.${ext}`;
+        const r = await putAudio({ key, buffer: req.file.buffer, mimetype: req.file.mimetype });
+        if (!r.stored) {
+            log.error("SUBMISSION", `proctor-video não armazenado submission=${req.submission.submission_token}: ${r.reason}`);
+            return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
+        }
+        await db.appendOralVideoPart(req.submission.id, key);
+        log.info("SUBMISSION", `proctor-video armazenado submission=${req.submission.submission_token} key=${key} bytes=${req.file.buffer.length}`);
+        res.json({ ok: true });
+    } catch (err) {
+        log.error("SUBMISSION", `proctor-video failed: ${err.message}`);
+        res.status(500).json({ error: "falha no upload do vídeo", detail: err.message });
     }
 });
 

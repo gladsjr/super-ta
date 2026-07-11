@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/css/app.css" />
   <script src="/static/js/theme.js"></script>
   <script src="/static/js/interviewSetup.js"></script>
+  <script src="/static/js/gestureControl.js"></script>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
@@ -959,6 +960,7 @@
     // finalizeAndEnterReview ou no caminho de re-entry (entrevista já
     // finalizada em outra aba ou sessão anterior).
     async function enterReviewMode() {
+      stopProctoringAndUpload(); // fim da entrevista: encerra a gravação e envia o vídeo (no-op sem proctoring)
       document.getElementById('chat-area')?.classList.add('hidden');
       document.getElementById('upload-area')?.classList.add('hidden');
       document.getElementById('btn-give-up')?.classList.add('hidden');
@@ -1857,7 +1859,11 @@
           try {
             await window.runProctoringSetup({
               submissionToken, config: setupCfg, container: box,
-              onDone: () => { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); },
+              onDone: () => {
+                box.classList.add('hidden');
+                document.getElementById('chat-area')?.classList.remove('hidden');
+                startProctoring(); // câmera ligada: grava o vídeo + habilita o controle por gesto
+              },
             });
           } catch { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); }
           startIntro();
@@ -2355,6 +2361,71 @@
       setRecordingUI('sending');
       await stopRecordingAndSend();
     });
+
+    // ---- Proctoring por vídeo + controle por gesto (só com proctoring ligado) ----
+    // Camada PARALELA: a gravação de áudio/STT acima NÃO muda. A câmera grava um
+    // vídeo contínuo (revisão humana) e o gesto apenas CLICA os botões existentes.
+    let proctorStream = null, proctorRecorder = null, proctorChunks = [], gestureCtl = null, proctorDone = false;
+    async function startProctoring() {
+      try { proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: true }); }
+      catch { return; } // sem câmera → segue a entrevista normalmente (sem vídeo/gesto)
+      const box = document.createElement('div');
+      box.id = 'proctor-selfview';
+      box.style.cssText = 'position:fixed;right:14px;bottom:14px;width:180px;z-index:50;text-align:center;font-size:12px';
+      box.innerHTML = '<video id="pv-cam" autoplay muted playsinline style="width:100%;border-radius:10px;background:#000;transform:scaleX(-1);display:block;box-shadow:0 2px 10px rgba(0,0,0,.25)"></video>'
+        + '<div id="pv-hint" style="margin-top:4px;color:#556;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:3px 6px">✋ palma=gravar · ✌️=enviar · ✊=cancelar</div>'
+        + '<div style="height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden;margin-top:3px"><div id="pv-bar" style="height:100%;width:0;background:#2563eb;transition:width .05s linear"></div></div>';
+      document.body.appendChild(box);
+      const pv = document.getElementById('pv-cam'); pv.srcObject = proctorStream;
+      // gravação contínua (bitrate baixo — é para revisão humana)
+      try { proctorRecorder = new MediaRecorder(proctorStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
+      catch { try { proctorRecorder = new MediaRecorder(proctorStream); } catch { proctorRecorder = null; } }
+      if (proctorRecorder) {
+        proctorChunks = [];
+        proctorRecorder.ondataavailable = e => { if (e.data && e.data.size) proctorChunks.push(e.data); };
+        proctorRecorder.onstop = uploadProctorVideo;
+        proctorRecorder.start(2000);
+      }
+      // camada de gesto: só CLICA os botões conforme o estado (idle → gravar; gravando → enviar/cancelar)
+      if (window.createGestureControl) {
+        const vis = el => el && !el.classList.contains('hidden') && !el.disabled;
+        gestureCtl = window.createGestureControl({
+          videoEl: pv,
+          onCommand: (kind) => {
+            const rec = document.getElementById('record-btn'), stop = document.getElementById('stop-btn'), send = document.getElementById('stop-send-btn');
+            if (kind === 'start' && vis(rec)) rec.click();
+            else if (kind === 'send' && vis(send)) send.click();
+            else if (kind === 'cancel' && vis(stop)) stop.click();
+          },
+          onFeedback: ({ pose, progress, label }) => {
+            const bar = document.getElementById('pv-bar'); if (bar) bar.style.width = (progress || 0) + '%';
+            const hint = document.getElementById('pv-hint'); if (!hint) return;
+            if (label) hint.textContent = label;
+            else if (pose === 'OPEN_PALM') hint.textContent = '✋ segure para GRAVAR';
+            else if (pose === 'V_SIGN') hint.textContent = '✌️ segure para ENVIAR';
+            else if (pose === 'FIST') hint.textContent = '✊ segure para CANCELAR';
+            else hint.textContent = '✋ palma=gravar · ✌️=enviar · ✊=cancelar';
+          },
+        });
+      }
+    }
+    function uploadProctorVideo() {
+      if (!proctorChunks.length) return;
+      const blob = new Blob(proctorChunks, { type: (proctorRecorder && proctorRecorder.mimeType) || 'video/webm' });
+      proctorChunks = [];
+      const form = new FormData(); form.append('file', blob, 'proctor.webm');
+      fetch(`/s/${encodeURIComponent(submissionToken)}/proctor-video`, { method: 'POST', body: form }).catch(() => {});
+    }
+    function stopProctoringAndUpload() {
+      if (proctorDone || !proctorStream) return; proctorDone = true;
+      try { gestureCtl && gestureCtl.stop(); } catch {}
+      try {
+        if (proctorRecorder && proctorRecorder.state !== 'inactive') proctorRecorder.stop(); // onstop → upload
+        else uploadProctorVideo();
+      } catch {}
+      try { proctorStream.getTracks().forEach(t => t.stop()); } catch {}
+      const box = document.getElementById('proctor-selfview'); if (box) setTimeout(() => box.remove(), 800);
+    }
 
     // ---- Sugestão de resposta do aluno (conversa de TESTE — professor) ----
     // Princípio: SEMPRE passa pelo texto antes de enviar. Texto: "Sugerir resposta"
