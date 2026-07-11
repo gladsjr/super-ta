@@ -118,7 +118,7 @@
       <input type="range" id="minconf" min="0.1" max="0.9" step="0.05" value="0.40"/>
       <label class="chk"><input type="checkbox" id="gate-raise" checked/> Exigir mão levantada</label>
       <label class="chk"><input type="checkbox" id="gate-trans" checked/> Exigir transição (relaxar entre comandos)</label>
-      <label class="chk"><input type="checkbox" id="gate-facing"/> Exigir palma p/ câmera (só COMEÇAR)</label>
+      <label class="chk"><input type="checkbox" id="gate-facing" checked/> Exigir palma p/ câmera (só COMEÇAR)</label>
       <label class="chk"><input type="checkbox" id="facing-inv"/> Inverter sinal da palma (se marcar errado)</label>
       <div style="margin-top:12px"><button id="clear-ev">Limpar eventos</button></div>
     </div>
@@ -136,7 +136,8 @@ const $ = id => document.getElementById(id);
 const video = $('cam'), overlay = $('overlay'), octx = overlay.getContext('2d');
 
 let HOLD_MS = 800, MIN_CONF = 0.40, RAISE_Y = 0.55;
-let GATE_RAISE = true, GATE_TRANS = true, GATE_FACING = false, FACING_INV = false;
+let GATE_RAISE = true, GATE_TRANS = true, GATE_FACING = true, FACING_INV = false;
+const FACING_COS = 0.35; // cosseno mínimo: só conta palma CLARAMENTE virada p/ a câmera (~70°)
 $('hold').oninput = e => { HOLD_MS = +e.target.value; $('hold-val').textContent = HOLD_MS; };
 $('minconf').oninput = e => { MIN_CONF = +e.target.value; $('conf-val').textContent = MIN_CONF.toFixed(2); };
 $('raise').oninput = e => { RAISE_Y = +e.target.value; $('raise-val').textContent = RAISE_Y.toFixed(2); };
@@ -165,15 +166,25 @@ async function initHands() {
 // Landmarks (21): 0 wrist; polegar 1-4; indicador 5-8; médio 9-12; anelar 13-16; mínimo 17-20.
 const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 function fingerExtended(L, tip, pip) { return d(L[tip], L[0]) > d(L[pip], L[0]) * 1.03; }
-// Winding do triângulo (pulso, base do indicador, base do mínimo): o SINAL vira quando a
-// palma gira de frente p/ a câmera para de frente p/ a pessoa. Combinado com a lateralidade.
+// Normal 3D da palma: cross(P_indexMCP - P_wrist, P_pinkyMCP - P_wrist) usando também a
+// PROFUNDIDADE (z) dos landmarks. A normal aponta para fora da palma; corrigida pela mão
+// (esquerda/direita são espelhadas). z do MediaPipe: menor = mais perto da câmera, então
+// palma virada p/ a câmera ⇒ nz < 0. Margem FACING_EPS evita disparo em ângulo ambíguo
+// (ex.: mão de lado para coçar o rosto).
 function palmFacingCamera(L, handedness) {
-  const a = { x: L[5].x - L[0].x, y: L[5].y - L[0].y };
-  const b = { x: L[17].x - L[0].x, y: L[17].y - L[0].y };
-  const nz = a.x * b.y - a.y * b.x;
-  let facing = handedness === 'Right' ? nz > 0 : nz < 0;
-  if (FACING_INV) facing = !facing;
-  return { facing, nz };
+  const v1 = { x: L[5].x - L[0].x,  y: L[5].y - L[0].y,  z: (L[5].z || 0) - (L[0].z || 0) };
+  const v2 = { x: L[17].x - L[0].x, y: L[17].y - L[0].y, z: (L[17].z || 0) - (L[0].z || 0) };
+  // normal 3D completa = v1×v2
+  const nx = v1.y * v2.z - v1.z * v2.y;
+  const ny = v1.z * v2.x - v1.x * v2.z;
+  const nz = v1.x * v2.y - v1.y * v2.x;
+  const mag = Math.hypot(nx, ny, nz) || 1;
+  // cosseno da normal com o eixo da câmera. z do MediaPipe: menor = mais perto ⇒ palma
+  // p/ câmera tem normal apontando p/ -z. score>0 = virada p/ câmera; ~1 = bem de frente.
+  let score = -(nz / mag);
+  if (handedness === 'Left') score = -score;
+  if (FACING_INV) score = -score;
+  return { facing: score > FACING_COS, nz: score };
 }
 function classify(L) {
   const idx = fingerExtended(L, 8, 6);
