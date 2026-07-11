@@ -81,7 +81,7 @@
       <div class="legend">
         <div class="row"><span class="pill start">COMEÇAR</span> <b>🖐 Palma aberta</b> — virada para a câmera</div>
         <div class="row"><span class="pill send">ENVIAR</span> <b>✌️ V (paz)</b> — indicador + médio</div>
-        <div class="row"><span class="pill cancel">CANCELAR</span> <b>👍 Joia</b> — polegar para cima</div>
+        <div class="row"><span class="pill cancel">CANCELAR</span> <b>✊ Mão fechada</b> — punho</div>
       </div>
     </div>
 
@@ -192,16 +192,16 @@ function classify(L) {
   const ring = fingerExtended(L, 16, 14);
   const pink = fingerExtended(L, 20, 18);
   const n = [idx, mid, ring, pink].filter(Boolean).length;
-  const thumbUp = (L[0].y - L[4].y) > 0.15 && (L[5].y - L[4].y) > 0.05;
+  const thumbUp = (L[0].y - L[4].y) > 0.15 && (L[5].y - L[4].y) > 0.05; // só p/ o indicador visual
   let pose = 'NONE';
   if (idx && mid && ring && pink) pose = 'OPEN_PALM';
   else if (idx && mid && !ring && !pink) pose = 'V_SIGN';
-  else if (n === 0 && thumbUp) pose = 'THUMB_UP';
+  else if (n === 0) pose = 'FIST';
   return { pose, n, fingers: [thumbUp, idx, mid, ring, pink] };
 }
 
-const POSE_LABEL = { OPEN_PALM:'Palma aberta', V_SIGN:'V (paz)', THUMB_UP:'Joia 👍', NONE:'—' };
-const ACTION = { OPEN_PALM:{k:'start', t:'COMEÇAR'}, V_SIGN:{k:'send', t:'ENVIAR'}, THUMB_UP:{k:'cancel', t:'CANCELAR'} };
+const POSE_LABEL = { OPEN_PALM:'Palma aberta', V_SIGN:'V (paz)', FIST:'Mão fechada', NONE:'—' };
+const ACTION = { OPEN_PALM:{k:'start', t:'COMEÇAR'}, V_SIGN:{k:'send', t:'ENVIAR'}, FIST:{k:'cancel', t:'CANCELAR'} };
 
 let heldPose = 'NONE', heldSince = 0, canFire = false;
 let lastT = performance.now();
