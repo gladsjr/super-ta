@@ -146,9 +146,13 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
      * @param {object} p.visibleSections - quais seções o professor decidiu EXIBIR ao aluno
      *        { strengths, improvement_areas, study_suggestions } (booleans). As não
      *        exibidas devem ter sua substância dobrada no summary.
+     * @param {string|null} p.proctoringSummary - observações de vídeo (wording neutro,
+     *        já pronto por lib/gradePenalty#renderProctorForStudent); null = nada a dizer
+     * @param {string|null} p.proctoringInstruction - prompt do professor p/ a menção de
+     *        proctoring (works.devolutiva_proctor_prompt); null = usa o default gentil
      * @param {object|null} p.meterCtx  - contexto de billing
      */
-    async derive({ internalReport, guidelines = null, visibleSections = null, meterCtx = null }) {
+    async derive({ internalReport, guidelines = null, visibleSections = null, proctoringSummary = null, proctoringInstruction = null, meterCtx = null }) {
         if (!internalReport) throw new Error("StudentFeedback: missing internalReport");
 
         // Diz ao agente quais blocos de seção serão EXIBIDOS ao leitor. As
@@ -182,9 +186,21 @@ ${guidelines.trim()}
         const hiddenReminder = (visibleSections && vs.improvement_areas === false)
             ? `\n\nLEMBRETE FINAL: "O que pode melhorar" NÃO será exibido como bloco. Logo, os pontos fracos/a melhorar identificados no relatório interno TÊM de aparecer escritos no summary (e a lista improvement_areas vai vazia). Devolutiva só com elogios aqui é erro.`
             : "";
+        // Proctoring por vídeo (opt-in): quando há observações relevantes, o professor
+        // decidiu que elas PODEM entrar na devolutiva — mas sempre de forma SUAVE e não
+        // acusatória (a REGRA INVIOLÁVEL e a varredura FORBIDDEN_PATTERNS continuam valendo).
+        const DEFAULT_PROCTOR_INSTRUCTION = "Mencione essas observações de forma BREVE e GENTIL, como ORIENTAÇÃO para a próxima vez (ex.: manter-se visível e sozinho no vídeo, guardar o celular durante a atividade). No máximo uma ou duas frases integradas ao summary. NÃO afirme trapaça, fraude nem intenção — descreva só o observado.";
+        const proctorBlock = (typeof proctoringSummary === "string" && proctoringSummary.trim())
+            ? `
+
+OBSERVAÇÕES DE PROCTORING POR VÍDEO (integre ao summary conforme a instrução; a REGRA INVIOLÁVEL de não acusar prevalece sobre tudo):
+Observado na gravação: ${proctoringSummary.trim()}.
+Instrução do professor: ${typeof proctoringInstruction === "string" && proctoringInstruction.trim() ? proctoringInstruction.trim() : DEFAULT_PROCTOR_INSTRUCTION}`
+            : "";
+
         const userText = `${guidelinesBlock}RELATÓRIO INTERNO DA AVALIAÇÃO (não mostrar cru — derive a devolutiva conforme o contrato):
 
-${JSON.stringify(internalReport, null, 2)}${hiddenReminder}`;
+${JSON.stringify(internalReport, null, 2)}${proctorBlock}${hiddenReminder}`;
 
         const payload = {
             model: this.model,

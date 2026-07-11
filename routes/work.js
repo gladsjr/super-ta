@@ -230,6 +230,19 @@ router.post("/w/:workToken/proctoring", requireWorkToken, express.json({ limit: 
     }
 });
 
+// Prompt do professor p/ a menção de proctoring na DEVOLUTIVA (linguagem suave).
+// Vazio/nulo = usa o default gentil (menção ligada). Texto = instrução do professor
+// (pode inclusive pedir para NÃO mencionar). Compartilhado oral+entrevista.
+router.post("/w/:workToken/devolutiva-proctor-prompt", requireWorkToken, express.json({ limit: "8kb" }), async (req, res) => {
+    try {
+        const saved = await db.setDevolutivaProctorPrompt(req.work.id, req.body?.prompt);
+        res.json({ ok: true, devolutiva_proctor_prompt: saved });
+    } catch (err) {
+        log.error("WORK", `set devolutiva proctor prompt failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar o prompt", detail: err.message });
+    }
+});
+
 // ---- Frase de calibração de fala da ENTREVISTA (reusa oral_calibration_json) ----
 // Salvar (editada à mão ou gerada) e Gerar a partir do ENUNCIADO do trabalho. Vazio
 // = pré-teste desligado. As rotas orais equivalentes ficam em /oral/calibration.

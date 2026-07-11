@@ -248,6 +248,11 @@
           <button class="btn btn-primary" id="calib-save" type="button">Salvar frase</button>
           <span class="hint" id="calib-msg"></span>
         </div>
+
+        <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
+          <p class="card-sub" data-help="Por padrão, quando a análise do vídeo aponta algo relevante (ausência, celular, outra pessoa, enquadramento), a devolutiva do aluno ganha uma menção BREVE, gentil e NÃO acusatória, como orientação. Escreva aqui para ajustar o tom/ênfase — ou peça explicitamente para NÃO mencionar o proctoring, se preferir excluir.">Menção do proctoring na <strong>devolutiva do aluno</strong> (opcional). Em branco = menção suave padrão.</p>
+          <textarea id="devol-proctor-prompt" class="textarea" rows="2" placeholder="Ex.: comente de forma muito breve e acolhedora; ou 'não mencione o proctoring na devolutiva'."></textarea>
+        </div>
       </div>
     </div>
 
@@ -571,6 +576,7 @@ async function load() {
   applyProctoringStateToUI(j.work.proctoring_enabled === true);
   CALIB = j.work.oral_calibration || null;
   renderCalib();
+  document.getElementById('devol-proctor-prompt').value = j.work.devolutiva_proctor_prompt || '';
   document.getElementById('question-count').value = j.work.question_count ?? 6;
   // A sugestão de identidade é cosmética. Ela NUNCA pode derrubar o load() e
   // impedir a renderização da lista de alunos (que vem logo abaixo) — foi
@@ -1224,6 +1230,7 @@ document.getElementById('save-cenario').onclick = async () => {
       fetch(`/w/${encodeURIComponent(workToken)}/question-count`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_count: count }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/expect-spontaneous`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expect_spontaneous: expect }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/proctoring`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: proctoringOn }) }),
+      fetch(`/w/${encodeURIComponent(workToken)}/devolutiva-proctor-prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: document.getElementById('devol-proctor-prompt').value }) }),
     ]);
     const bad = reqs.find(r => !r.ok);
     if (bad) { const j = await bad.json().catch(() => ({})); msg.textContent = 'Erro ao salvar: ' + (j.error || bad.status); }
