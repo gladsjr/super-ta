@@ -27,6 +27,7 @@ import { deleteConversationLog } from "../lib/conversationLog.js";
 import { classifyAudio } from "../lib/audioIntelligibility.js";
 import { classifyAcoustic, combineTiers } from "../lib/acousticGate.js";
 import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
+import { scoreCalibration } from "../lib/speechCalib.js";
 import {
     introductionAgent,
     audioIntelligibilityAgent,
@@ -500,6 +501,69 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
         const message = err.publicMessage || "failed to start submission";
         log.error("SUBMISSION", `start failed (status=${status}): ${err.message}`);
         res.status(status).json({ error: message });
+    }
+});
+
+// ============================================================================
+// Proctoring por vídeo (opt-in) — setup do aluno ANTES do chat
+// ============================================================================
+// Config para a tela de setup: se o trabalho tem proctoring ligado e a frase de
+// calibração de fala (mesma coluna/lib da prova oral). Sem proctoring, o aluno vai
+// direto para o chat (o frontend decide). Fail-open em tudo.
+const MAX_CALIB_ATTEMPTS = 2;
+const CALIB_ADVICE = "Fale em volume médio, num ritmo tranquilo (sem correr) e sem cortar o fim das palavras — assim a captação transcreve melhor a sua fala.";
+router.get("/s/:submissionToken/setup-config", requireSubmissionToken, async (req, res) => {
+    try {
+        const calib = await db.getOralCalibration(req.work.id);
+        res.set("Cache-Control", "no-store");
+        res.json({
+            proctoring_enabled: req.work.proctoring_enabled === true,
+            calibration: { enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS },
+        });
+    } catch (err) {
+        log.error("SUBMISSION", `setup-config failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao carregar o setup" });
+    }
+});
+
+// Calibração de fala da ENTREVISTA: recebe a repetição gravada, transcreve com o
+// MESMO gpt-4o-transcribe da correção e pontua contra a frase-alvo. NUNCA bloqueia
+// (após MAX_CALIB_ATTEMPTS o aluno segue). Reaproveita lib/speechCalib.js e as
+// colunas submissions.oral_calibration_json. Espelha /oral/calibrate (prova oral).
+router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload.single("file"), async (req, res) => {
+    try {
+        const calib = await db.getOralCalibration(req.work.id);
+        if (!calib) return res.status(409).json({ error: "sem frase de calibração" });
+        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        let attempt = Number(req.body?.attempt);
+        if (!Number.isInteger(attempt) || attempt < 1) attempt = 1;
+        if (attempt > MAX_CALIB_ATTEMPTS) attempt = MAX_CALIB_ATTEMPTS;
+
+        const { text } = await transcribeAudio(openai, STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
+        const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
+
+        const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
+        const transcripts = (Array.isArray(prev?.transcripts) ? prev.transcripts : []).slice(-3);
+        transcripts.push({ attempt, wer: wer == null ? null : Math.round(wer * 1000) / 1000, missed: missedTerms, text });
+        const worst = Math.max(Number(prev?.worst_wer) || 0, wer == null ? 0 : wer);
+        await db.setOralCalibrationResult(req.submission.id, {
+            passed: ok || prev?.passed === true,
+            attempts: attempt,
+            worst_wer: Math.round(worst * 1000) / 1000,
+            missed_terms: missedTerms,
+            target: calib.sentence,
+            transcripts,
+            updated_at: new Date().toISOString(),
+        });
+
+        log.info("SUBMISSION", `calibrate submission=${req.submission.submission_token} attempt=${attempt} ok=${ok} wer=${wer == null ? "—" : wer.toFixed(2)}`);
+        res.json({
+            ok, attempt, attempts_left: Math.max(0, MAX_CALIB_ATTEMPTS - attempt),
+            wer, missed_terms: missedTerms, transcript: text, advice: ok ? null : CALIB_ADVICE,
+        });
+    } catch (err) {
+        log.error("SUBMISSION", `calibrate failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao verificar a captação", detail: err.message });
     }
 });
 
