@@ -34,7 +34,7 @@ FORMATO: uma única frase afirmativa, ~12 a 25 palavras, no espírito de "As que
 key_terms: a lista (2 a 4) dos termos do domínio que você embutiu na frase, EXATAMENTE como aparecem nela (o sistema checa se sobreviveram à transcrição). Prefira termos DISTINTIVOS (jargão, siglas, nomes próprios técnicos), não palavras comuns.
 
 REGRAS:
-- Baseie os termos SOMENTE nas perguntas/respostas fornecidas; não invente jargão que não esteja lá.
+- Baseie os termos SOMENTE no material fornecido (perguntas/respostas OU o enunciado do trabalho em anexo); não invente jargão que não esteja lá.
 - Português do Brasil; a frase será LIDA por uma pessoa — priorize pronunciabilidade.
 - Se houver poucos termos técnicos, use os que houver (mínimo 2). Se não houver nenhum, escolha 2 substantivos centrais do tema.
 
@@ -44,36 +44,49 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
     }
 
     /**
+     * Fonte dos termos: perguntas/respostas (prova oral) OU o enunciado do trabalho em
+     * PDF (entrevista por mensagem — passe openaiFileId). Um dos dois é obrigatório.
      * @param {object} p
-     * @param {Array<{question:string, answer?:string}>} p.items - perguntas (e respostas, se houver) da prova
-     * @param {object|null} p.meterCtx
+     * @param {Array<{question:string, answer?:string}>} [p.items] - perguntas (e respostas) da prova
+     * @param {string|null} [p.openaiFileId] - id do PDF do enunciado já enviado à Files API
+     * @param {object|null} [p.meterCtx]
      * @returns {Promise<{sentence:string, key_terms:string[]}>}
      */
-    async build({ items = [], meterCtx = null }) {
-        const list = (Array.isArray(items) ? items : [])
-            .map((it, i) => {
-                const q = String(it?.question ?? "").trim();
-                const a = String(it?.answer ?? "").trim();
-                if (!q && !a) return null;
-                return `${i + 1}. PERGUNTA: ${q || "(sem enunciado)"}${a ? `\n   RESPOSTA: ${a}` : ""}`;
-            })
-            .filter(Boolean)
-            .join("\n");
-        if (!list) throw new Error("OralCalibration: sem perguntas/respostas para extrair termos");
-
+    async build({ items = [], openaiFileId = null, meterCtx = null }) {
         const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
 
 ${this.systemPromptBody}`;
-        const userText = `PERGUNTAS E RESPOSTAS DA PROVA:
+
+        let input, promptLog;
+        if (openaiFileId) {
+            // Entrevista: os termos vêm do ENUNCIADO do trabalho (PDF em anexo).
+            const userText = `O material da prova é o ENUNCIADO do trabalho, em anexo (PDF). Extraia dele 2 a 4 termos DISTINTIVOS do domínio e escreva a frase de calibração e a lista de termos-chave.`;
+            input = [{ role: "user", content: [{ type: "input_text", text: userText }, { type: "input_file", file_id: openaiFileId }] }];
+            promptLog = `${systemPrompt}\n\n${userText}\n\n[enunciado PDF anexado file_id=${openaiFileId}]`;
+        } else {
+            const list = (Array.isArray(items) ? items : [])
+                .map((it, i) => {
+                    const q = String(it?.question ?? "").trim();
+                    const a = String(it?.answer ?? "").trim();
+                    if (!q && !a) return null;
+                    return `${i + 1}. PERGUNTA: ${q || "(sem enunciado)"}${a ? `\n   RESPOSTA: ${a}` : ""}`;
+                })
+                .filter(Boolean)
+                .join("\n");
+            if (!list) throw new Error("OralCalibration: sem perguntas/respostas nem enunciado para extrair termos");
+            const userText = `PERGUNTAS E RESPOSTAS DA PROVA:
 ${list}
 
 Escreva a frase de calibração e liste os termos-chave embutidos.`;
+            input = [{ role: "user", content: [{ type: "input_text", text: userText }] }];
+            promptLog = systemPrompt + "\n\n" + userText;
+        }
 
         const { sentence, key_terms } = await runStructured({
             client: this.client, model: this.model, label: "AGENT:OralCalibration",
-            instructions: systemPrompt, input: [{ role: "user", content: [{ type: "input_text", text: userText }] }],
+            instructions: systemPrompt, input,
             schema: SCHEMA, schemaName: "oral_calibration", meterCtx,
-            promptLog: systemPrompt + "\n\n" + userText, maxAttempts: 2, extractObject: true,
+            promptLog, maxAttempts: 2, extractObject: true,
             validate: (parsed) => {
                 const s = typeof parsed.sentence === "string" ? parsed.sentence.trim() : "";
                 if (!s) throw new Error("OralCalibration: sentence vazia");
