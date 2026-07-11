@@ -779,6 +779,52 @@ const DELIVERY_LABEL = {
   inconclusive: 'Entrega: inconclusiva',
 };
 
+// Proctoring por vídeo (entrevista com proctoring ligado): alertas + botão de
+// análise + player. Reusa os mesmos limiares dos badges da prova oral.
+function renderProctorAlertsHtml(rep) {
+  const f = rep && rep.flags; if (!f) return '';
+  const pill = t => `<span style="display:inline-block;margin:2px 5px 2px 0;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">${t}</span>`;
+  const lines = [];
+  if (f.absent && f.absent.pct >= 20) lines.push(pill(`ausência ${f.absent.pct}%`));
+  if (f.multiple_people && f.multiple_people.pct >= 20) lines.push(pill(`+1 pessoa ${f.multiple_people.pct}%`));
+  if (f.phone && f.phone.pct >= 25) lines.push(pill(`celular ${f.phone.pct}%`));
+  if (f.hands && f.hands.flag) lines.push(pill('mãos fora do quadro'));
+  if (f.framing && f.framing.flag) lines.push(pill('enquadramento fora do padrão'));
+  return lines.length ? `<div style="margin:6px 0">${lines.join('')}</div>` : '';
+}
+function renderProctoring(p) {
+  if (!p || !p.enabled) return;
+  let card = document.getElementById('proctoring-card');
+  if (!card) {
+    const host = document.getElementById('evaluation');
+    card = document.createElement('section');
+    card.id = 'proctoring-card';
+    card.className = 'card';
+    card.style.cssText = 'margin: var(--sp-4) 0; padding: var(--sp-4)';
+    if (host && host.parentNode) host.parentNode.insertBefore(card, host); else document.body.appendChild(card);
+  }
+  const rep = p.report;
+  const hasVideo = p.video_parts > 0;
+  const alerts = rep ? renderProctorAlertsHtml(rep) : '';
+  const btn = hasVideo ? `<button class="btn btn-sm" id="proctor-run">${rep ? 'Reanalisar vídeo' : 'Analisar vídeo'}</button>` : '<span class="eval-meta">Sem vídeo gravado para esta submissão.</span>';
+  const player = hasVideo ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-video/0"></video>` : '';
+  const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>') : (hasVideo ? '<div class="eval-meta">Vídeo ainda não analisado — clique em “Analisar vídeo”.</div>' : '');
+  card.innerHTML = `<h2 class="card-title">Proctoring por vídeo</h2>
+    <div class="row" style="gap:10px;align-items:center;margin-bottom:8px">${btn}<span class="eval-meta" id="proctor-status"></span></div>
+    ${body}${player}`;
+  const run = document.getElementById('proctor-run');
+  if (run) run.onclick = async () => {
+    run.disabled = true;
+    const st = document.getElementById('proctor-status'); st.textContent = 'Analisando o vídeo (pode levar alguns instantes)…';
+    try {
+      const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor`, { method: 'POST' });
+      const jj = await r.json();
+      if (!r.ok) { st.textContent = 'Falha: ' + (jj.error || r.status); run.disabled = false; return; }
+      renderProctoring({ enabled: true, report: jj.proctor, video_parts: p.video_parts });
+    } catch { st.textContent = 'Falha de comunicação.'; run.disabled = false; }
+  };
+}
+
 function renderEvalList(title, items) {
   const arr = Array.isArray(items) ? items.filter(x => x != null && String(x).trim() !== '') : [];
   if (arr.length === 0) return '';
@@ -1465,6 +1511,8 @@ async function load() {
     ` <span class="badge badge-${statusKey}">${statusLabel(statusKey)}</span>` +
     modeChip +
     personaLine;
+
+  renderProctoring(j.proctoring);
 
   const conv = j.conversation;
   if (!conv) {

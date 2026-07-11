@@ -36,7 +36,8 @@ import {
     studentEvaluationPayload,
     SECTION_KEYS,
 } from "../lib/evaluationOps.js";
-import { streamAudio } from "../lib/audioStore.js";
+import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
+import { analyzeOralVideoParts } from "../lib/proctor.js";
 import {
     PRINCIPAL_REASONING_MODEL,
     TTS_MODEL,
@@ -369,14 +370,78 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
         } catch (err) {
             log.error("WORK", `audio list failed submission=${subToken}: ${err.message}`);
         }
+        // Proctoring por vídeo (entrevista): relatório já analisado (se houver) e se
+        // existe vídeo gravado — a UI mostra os alertas, o botão "Analisar vídeo" e o player.
+        let proctoring = null;
+        if (req.work.proctoring_enabled) {
+            const [detail, parts] = await Promise.all([
+                db.getOralSubmissionDetail(found.id),
+                db.getOralVideoParts(found.id),
+            ]);
+            proctoring = { enabled: true, report: detail?.oral_proctor_json || null, video_parts: parts.length };
+        }
         res.json({
             work: { work_token: req.work.work_token, name: req.work.name },
             submission: { submission_token: subToken, student_label: found.student_label, status: found.status },
             conversation,
+            proctoring,
         });
     } catch (err) {
         log.error("WORK", `conversation lookup failed submission=${subToken}: ${err.message}`);
         res.status(500).json({ error: "failed to read conversation" });
+    }
+});
+
+// Roda o proctoring por vídeo de UMA submissão da entrevista (análise pós-envio, sob
+// demanda do professor). Reusa o mesmo núcleo da prova oral (analyzeOralVideoParts) e
+// grava em submissions.oral_proctor_json. Alimenta a penalidade (lib/gradePenalty) e o painel.
+router.post("/w/:workToken/submissions/:subToken/proctor", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    try {
+        if (req.work.proctoring_enabled !== true) return res.status(400).json({ error: "proctoring desligado neste trabalho" });
+        const parts = await db.getOralVideoParts(req.submission.id);
+        if (!parts.length) return res.status(409).json({ error: "esta submissão não tem vídeo gravado" });
+        const report = await analyzeOralVideoParts(parts);
+        await db.setOralProctor(req.submission.id, report);
+        log.info("WORK", `proctor entrevista sub=${req.submission.submission_token} frames=${report.frames}`);
+        res.json({ ok: true, proctor: report });
+    } catch (err) {
+        log.error("WORK", `proctor (interview) failed: ${err.message}`);
+        res.status(500).json({ error: "falha na análise do vídeo", detail: err.message });
+    }
+});
+
+// Professor assiste ao vídeo do proctoring da entrevista (Range/seek). Espelha a rota
+// da prova oral, mas para o kind entrevista. Auth por token do trabalho + submissão dele.
+router.get("/w/:workToken/submissions/:subToken/proctor-video/:idx?", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    try {
+        const parts = await db.getOralVideoParts(req.submission.id);
+        const idx = req.params.idx != null ? parseInt(req.params.idx, 10) : 0;
+        const key = parts[Number.isFinite(idx) ? idx : 0];
+        if (!key) return res.status(404).json({ error: "sem vídeo para esta submissão" });
+        const ext = key.split(".").pop();
+        const type = (ext === "mp4" || ext === "m4a") ? "video/mp4" : "video/webm";
+        const local = await localFilePath(key);
+        if (local) { res.type(type); return res.sendFile(local); }
+        const buf = await readAllBytes(key);
+        if (!buf) return res.status(404).json({ error: "vídeo indisponível no armazenamento" });
+        const total = buf.length;
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Content-Type", type);
+        const range = req.headers.range;
+        if (!range) { res.setHeader("Content-Length", total); return res.end(buf); }
+        const m = /bytes=(\d*)-(\d*)/.exec(range);
+        let start = m && m[1] ? parseInt(m[1], 10) : 0;
+        let end = m && m[2] ? parseInt(m[2], 10) : total - 1;
+        if (!Number.isFinite(start) || start < 0) start = 0;
+        if (!Number.isFinite(end) || end >= total) end = total - 1;
+        if (start > end) { res.status(416).setHeader("Content-Range", `bytes */${total}`); return res.end(); }
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+        res.setHeader("Content-Length", end - start + 1);
+        return res.end(buf.subarray(start, end + 1));
+    } catch (err) {
+        log.error("WORK", `proctor-video serve failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao servir o vídeo" });
     }
 });
 
