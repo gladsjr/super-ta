@@ -68,7 +68,7 @@
     <div class="panel" style="margin-top:14px">
       <h2>Como testar</h2>
       <div class="status">
-        1) Afaste-se ~1,5 m (tronco+cabeça no quadro). 2) A linha tracejada é o "chão" do gesto: a mão só é lida <b>acima</b> dela — <b>levante a mão</b> perto do rosto para comandar e <b>segure</b> até o anel completar.
+        1) Afaste-se ~1,5 m (tronco+cabeça no quadro). 2) A linha tracejada é o "chão" do gesto: a mão só é lida <b>acima</b> dela — <b>levante a mão</b> perto do rosto, <b>com a palma virada para a câmera</b>, e <b>segure</b> até o anel completar.
         3) Para repetir, <b>abaixe a mão</b> (relaxe) e levante de novo. 4) Rode o <b>teste de falso positivo</b> com as mãos em repouso no colo/mesa.
       </div>
       <div class="banner warn" id="load-msg">Carregando MediaPipe…</div>
@@ -118,7 +118,7 @@
       <input type="range" id="minconf" min="0.1" max="0.9" step="0.05" value="0.40"/>
       <label class="chk"><input type="checkbox" id="gate-raise" checked/> Exigir mão levantada</label>
       <label class="chk"><input type="checkbox" id="gate-trans" checked/> Exigir transição (relaxar entre comandos)</label>
-      <label class="chk"><input type="checkbox" id="gate-facing" checked/> Exigir palma p/ câmera (só COMEÇAR)</label>
+      <label class="chk"><input type="checkbox" id="gate-facing" checked/> Exigir palma p/ câmera (todos os gestos)</label>
       <label class="chk"><input type="checkbox" id="facing-inv"/> Inverter sinal da palma (se marcar errado)</label>
       <div style="margin-top:12px"><button id="clear-ev">Limpar eventos</button></div>
     </div>
@@ -258,7 +258,7 @@ function loop() {
     // aplica guardas
     let ok = rawPose !== 'NONE' && !!ACTION[rawPose];
     if (ok && GATE_RAISE && !raised) ok = false;
-    if (ok && GATE_FACING && rawPose === 'OPEN_PALM' && !pf.facing) ok = false;
+    if (ok && GATE_FACING && !pf.facing) ok = false; // vale p/ TODOS os gestos (palma p/ câmera)
     validPose = ok ? rawPose : 'NONE';
 
     // métricas
