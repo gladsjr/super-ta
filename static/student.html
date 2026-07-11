@@ -7,6 +7,7 @@
   <title>ORATIA — Aluno</title>
   <link rel="stylesheet" href="/static/css/app.css" />
   <script src="/static/js/theme.js"></script>
+  <script src="/static/js/interviewSetup.js"></script>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
@@ -606,6 +607,10 @@
         <button id="btn-instructions" class="btn hidden" type="button">Instruções</button>
         <button id="btn-give-up" class="btn btn-give-up hidden" type="button">Desistir da entrevista</button>
       </div>
+
+      <!-- Setup de proctoring por vídeo (só quando o trabalho tem proctoring ligado);
+           preenchido por /static/js/interviewSetup.js entre o upload e a entrevista. -->
+      <div id="proctor-setup" class="card hidden"></div>
 
       <div id="chat-area">
         <div id="chat-card" class="card">
@@ -1829,15 +1834,35 @@
           if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
           handleTurn(j, wrap);
         };
+        const startIntro = () => {
+          if (interactionMode === 'audio' && j.narrator?.audio_url) {
+            // Modo áudio: mostra primeiro o balão do orientador com checkbox
+            // Ciente. A saudação do entrevistador (texto + URL já em cache no
+            // servidor) só nasce no DOM quando o aluno marca Ciente.
+            appendNarrator(j.narrator.audio_url, releaseInterviewer);
+          } else {
+            releaseInterviewer();
+          }
+        };
 
-        if (interactionMode === 'audio' && j.narrator?.audio_url) {
-          // Modo áudio: mostra primeiro o balão do orientador com checkbox
-          // Ciente. A saudação do entrevistador (texto + URL já em cache no
-          // servidor) só nasce no DOM quando o aluno marca Ciente.
-          appendNarrator(j.narrator.audio_url, releaseInterviewer);
+        // Proctoring por vídeo (opt-in do professor): antes da entrevista, o aluno
+        // passa pelo setup (conexão/ruído/calibração + posição por câmera). Fail-open:
+        // qualquer erro cai direto na entrevista. Só roda se o trabalho tem proctoring.
+        let setupCfg = null;
+        try { setupCfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json(); } catch {}
+        if (setupCfg && setupCfg.proctoring_enabled && window.runProctoringSetup) {
+          const box = document.getElementById('proctor-setup');
+          document.getElementById('chat-area')?.classList.add('hidden');
+          box.classList.remove('hidden');
+          try {
+            await window.runProctoringSetup({
+              submissionToken, config: setupCfg, container: box,
+              onDone: () => { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); },
+            });
+          } catch { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); }
+          startIntro();
         } else {
-          // Modo texto OU áudio sem orientador disponível: comportamento direto.
-          releaseInterviewer();
+          startIntro();
         }
       } catch {
         status.remove();
