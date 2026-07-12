@@ -2419,6 +2419,16 @@
         zonesCtl = window.createCommandZones({
           videoEl: pv, canvasEl: document.getElementById('pv-canvas'), dwellMs: 2000, size: 0.22,
           zones: [{ id: 'consent', corner: 'tl', label: 'CIENTE – COMEÇAR', color: '#16a34a' }],
+          // habilita só o que faz sentido: espelha a visibilidade dos botões reais
+          // (parado → Gravar; gravando → Enviar/Cancelar; vez do entrevistador → nenhuma).
+          enabledFn: (id) => {
+            if (id === 'consent') return !consented;
+            const rec = document.getElementById('record-btn'), stop = document.getElementById('stop-btn'), send = document.getElementById('stop-send-btn');
+            if (id === 'record') return vis(rec);
+            if (id === 'send') return vis(send);
+            if (id === 'cancel') return vis(stop);
+            return true;
+          },
           onFire: (id) => {
             if (!consented && id === 'consent') {
               consented = true;

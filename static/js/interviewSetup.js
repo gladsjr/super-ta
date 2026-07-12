@@ -69,7 +69,7 @@
           <div id="ps-commands" style="display:none">
             <div style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><strong>Comandos (prática)</strong><button id="ps-audio-cmd" type="button" class="ps-btn ghost" style="padding:5px 10px;font-size:13px">🔊 Ouvir instruções</button></div>
             <div class="ps-stage" id="ps-cmd-stage"><video id="ps-cmd-cam" autoplay muted playsinline></video><canvas id="ps-cmd-canvas"></canvas></div>
-            <div id="ps-cmd-guid" class="ps-guid" style="background:#eef4ff;color:#274; font-size:13px">Leve a mão a uma das áreas dos cantos e segure enquanto conta até 3. Nada está sendo gravado agora.</div>
+            <div id="ps-cmd-guid" class="ps-guid" style="background:#eef4ff;color:#274; font-size:15px; line-height:1.4">Leve a mão a uma das áreas dos cantos e segure enquanto conta até 3. Ficam disponíveis só as áreas que fazem sentido a cada momento. Nada está sendo gravado agora.</div>
             <!-- botões IDÊNTICOS aos da entrevista (mesmas classes .record-btn) — modo prática -->
             <div class="input-area-audio" style="margin-top:10px">
               <div class="record-actions">
@@ -264,6 +264,8 @@
               { id: 'send',   corner: 'bl', label: 'ENVIAR',   color: '#2563eb' }, // vê: inf./dir.
               { id: 'start',  corner: 'br', label: 'INICIAR',  color: '#d97706' }, // vê: inf./esq.
             ],
+            // habilita só o que faz sentido: parado → Gravar; gravando → Enviar/Cancelar; Iniciar sempre.
+            enabledFn: (id) => id === 'start' ? true : id === 'record' ? practice === 'idle' : practice === 'recording',
             onFire,
           });
         }

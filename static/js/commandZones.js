@@ -9,7 +9,10 @@
   const centroidOf = L => { let x=0,y=0; for (const p of L){ x+=p.x; y+=p.y; } return { x:x/L.length, y:y/L.length }; };
 
   // { videoEl, canvasEl, zones:[{id,corner:'tl'|'tr'|'bl'|'br',label,color}], dwellMs, size, onFire(id), onActive(id|null) }
-  window.createCommandZones = function ({ videoEl, canvasEl, zones, dwellMs = 2000, size = 0.24, onFire, onActive }) {
+  // enabledFn(id) → bool: chamado por frame; false = área DESABILITADA (esmaecida,
+  // não dispara). Reflete a máquina de estados dos botões (idle: só Gravar; gravando:
+  // só Enviar/Cancelar). Sem enabledFn, todas ficam habilitadas.
+  window.createCommandZones = function ({ videoEl, canvasEl, zones, dwellMs = 2000, size = 0.24, onFire, onActive, enabledFn }) {
     const octx = canvasEl.getContext('2d');
     let handLm = null, running = true, enabled = true, lastT = null, lastHands = [];
     let Z = zones.map(z => ({ ...z, since: 0, canFire: true }));
@@ -57,22 +60,38 @@
       octx.fillStyle = color || '#fff'; octx.fillText(txt, X, cy);
       octx.restore();
     }
-    function draw(hands, centroids) {
+    // rótulo CENTRALIZADO no quadrado, auto-ajustado para caber na largura da caixa.
+    function drawFitLabel(txt, cx, cy, boxW, maxFont, baseline, color) {
+      let f = maxFont;
+      octx.font = `bold ${f}px system-ui`;
+      while (f > 11 && octx.measureText(txt).width > boxW * 0.9) { f -= 1; octx.font = `bold ${f}px system-ui`; }
+      drawText(txt, cx, cy, `bold ${f}px system-ui`, color || '#fff', baseline);
+    }
+    function draw(hands) {
       const W = canvasEl.width, H = canvasEl.height;
       octx.clearRect(0, 0, W, H);
       for (const L of hands) drawHand(L);
       for (const z of Z) {
-        const r = rectOf(z.corner);
+        const r = z._r || rectOf(z.corner);
         const x = r.x0*W, y = r.y0*H, w = (r.x1-r.x0)*W, h = (r.y1-r.y0)*H;
-        const inside = centroids.some(c => inRect(c, r));
+        if (!z._on) { // DESABILITADA: esmaecida, tracejada, sem contagem
+          octx.fillStyle = 'rgba(110,110,110,0.16)'; octx.fillRect(x, y, w, h);
+          octx.strokeStyle = 'rgba(200,200,200,0.45)'; octx.lineWidth = 3; octx.setLineDash([7, 6]); octx.strokeRect(x, y, w, h); octx.setLineDash([]);
+          drawFitLabel(z.label, x + w/2, y + h/2, w, Math.round(W * 0.042), 'middle', 'rgba(255,255,255,0.5)');
+          continue;
+        }
+        const inside = z._inside;
         const progress = Math.min(100, (z.since/dwellMs)*100);
         const count = inside && z.since>0 ? Math.min(3, Math.floor(z.since/(dwellMs/3))+1) : 0;
         octx.fillStyle = hexA(z.color, inside ? 0.32 : 0.18); octx.fillRect(x, y, w, h);
         if (inside && progress>0) { octx.fillStyle = hexA(z.color, 0.55); const fh = h*(progress/100); octx.fillRect(x, y+h-fh, w, fh); }
         octx.strokeStyle = z.color; octx.lineWidth = inside ? 6 : 4; octx.strokeRect(x, y, w, h);
-        // rótulo grande e legível (fonte proporcional ao canvas, com contorno)
-        drawText(z.label, x + w/2, y + Math.max(12, W * 0.03), `bold ${Math.max(17, Math.round(W * 0.05))}px system-ui`, '#fff', 'top');
-        if (count > 0) drawText(String(count), x + w/2, y + h/2 + 4, `bold ${Math.round(W * 0.15)}px system-ui`, '#fff', 'middle');
+        if (count > 0) { // contando: rótulo pequeno no topo + número grande no centro
+          drawFitLabel(z.label, x + w/2, y + Math.max(11, W * 0.026), w, Math.round(W * 0.032), 'top', '#fff');
+          drawText(String(count), x + w/2, y + h/2 + Math.round(W * 0.02), `bold ${Math.round(W * 0.15)}px system-ui`, '#fff', 'middle');
+        } else { // parado: rótulo centralizado no quadrado
+          drawFitLabel(z.label, x + w/2, y + h/2, w, Math.round(W * 0.042), 'middle', '#fff');
+        }
       }
     }
     function loop() {
@@ -88,12 +107,14 @@
       let active = null;
       for (const z of Z) {
         const r = rectOf(z.corner);
-        const inside = centroids.some(c => inRect(c, r));
+        const on = enabledFn ? !!enabledFn(z.id) : true; // máquina de estados por zona
+        const inside = on && centroids.some(c => inRect(c, r));
         if (!inside) { z.canFire = true; z.since = 0; }
         else { z.since += dt; if (enabled && z.since >= dwellMs && z.canFire) { z.canFire = false; z.since = 0; onFire && onFire(z.id); } }
+        z._r = r; z._on = on; z._inside = inside;
         if (inside) active = z.id;
       }
-      draw(hands, centroids);
+      draw(hands);
       onActive && onActive(active);
       requestAnimationFrame(loop);
     }
