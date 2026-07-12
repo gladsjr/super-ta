@@ -231,11 +231,11 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title" data-help="Liga a câmera durante a entrevista, grava o vídeo e o analisa após o envio (presença, celular, outra pessoa, enquadramento). Exige modo áudio: o aluno responde por voz e comanda gravar/enviar/cancelar por GESTO, longe do teclado.">Proctoring por vídeo</h3>
+      <h3 class="card-title" data-help="Liga a câmera durante a entrevista, grava o vídeo e o analisa após o envio (presença, celular, outra pessoa, enquadramento). Exige modo áudio: o aluno responde por voz e comanda gravar/enviar/cancelar por ÁREAS DE COMANDO na tela (mão no canto), longe do teclado.">Fiscalização por vídeo</h3>
       <p class="card-sub">Câmera ligada + análise do vídeo após o envio. Ativar exige o <strong>modo áudio</strong> (respostas por voz).</p>
       <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
         <input type="checkbox" id="proctoring-enabled" style="margin-top: 3px"/>
-        <span class="card-sub" style="margin:0">Ativar <strong>proctoring por vídeo</strong> nesta entrevista.</span>
+        <span class="card-sub" style="margin:0">Ativar <strong>fiscalização por vídeo</strong> nesta entrevista.</span>
       </label>
 
       <div id="calib-block" style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
@@ -1166,11 +1166,14 @@ function applyProctoringStateToUI(on) {
     document.getElementById('mode-audio').checked = true;
     document.getElementById('voice-row').classList.remove('hidden');
   }
+  // Fiscalização por vídeo já garante integridade → "resposta de cabeça" fica desligada.
+  const sp = document.getElementById('expect-spontaneous');
+  if (sp) { sp.disabled = on; if (on) sp.checked = false; }
+  const spm = document.getElementById('spontaneous-msg');
+  if (spm) spm.textContent = on ? 'A fiscalização por vídeo já garante a integridade — a resposta “de cabeça” fica desativada.' : '';
 }
 document.getElementById('proctoring-enabled').addEventListener('change', (e) => {
-  const on = e.target.checked;
-  document.getElementById('calib-block').classList.toggle('hidden', !on);
-  if (on) { document.getElementById('mode-audio').checked = true; document.getElementById('voice-row').classList.remove('hidden'); }
+  applyProctoringStateToUI(e.target.checked);
 });
 document.getElementById('calib-gen').onclick = async () => {
   const msg = document.getElementById('calib-msg'), btn = document.getElementById('calib-gen');
@@ -1204,7 +1207,7 @@ document.getElementById('save-cenario').onclick = async () => {
   let mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
   if (proctoringOn) mode = 'audio'; // proctoring exige áudio
   const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
-  if (mode === 'audio' && !voice) { msg.textContent = proctoringOn ? 'Proctoring exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'; return; }
+  if (mode === 'audio' && !voice) { msg.textContent = proctoringOn ? 'A fiscalização por vídeo exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'; return; }
   const name = document.getElementById('interviewer-name').value.trim();
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
   // Identidade só persiste se foi DEFINIDA pelo professor; o rascunho sugerido

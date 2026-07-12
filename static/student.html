@@ -2391,6 +2391,9 @@
         + '<div id="pv-hint" style="position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-size:12px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.72));text-align:center">Comande <strong>CIENTE – COMEÇAR</strong> (área verde, canto superior direito) para iniciar.</div>';
       const chatArea = document.getElementById('chat-area');
       chatArea.insertBefore(stage, chatArea.firstChild);
+      // o self-view já ocupa o topo; encurta o mínimo do chat p/ os controles não
+      // caírem para fora da tela (o chat ainda cresce/rola conforme as mensagens).
+      try { document.getElementById('chat').style.minHeight = '150px'; } catch {}
       // Conversa de TESTE (professor): as respostas são geradas por controles de
       // teclado/mouse — as áreas de comando por câmera valem para o aluno real.
       if (typeof isTestMode !== 'undefined' && isTestMode) {
@@ -2412,7 +2415,8 @@
       }
 
       // instruções faladas (orientador) + a área "Ciente – Começar"
-      if (narratorUrl) { try { const a = new Audio(narratorUrl); a.play().catch(() => {}); } catch {} }
+      let narratorAudio = null;
+      if (narratorUrl) { try { narratorAudio = new Audio(narratorUrl); narratorAudio.play().catch(() => {}); } catch {} }
       let consented = false;
       const vis = el => el && !el.classList.contains('hidden') && !el.disabled;
       if (window.createCommandZones) {
@@ -2432,6 +2436,7 @@
           onFire: (id) => {
             if (!consented && id === 'consent') {
               consented = true;
+              try { if (narratorAudio) { narratorAudio.pause(); narratorAudio.currentTime = 0; } } catch {} // não fala por cima do entrevistador
               const hint = document.getElementById('pv-hint'); if (hint) hint.innerHTML = 'GRAVAR (↗) · CANCELAR (↖) · ENVIAR (↘)';
               zonesCtl.setZones(REC_ZONES);
               if (typeof onConsent === 'function') onConsent();

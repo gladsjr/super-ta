@@ -62,8 +62,21 @@
     }
     // rótulo CENTRALIZADO no quadrado, auto-ajustado para caber na largura da caixa.
     function drawFitLabel(txt, cx, cy, boxW, maxFont, baseline, color) {
-      let f = maxFont;
-      octx.font = `bold ${f}px system-ui`;
+      octx.font = `bold ${maxFont}px system-ui`;
+      if (octx.measureText(txt).width <= boxW * 0.9) { drawText(txt, cx, cy, `bold ${maxFont}px system-ui`, color || '#fff', baseline); return; }
+      // não coube em 1 linha: quebra em 2 (no travessão ou no espaço) mantendo tamanho legível
+      const sep = txt.includes('–') ? '–' : (txt.includes(' ') ? ' ' : null);
+      if (sep) {
+        const bits = txt.split(sep).map(s => s.trim()).filter(Boolean);
+        const l1 = bits[0], l2 = bits.slice(1).join(' ');
+        let f = maxFont; octx.font = `bold ${f}px system-ui`;
+        while (f > 11 && Math.max(octx.measureText(l1).width, octx.measureText(l2).width) > boxW * 0.92) { f -= 1; octx.font = `bold ${f}px system-ui`; }
+        const lh = f * 1.06;
+        if (baseline === 'top') { drawText(l1, cx, cy, `bold ${f}px system-ui`, color || '#fff', 'top'); drawText(l2, cx, cy + lh, `bold ${f}px system-ui`, color || '#fff', 'top'); }
+        else { drawText(l1, cx, cy - lh/2, `bold ${f}px system-ui`, color || '#fff', 'middle'); drawText(l2, cx, cy + lh/2, `bold ${f}px system-ui`, color || '#fff', 'middle'); }
+        return;
+      }
+      let f = maxFont; octx.font = `bold ${f}px system-ui`; // 1 palavra longa: encolhe
       while (f > 11 && octx.measureText(txt).width > boxW * 0.9) { f -= 1; octx.font = `bold ${f}px system-ui`; }
       drawText(txt, cx, cy, `bold ${f}px system-ui`, color || '#fff', baseline);
     }
@@ -110,7 +123,8 @@
         const on = enabledFn ? !!enabledFn(z.id) : true; // máquina de estados por zona
         const inside = on && centroids.some(c => inRect(c, r));
         if (!inside) { z.canFire = true; z.since = 0; }
-        else { z.since += dt; if (enabled && z.since >= dwellMs && z.canFire) { z.canFire = false; z.since = 0; onFire && onFire(z.id); } }
+        else if (z.canFire) { z.since += dt; if (enabled && z.since >= dwellMs) { z.canFire = false; z.since = 0; onFire && onFire(z.id); } }
+        else { z.since = 0; } // já disparou: fica INERTE até a mão SAIR (evita 2ª contagem)
         z._r = r; z._on = on; z._inside = inside;
         if (inside) active = z.id;
       }

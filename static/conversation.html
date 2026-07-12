@@ -809,7 +809,7 @@ function renderProctoring(p) {
   const btn = hasVideo ? `<button class="btn btn-sm" id="proctor-run">${rep ? 'Reanalisar vídeo' : 'Analisar vídeo'}</button>` : '<span class="eval-meta">Sem vídeo gravado para esta submissão.</span>';
   const player = hasVideo ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-video/0"></video>` : '';
   const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>') : (hasVideo ? '<div class="eval-meta">Vídeo ainda não analisado — clique em “Analisar vídeo”.</div>' : '');
-  card.innerHTML = `<h2 class="card-title">Proctoring por vídeo</h2>
+  card.innerHTML = `<h2 class="card-title">Fiscalização por vídeo</h2>
     <div class="row" style="gap:10px;align-items:center;margin-bottom:8px">${btn}<span class="eval-meta" id="proctor-status"></span></div>
     ${body}${player}`;
   const run = document.getElementById('proctor-run');

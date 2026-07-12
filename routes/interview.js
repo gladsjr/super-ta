@@ -488,7 +488,9 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
 
         // Re-sincroniza a expectativa de espontaneidade com a config atual do
         // trabalho (igual ao modo): vale para o aviso ao aluno no /start.
-        sess.expectSpontaneous = req.work.expect_spontaneous === true;
+        // Fiscalização por vídeo já garante a integridade — não pedir "resposta de cabeça"
+        // (a fala de espontaneidade não faz mais sentido e conflita com a câmera ligada).
+        sess.expectSpontaneous = req.work.expect_spontaneous === true && req.work.proctoring_enabled !== true;
 
         res.json({
             work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
@@ -607,10 +609,15 @@ const setupAudioCache = new Map(); // `${which}|${voice}` -> Buffer
 router.get("/s/:submissionToken/setup-audio", requireSubmissionToken, async (req, res) => {
     try {
         const which = String(req.query.which || "");
-        const text = SETUP_SCRIPTS[which];
+        let text = SETUP_SCRIPTS[which];
         if (!text) return res.status(400).json({ error: "which inválido" });
+        // Conversa de teste (professor): a geração das respostas por IA é por teclado/mouse.
+        const isTest = req.submission && req.submission.is_test === true;
+        if (which === "commands" && isTest) {
+            text += " Atenção: esta é uma conversa de teste. Aqui, a geração das respostas por inteligência artificial é feita pelos controles de teclado e mouse na tela; as áreas de comando por câmera valem para o aluno de verdade.";
+        }
         const voice = req.work.voice || "coral";
-        const key = `${which}|${voice}`;
+        const key = `${which}|${voice}|${isTest ? "t" : "n"}`;
         let buf = setupAudioCache.get(key);
         if (!buf) { buf = await synthesizeSpeech(openai, TTS_MODEL, text, voice); setupAudioCache.set(key, buf); }
         res.type("audio/mpeg").send(buf);
