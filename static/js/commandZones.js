@@ -45,10 +45,16 @@
       octx.fillStyle = '#eaffe9';
       for (const p of L) { octx.beginPath(); octx.arc(p.x*W, p.y*H, 3, 0, 7); octx.fill(); }
     }
-    function drawText(txt, cx, cy, font, color) {
-      octx.save(); octx.translate(canvasEl.width, 0); octx.scale(-1, 1); // desfaz o espelho (CSS scaleX(-1))
-      octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.font = font; octx.fillStyle = color || '#fff';
-      octx.fillText(txt, canvasEl.width - cx, cy);
+    // Texto legível apesar do espelho (CSS scaleX(-1)): desfaz o flip e desenha com
+    // CONTORNO escuro (para ler sobre qualquer fundo do vídeo). Fonte já vem escalada.
+    function drawText(txt, cx, cy, font, color, baseline) {
+      const sz = parseInt((font.match(/(\d+)px/) || [])[1]) || 16;
+      octx.save(); octx.translate(canvasEl.width, 0); octx.scale(-1, 1);
+      octx.textAlign = 'center'; octx.textBaseline = baseline || 'middle'; octx.font = font;
+      octx.lineJoin = 'round'; octx.lineWidth = Math.max(3, sz * 0.18); octx.strokeStyle = 'rgba(0,0,0,.82)';
+      const X = canvasEl.width - cx;
+      octx.strokeText(txt, X, cy);
+      octx.fillStyle = color || '#fff'; octx.fillText(txt, X, cy);
       octx.restore();
     }
     function draw(hands, centroids) {
@@ -64,9 +70,9 @@
         octx.fillStyle = hexA(z.color, inside ? 0.32 : 0.18); octx.fillRect(x, y, w, h);
         if (inside && progress>0) { octx.fillStyle = hexA(z.color, 0.55); const fh = h*(progress/100); octx.fillRect(x, y+h-fh, w, fh); }
         octx.strokeStyle = z.color; octx.lineWidth = inside ? 6 : 4; octx.strokeRect(x, y, w, h);
-        octx.fillStyle = hexA(z.color, 0.92); octx.fillRect(x, y, w, 24); // faixa do rótulo
-        drawText(z.label, x+w/2, y+12, 'bold 14px system-ui', '#fff');
-        if (count>0) drawText(String(count), x+w/2, y+h/2+6, 'bold 54px system-ui', '#fff');
+        // rótulo grande e legível (fonte proporcional ao canvas, com contorno)
+        drawText(z.label, x + w/2, y + Math.max(12, W * 0.03), `bold ${Math.max(17, Math.round(W * 0.05))}px system-ui`, '#fff', 'top');
+        if (count > 0) drawText(String(count), x + w/2, y + h/2 + 4, `bold ${Math.round(W * 0.15)}px system-ui`, '#fff', 'middle');
       }
     }
     function loop() {

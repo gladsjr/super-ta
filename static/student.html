@@ -2385,12 +2385,20 @@
       // self-view GRANDE acima da troca de mensagens (como na prova oral)
       const stage = document.createElement('div');
       stage.id = 'proctor-stage';
-      stage.style.cssText = 'position:relative;width:100%;max-width:380px;aspect-ratio:4/3;margin:0 auto 12px;background:#000;border-radius:12px;overflow:hidden';
+      stage.style.cssText = 'position:relative;width:100%;max-width:300px;aspect-ratio:4/3;margin:0 auto 12px;background:#000;border-radius:12px;overflow:hidden';
       stage.innerHTML = '<video id="pv-cam" autoplay muted playsinline style="position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);object-fit:cover"></video>'
         + '<canvas id="pv-canvas" style="position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)"></canvas>'
         + '<div id="pv-hint" style="position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-size:12px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.72));text-align:center">Comande <strong>CIENTE – COMEÇAR</strong> (área verde, canto superior direito) para iniciar.</div>';
       const chatArea = document.getElementById('chat-area');
       chatArea.insertBefore(stage, chatArea.firstChild);
+      // Conversa de TESTE (professor): as respostas são geradas por controles de
+      // teclado/mouse — as áreas de comando por câmera valem para o aluno real.
+      if (typeof isTestMode !== 'undefined' && isTestMode) {
+        const note = document.createElement('div');
+        note.style.cssText = 'max-width:420px;margin:0 auto 12px;padding:8px 12px;border-radius:8px;background:#fff7e6;border:1px solid #f0d69a;color:#8a6d1a;font-size:13px;text-align:center';
+        note.innerHTML = '🧪 <strong>Conversa de teste:</strong> gere e envie as respostas pelos controles de <strong>teclado/mouse</strong> abaixo. As áreas de comando por câmera valem para o aluno real.';
+        chatArea.insertBefore(note, stage.nextSibling);
+      }
       const pv = document.getElementById('pv-cam'); pv.srcObject = proctorStream;
 
       // gravação contínua (bitrate baixo — é para revisão humana; vídeo sem áudio)
