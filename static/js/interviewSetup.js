@@ -33,8 +33,6 @@
           .ps-guid { text-align:center; font-weight:600; padding:9px 12px; border-radius:8px; margin-top:10px; }
           .ps-btn { cursor:pointer; font:inherit; padding:10px 16px; border-radius:8px; border:none; background:#2563eb; color:#fff; }
           .ps-btn.ghost { background:#eef2f7; color:#243; border:1px solid #cbd3e1; }
-          .ps-prbtn { cursor:pointer; font:inherit; padding:9px 14px; border-radius:8px; border:1px solid #cbd3e1; background:#fff; color:#243; }
-          .ps-prbtn.rec { background:#16a34a; color:#fff; border-color:#16a34a; }
         </style>
         <div id="ps-root" style="max-width:520px;margin:0 auto">
           <audio id="ps-audio" preload="none"></audio>
@@ -72,12 +70,15 @@
             <div style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><strong>Comandos (prática)</strong><button id="ps-audio-cmd" type="button" class="ps-btn ghost" style="padding:5px 10px;font-size:13px">🔊 Ouvir instruções</button></div>
             <div class="ps-stage" id="ps-cmd-stage"><video id="ps-cmd-cam" autoplay muted playsinline></video><canvas id="ps-cmd-canvas"></canvas></div>
             <div id="ps-cmd-guid" class="ps-guid" style="background:#eef4ff;color:#274; font-size:13px">Leve a mão a uma das áreas dos cantos e segure enquanto conta até 3. Nada está sendo gravado agora.</div>
-            <div id="ps-practice" style="display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
-              <button id="pr-record" type="button" class="ps-prbtn">🎙️ Gravar resposta</button>
-              <button id="pr-cancel" type="button" class="ps-prbtn" style="display:none">⏹ Parar</button>
-              <button id="pr-send" type="button" class="ps-prbtn" style="display:none">📨 Parar e enviar</button>
+            <!-- botões IDÊNTICOS aos da entrevista (mesmas classes .record-btn) — modo prática -->
+            <div class="input-area-audio" style="margin-top:10px">
+              <div class="record-actions">
+                <button id="pr-record" class="record-btn" type="button">🎙️ Gravar resposta</button>
+                <button id="pr-cancel" class="record-btn secondary hidden" type="button">Cancelar</button>
+                <button id="pr-send" class="record-btn recording hidden" type="button">Enviar</button>
+              </div>
+              <div id="pr-status" class="record-status">Pratique os comandos. Comande <strong>Iniciar</strong> (canto inferior esquerdo) quando quiser começar a entrevista.</div>
             </div>
-            <div id="pr-status" class="ps-guid" style="background:#f3f4f6;color:#556">Pratique os comandos. Comande <strong>Iniciar</strong> (canto inferior esquerdo) quando quiser começar a entrevista.</div>
           </div>
         </div>`;
 
@@ -238,14 +239,13 @@
         const recBtn = $('pr-record'), cancelBtn = $('pr-cancel'), sendBtn = $('pr-send'), st = $('pr-status');
         const setPractice = (s) => {
           practice = s;
-          recBtn.style.display = s === 'idle' ? '' : 'none';
-          cancelBtn.style.display = s === 'recording' ? '' : 'none';
-          sendBtn.style.display = s === 'recording' ? '' : 'none';
-          recBtn.classList.toggle('rec', false);
+          recBtn.classList.toggle('hidden', s !== 'idle');
+          cancelBtn.classList.toggle('hidden', s !== 'recording');
+          sendBtn.classList.toggle('hidden', s !== 'recording');
         };
-        const doRecord = () => { if (practice === 'idle') { setPractice('recording'); banner(st, '🔴 Gravando (teste)… comande Enviar para mandar, ou Cancelar para descartar.', 'wait'); } };
-        const doSend = () => { if (practice === 'recording') { setPractice('idle'); banner(st, 'Resposta enviada (teste) ✓ — na prova, aqui a IA responderia.', 'ok'); } };
-        const doCancel = () => { if (practice === 'recording') { setPractice('idle'); banner(st, 'Gravação descartada (teste). Pode gravar de novo.', 'wait'); } };
+        const doRecord = () => { if (practice === 'idle') { setPractice('recording'); st.textContent = '🔴 Gravando (teste)… comande Enviar para mandar, ou Cancelar para descartar.'; } };
+        const doSend = () => { if (practice === 'recording') { setPractice('idle'); st.textContent = 'Resposta enviada (teste) ✓ — na prova, aqui a IA responderia. Comande Iniciar para começar.'; } };
+        const doCancel = () => { if (practice === 'recording') { setPractice('idle'); st.textContent = 'Gravação descartada (teste). Pode gravar de novo.'; } };
         recBtn.onclick = doRecord; sendBtn.onclick = doSend; cancelBtn.onclick = doCancel;
         setPractice('idle');
 
@@ -257,7 +257,7 @@
         };
         if (window.createCommandZones) {
           zones = window.createCommandZones({
-            videoEl: vid, canvasEl: canvas, dwellMs: 2000, size: 0.26,
+            videoEl: vid, canvasEl: canvas, dwellMs: 2000, size: 0.18,
             zones: [
               { id: 'record', corner: 'tl', label: 'GRAVAR',   color: '#16a34a' }, // vê: sup./dir.
               { id: 'cancel', corner: 'tr', label: 'CANCELAR', color: '#dc2626' }, // vê: sup./esq.

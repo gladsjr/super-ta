@@ -2409,7 +2409,7 @@
       const vis = el => el && !el.classList.contains('hidden') && !el.disabled;
       if (window.createCommandZones) {
         zonesCtl = window.createCommandZones({
-          videoEl: pv, canvasEl: document.getElementById('pv-canvas'), dwellMs: 2000, size: 0.28,
+          videoEl: pv, canvasEl: document.getElementById('pv-canvas'), dwellMs: 2000, size: 0.22,
           zones: [{ id: 'consent', corner: 'tl', label: 'CIENTE – COMEÇAR', color: '#16a34a' }],
           onFire: (id) => {
             if (!consented && id === 'consent') {
