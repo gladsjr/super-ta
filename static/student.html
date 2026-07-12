@@ -1559,21 +1559,19 @@
       label.className = 'dica-label';
       label.textContent = 'Dica';
       div.appendChild(label);
+      // Compacta: só o título (negrito) + a transcrição, com fonte MAIOR (visível a
+      // ~1,5 m). O corpo explicativo (body) é omitido de propósito.
       if (title) {
         const t = document.createElement('div');
         t.className = 'dica-title';
         t.textContent = title;
+        t.style.fontSize = '18px'; t.style.fontWeight = '700';
         div.appendChild(t);
-      }
-      if (body) {
-        const b = document.createElement('div');
-        b.className = 'dica-body';
-        b.textContent = body;
-        div.appendChild(b);
       }
       if (transcript) {
         const tr = document.createElement('div');
         tr.className = 'dica-transcript';
+        tr.style.fontSize = '16px'; tr.style.lineHeight = '1.5'; tr.style.marginTop = '6px';
         tr.innerHTML = highlightUnclear(transcript, unclear);
         div.appendChild(tr);
       }
@@ -2413,6 +2411,8 @@
       let narratorAudio = null;
       if (narratorUrl) { try { narratorAudio = new Audio(narratorUrl); narratorAudio.play().catch(() => {}); } catch {} }
       let consented = false;
+      let curAudio = null; // áudio do entrevistador tocando por REPETIR (p/ Gravar off / Cancelar parar)
+      const audioPlaying = () => curAudio && !curAudio.paused && !curAudio.ended;
       const vis = el => el && !el.classList.contains('hidden') && !el.disabled;
       if (window.createCommandZones) {
         zonesCtl = window.createCommandZones({
@@ -2423,10 +2423,11 @@
           enabledFn: (id) => {
             if (id === 'consent') return !consented;
             const rec = document.getElementById('record-btn'), stop = document.getElementById('stop-btn'), send = document.getElementById('stop-send-btn');
-            if (id === 'record') return vis(rec);
+            const playing = audioPlaying();
+            if (id === 'record') return vis(rec) && !playing;   // não gravar enquanto ouve o entrevistador
             if (id === 'send') return vis(send);
-            if (id === 'cancel') return vis(stop);
-            if (id === 'repeat') return vis(rec) && !!document.querySelector('#chat audio'); // re-ouvir só na vez do aluno
+            if (id === 'cancel') return playing || vis(stop);   // parar o áudio OU descartar a gravação
+            if (id === 'repeat') return vis(rec) && !playing && !!document.querySelector('#chat audio');
             return true;
           },
           onFire: (id) => {
@@ -2438,10 +2439,16 @@
               if (typeof onConsent === 'function') onConsent();
             } else if (consented) {
               const rec = document.getElementById('record-btn'), stop = document.getElementById('stop-btn'), send = document.getElementById('stop-send-btn');
-              if (id === 'record' && vis(rec)) rec.click();
+              if (id === 'record' && vis(rec) && !audioPlaying()) rec.click();
               else if (id === 'send' && vis(send)) send.click();
-              else if (id === 'cancel' && vis(stop)) stop.click();
-              else if (id === 'repeat') { const a = [...document.querySelectorAll('#chat audio')].pop(); if (a) { try { a.currentTime = 0; a.play(); } catch {} } } // re-ouvir o entrevistador
+              else if (id === 'cancel') {
+                if (audioPlaying()) { try { curAudio.pause(); } catch {} curAudio = null; } // para o áudio do REPETIR
+                else if (vis(stop)) stop.click();                                            // ou descarta a gravação
+              }
+              else if (id === 'repeat') { // re-ouvir o entrevistador (rastreia p/ Gravar off / Cancelar parar)
+                const a = [...document.querySelectorAll('#chat audio')].pop();
+                if (a) { try { a.currentTime = 0; a.play(); curAudio = a; a.addEventListener('ended', () => { if (curAudio === a) curAudio = null; }, { once: true }); } catch {} }
+              }
             }
           },
         });

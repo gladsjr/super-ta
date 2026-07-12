@@ -664,7 +664,9 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
     // fica imutável até o próximo upload.
     sess.interactionMode = req.work.interaction_mode || "text";
     sess.voice = req.work.voice || null;
-    sess.expectSpontaneous = req.work.expect_spontaneous === true;
+    // Fiscalização por vídeo já garante integridade → não pedir "resposta de cabeça"
+    // (o beat de espontaneidade do intro lê sess.expectSpontaneous).
+    sess.expectSpontaneous = req.work.expect_spontaneous === true && req.work.proctoring_enabled !== true;
     // Persona segue, em ordem de prioridade: (1) override do professor, (2)
     // gênero da voz em modo áudio, (3) sorteio balanceado em modo texto.
     // A pré-geração no /start já escolheu uma persona; só re-picka se a config
