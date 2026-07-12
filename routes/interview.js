@@ -597,6 +597,29 @@ router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUp
     }
 });
 
+// Áudios FIXOS de instrução do setup de proctoring (posicionamento / comandos),
+// sintetizados por TTS na voz do trabalho e cacheados em memória (texto fixo).
+const SETUP_SCRIPTS = {
+    position: "Vamos ajustar a sua posição para a prova. Fique de frente para a câmera, a cerca de um metro e meio de distância, de forma que apareçam a sua cabeça e o seu tronco. Deixe as duas mãos à mostra. Você precisa estar sozinho, sem outras pessoas no quadro, e não pode usar o celular durante a prova. Se algo estiver fora do lugar, a tela vai avisar com uma borda vermelha e uma mensagem embaixo. Ajuste a sua posição até ficar tudo certo.",
+    commands: "Agora vamos praticar os comandos. Durante a entrevista, você vai ouvir o entrevistador e depois vai responder gravando mensagens de áudio. Como você fica longe do teclado, os comandos são feitos com a mão, nas quatro áreas nos cantos da tela. Em cima à direita, Gravar. Em cima à esquerda, Cancelar. Embaixo à direita, Enviar. Embaixo à esquerda, Iniciar. Ponha a mão sobre uma área e segure enquanto ela conta até três. Pode testar à vontade agora, porque nada está sendo gravado. Quando você comandar Iniciar, a entrevista vai começar.",
+};
+const setupAudioCache = new Map(); // `${which}|${voice}` -> Buffer
+router.get("/s/:submissionToken/setup-audio", requireSubmissionToken, async (req, res) => {
+    try {
+        const which = String(req.query.which || "");
+        const text = SETUP_SCRIPTS[which];
+        if (!text) return res.status(400).json({ error: "which inválido" });
+        const voice = req.work.voice || "coral";
+        const key = `${which}|${voice}`;
+        let buf = setupAudioCache.get(key);
+        if (!buf) { buf = await synthesizeSpeech(openai, TTS_MODEL, text, voice); setupAudioCache.set(key, buf); }
+        res.type("audio/mpeg").send(buf);
+    } catch (err) {
+        log.error("SUBMISSION", `setup-audio failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar o áudio de instrução" });
+    }
+});
+
 // ============================================================================
 // POST /s/:submissionToken/upload
 // ============================================================================

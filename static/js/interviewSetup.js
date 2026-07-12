@@ -1,93 +1,108 @@
 // Setup de PROCTORING POR VÍDEO da ENTREVISTA por mensagem.
-// EXCLUSIVO da entrevista — não importa nem altera nada da prova oral. Renderiza
-// duas telas num container e chama onDone() quando o aluno clica "Começar
-// entrevista". NUNCA bloqueia: as checagens só orientam o começo (espelha a
-// filosofia do setup da prova oral, mas com código próprio).
+// EXCLUSIVO da entrevista — não importa nem altera nada da prova oral. Três estágios:
+//   1) checagens (fones + conexão + ruído + calibração de fala)
+//   2) POSICIONAMENTO — áudio de instruções + câmera ao vivo; problemas aparecem em
+//      tempo real (contorno vermelho + texto). Só avança quando a posição fica ok.
+//   3) COMANDOS — áudio de instruções + as 4 ÁREAS de comando (canto) + botões que se
+//      comportam como os da entrevista (modo prática, nada é gravado). "Iniciar" conclui.
+// Ao concluir chama onDone(camStream) — a câmera segue para a entrevista (reuso do stream).
+// NUNCA bloqueia (as checagens só orientam). Requer window.createCommandZones (commandZones.js).
 //
-// Uso (na student.html, script clássico):
-//   await window.runProctoringSetup({ submissionToken, config, container, onDone });
-// `config` = payload de GET /s/:t/setup-config: { proctoring_enabled, calibration }.
+// Uso: await window.runProctoringSetup({ submissionToken, config, container, onDone });
 (function () {
   const MP_BASE = '/static/vision';
-  const POSE_IMG_BASE = '/static/oral-poses/';
-  const NOISE_MAX_RMS = 0.035;      // limiar de "barulhento" (mesma sensibilidade da oral)
-  const FACE_MAX = 0.16, FACE_MIN = 0.06; // distância pela largura da face (orelha a orelha)
+  const NOISE_MAX_RMS = 0.035;
+  const FACE_MAX = 0.16, FACE_MIN = 0.06;
   const MAX_ATTEMPTS = 2;
-
+  const POS_OK_HOLD_MS = 1500; // posição precisa ficar ok por este tempo p/ avançar
   const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
   window.runProctoringSetup = function ({ submissionToken, config, container, onDone }) {
     return new Promise((resolve) => {
       const calib = config && config.calibration && config.calibration.enabled ? config.calibration : null;
-      let camStream = null, micStream = null, noiseCtx = null, noiseRAF = 0, posRAF = 0;
-      let poseLm = null, handLm = null, objDet = null, calibRecording = false;
+      let camStream = null, micStream = null, noiseCtx = null, noiseRAF = 0, posRAF = 0, cmdPosTimer = 0;
+      let poseLm = null, handLm = null, objDet = null, calibRecording = false, zones = null, done = false;
 
-      // ---------- markup ----------
       container.innerHTML = `
+        <style>
+          .ps-stage { position:relative; width:100%; max-width:460px; margin:0 auto; aspect-ratio:4/3; background:#000; border-radius:12px; overflow:hidden; border:4px solid transparent; transition:border-color .15s, box-shadow .15s; }
+          .ps-stage.bad { border-color:#dc2626; box-shadow:0 0 0 3px rgba(220,38,38,.35); }
+          .ps-stage video, .ps-stage canvas { position:absolute; inset:0; width:100%; height:100%; }
+          .ps-stage video { transform:scaleX(-1); object-fit:cover; }
+          .ps-stage canvas { transform:scaleX(-1); }
+          .ps-guid { text-align:center; font-weight:600; padding:9px 12px; border-radius:8px; margin-top:10px; }
+          .ps-btn { cursor:pointer; font:inherit; padding:10px 16px; border-radius:8px; border:none; background:#2563eb; color:#fff; }
+          .ps-btn.ghost { background:#eef2f7; color:#243; border:1px solid #cbd3e1; }
+          .ps-prbtn { cursor:pointer; font:inherit; padding:9px 14px; border-radius:8px; border:1px solid #cbd3e1; background:#fff; color:#243; }
+          .ps-prbtn.rec { background:#16a34a; color:#fff; border-color:#16a34a; }
+        </style>
         <div id="ps-root" style="max-width:520px;margin:0 auto">
-          <!-- Tela 1: conexão + ruído + calibração -->
-          <div id="ps-screen1">
+          <audio id="ps-audio" preload="none"></audio>
+
+          <!-- 1) checagens -->
+          <div id="ps-checks">
             <p style="background:#eef4ff;border:1px solid #cfe0f5;border-radius:8px;padding:8px 12px;margin:0 0 12px"><strong>🎧 Use fones de ouvido.</strong></p>
-            <div id="ps-conn" style="text-align:center;font-weight:600;padding:10px;border-radius:8px;background:#fff7e6;border:1px solid #f0d69a;color:#8a6d1a">Testando a conexão…</div>
+            <div id="ps-conn" class="ps-guid" style="background:#fff7e6;color:#8a6d1a">Testando a conexão…</div>
             <div style="margin:14px auto 0">
               <div style="text-align:center;color:#667;font-size:13px;margin-bottom:4px">Nível de ruído do ambiente</div>
               <div style="height:10px;background:#e5e7eb;border-radius:5px;overflow:hidden"><div id="ps-noise-bar" style="height:100%;width:0;background:#2f9e56;transition:width .1s linear"></div></div>
-              <div id="ps-noise-verdict" style="text-align:center;font-weight:600;padding:6px;border-radius:8px;background:#fff7e6;border:1px solid #f0d69a;color:#8a6d1a;margin-top:6px">Medindo o ambiente…</div>
+              <div id="ps-noise-verdict" class="ps-guid" style="background:#fff7e6;color:#8a6d1a">Medindo o ambiente…</div>
             </div>
             ${calib ? `
             <div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:14px">
-              <p style="margin:0 0 4px"><strong>Teste de captação da sua fala.</strong> Vamos conferir se o sistema transcreve bem o que você fala — a sua nota sai da transcrição, então isso ajuda a avaliação a refletir a sua resposta.</p>
-              <p style="margin:0 0 8px;color:#667;font-size:13px">Fale em <strong>volume médio</strong>, num <strong>ritmo tranquilo</strong> (sem correr) e <strong>sem cortar o fim das palavras</strong>. Leia a frase abaixo em voz alta:</p>
+              <p style="margin:0 0 4px"><strong>Teste de captação da sua fala.</strong> A sua nota sai da transcrição, então isso ajuda a avaliação a refletir a sua resposta.</p>
+              <p style="margin:0 0 8px;color:#667;font-size:13px">Fale em <strong>volume médio</strong>, num <strong>ritmo tranquilo</strong> e <strong>sem cortar o fim das palavras</strong>. Leia em voz alta:</p>
               <div style="text-align:center;font-size:18px;line-height:1.5;margin:0 0 10px;padding:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa">${esc(calib.sentence)}</div>
-              <div style="text-align:center"><button id="ps-calib-rec" type="button" style="cursor:pointer;font:inherit;padding:10px 16px;border-radius:8px;border:1px solid #cbd3e1;background:#2563eb;color:#fff">🎤 Gravar e ler a frase</button></div>
-              <div id="ps-calib-status" style="text-align:center;padding:8px;border-radius:8px;background:#f3f4f6;color:#556;margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
+              <div style="text-align:center"><button id="ps-calib-rec" type="button" class="ps-btn">🎤 Gravar e ler a frase</button></div>
+              <div id="ps-calib-status" class="ps-guid" style="background:#f3f4f6;color:#556">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
             </div>` : ''}
-            <div style="margin-top:18px;text-align:center"><button id="ps-to-check" type="button" style="cursor:pointer;font:inherit;padding:10px 18px;border-radius:8px;border:none;background:#2563eb;color:#fff">Continuar</button></div>
+            <div style="margin-top:18px;text-align:center"><button id="ps-to-position" type="button" class="ps-btn">Continuar</button></div>
           </div>
 
-          <!-- Tela 2: posição por câmera -->
-          <div id="ps-screen2" style="display:none">
-            <p style="margin:0 0 8px"><strong>Posição:</strong> tronco à cabeça no quadro; ~1,5 m da câmera; mãos à mostra.</p>
-            <div style="display:flex;gap:10px;max-width:320px;margin:8px auto 10px">
-              <figure style="margin:0;flex:1"><img src="${POSE_IMG_BASE}com-mesa__m__branco.jpg" alt="exemplo com mesa" style="width:100%;border:1px solid #e5e7eb;border-radius:10px;display:block"/><figcaption style="text-align:center;color:#667;font-size:12px;margin-top:3px">Com mesa</figcaption></figure>
-              <figure style="margin:0;flex:1"><img src="${POSE_IMG_BASE}sem-mesa__f__negra.jpg" alt="exemplo sem mesa" style="width:100%;border:1px solid #e5e7eb;border-radius:10px;display:block"/><figcaption style="text-align:center;color:#667;font-size:12px;margin-top:3px">Sem mesa</figcaption></figure>
+          <!-- 2) posicionamento -->
+          <div id="ps-position" style="display:none">
+            <div style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><strong>Posicionamento</strong><button id="ps-audio-pos" type="button" class="ps-btn ghost" style="padding:5px 10px;font-size:13px">🔊 Ouvir instruções</button></div>
+            <div class="ps-stage" id="ps-pos-stage"><video id="ps-pos-cam" autoplay muted playsinline></video></div>
+            <div id="ps-pos-guid" class="ps-guid" style="background:#fff7e6;color:#8a6d1a">Iniciando a câmera…</div>
+            <div id="ps-pos-err" style="color:#c0453b;text-align:center;margin-top:8px"></div>
+          </div>
+
+          <!-- 3) comandos -->
+          <div id="ps-commands" style="display:none">
+            <div style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><strong>Comandos (prática)</strong><button id="ps-audio-cmd" type="button" class="ps-btn ghost" style="padding:5px 10px;font-size:13px">🔊 Ouvir instruções</button></div>
+            <div class="ps-stage" id="ps-cmd-stage"><video id="ps-cmd-cam" autoplay muted playsinline></video><canvas id="ps-cmd-canvas"></canvas></div>
+            <div id="ps-cmd-guid" class="ps-guid" style="background:#eef4ff;color:#274; font-size:13px">Leve a mão a uma das áreas dos cantos e segure enquanto conta até 3. Nada está sendo gravado agora.</div>
+            <div id="ps-practice" style="display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
+              <button id="pr-record" type="button" class="ps-prbtn">🎙️ Gravar resposta</button>
+              <button id="pr-cancel" type="button" class="ps-prbtn" style="display:none">⏹ Parar</button>
+              <button id="pr-send" type="button" class="ps-prbtn" style="display:none">📨 Parar e enviar</button>
             </div>
-            <div style="background:#fffbeb;border:1px solid #f0e0a0;border-radius:8px;padding:8px 12px;margin:0 0 10px;color:#7a5c12"><strong>Importante:</strong> a entrevista não será interrompida por posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
-            <div style="text-align:center;color:#667;font-size:13px;margin-bottom:4px">Sua câmera</div>
-            <video id="ps-cam" autoplay muted playsinline style="width:100%;max-width:300px;border-radius:10px;background:#000;transform:scaleX(-1);display:block;margin:0 auto 10px"></video>
-            <div id="ps-pos-guidance" style="text-align:center;font-weight:600;padding:10px;border-radius:8px;background:#fff7e6;border:1px solid #f0d69a;color:#8a6d1a">Iniciando a câmera…</div>
-            <div style="margin-top:14px;text-align:center"><button id="ps-begin" type="button" style="cursor:pointer;font:inherit;padding:10px 18px;border-radius:8px;border:none;background:#2563eb;color:#fff">Começar entrevista</button></div>
-            <div id="ps-err" style="color:#c0453b;text-align:center;margin-top:8px"></div>
+            <div id="pr-status" class="ps-guid" style="background:#f3f4f6;color:#556">Pratique os comandos. Comande <strong>Iniciar</strong> (canto inferior esquerdo) quando quiser começar a entrevista.</div>
           </div>
         </div>`;
 
       const $ = id => container.querySelector('#' + id);
       const banner = (el, text, kind) => {
         el.textContent = text;
-        const c = kind === 'ok' ? ['#eaf7ef', '#a9dcbd', '#1e6b3b'] : kind === 'bad' ? ['#fdecec', '#f0b4b4', '#8a2020'] : ['#fff7e6', '#f0d69a', '#8a6d1a'];
-        el.style.background = c[0]; el.style.borderColor = c[1]; el.style.color = c[2];
+        const c = kind === 'ok' ? ['#eaf7ef', '#1e6b3b'] : kind === 'bad' ? ['#fdecec', '#8a2020'] : ['#fff7e6', '#8a6d1a'];
+        el.style.background = c[0]; el.style.color = c[1];
       };
+      const playAudio = (which) => { const a = $('ps-audio'); a.src = `/s/${submissionToken}/setup-audio?which=${which}&_=${which}`; a.play().catch(() => {}); };
 
-      // ---------- 1) Conexão (ping simples ao servidor) ----------
+      // ---------- 1) Conexão + ruído + calibração ----------
       (async () => {
         const times = [];
-        for (let i = 0; i < 3; i++) {
-          const t0 = performance.now();
-          try { await fetch(`/s/${submissionToken}/setup-config`, { cache: 'no-store' }); times.push(performance.now() - t0); } catch {}
-        }
+        for (let i = 0; i < 3; i++) { const t0 = performance.now(); try { await fetch(`/s/${submissionToken}/setup-config`, { cache: 'no-store' }); times.push(performance.now() - t0); } catch {} }
         if (times.length) { times.sort((a, b) => a - b); banner($('ps-conn'), `Conexão ok ✓ (~${Math.round(times[Math.floor(times.length / 2)])} ms)`, 'ok'); }
         else banner($('ps-conn'), 'Conexão instável — verifique sua internet.', 'bad');
       })();
-
-      // ---------- 2) Medidor de ruído (Web Audio RMS + EMA) ----------
       (async () => {
         try { micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
         catch { banner($('ps-noise-verdict'), 'Não foi possível medir o ruído (microfone).', 'bad'); return; }
         noiseCtx = new (window.AudioContext || window.webkitAudioContext)();
         const src = noiseCtx.createMediaStreamSource(micStream);
         const an = noiseCtx.createAnalyser(); an.fftSize = 2048; src.connect(an);
-        const buf = new Float32Array(an.fftSize);
-        let ema = null;
+        const buf = new Float32Array(an.fftSize); let ema = null;
         const tick = () => {
           if (calibRecording) { banner($('ps-noise-verdict'), 'Medição de ruído pausada durante a leitura', 'wait'); noiseRAF = requestAnimationFrame(tick); return; }
           an.getFloatTimeDomainData(buf);
@@ -101,8 +116,6 @@
         };
         tick();
       })();
-
-      // ---------- 3) Calibração de fala (opcional) ----------
       let calibRec = null, calibChunks = [], calibAttempt = 0;
       if (calib) {
         const recBtn = $('ps-calib-rec'), stat = $('ps-calib-status');
@@ -118,10 +131,7 @@
             calibRecording = true; calibRec.start();
             recBtn.textContent = '⏹ Parar e verificar';
             banner(stat, '🔴 Gravando… leia a frase e toque em “Parar e verificar”.', 'wait');
-          } else {
-            calibRecording = false; recBtn.disabled = true;
-            try { calibRec.stop(); } catch {}
-          }
+          } else { calibRecording = false; recBtn.disabled = true; try { calibRec.stop(); } catch {} }
         };
         async function submitCalib() {
           calibAttempt++;
@@ -140,18 +150,19 @@
         }
       }
 
-      // ---------- passagem para a tela 2 ----------
-      $('ps-to-check').onclick = () => {
-        if (noiseRAF) cancelAnimationFrame(noiseRAF), noiseRAF = 0;
+      // ---------- passagem checagens → posicionamento ----------
+      $('ps-to-position').onclick = async () => {
+        if (noiseRAF) { cancelAnimationFrame(noiseRAF); noiseRAF = 0; }
         try { noiseCtx && noiseCtx.close(); } catch {}
-        try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} // libera o mic; a câmera abre agora
-        micStream = null;
-        $('ps-screen1').style.display = 'none';
-        $('ps-screen2').style.display = '';
-        startPositionCheck();
+        try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} micStream = null;
+        $('ps-checks').style.display = 'none';
+        $('ps-position').style.display = '';
+        await startPosition();
       };
+      $('ps-audio-pos').onclick = () => playAudio('position');
+      $('ps-audio-cmd').onclick = () => playAudio('commands');
 
-      // ---------- 4) Posição por câmera (MediaPipe) ----------
+      // ---------- MediaPipe (pose + hands + objetos) ----------
       async function initVision() {
         const mp = await import(`${MP_BASE}/vision_bundle.mjs`);
         const fs = await mp.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
@@ -161,9 +172,9 @@
           mp.ObjectDetector.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/efficientdet_lite0.tflite` }, runningMode: 'VIDEO', scoreThreshold: 0.4, categoryAllowlist: ['cell phone', 'person'] }),
         ]);
       }
-      function evalFrame(vid, ts) {
+      // checagem de posição; checkHands=true no estágio de posição (exige 2 mãos), false nos comandos.
+      function evalPosition(vid, ts, checkHands) {
         const pr = poseLm.detectForVideo(vid, ts);
-        const hr = handLm.detectForVideo(vid, ts);
         const od = objDet.detectForVideo(vid, ts);
         const dets = od.detections || [];
         const phone = dets.some(d => (d.categories || []).some(c => c.categoryName === 'cell phone' && c.score >= 0.4));
@@ -181,43 +192,105 @@
         if (!trunk) return { ok: false, guidance: 'Mostre o TRONCO: os dois ombros precisam aparecer (afaste-se se estiver perto demais).' };
         if (faceW > FACE_MAX) return { ok: false, guidance: 'Afaste-se — você está perto demais; preciso ver do tronco até a cabeça.' };
         if (faceW < FACE_MIN) return { ok: false, guidance: 'Aproxime-se um pouco da câmera.' };
-        if ((hr.landmarks || []).length < 2) return { ok: false, guidance: 'Deixe AS DUAS mãos visíveis, como nas fotos de exemplo.' };
+        if (checkHands) { const hr = handLm.detectForVideo(vid, ts); if ((hr.landmarks || []).length < 2) return { ok: false, guidance: 'Deixe AS DUAS mãos visíveis, como nas fotos de exemplo.' }; }
         if (phone) return { ok: false, guidance: 'Guarde o celular para começar.' };
         if (people >= 2) return { ok: false, guidance: 'Você precisa estar sozinho — há outra pessoa no quadro.' };
         return { ok: true, guidance: 'Posição e enquadramento ok!' };
       }
-      async function startPositionCheck() {
-        const vid = $('ps-cam'), g = $('ps-pos-guidance');
+
+      // ---------- 2) Posicionamento ----------
+      async function startPosition() {
+        const vid = $('ps-pos-cam'), stage = $('ps-pos-stage'), g = $('ps-pos-guid');
         try { camStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }); }
-        catch { $('ps-err').textContent = 'Não foi possível abrir a câmera. Você ainda pode começar a entrevista.'; return; }
+        catch { $('ps-pos-err').textContent = 'Não foi possível abrir a câmera. Você ainda pode começar a entrevista.'; setTimeout(goCommands, 1200); return; }
         vid.srcObject = camStream;
-        try { await initVision(); } catch (e) { banner(g, 'Checagem de posição indisponível — pode começar mesmo assim.', 'wait'); return; }
+        playAudio('position');
+        try { await initVision(); } catch (e) { banner(g, 'Checagem de posição indisponível — seguindo.', 'wait'); setTimeout(goCommands, 800); return; }
+        let okSince = 0, advanced = false, last = performance.now();
         const loop = () => {
-          if (!camStream) return;
+          if (advanced || !camStream) return;
+          const now = performance.now(), dt = now - last; last = now;
           if (vid.readyState >= 2) {
-            let r; try { r = evalFrame(vid, performance.now()); } catch { r = null; }
-            if (r) banner(g, r.guidance, r.ok ? 'ok' : 'wait');
+            let r; try { r = evalPosition(vid, now, true); } catch { r = null; }
+            if (r) {
+              banner(g, r.guidance, r.ok ? 'ok' : 'wait');
+              stage.classList.toggle('bad', !r.ok);
+              okSince = r.ok ? okSince + dt : 0;
+              if (okSince >= POS_OK_HOLD_MS) { advanced = true; goCommands(); return; }
+            }
           }
           posRAF = requestAnimationFrame(loop);
         };
         loop();
       }
 
-      // ---------- concluir ----------
-      function cleanup() {
-        if (noiseRAF) cancelAnimationFrame(noiseRAF);
+      // ---------- 3) Comandos (prática) ----------
+      function goCommands() {
+        if (posRAF) { cancelAnimationFrame(posRAF); posRAF = 0; }
+        $('ps-position').style.display = 'none';
+        $('ps-commands').style.display = '';
+        const vid = $('ps-cmd-cam'), canvas = $('ps-cmd-canvas'), stage = $('ps-cmd-stage');
+        if (camStream) vid.srcObject = camStream;
+        playAudio('commands');
+
+        // botões-prática espelhando a entrevista (sem gravar de verdade)
+        let practice = 'idle';
+        const recBtn = $('pr-record'), cancelBtn = $('pr-cancel'), sendBtn = $('pr-send'), st = $('pr-status');
+        const setPractice = (s) => {
+          practice = s;
+          recBtn.style.display = s === 'idle' ? '' : 'none';
+          cancelBtn.style.display = s === 'recording' ? '' : 'none';
+          sendBtn.style.display = s === 'recording' ? '' : 'none';
+          recBtn.classList.toggle('rec', false);
+        };
+        const doRecord = () => { if (practice === 'idle') { setPractice('recording'); banner(st, '🔴 Gravando (teste)… comande Enviar para mandar, ou Cancelar para descartar.', 'wait'); } };
+        const doSend = () => { if (practice === 'recording') { setPractice('idle'); banner(st, 'Resposta enviada (teste) ✓ — na prova, aqui a IA responderia.', 'ok'); } };
+        const doCancel = () => { if (practice === 'recording') { setPractice('idle'); banner(st, 'Gravação descartada (teste). Pode gravar de novo.', 'wait'); } };
+        recBtn.onclick = doRecord; sendBtn.onclick = doSend; cancelBtn.onclick = doCancel;
+        setPractice('idle');
+
+        const onFire = (id) => {
+          if (id === 'record') doRecord();
+          else if (id === 'send') doSend();
+          else if (id === 'cancel') doCancel();
+          else if (id === 'start') finish();
+        };
+        if (window.createCommandZones) {
+          zones = window.createCommandZones({
+            videoEl: vid, canvasEl: canvas, dwellMs: 2000, size: 0.26,
+            zones: [
+              { id: 'record', corner: 'tl', label: 'GRAVAR',   color: '#16a34a' }, // vê: sup./dir.
+              { id: 'cancel', corner: 'tr', label: 'CANCELAR', color: '#dc2626' }, // vê: sup./esq.
+              { id: 'send',   corner: 'bl', label: 'ENVIAR',   color: '#2563eb' }, // vê: inf./dir.
+              { id: 'start',  corner: 'br', label: 'INICIAR',  color: '#d97706' }, // vê: inf./esq.
+            ],
+            onFire,
+          });
+        }
+        // monitor de posição leve (mantém o aviso vermelho), throttled — sem mãos p/ não
+        // rodar 2 detectores de mão ao mesmo tempo que as áreas de comando.
+        if (poseLm && objDet) {
+          cmdPosTimer = setInterval(() => {
+            if (vid.readyState < 2) return;
+            let r; try { r = evalPosition(vid, performance.now(), false); } catch { r = null; }
+            if (r) stage.classList.toggle('bad', !r.ok);
+          }, 300);
+        }
+      }
+
+      function finish() {
+        if (done) return; done = true;
         if (posRAF) cancelAnimationFrame(posRAF);
+        if (noiseRAF) cancelAnimationFrame(noiseRAF);
+        if (cmdPosTimer) clearInterval(cmdPosTimer);
+        try { zones && zones.stop(); } catch {}
         try { noiseCtx && noiseCtx.close(); } catch {}
         try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {}
-        try { camStream && camStream.getTracks().forEach(t => t.stop()); } catch {}
-        micStream = camStream = null;
-      }
-      $('ps-begin').onclick = () => {
-        cleanup();
         container.innerHTML = '';
-        if (typeof onDone === 'function') onDone();
-        resolve();
-      };
+        const stream = camStream; camStream = null; // ENTREGA a câmera para a entrevista
+        if (typeof onDone === 'function') onDone(stream);
+        resolve(stream);
+      }
     });
   };
 })();
