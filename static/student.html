@@ -1802,6 +1802,15 @@
         const ok = await ensureConsent(interactionMode);
         if (!ok) return;
       }
+
+      // Fiscalização por vídeo — reentrada de entrevista EM ANDAMENTO: religa câmera +
+      // gravação + áreas de comando (sem refazer o setup nem o consentimento). Fail-open.
+      if (phase === 'intro' || phase === 'interviewing') {
+        try {
+          const cfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json();
+          if (cfg && cfg.proctoring_enabled) startProctoring(null, null, null, true);
+        } catch {}
+      }
     }
 
     document.getElementById('sendFile').onclick = async () => {
@@ -2375,7 +2384,10 @@
       { id: 'send',   corner: 'bl', label: 'ENVIAR',   color: '#2563eb' }, // vê: inf./dir.
       { id: 'repeat', corner: 'br', label: 'REPETIR',  color: '#0891b2' }, // vê: inf./esq.
     ];
-    async function startProctoring(camStream, onConsent, narratorUrl) {
+    // resume=true: reentrada de entrevista em andamento — sem setup nem consentimento,
+    // já entra com as áreas de gravação (Gravar/Enviar/Cancelar/Repetir).
+    async function startProctoring(camStream, onConsent, narratorUrl, resume) {
+      if (proctorStream) return; // já ligado nesta sessão
       proctorStream = camStream || null;
       if (!proctorStream) { // setup não entregou a câmera → tenta abrir; senão, segue sem proctoring
         try { proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }); }
@@ -2396,6 +2408,7 @@
       // compacta a faixa dos botões (Instruções/Desistir) p/ recuperar espaço no topo.
       try { const ia = document.getElementById('interview-actions'); if (ia) { ia.style.margin = '0'; ia.style.marginTop = '-8px'; } } catch {}
       const pv = document.getElementById('pv-cam'); pv.srcObject = proctorStream;
+      if (resume) { const h = document.getElementById('pv-hint'); if (h) h.innerHTML = 'GRAVAR (↗) · CANCELAR (↖) · ENVIAR (↘) · REPETIR (↙)'; }
 
       // gravação contínua (bitrate baixo — é para revisão humana; vídeo sem áudio)
       try { proctorRecorder = new MediaRecorder(proctorStream, { videoBitsPerSecond: 400000 }); }
@@ -2410,14 +2423,14 @@
       // instruções faladas (orientador) + a área "Ciente – Começar"
       let narratorAudio = null;
       if (narratorUrl) { try { narratorAudio = new Audio(narratorUrl); narratorAudio.play().catch(() => {}); } catch {} }
-      let consented = false;
+      let consented = !!resume; // reentrada já entrou; não pede consentimento de novo
       let curAudio = null; // áudio do entrevistador tocando por REPETIR (p/ Gravar off / Cancelar parar)
       const audioPlaying = () => curAudio && !curAudio.paused && !curAudio.ended;
       const vis = el => el && !el.classList.contains('hidden') && !el.disabled;
       if (window.createCommandZones) {
         zonesCtl = window.createCommandZones({
           videoEl: pv, canvasEl: document.getElementById('pv-canvas'), dwellMs: 2000, size: 0.22,
-          zones: [{ id: 'consent', corner: 'tl', label: 'CIENTE – COMEÇAR', color: '#16a34a' }],
+          zones: resume ? REC_ZONES : [{ id: 'consent', corner: 'tl', label: 'CIENTE – COMEÇAR', color: '#16a34a' }],
           // habilita só o que faz sentido: espelha a visibilidade dos botões reais
           // (parado → Gravar; gravando → Enviar/Cancelar; vez do entrevistador → nenhuma).
           enabledFn: (id) => {
