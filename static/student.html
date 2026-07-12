@@ -1818,74 +1818,65 @@
       if (!f) return alert('Escolha um arquivo.');
       const sendBtn = document.getElementById('sendFile');
       sendBtn.disabled = true;
-      const status = appendStatus('Enviando arquivo...');
+      const status = appendStatus('Enviando o trabalho…');
       const form = new FormData();
       form.append('file', f);
-      status.textContent = 'Analisando trabalho...';
 
-      try {
-        const r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form }));
-        const j = await r.json();
+      // O upload (que roda a ANÁLISE do trabalho) segue EM PARALELO — o aluno já
+      // avança para o setup de fiscalização em vez de esperar a análise. Ao concluir
+      // o setup, o resultado do upload provavelmente já está pronto.
+      const uploadPromise = sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form }))
+        .then(r => r.json())
+        .catch(() => ({ __neterr: true }));
+
+      // Trata o resultado do upload e devolve releaseInterviewer() (ou null em erro).
+      const finishUpload = (j) => {
         document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
         status.remove();
-        if (j.error) { appendStatus(j.message || j.error, true); return; }
-        if (!j.assistant) return;
-
+        sendBtn.disabled = false;
+        if (j.__neterr) { appendStatus('Não foi possível enviar o trabalho. Verifique sua conexão e tente novamente.', true); return null; }
+        if (j.error) { appendStatus(j.message || j.error, true); return null; }
+        if (!j.assistant) return null;
         document.getElementById('upload-area').classList.add('hidden');
         phase = 'intro';
         syncTopbarActions();
-
-        // Função que renderiza o balão do entrevistador + dispara o turno.
-        // Em modo áudio, fica gated atrás do checkbox Ciente do orientador
-        // (releaseInterviewer é o callback). Em modo texto, executa direto.
-        const releaseInterviewer = () => {
+        return () => {
           const wrap = appendTA(j.assistant, j.audio_url);
           if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
           handleTurn(j, wrap);
         };
-        const startIntro = () => {
-          if (interactionMode === 'audio' && j.narrator?.audio_url) {
-            // Modo áudio: mostra primeiro o balão do orientador com checkbox
-            // Ciente. A saudação do entrevistador (texto + URL já em cache no
-            // servidor) só nasce no DOM quando o aluno marca Ciente.
-            appendNarrator(j.narrator.audio_url, releaseInterviewer);
-          } else {
-            releaseInterviewer();
-          }
-        };
+      };
 
-        // Proctoring por vídeo (opt-in do professor): antes da entrevista, o aluno
-        // passa pelo setup (conexão/ruído/calibração + posição por câmera). Fail-open:
-        // qualquer erro cai direto na entrevista. Só roda se o trabalho tem proctoring.
-        let setupCfg = null;
-        try { setupCfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json(); } catch {}
-        if (setupCfg && setupCfg.proctoring_enabled && window.runProctoringSetup) {
-          const box = document.getElementById('proctor-setup');
-          document.getElementById('chat-area')?.classList.add('hidden');
-          box.classList.remove('hidden');
-          let started = false;
-          try {
-            await window.runProctoringSetup({
-              submissionToken, config: setupCfg, container: box,
-              // onDone recebe a CÂMERA aberta no setup (reuso do stream). A área de comando
-              // "Ciente – Começar" (canto sup./dir.) solta o entrevistador — sem teclado.
-              onDone: (camStream) => {
-                box.classList.add('hidden');
-                document.getElementById('chat-area')?.classList.remove('hidden');
-                started = true;
-                startProctoring(camStream, releaseInterviewer, j.narrator?.audio_url);
-              },
-            });
-          } catch { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); }
-          if (!started) startIntro(); // fail-open: setup abortou → entrevista normal
-        } else {
-          startIntro();
-        }
-      } catch {
-        status.remove();
-        appendStatus('Não foi possível enviar o trabalho. Verifique sua conexão e tente novamente.', true);
-      } finally {
-        sendBtn.disabled = false;
+      // setup-config (rápido) decide se há fiscalização por vídeo.
+      let setupCfg = null;
+      try { setupCfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json(); } catch {}
+
+      if (setupCfg && setupCfg.proctoring_enabled && window.runProctoringSetup) {
+        // Mostra o SETUP já, enquanto o upload roda em paralelo.
+        const box = document.getElementById('proctor-setup');
+        document.getElementById('upload-area').classList.add('hidden');
+        document.getElementById('chat-area')?.classList.add('hidden');
+        box.classList.remove('hidden');
+        let camStream = null, setupOk = false;
+        try {
+          await window.runProctoringSetup({
+            submissionToken, config: setupCfg, container: box,
+            onDone: (cs) => { camStream = cs; setupOk = true; box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); },
+          });
+        } catch { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); }
+        const j = await uploadPromise; // aluno terminou o setup → já espera o resultado
+        const release = finishUpload(j);
+        if (!release) { if (camStream) try { camStream.getTracks().forEach(t => t.stop()); } catch {} return; }
+        if (setupOk) startProctoring(camStream, release, j.narrator?.audio_url); // "Ciente – Começar" solta o entrevistador
+        else if (interactionMode === 'audio' && j.narrator?.audio_url) appendNarrator(j.narrator.audio_url, release);
+        else release();
+      } else {
+        // Sem fiscalização: espera o upload e começa (comportamento normal).
+        const j = await uploadPromise;
+        const release = finishUpload(j);
+        if (!release) return;
+        if (interactionMode === 'audio' && j.narrator?.audio_url) appendNarrator(j.narrator.audio_url, release);
+        else release();
       }
     };
 
@@ -2406,7 +2397,8 @@
       // ficarem sempre visíveis (o chat rola internamente e vai ao fim a cada msg).
       try { const ch = document.getElementById('chat'); ch.style.minHeight = '110px'; ch.style.maxHeight = '30vh'; } catch {}
       // compacta a faixa dos botões (Instruções/Desistir) p/ recuperar espaço no topo.
-      try { const ia = document.getElementById('interview-actions'); if (ia) { ia.style.margin = '0'; ia.style.marginTop = '-8px'; } } catch {}
+      try { document.getElementById('meta')?.style.setProperty('display', 'none'); } catch {} // some o subtítulo (libera espaço)
+      try { const ia = document.getElementById('interview-actions'); if (ia) ia.style.margin = '0'; } catch {}
       const pv = document.getElementById('pv-cam'); pv.srcObject = proctorStream;
       if (resume) { const h = document.getElementById('pv-hint'); if (h) h.innerHTML = 'GRAVAR (↗) · CANCELAR (↖) · ENVIAR (↘) · REPETIR (↙)'; }
 
