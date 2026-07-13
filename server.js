@@ -36,6 +36,7 @@ import scenarioCockpitRoutes from "./routes/scenarioCockpit.js";
 import oralExamRoutes from "./routes/oralExam.js";
 import { attachOralRelay } from "./lib/oralRealtime.js";
 import diagRoutes from "./routes/diag.js";
+import benchmarkRoutes from "./routes/benchmark.js";
 import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
@@ -95,6 +96,7 @@ app.use(scenarioRoutes); // /scenarios/api/* (gateado acima). O dev server scena
 app.use(scenarioStudentRoutes); // /s/:submissionToken/scenario/* — fluxo do aluno (auth por token de submissão).
 app.use(oralExamRoutes); // /w/:t/oral/* e /s/:t/oral/* — prova oral (Realtime)
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
+app.use(benchmarkRoutes); // /api/benchmark/* — benchmark interno (requireAdmin por rota)
 
 const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {

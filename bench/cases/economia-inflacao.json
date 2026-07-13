@@ -1,0 +1,13 @@
+{
+  "id": "eco-inflacao-juros",
+  "large_area": "Ciencias Sociais Aplicadas",
+  "area": "Economia",
+  "course_level": "Graduacao",
+  "persona": { "key": "jornalista-economia", "description": "Jornalista de economia rigorosa, curiosa e acessivel. Busca mecanismos causais e implicacoes para o publico, sem pedir demonstracoes formais." },
+  "assignment": "Analisar a desinflacao recente e discutir o papel da politica monetaria e de choques de oferta.",
+  "student_work": "O trabalho atribui toda a queda da inflacao ao aumento dos juros. No anexo, alimentos e energia respondem por mais da metade da desaceleracao, enquanto servicos permanecem elevados. A conclusao recomenda corte imediato e forte dos juros.",
+  "turns": [
+    { "id": "t1", "history": [], "student_message": "Nos mostramos que os juros altos derrubaram a inflacao.", "canonical_response": "Se alimentos e energia explicam mais da metade da desaceleracao, como voces separaram o efeito dos juros do alivio desses choques de oferta?", "expected_intents": ["questionar atribuicao causal total", "separar demanda de oferta"], "known_contradictions": ["texto atribui tudo aos juros, dados mostram forte papel de oferta"] },
+    { "id": "t2", "history": [{"role":"interviewer","text":"E a inflacao de servicos?"}], "student_message": "Ela ainda esta alta, mas deve cair junto quando os juros forem reduzidos.", "canonical_response": "Qual e o mecanismo para servicos cairem depois de um corte forte, se esse corte tende a estimular justamente a demanda domestica?", "expected_intents": ["testar coerencia do mecanismo", "explorar risco da recomendacao"], "known_contradictions": ["corte forte pode estimular demanda com servicos ainda altos"] }
+  ]
+}

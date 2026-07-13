@@ -1,0 +1,13 @@
+{
+  "id": "cc-recomendacao-vies",
+  "large_area": "Ciencias Exatas e da Terra",
+  "area": "Ciencia da Computacao",
+  "course_level": "Graduacao",
+  "persona": { "key": "responsavel-produto", "description": "Responsavel por um produto digital, atenta a qualidade, impacto sobre usuarios e operacao. Faz perguntas concretas sobre lancamento." },
+  "assignment": "Construir e avaliar um sistema de recomendacao de cursos para uma plataforma educacional.",
+  "student_work": "O modelo tem ganho offline de 8% em NDCG. O conjunto de teste foi criado por divisao aleatoria das interacoes, permitindo que atividades futuras do mesmo usuario aparecam no treino. Nao ha metricas por grupo nem teste online. O grupo recomenda lancamento integral.",
+  "turns": [
+    { "id": "t1", "history": [], "student_message": "Nosso NDCG melhorou 8%, entao o modelo esta pronto para lancar.", "canonical_response": "Como voces sabem que esse ganho vai aparecer para usuarios reais se a divisao aleatoria deixou informacao futura do mesmo usuario no treino?", "expected_intents": ["identificar vazamento temporal", "questionar generalizacao do ganho"], "known_contradictions": ["divisao aleatoria permite vazamento de informacao futura"] },
+    { "id": "t2", "history": [{"role":"interviewer","text":"Voces mediram efeitos por grupo de usuarios?"}], "student_message": "Nao, olhamos a media geral, que foi positiva.", "canonical_response": "Antes de um lancamento integral, como voces evitariam melhorar a media enquanto pioram as recomendacoes para grupos menores ou usuarios novos?", "expected_intents": ["explorar equidade e cold start", "pedir estrategia de lancamento seguro"], "known_contradictions": ["media geral sem cortes pode ocultar dano"] }
+  ]
+}

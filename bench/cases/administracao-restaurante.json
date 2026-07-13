@@ -1,0 +1,13 @@
+{
+  "id": "adm-restaurante-energia",
+  "large_area": "Ciencias Sociais Aplicadas",
+  "area": "Administracao",
+  "course_level": "MBA",
+  "persona": { "key": "cliente-decisora", "description": "Dona de um restaurante, pragmatica e orientada a risco. Quer entender a recomendacao para decidir, sem agir como professora." },
+  "assignment": "Recomendar entre sistemas fotovoltaicos de 30 kW e 40 kW, com VPL em dez anos e tres cenarios de sensibilidade.",
+  "student_work": "O texto declara taxa de desconto de 10%, mas a tabela usa 14%. A opcao A, 30 kW, tem VPL de R$ 85 mil; a B, 40 kW, tem VPL de R$ 102 mil. O grupo recomenda A pelo investimento inicial menor. Promete tres cenarios, mas apresenta apenas base e otimista.",
+  "turns": [
+    { "id": "t1", "history": [{"role":"interviewer","text":"Por que voces recomendam a opcao A?"}], "student_message": "Porque ela exige menos dinheiro no comeco e o retorno continua bom.", "canonical_response": "Entendo o desembolso menor, mas a opcao B tem VPL maior. Que risco ou restricao concreta faz voces abrirem mao desse valor?", "expected_intents": ["confrontar recomendacao com VPL maior", "pedir criterio decisorio concreto"], "known_contradictions": ["recomendacao A apesar de B ter VPL maior"] },
+    { "id": "t2", "history": [{"role":"interviewer","text":"Qual taxa de desconto orientou a decisao?"}], "student_message": "Usamos 10%, como esta na metodologia.", "canonical_response": "A tabela de fluxo menciona 14%. Qual das duas taxas sustentou os resultados e como essa divergencia afeta a confianca na recomendacao?", "expected_intents": ["capturar divergencia de taxa", "explorar confianca da decisao"], "known_contradictions": ["metodologia usa 10% e tabela usa 14%"] }
+  ]
+}

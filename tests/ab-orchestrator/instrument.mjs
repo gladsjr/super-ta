@@ -51,7 +51,7 @@ function percentile(sortedAsc, p) {
 // são do conjunto todo.
 export function summarizeSink(sink) {
     let totalCost = 0;
-    let inTok = 0, cachedTok = 0, outTok = 0;
+    let inTok = 0, cachedTok = 0, cacheWriteTok = 0, outTok = 0;
     const latencies = [];
     for (const rec of sink) {
         latencies.push(rec.latencyMs);
@@ -60,6 +60,7 @@ export function summarizeSink(sink) {
         totalCost += c.cost_usd;
         inTok += c.input_tokens;
         cachedTok += c.cached_tokens;
+        cacheWriteTok += c.cache_write_tokens ?? 0;
         outTok += c.output_tokens;
     }
     const sorted = [...latencies].sort((a, b) => a - b);
@@ -69,6 +70,7 @@ export function summarizeSink(sink) {
         total_cost_usd: totalCost,
         input_tokens: inTok,
         cached_tokens: cachedTok,
+        cache_write_tokens: cacheWriteTok,
         output_tokens: outTok,
         latency_ms: {
             mean: mean != null ? Math.round(mean) : null,

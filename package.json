@@ -11,6 +11,9 @@
     "analyze:authorship": "node scripts/detect-ai-answers.mjs",
     "test:audio": "node tests/audio-e2e/run.mjs",
     "test:ab-orchestrator": "node -r dotenv/config tests/ab-orchestrator/run.mjs",
+    "bench": "node scripts/bench-run.mjs",
+    "bench:validate": "node scripts/bench-run.mjs --dry-run",
+    "test:benchmark": "node --test tests/benchmark.test.mjs",
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"
   },

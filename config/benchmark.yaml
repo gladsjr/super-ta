@@ -1,0 +1,39 @@
+benchmark: ORATIA-Bench
+setup_version: S0
+context_version: C0
+jury_version: J0
+mode: frozen-turn
+random_seed: 20260711
+rag:
+  strategy: lexical-v1
+  chunk_chars: 1800
+  top_k: 8
+prompts:
+  candidate: >-
+    Escolha uma pergunta ou follow-up que melhor revele dominio, coerencia e
+    capacidade de decisao do aluno. Mantenha um unico foco e respeite a persona.
+  judge: >-
+    Compare as respostas pela utilidade pedagogica da proxima intervencao, sem
+    favorecer a resposta de referencia apenas por ela ser a referencia.
+cases_dir: bench/cases
+case_ids: []
+candidates:
+  - openai:gpt-5.4:high
+  - openai:gpt-5.6-luna:medium
+judges:
+  - openai:gpt-5.6-sol:high
+storage:
+  runs_dir: bench/runs
+limits:
+  max_cost_usd: 50
+  max_concurrency: 1
+  timeout_ms: 90000
+  retries: 2
+consensus:
+  disagreement_threshold: 0.65
+  deliberation_enabled: false
+providers:
+  anthropic:
+    pricing: {}
+  gemini:
+    pricing: {}

@@ -28,7 +28,7 @@ export class SuperOrchestratorAgent {
 
     constructor(openaiClient, model, reasoningEffort = null) {
         if (!model) throw new Error("Missing model for SuperOrchestratorAgent");
-        if (reasoningEffort != null && !["minimal", "low", "medium", "high"].includes(reasoningEffort)) {
+        if (reasoningEffort != null && !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(reasoningEffort)) {
             throw new Error(`Invalid reasoningEffort for SuperOrchestratorAgent: ${reasoningEffort}`);
         }
         this.client = openaiClient;

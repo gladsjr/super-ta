@@ -21,9 +21,11 @@
 default_work_budget_usd: 4.00
 
 # ---------------------------------------------------------------------------
-# Modelos de texto (Responses API). Custo = input_tokens × input_per_mtok
-# + cached_tokens × input_cached_per_mtok + output_tokens × output_per_mtok,
-# tudo dividido por 1.000.000.
+# Modelos de texto (Responses API). Custo = input_tokens não-cacheados ×
+# input_per_mtok + cached_tokens × input_cached_per_mtok + cache_write_tokens ×
+# cache_write_per_mtok + output_tokens × output_per_mtok, tudo dividido por
+# 1.000.000. cache_write_per_mtok é usado só por modelos que cobram escrita em
+# cache (família GPT-5.6+); ausente = 0.
 #
 # Observação sobre cached: a documentação oficial costuma definir cache hit
 # como ~10% do preço de input padrão (cache hit barateia 90%).
@@ -36,6 +38,26 @@ default_work_budget_usd: 4.00
 # tabela da OpenAI ao trocar de modelo.
 # ---------------------------------------------------------------------------
 text:
+  gpt-5.6-sol:
+    input_per_mtok: 5.00
+    input_cached_per_mtok: 0.50
+    cache_write_per_mtok: 6.25
+    output_per_mtok: 30.00
+  gpt-5.6:
+    input_per_mtok: 5.00
+    input_cached_per_mtok: 0.50
+    cache_write_per_mtok: 6.25
+    output_per_mtok: 30.00
+  gpt-5.6-terra:
+    input_per_mtok: 2.50
+    input_cached_per_mtok: 0.25
+    cache_write_per_mtok: 3.125
+    output_per_mtok: 15.00
+  gpt-5.6-luna:
+    input_per_mtok: 1.00
+    input_cached_per_mtok: 0.10
+    cache_write_per_mtok: 1.25
+    output_per_mtok: 6.00
   gpt-5.4:
     input_per_mtok: 2.50
     input_cached_per_mtok: 0.25   # ~10% do input (oficial)

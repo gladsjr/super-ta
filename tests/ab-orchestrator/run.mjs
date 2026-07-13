@@ -51,6 +51,7 @@ async function main() {
     // = comportamento de produção. Setar p/ testar low vs medium.
     const STRONG_EFFORT = env("AB_PRINCIPAL_EFFORT", null);
     const FAST_EFFORT = env("AB_FAST_EFFORT", null);
+    const JUDGE_EFFORT = env("AB_JUDGE_EFFORT", null);
     const armLabel = (model, effort) => `${model} (effort=${effort || "default"})`;
     const QC = parseInt(env("AB_QUESTION_COUNT", "6"), 10);
     const REPEATS = parseInt(env("AB_REPEATS", "2"), 10);
@@ -118,12 +119,12 @@ async function main() {
         const allCfSamples = pairs.flatMap((p) => p.strongRun.counterfactualSamples);
         console.log(`[juiz] pareado por turno: ${allCfSamples.length} amostras...`);
         for (const s of allCfSamples) {
-            try { cfJudgements.push(await judgeCounterfactualSample(judgeClient, JUDGE, s)); }
+            try { cfJudgements.push(await judgeCounterfactualSample(judgeClient, JUDGE, s, JUDGE_EFFORT)); }
             catch (err) { console.warn(`  juiz cf falhou (turno ${s.turnIndex}): ${err.message}`); }
         }
         console.log(`[juiz] holístico: ${pairs.length} pares...`);
         for (const p of pairs) {
-            try { holisticJudgements.push(await judgeHolisticPair(judgeClient, JUDGE, p.strongRun, p.fastRun)); }
+            try { holisticJudgements.push(await judgeHolisticPair(judgeClient, JUDGE, p.strongRun, p.fastRun, JUDGE_EFFORT)); }
             catch (err) { console.warn(`  juiz holístico falhou (${p.persona} r${p.repeat}): ${err.message}`); }
         }
     } else {
@@ -207,7 +208,7 @@ async function main() {
     lines.push("");
     lines.push(`- Braço baseline (forte): \`${armLabel(STRONG, STRONG_EFFORT)}\``);
     lines.push(`- Braço candidato (rápido): \`${armLabel(FAST, FAST_EFFORT)}\``);
-    lines.push(`- Juiz: \`${JUDGE}\` (cego, ordem A/B randomizada)`);
+    lines.push(`- Juiz: \`${armLabel(JUDGE, JUDGE_EFFORT)}\` (cego, ordem A/B randomizada)`);
     lines.push(`- ${nInterviews} entrevistas por braço (${personaKeys.length} personas × ${REPEATS} repetições), ${QC} perguntas no plano`);
     lines.push(`- Plano + análise gerados 1× no modelo forte e compartilhados (única variável = braço do orquestrador)`);
     lines.push("");
@@ -261,7 +262,7 @@ async function main() {
     const summary = lines.join("\n");
     fs.writeFileSync(path.join(outDir, "summary.md"), summary);
     fs.writeFileSync(path.join(outDir, "raw.json"), JSON.stringify({
-        config: { STRONG, FAST, JUDGE, STRONG_EFFORT, FAST_EFFORT, QC, REPEATS, MAXT, personaKeys },
+        config: { STRONG, FAST, JUDGE, STRONG_EFFORT, FAST_EFFORT, JUDGE_EFFORT, QC, REPEATS, MAXT, personaKeys },
         cost, perInterview,
         counterfactual: { tally: cfTally, dims: cfDims, recompute: { strong: cfRecompStrong, fast: cfRecompFast, total: cfTotal }, judgements: cfJudgements },
         holistic: { tally: holTally, scores: holScore, judgements: holisticJudgements },

@@ -1,0 +1,13 @@
+{
+  "id": "eng-ponte-monitoramento",
+  "large_area": "Engenharias",
+  "area": "Engenharia Civil",
+  "course_level": "Graduacao",
+  "persona": { "key": "gestor-infraestrutura", "description": "Gestor publico responsavel por seguranca e continuidade operacional. Pergunta por decisoes, margens e planos de contingencia." },
+  "assignment": "Propor um sistema de monitoramento estrutural para uma ponte rodoviaria existente.",
+  "student_work": "A proposta usa sensores de deformacao e acelerometros. Define alerta em 80% do limite de projeto, mas nao justifica o valor. A comunicacao depende de uma unica rede celular e nao ha procedimento para perda de sinal.",
+  "turns": [
+    { "id": "t1", "history": [], "student_message": "O sistema manda um alerta quando chega a 80% do limite.", "canonical_response": "Por que 80% e um limiar seguro para esta ponte, e que decisao operacional esse alerta dispara?", "expected_intents": ["pedir justificativa do limiar", "ligar medicao a acao"], "known_contradictions": ["limiar de 80% sem justificativa"] },
+    { "id": "t2", "history": [{"role":"interviewer","text":"Como o centro recebe os alertas?"}], "student_message": "Por uma conexao celular, que costuma funcionar bem naquela regiao.", "canonical_response": "E quando essa conexao falhar durante um evento severo, qual redundancia preserva o alerta ou coloca a ponte em estado seguro?", "expected_intents": ["explorar falha unica", "pedir contingencia operacional"], "known_contradictions": ["canal unico sem contingencia"] }
+  ]
+}

@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ORATIA Bench</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <style>
+    .bench-layout { display:grid; grid-template-columns:320px minmax(0,1fr); gap:24px; align-items:start }
+    .bench-layout > * { min-width:0 }
+    .panel { background:var(--bg-raised); border:1px solid var(--ink-100); border-radius:var(--r-md); padding:20px }
+    .panel + .panel { margin-top:16px }
+    .field { margin-bottom:14px }
+    .field label { display:block; font-size:var(--fs-sm); font-weight:600; margin-bottom:5px }
+    .field-help { color:var(--ink-500); font-size:var(--fs-xs); margin-top:4px }
+    .case-list { max-height:280px; overflow:auto; border:1px solid var(--ink-100); border-radius:var(--r-sm) }
+    .case-option { display:grid; grid-template-columns:18px 1fr; gap:8px; padding:9px 10px; border-bottom:1px solid var(--ink-100); font-size:var(--fs-sm) }
+    .case-option:last-child { border-bottom:0 }
+    .case-option small { display:block; color:var(--ink-500) }
+    .toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px }
+    .toolbar-actions { display:flex; gap:8px; align-items:center }
+    .status { white-space:nowrap }
+    .status-running,.status-queued { background:var(--warning-50); color:var(--warning-700) }
+    .status-completed,.status-validated { background:var(--success-50); color:var(--success-700) }
+    .status-failed,.status-cancelled { background:var(--danger-50); color:var(--danger-700) }
+    .progress { width:110px; height:7px; background:var(--ink-100); border-radius:4px; overflow:hidden }
+    .progress span { display:block; height:100%; background:var(--teal-500) }
+    .metrics { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:12px; margin:16px 0 }
+    .metric { border-left:3px solid var(--ink-200); padding:7px 10px }
+    .metric-label { color:var(--ink-500); font-size:var(--fs-xs) }
+    .metric-value { font-size:var(--fs-xl); font-weight:600; font-variant-numeric:tabular-nums }
+    .detail-head { display:flex; justify-content:space-between; gap:16px; align-items:start }
+    .artifact-layout { display:grid; grid-template-columns:240px minmax(0,1fr); gap:12px }
+    .artifact-list { border:1px solid var(--ink-100); max-height:440px; overflow:auto }
+    .artifact-btn { width:100%; border:0; border-bottom:1px solid var(--ink-100); background:transparent; text-align:left; padding:8px; font:inherit; font-size:var(--fs-xs); cursor:pointer; overflow-wrap:anywhere }
+    .artifact-btn:hover { background:var(--ink-50) }
+    .artifact-view { min-height:300px; max-height:520px; margin:0; white-space:pre-wrap; overflow:auto }
+    .hidden { display:none !important }
+    .muted { color:var(--ink-500) }
+    .error-box { color:var(--danger-700); background:var(--danger-50); padding:10px; border-radius:var(--r-sm); white-space:pre-wrap }
+    .view-tabs,.content-tabs { display:flex; gap:4px; border-bottom:1px solid var(--ink-200); margin-bottom:20px; overflow:auto }
+    .view-tab,.content-tab { border:0; border-bottom:3px solid transparent; background:transparent; color:var(--ink-600); padding:9px 13px; font:inherit; font-weight:600; cursor:pointer; white-space:nowrap }
+    .view-tab.active,.content-tab.active { color:var(--accent-700); border-bottom-color:var(--accent-700) }
+    .case-browser-list { border:1px solid var(--ink-100); border-radius:var(--r-sm); overflow:hidden; margin-top:12px }
+    .case-browser-item { width:100%; padding:11px; border:0; border-bottom:1px solid var(--ink-100); background:transparent; text-align:left; font:inherit; cursor:pointer }
+    .case-browser-item:last-child { border-bottom:0 }.case-browser-item:hover,.case-browser-item.active { background:var(--accent-50) }
+    .case-browser-item small { display:block; color:var(--ink-500); margin-top:2px }
+    .document-text { white-space:pre-wrap; line-height:1.65; max-width:82ch }
+    .persona-block { border-left:3px solid var(--teal-500); padding:10px 14px; max-width:82ch }
+    .turn-block { border-top:1px solid var(--ink-100); padding:16px 0 }.turn-block:first-child{border-top:0;padding-top:0}
+    .conversation-line { margin:5px 0; padding-left:12px; border-left:2px solid var(--ink-100) }
+    .canonical { background:var(--success-50); border-left:3px solid var(--success-700); padding:10px 12px; margin-top:10px }
+    .criteria-list { margin:8px 0; padding-left:20px }.criteria-list li{margin:4px 0}
+    .rag-chunk { border:1px solid var(--ink-100); border-radius:var(--r-sm); padding:12px; margin:10px 0 }
+    .rag-meta { display:flex; flex-wrap:wrap; gap:8px; color:var(--ink-500); font-size:var(--fs-xs); margin-bottom:7px }
+    @media(max-width:850px){
+      .page-wide{padding:24px 16px}.bench-layout{grid-template-columns:minmax(0,1fr)}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-layout{grid-template-columns:minmax(0,1fr)}
+      .topbar-inner{padding-left:16px;padding-right:16px;gap:12px}.topbar-context{display:none}.topbar-right{margin-left:auto}
+      .panel{padding:16px}.detail-head{display:block}.detail-head .btn{margin-top:8px}
+    }
+    @media(max-width:460px){.metrics{grid-template-columns:minmax(0,1fr)}.brand-word{height:18px}.topbar-right{font-size:var(--fs-xs)}}
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="topbar-inner">
+    <a class="brand" href="/admin"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
+    <span class="topbar-context">Benchmark de modelos</span>
+    <div class="topbar-right"><a href="/admin">Administração</a></div>
+  </div></header>
+
+  <main class="page-wide">
+    <div class="page-header"><h1>ORATIA Bench</h1><p class="subtitle">Execuções versionadas, resultados e artefatos de auditoria.</p></div>
+    <div class="view-tabs" role="tablist"><button class="view-tab active" data-view="cases" type="button">Casos</button><button class="view-tab" data-view="setup" type="button">Setup</button><button class="view-tab" data-view="generations" type="button">Gerações</button><button class="view-tab" data-view="versions" type="button">Versões</button><button class="view-tab" data-view="juries" type="button">Conselhos</button><button class="view-tab" data-view="executions" type="button">Execuções</button><button class="view-tab" data-view="results" type="button">Resultados</button></div>
+    <div id="global-error" class="error-box hidden"></div>
+    <div id="executions-view" class="hidden">
+      <div style="max-width:720px">
+        <form id="run-form" class="panel">
+          <h2>Nova execução</h2>
+          <div id="provider-status" class="field-help" style="margin-bottom:14px"></div>
+          <div class="field"><label for="release-key">Versão do benchmark</label><select id="release-key" class="select"></select><div id="release-summary" class="field-help"></div></div>
+          <div class="field"><label for="candidates">Modelos candidatos</label><textarea id="candidates" class="textarea input-mono" rows="3"></textarea><div class="field-help">Um por linha: fornecedor:modelo:esforço</div></div>
+          <div class="field"><label for="max-cost">Limite de custo (US$)</label><input id="max-cost" class="input" type="number" min="0.01" max="1000" step="1"></div>
+          <div class="field"><label for="seed">Semente A/B</label><input id="seed" class="input input-mono"></div>
+          <button id="start-run" class="btn btn-primary" type="submit">Iniciar execução</button>
+          <span id="form-message" class="field-help"></span>
+        </form>
+      </div>
+    </div>
+
+    <div id="results-view" class="hidden">
+      <section>
+        <div class="panel">
+          <div class="toolbar"><h2>Execuções</h2><div class="toolbar-actions"><button id="refresh" class="btn btn-sm" type="button">Atualizar</button></div></div>
+          <div style="overflow:auto"><table class="table"><thead><tr><th>Execução</th><th>Versão</th><th>Estado</th><th>Progresso</th><th>Custo</th><th>Início</th></tr></thead><tbody id="runs-body"></tbody></table></div>
+          <div id="runs-empty" class="table-empty hidden">Nenhuma execução registrada.</div>
+        </div>
+
+        <div id="detail" class="panel hidden">
+          <div class="detail-head"><div><h2 id="detail-title"></h2><div id="detail-meta" class="muted"></div></div><button id="cancel-run" class="btn btn-danger-ghost btn-sm hidden" type="button">Cancelar</button></div>
+          <div id="run-cases" class="row-tight" style="margin-top:10px"></div>
+          <div id="detail-error" class="error-box hidden"></div>
+          <div id="metrics" class="metrics"></div>
+          <div id="model-results"></div>
+          <h3>Artefatos</h3>
+          <div class="artifact-layout"><div id="artifact-list" class="artifact-list"></div><pre id="artifact-view" class="artifact-view">Selecione um artefato.</pre></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="cases-view" class="bench-layout hidden">
+      <aside class="panel">
+        <h2>Casos do benchmark</h2>
+        <div class="field"><label for="case-search">Buscar</label><input id="case-search" class="input" type="search" placeholder="Área, persona ou identificador"></div>
+        <div class="field"><label for="case-area-filter">Grande área</label><select id="case-area-filter" class="select"><option value="">Todas</option></select></div>
+        <div id="case-browser-list" class="case-browser-list"></div>
+      </aside>
+      <section id="case-detail" class="panel">
+        <div class="table-empty">Selecione um caso para examinar seus documentos e a entrevista canônica.</div>
+      </section>
+    </div>
+
+    <div id="setup-view" class="bench-layout hidden">
+      <aside class="panel"><div class="toolbar"><h2>Rascunhos</h2><button id="new-setup" class="btn btn-sm" type="button">Novo</button></div><div id="setup-draft-list" class="case-browser-list"></div></aside>
+      <section id="setup-editor" class="panel"><div class="table-empty">Selecione ou crie um rascunho de setup.</div></section>
+    </div>
+
+    <div id="generations-view" class="panel hidden"><div class="toolbar"><div><h2>Gerações do setup</h2><p class="muted">Registros produzidos a partir dos rascunhos antes da publicação.</p></div><button id="refresh-generations" class="btn btn-sm" type="button">Atualizar</button></div><div id="generation-list"></div></div>
+
+    <div id="versions-view" class="bench-layout hidden">
+      <section class="panel"><h2>Versões S publicadas</h2><div id="setup-version-list"></div></section>
+      <aside class="panel"><h2>Combinar S-J</h2><div class="field"><label for="release-setup">Setup</label><select id="release-setup" class="select"></select></div><div class="field"><label for="release-jury">Conselho</label><select id="release-jury" class="select"></select></div><div class="field"><label for="release-name">Nome</label><input id="release-name" class="input"></div><button id="create-release" class="btn btn-primary" type="button">Criar versão S-J</button><div id="release-message" class="field-help"></div><hr><h3>Versões disponíveis</h3><div id="release-list"></div></aside>
+    </div>
+
+    <div id="juries-view" class="bench-layout hidden">
+      <section class="panel"><h2>Conselhos J publicados</h2><div id="jury-version-list"></div></section>
+      <aside class="panel"><h2>Novo conselho</h2><div class="field"><label for="jury-version">Versão</label><input id="jury-version" class="input input-mono" placeholder="1.0"></div><div class="field"><label for="jury-name">Nome</label><input id="jury-name" class="input"></div><div class="field"><label for="jury-models">Juízes</label><textarea id="jury-models" class="textarea input-mono" rows="5" placeholder="openai:gpt-5.6-sol:high"></textarea></div><button id="publish-jury" class="btn btn-primary" type="button">Publicar J</button><div id="jury-message" class="field-help"></div></aside>
+    </div>
+  </main>
+
+<script>
+const state = { selectedRun: null, selectedCase: null, selectedDraft: null, cases: [], drafts: [], generations: [], setupVersions: [], juryVersions: [], releases: [], poll: null };
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const specs = (id) => $(id).value.split(/\r?\n|,/).map(v => v.trim()).filter(Boolean);
+const money = (v) => v == null ? '-' : 'US$ ' + Number(v).toFixed(4);
+const number = (v, d=3) => v == null ? '-' : Number(v).toFixed(d);
+const date = (v) => v ? new Date(v).toLocaleString('pt-BR') : '-';
+
+function showError(message) { $('global-error').textContent = message; $('global-error').classList.toggle('hidden', !message); }
+async function api(url, options) {
+  const response = await fetch(url, options);
+  if (response.status === 401) { location.href = '/admin'; throw new Error('Sessão expirada'); }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+async function loadSetup() {
+  const [configData, caseData, providerData] = await Promise.all([api('/api/benchmark/config'), api('/api/benchmark/cases'), api('/api/benchmark/providers')]);
+  const c = configData.config;
+  $('candidates').value = c.candidates.join('\n'); $('max-cost').value = c.max_cost_usd; $('seed').value = c.random_seed;
+  state.cases = caseData.cases;
+  const areas = [...new Set(caseData.cases.map(item => item.large_area))].sort();
+  $('case-area-filter').innerHTML += areas.map(area => `<option value="${esc(area)}">${esc(area)}</option>`).join('');
+  renderCaseBrowser();
+  $('provider-status').innerHTML = providerData.providers.map(p => `<span class="badge ${p.configured ? 'status-completed' : ''}" title="${esc(p.cost)}">${esc(p.name)}: ${p.configured ? 'pronto' : 'sem chave'}</span>`).join(' ');
+}
+
+function switchView(view) {
+  document.querySelectorAll('[data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
+  ['executions','results','cases','setup','generations','versions','juries'].forEach(name => $(`${name}-view`).classList.toggle('hidden', name !== view));
+}
+
+function renderCaseBrowser() {
+  const query = $('case-search').value.trim().toLocaleLowerCase('pt-BR');
+  const area = $('case-area-filter').value;
+  const filtered = state.cases.filter(item => (!area || item.large_area === area) && (!query || `${item.id} ${item.area} ${item.large_area} ${item.persona.key} ${item.persona.description}`.toLocaleLowerCase('pt-BR').includes(query)));
+  $('case-browser-list').innerHTML = filtered.length ? filtered.map(item => `<button class="case-browser-item ${state.selectedCase === item.id ? 'active' : ''}" data-case-id="${esc(item.id)}" type="button"><strong>${esc(item.area)}</strong><small>${esc(item.course_level)} · ${esc(item.persona.key)} · ${item.turns} turnos</small></button>`).join('') : '<div class="table-empty">Nenhum caso encontrado.</div>';
+  document.querySelectorAll('[data-case-id]').forEach(btn => btn.onclick = () => openCase(btn.dataset.caseId));
+}
+
+function list(items) { return items?.length ? `<ul class="criteria-list">${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul>` : '<span class="muted">Nenhum item registrado.</span>'; }
+function renderTurns(testCase) {
+  return testCase.turns.map((turn,index) => `<article class="turn-block"><h3>Turno ${index+1} <code>${esc(turn.id)}</code></h3>${turn.history.map(line => `<div class="conversation-line"><strong>${line.role === 'interviewer' ? 'Entrevistador' : 'Aluno'}:</strong> ${esc(line.text)}</div>`).join('')}<div class="conversation-line"><strong>Aluno:</strong> ${esc(turn.student_message)}</div><div class="canonical"><strong>Resposta canônica:</strong><br>${esc(turn.canonical_response)}</div><h4>Intenções pedagógicas</h4>${list(turn.expected_intents)}<h4>Contradições e riscos conhecidos</h4>${list(turn.known_contradictions)}</article>`).join('');
+}
+function renderRag(rag) {
+  return rag.map((pack,index) => `<article class="turn-block"><h3>Turno ${index+1} <code>${esc(pack.turn_id)}</code></h3><div class="rag-meta"><span>Estratégia: ${esc(pack.strategy)}</span><span>Pacote: <code>${esc(pack.package_hash.slice(0,12))}</code></span><span>Corpus: <code>${esc(pack.all_chunks_hash.slice(0,12))}</code></span></div><details><summary>Consulta de recuperação</summary><pre>${esc(pack.query)}</pre></details>${pack.chunks.map(chunk => `<div class="rag-chunk"><div class="rag-meta"><strong>${esc(chunk.id)}</strong><span>${esc(chunk.source)}</span><span>pontuação ${number(chunk.score)}</span><code>${esc(chunk.hash.slice(0,12))}</code></div><div class="document-text">${esc(chunk.content)}</div></div>`).join('')}</article>`).join('');
+}
+async function openCase(id) {
+  state.selectedCase = id; renderCaseBrowser();
+  $('case-detail').innerHTML = '<div class="table-empty">Carregando caso...</div>';
+  const data = await api(`/api/benchmark/cases/${encodeURIComponent(id)}`);
+  const c = data.case;
+  $('case-detail').innerHTML = `<div class="detail-head"><div><h2>${esc(c.area)}</h2><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div></div><span class="badge" title="Hash dos documentos">${esc(c.document_hash.slice(0,12))}</span></div><div class="content-tabs" role="tablist"><button class="content-tab active" data-case-tab="assignment" type="button">Enunciado</button><button class="content-tab" data-case-tab="work" type="button">Trabalho</button><button class="content-tab" data-case-tab="persona" type="button">Persona</button><button class="content-tab" data-case-tab="turns" type="button">Entrevista canônica</button><button class="content-tab" data-case-tab="rag" type="button">RAG</button></div><div id="case-tab-assignment" class="case-tab-content document-text">${esc(c.assignment)}</div><div id="case-tab-work" class="case-tab-content document-text hidden">${esc(c.student_work)}</div><div id="case-tab-persona" class="case-tab-content hidden"><div class="persona-block"><h3>${esc(c.persona.key)}</h3><p>${esc(c.persona.description)}</p></div></div><div id="case-tab-turns" class="case-tab-content hidden">${renderTurns(c)}</div><div id="case-tab-rag" class="case-tab-content hidden">${renderRag(data.rag)}</div>`;
+  document.querySelectorAll('[data-case-tab]').forEach(btn => btn.onclick = () => { document.querySelectorAll('[data-case-tab]').forEach(item => item.classList.toggle('active', item === btn)); document.querySelectorAll('.case-tab-content').forEach(content => content.classList.toggle('hidden', content.id !== `case-tab-${btn.dataset.caseTab}`)); });
+}
+
+function setupConfigFromEditor() {
+  return {
+    case_ids: [...document.querySelectorAll('#setup-case-selection input:checked')].map(input => input.value),
+    prompts: { candidate: $('setup-prompt-candidate').value, judge: $('setup-prompt-judge').value },
+    generation_council: specs('setup-generation-council'),
+    validation_council: specs('setup-validation-council'),
+    rag: { strategy: 'lexical-v1', chunk_chars: 1800, top_k: 8 },
+    consensus: { disagreement_threshold: 0.65, deliberation_enabled: false }
+  };
+}
+
+function renderDraftList() {
+  $('setup-draft-list').innerHTML = state.drafts.length ? state.drafts.map(draft => `<button class="case-browser-item ${state.selectedDraft == draft.id ? 'active' : ''}" data-draft-id="${draft.id}" type="button"><strong>${esc(draft.name)}</strong><small>Atualizado ${date(draft.updated_at)}</small></button>`).join('') : '<div class="table-empty">Nenhum rascunho.</div>';
+  document.querySelectorAll('[data-draft-id]').forEach(btn => btn.onclick = () => openDraft(btn.dataset.draftId));
+}
+
+function openDraft(id) {
+  const draft = state.drafts.find(item => String(item.id) === String(id)); if (!draft) return;
+  state.selectedDraft = draft.id; renderDraftList();
+  const config = draft.config_json || {}, selected = new Set(config.case_ids || []);
+  $('setup-editor').innerHTML = `<div class="detail-head"><div><h2>${esc(draft.name)}</h2><div class="muted">Rascunho editável · #${draft.id}</div></div></div><div class="field"><label for="setup-name">Nome</label><input id="setup-name" class="input" value="${esc(draft.name)}"></div><div class="field"><label for="setup-description">Descrição</label><textarea id="setup-description" class="textarea" rows="2">${esc(draft.description)}</textarea></div><div class="field"><label>Casos incluídos</label><div id="setup-case-selection" class="case-list">${state.cases.map(item => `<label class="case-option"><input type="checkbox" value="${esc(item.id)}" ${!selected.size || selected.has(item.id) ? 'checked' : ''}><span><strong>${esc(item.area)}</strong><small>${esc(item.id)}</small></span></label>`).join('')}</div></div><div class="field"><label for="setup-generation-council">Conselho de geração</label><textarea id="setup-generation-council" class="textarea input-mono" rows="3">${esc((config.generation_council || []).join('\n'))}</textarea></div><div class="field"><label for="setup-validation-council">Conselho de validação do setup</label><textarea id="setup-validation-council" class="textarea input-mono" rows="3">${esc((config.validation_council || []).join('\n'))}</textarea></div><div class="field"><label for="setup-prompt-candidate">Prompt de geração da próxima fala</label><textarea id="setup-prompt-candidate" class="textarea input-mono" rows="5">${esc(config.prompts?.candidate || '')}</textarea></div><div class="field"><label for="setup-prompt-judge">Prompt de validação e julgamento</label><textarea id="setup-prompt-judge" class="textarea input-mono" rows="5">${esc(config.prompts?.judge || '')}</textarea></div><div class="row"><button id="save-setup" class="btn" type="button">Salvar rascunho</button><button id="generate-setup" class="btn btn-primary" type="button">Gerar entrevistas</button><span id="setup-message" class="field-help"></span></div><div class="notice notice-info" style="margin-top:16px">A geração atual cria um snapshot dos fixtures simplificados e não chama LLMs. O registro de proveniência deixará isso explícito.</div>`;
+  $('save-setup').onclick = () => saveDraft(false);
+  $('generate-setup').onclick = () => saveDraft(true);
+}
+
+async function saveDraft(generate) {
+  const body = { name:$('setup-name').value, description:$('setup-description').value, config:setupConfigFromEditor() };
+  $('setup-message').textContent = 'Salvando...';
+  try {
+    await api(`/api/benchmark/setup-drafts/${state.selectedDraft}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if (generate) {
+      const data = await api(`/api/benchmark/setup-drafts/${state.selectedDraft}/generate`, {method:'POST'});
+      $('setup-message').textContent = `Geração ${data.generation.generation_key} criada sem custo.`;
+      await loadWorkflow(); switchView('generations');
+    } else { $('setup-message').textContent = 'Rascunho salvo.'; await loadWorkflow(false); }
+  } catch(err) { $('setup-message').textContent = err.message; }
+}
+
+function renderGenerations() {
+  $('generation-list').innerHTML = state.generations.length ? state.generations.map(item => `<div class="turn-block"><div class="detail-head"><div><h3>${esc(item.setup_name)}</h3><div><code>${esc(item.generation_key)}</code> · ${statusBadge(item.status)} · ${esc(item.mode)}</div></div></div><p class="muted">${esc(item.result_json?.provenance?.note || '')}</p><div class="row"><input class="input input-mono" style="max-width:120px" data-generation-version="${esc(item.generation_key)}" placeholder="0.1.0"><select class="select" style="max-width:150px" data-generation-class="${esc(item.generation_key)}"><option value="experimental">Experimental</option><option value="fixture">Fixture</option><option value="validated">Validado</option></select><button class="btn btn-primary btn-sm" data-publish-generation="${esc(item.generation_key)}" type="button">Publicar S</button><span class="field-help" data-generation-message="${esc(item.generation_key)}"></span></div></div>`).join('') : '<div class="table-empty">Nenhuma geração.</div>';
+  document.querySelectorAll('[data-publish-generation]').forEach(btn => btn.onclick = async () => {
+    const key=btn.dataset.publishGeneration, version=document.querySelector(`[data-generation-version="${key}"]`).value, classification=document.querySelector(`[data-generation-class="${key}"]`).value, message=document.querySelector(`[data-generation-message="${key}"]`);
+    try { const data=await api('/api/benchmark/setup-versions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation_key:key,version,classification,name:`Setup ${version}`})}); message.textContent=`Publicado ${data.version.version_key}.`; await loadWorkflow(); } catch(err){message.textContent=err.message;}
+  });
+}
+
+function renderVersions() {
+  $('setup-version-list').innerHTML = state.setupVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><div>${statusBadge(item.classification)} · publicado ${date(item.published_at)}</div><p>${esc(item.description)}</p><div class="field-help">Hash ${esc(item.manifest_hash)}</div></div>`).join('') || '<div class="table-empty">Nenhuma versão S.</div>';
+  $('jury-version-list').innerHTML = state.juryVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><p>${esc(item.description)}</p><div class="field-help">${esc((item.config_json?.judges || []).join(', '))}</div></div>`).join('') || '<div class="table-empty">Nenhum conselho.</div>';
+  $('release-list').innerHTML = state.releases.map(item => `<div class="turn-block"><strong><code>${esc(item.release_key)}</code></strong><div class="field-help">${esc(item.name)} · ${esc(item.classification)}</div></div>`).join('') || '<div class="table-empty">Nenhuma versão combinada.</div>';
+  $('release-setup').innerHTML = state.setupVersions.map(item => `<option value="${esc(item.version_key)}">${esc(item.version_key)} · ${esc(item.name)}</option>`).join('');
+  $('release-jury').innerHTML = state.juryVersions.map(item => `<option value="${esc(item.version_key)}">${esc(item.version_key)} · ${esc(item.name)}</option>`).join('');
+  $('release-key').innerHTML = state.releases.map(item => `<option value="${esc(item.release_key)}">${esc(item.release_key)} · ${esc(item.name)}</option>`).join('');
+  updateReleaseSummary();
+}
+
+function updateReleaseSummary() { const item=state.releases.find(r=>r.release_key===$('release-key').value); $('release-summary').textContent=item ? `${item.setup_name} · ${item.jury_name} · ${item.classification}` : 'Nenhuma versão S-J disponível.'; }
+
+async function loadWorkflow(preserveEditor=true) {
+  const [drafts,generations,setups,juries,releases] = await Promise.all([api('/api/benchmark/setup-drafts'),api('/api/benchmark/setup-generations'),api('/api/benchmark/setup-versions'),api('/api/benchmark/jury-versions'),api('/api/benchmark/releases')]);
+  state.drafts=drafts.drafts; state.generations=generations.generations; state.setupVersions=setups.versions; state.juryVersions=juries.versions; state.releases=releases.releases;
+  renderDraftList(); renderGenerations(); renderVersions();
+  if (preserveEditor && state.selectedDraft) openDraft(state.selectedDraft);
+}
+
+function statusBadge(status) { return `<span class="badge status status-${esc(status)}">${esc(status)}</span>`; }
+async function loadRuns() {
+  const { runs } = await api('/api/benchmark/runs');
+  $('runs-empty').classList.toggle('hidden', runs.length > 0);
+  $('runs-body').innerHTML = runs.map(run => {
+    const total = Number(run.progress_total || 0), done = Number(run.progress_done || 0), pct = total ? Math.round(done/total*100) : 0;
+    return `<tr data-run="${esc(run.run_key)}" style="cursor:pointer"><td><code>${esc(run.run_key)}</code></td><td>${esc(run.setup_version)}.${esc(run.context_version)}.${esc(run.jury_version)}</td><td>${statusBadge(run.status)}</td><td><div class="progress" title="${done}/${total}"><span style="width:${pct}%"></span></div></td><td>${money(run.metrics_json?.run_cost_usd)}</td><td>${date(run.started_at || run.created_at)}</td></tr>`;
+  }).join('');
+  document.querySelectorAll('[data-run]').forEach(row => row.onclick = () => openRun(row.dataset.run));
+  if (state.selectedRun) await openRun(state.selectedRun, false);
+  const active = runs.some(run => ['queued','running'].includes(run.status));
+  clearTimeout(state.poll); if (active) state.poll = setTimeout(loadRuns, 3000);
+}
+
+function renderMetrics(run) {
+  const metrics = run.metrics_json || {}, models = metrics.models || {}, first = Object.values(models)[0]?.overall;
+  $('metrics').innerHTML = [
+    ['Custo conhecido', money(metrics.run_cost_usd)],
+    ['Custos sem preço', metrics.cost_completeness?.unknown_calls ?? 0], ['Chamadas', metrics.calls ?? '-'],
+    ['Modelos', Object.keys(models).length], ['Estados avaliados', first?.judgments ?? '-']
+  ].map(([label,value]) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join('');
+  $('model-results').innerHTML = Object.entries(models).map(([key,result]) => {
+    const o=result.overall,q=o.quality,l=o.latency_ms,c=o.cost;
+    return `<h3>${esc(key)}</h3><div style="overflow:auto"><table class="table"><thead><tr><th>Qualidade média (IC 95%)</th><th>Mediana</th><th>Vitórias / empates / derrotas</th><th>Teste de sinais p</th><th>Discordâncias</th><th>Custo candidato</th><th>Custo dos juízes</th><th>Latência p50 / p95</th></tr></thead><tbody><tr><td>${number(q.mean)} (${number(q.mean_ci95?.low)} a ${number(q.mean_ci95?.high)})</td><td>${number(q.median)}</td><td>${q.wins} / ${q.ties} / ${q.losses}</td><td>${number(q.sign_test?.p_value,4)}</td><td>${q.needs_deliberation ?? 0}</td><td>${money(c.candidate_usd)}</td><td>${money(c.judge_usd)}</td><td>${number(l.p50,0)} / ${number(l.p95,0)} ms</td></tr></tbody></table></div>`;
+  }).join('');
+}
+
+async function loadArtifacts(key) {
+  const { artifacts } = await api(`/api/benchmark/runs/${encodeURIComponent(key)}/artifacts`);
+  $('artifact-list').innerHTML = artifacts.length ? artifacts.map(a => `<button class="artifact-btn" data-artifact="${esc(a.path)}">${esc(a.path)} <span class="muted">(${a.bytes} B)</span></button>`).join('') : '<div class="table-empty">Artefatos ainda não disponíveis.</div>';
+  document.querySelectorAll('[data-artifact]').forEach(btn => btn.onclick = async () => {
+    const response = await fetch(`/api/benchmark/runs/${encodeURIComponent(key)}/artifact?path=${encodeURIComponent(btn.dataset.artifact)}`);
+    $('artifact-view').textContent = response.ok ? await response.text() : 'Não foi possível carregar o artefato.';
+  });
+}
+
+async function openRun(key, resetArtifact=true) {
+  state.selectedRun = key;
+  const { run, outputs } = await api(`/api/benchmark/runs/${encodeURIComponent(key)}`);
+  $('detail').classList.remove('hidden'); $('detail-title').textContent = key;
+  $('detail-meta').innerHTML = `${statusBadge(run.status)} &nbsp; ${esc(run.benchmark)} ${esc(run.setup_version)}.${esc(run.context_version)}.${esc(run.jury_version)} · ${date(run.started_at)}`;
+  $('detail-error').textContent = run.error_text || ''; $('detail-error').classList.toggle('hidden', !run.error_text);
+  $('cancel-run').classList.toggle('hidden', !['queued','running'].includes(run.status)); $('cancel-run').dataset.run = key;
+  let caseIds = [...new Set((outputs || []).map(item => item.case_id))];
+  if (!caseIds.length) caseIds = run.config_json?.case_ids?.length ? run.config_json.case_ids : state.cases.map(item => item.id);
+  $('run-cases').innerHTML = caseIds.map(id => `<button class="btn btn-ghost btn-sm" data-run-case="${esc(id)}" type="button">${esc(state.cases.find(item => item.id === id)?.area || id)}</button>`).join('');
+  document.querySelectorAll('[data-run-case]').forEach(btn => btn.onclick = async () => { switchView('cases'); await openCase(btn.dataset.runCase); });
+  renderMetrics(run); await loadArtifacts(key); if (resetArtifact) $('artifact-view').textContent = 'Selecione um artefato.';
+}
+
+$('run-form').onsubmit = async (event) => {
+  event.preventDefault(); $('start-run').disabled = true; $('form-message').textContent = 'Criando execução...';
+  try {
+    const payload={ release_key:$('release-key').value, candidates:specs('candidates'), max_cost_usd:Number($('max-cost').value), random_seed:$('seed').value };
+    let data;
+    try { data=await api('/api/benchmark/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); }
+    catch(err) {
+      if (err.message !== 'duplicate_evaluation') throw err;
+      if (!confirm('Este conjunto de modelos já foi avaliado nesta versão. Executar novamente como repetição?')) throw new Error('Execução cancelada.');
+      data=await api('/api/benchmark/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,allow_repeat:true})});
+    }
+    $('form-message').textContent = `Execução ${data.run_key} iniciada.`; state.selectedRun = data.run_key; await loadRuns();
+    switchView('results');
+  } catch (err) { $('form-message').textContent = err.message; } finally { $('start-run').disabled = false; }
+};
+$('refresh').onclick = () => loadRuns().catch(err => showError(err.message));
+$('cancel-run').onclick = async () => { const key=$('cancel-run').dataset.run; await api(`/api/benchmark/runs/${encodeURIComponent(key)}/cancel`, {method:'POST'}); await loadRuns(); };
+document.querySelectorAll('[data-view]').forEach(btn => btn.onclick = () => switchView(btn.dataset.view));
+$('case-search').oninput = renderCaseBrowser;
+$('case-area-filter').onchange = renderCaseBrowser;
+$('release-key').onchange = updateReleaseSummary;
+$('new-setup').onclick = async () => { const name=prompt('Nome do novo setup:'); if(!name)return; try{const data=await api('/api/benchmark/setup-drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});await loadWorkflow(false);openDraft(data.draft.id);}catch(err){showError(err.message);} };
+$('refresh-generations').onclick = () => loadWorkflow().catch(err => showError(err.message));
+$('publish-jury').onclick = async () => { $('jury-message').textContent='Publicando...'; try{const data=await api('/api/benchmark/jury-versions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version:$('jury-version').value,name:$('jury-name').value,judges:specs('jury-models')})});$('jury-message').textContent=`Publicado ${data.version.version_key}.`;await loadWorkflow();}catch(err){$('jury-message').textContent=err.message;} };
+$('create-release').onclick = async () => { $('release-message').textContent='Criando...'; try{const data=await api('/api/benchmark/releases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({setup_version_key:$('release-setup').value,jury_version_key:$('release-jury').value,name:$('release-name').value})});$('release-message').textContent=`Criada ${data.release.release_key}.`;await loadWorkflow();}catch(err){$('release-message').textContent=err.message;} };
+
+Promise.all([loadSetup(), loadRuns(), loadWorkflow()]).then(() => { switchView('cases'); if(state.cases.length) openCase(state.cases[0].id); }).catch(err => showError(err.message));
+</script>
+</body>
+</html>

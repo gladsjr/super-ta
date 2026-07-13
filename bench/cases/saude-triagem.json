@@ -1,0 +1,13 @@
+{
+  "id": "saude-triagem-remota",
+  "large_area": "Ciencias da Saude",
+  "area": "Saude Coletiva",
+  "course_level": "Pos-graduacao",
+  "persona": { "key": "gestora-clinica", "description": "Gestora clinica preocupada com seguranca, equidade e fluxo assistencial. Evita diagnosticar o paciente durante a entrevista." },
+  "assignment": "Avaliar um protocolo de triagem remota para pacientes com sintomas respiratorios.",
+  "student_work": "O protocolo encaminha para emergencia quem tem saturacao abaixo de 94%. Nao trata pacientes sem oximetro, gestantes ou doentes pulmonares cronicos. O piloto excluiu pessoas acima de 70 anos, mas a conclusao recomenda uso universal.",
+  "turns": [
+    { "id": "t1", "history": [], "student_message": "Abaixo de 94% a pessoa vai direto para a emergencia.", "canonical_response": "Como o protocolo decide com seguranca quando a pessoa nao tem oximetro ou tem uma condicao que altera sua saturacao basal?", "expected_intents": ["testar excecoes clinicas", "explorar acesso desigual ao dispositivo"], "known_contradictions": ["protocolo depende de oximetro e ignora condicoes basais"] },
+    { "id": "t2", "history": [{"role":"interviewer","text":"Para quem o protocolo pode ser usado?"}], "student_message": "A ideia e usar para toda a populacao da rede.", "canonical_response": "O piloto excluiu maiores de 70 anos. Que evidencia permite estender a conclusao justamente a um grupo de maior risco que nao foi estudado?", "expected_intents": ["questionar validade externa", "proteger grupo de maior risco"], "known_contradictions": ["recomendacao universal com exclusao de idosos no piloto"] }
+  ]
+}

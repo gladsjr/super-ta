@@ -35,8 +35,12 @@ function fmtTail(tail) {
     return tail.map((h) => `${h.role === "interviewer" ? "Entrevistadora" : "Aluno"}: ${h.text}`).join("\n");
 }
 
+function withReasoningEffort(payload, effort) {
+    return effort ? { ...payload, reasoning: { effort } } : payload;
+}
+
 // Julga uma amostra counterfactual. Retorna { winner: "strong"|"fast"|"tie", dims, reason }.
-export async function judgeCounterfactualSample(client, judgeModel, sample) {
+export async function judgeCounterfactualSample(client, judgeModel, sample, judgeEffort = null) {
     // Randomiza posição.
     const flip = Math.random() < 0.5;
     const A = flip ? sample.counterfactualAction : sample.driverAction; // se flip, A=fast
@@ -61,7 +65,7 @@ Retorne JSON:
   "reason": "1-2 frases justificando o vencedor"
 }`;
 
-    const res = await client.responses.create({ model: judgeModel, instructions, input });
+    const res = await client.responses.create(withReasoningEffort({ model: judgeModel, instructions, input }, judgeEffort));
     const parsed = extractJson(res.output_text || "");
     const mapWinner = (w) => (w === "tie" ? "tie" : (w === "A" ? (aIsFast ? "fast" : "strong") : (aIsFast ? "strong" : "fast")));
     const winner = mapWinner(parsed.winner);
@@ -82,7 +86,7 @@ function fmtTranscript(transcript) {
 
 // Julga duas entrevistas completas (mesma persona). Retorna
 // { winner: "strong"|"fast"|"tie", scores: {strong:{...}, fast:{...}}, reason }.
-export async function judgeHolisticPair(client, judgeModel, strongRun, fastRun) {
+export async function judgeHolisticPair(client, judgeModel, strongRun, fastRun, judgeEffort = null) {
     const flip = Math.random() < 0.5;
     const A = flip ? fastRun : strongRun;
     const B = flip ? strongRun : fastRun;
@@ -107,7 +111,7 @@ Retorne JSON:
   "reason": "2-3 frases comparando"
 }`;
 
-    const res = await client.responses.create({ model: judgeModel, instructions, input });
+    const res = await client.responses.create(withReasoningEffort({ model: judgeModel, instructions, input }, judgeEffort));
     const parsed = extractJson(res.output_text || "");
     const mapWinner = (w) => (w === "tie" ? "tie" : (w === "A" ? (aIsFast ? "fast" : "strong") : (aIsFast ? "strong" : "fast")));
     const scores = {

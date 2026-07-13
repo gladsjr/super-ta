@@ -12,4 +12,5 @@ commit-msg.txt
 data/scenarios/
 scenarios-dev.mjs
 tmp/
+bench/runs/
 .claude/launch.json
