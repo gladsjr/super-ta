@@ -77,3 +77,9 @@ id = "1PxZOJjxXAyzSpQI-4JUJ"
 uri = "file://tmp/download-link.txt"
 type = "text"
 title = "Link temporário para baixar o ZIP (válido por 6h)"
+
+[[outputs]]
+id = "pY7m3VmjxkkXjeKZQPHNj"
+uri = "file://tmp/ORATIA_Documentacao_Arquitetural.docx"
+type = "word_document"
+title = "ORATIA – Documentação Arquitetural (docx)"
