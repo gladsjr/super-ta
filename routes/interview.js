@@ -488,7 +488,9 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
 
         // Re-sincroniza a expectativa de espontaneidade com a config atual do
         // trabalho (igual ao modo): vale para o aviso ao aluno no /start.
-        sess.expectSpontaneous = req.work.expect_spontaneous === true;
+        // Fiscalização por vídeo já garante a integridade — não pedir "resposta de cabeça"
+        // (a fala de espontaneidade não faz mais sentido e conflita com a câmera ligada).
+        sess.expectSpontaneous = req.work.expect_spontaneous === true && req.work.proctoring_enabled !== true;
 
         res.json({
             work: { name: req.work.name, has_enunciado: !!req.work.assignment_pdf },
@@ -597,6 +599,34 @@ router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUp
     }
 });
 
+// Áudios FIXOS de instrução do setup de proctoring (posicionamento / comandos),
+// sintetizados por TTS na voz do trabalho e cacheados em memória (texto fixo).
+const SETUP_SCRIPTS = {
+    position: "Vamos ajustar a sua posição para a prova. Fique de frente para a câmera, a cerca de um metro e meio de distância, de forma que apareçam a sua cabeça e o seu tronco. Deixe as duas mãos à mostra. Você precisa estar sozinho, sem outras pessoas no quadro, e não pode usar o celular durante a prova. Se algo estiver fora do lugar, a tela vai avisar com uma borda vermelha e uma mensagem embaixo. Ajuste a sua posição até ficar tudo certo.",
+    commands: "Agora vamos praticar os comandos. Durante a entrevista, você vai ouvir o entrevistador e depois vai responder gravando mensagens de áudio. Como você fica longe do teclado, os comandos são feitos com a mão, nas áreas nos cantos da tela. Em cima à direita, Gravar. Em cima à esquerda, Cancelar. Embaixo à direita, Enviar. Ponha a mão sobre uma área e segure enquanto ela conta até três. Os botões embaixo do vídeo se comportam exatamente como na hora da entrevista: ao comandar Gravar, ele começa a gravar a sua resposta; Enviar manda a resposta para o entrevistador; e Cancelar descarta a gravação. Ficam disponíveis apenas as áreas que fazem sentido a cada momento: no começo, só Gravar; depois que você começa a gravar, aparecem Enviar e Cancelar. Pode testar à vontade agora, porque nada está sendo gravado. A área Iniciar, no canto inferior esquerdo, existe só nesta tela de preparação: quando você comandar Iniciar, a entrevista vai começar de verdade.",
+};
+const setupAudioCache = new Map(); // `${which}|${voice}` -> Buffer
+router.get("/s/:submissionToken/setup-audio", requireSubmissionToken, async (req, res) => {
+    try {
+        const which = String(req.query.which || "");
+        let text = SETUP_SCRIPTS[which];
+        if (!text) return res.status(400).json({ error: "which inválido" });
+        // Conversa de teste (professor): a geração das respostas por IA é por teclado/mouse.
+        const isTest = req.submission && req.submission.is_test === true;
+        if (which === "commands" && isTest) {
+            text += " Atenção: esta é uma conversa de teste. Aqui, a geração das respostas por inteligência artificial é feita pelos controles de teclado e mouse na tela; as áreas de comando por câmera valem para o aluno de verdade.";
+        }
+        const voice = req.work.voice || "coral";
+        const key = `${which}|${voice}|${isTest ? "t" : "n"}`;
+        let buf = setupAudioCache.get(key);
+        if (!buf) { buf = await synthesizeSpeech(openai, TTS_MODEL, text, voice); setupAudioCache.set(key, buf); }
+        res.type("audio/mpeg").send(buf);
+    } catch (err) {
+        log.error("SUBMISSION", `setup-audio failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar o áudio de instrução" });
+    }
+});
+
 // ============================================================================
 // POST /s/:submissionToken/upload
 // ============================================================================
@@ -634,7 +664,9 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
     // fica imutável até o próximo upload.
     sess.interactionMode = req.work.interaction_mode || "text";
     sess.voice = req.work.voice || null;
-    sess.expectSpontaneous = req.work.expect_spontaneous === true;
+    // Fiscalização por vídeo já garante integridade → não pedir "resposta de cabeça"
+    // (o beat de espontaneidade do intro lê sess.expectSpontaneous).
+    sess.expectSpontaneous = req.work.expect_spontaneous === true && req.work.proctoring_enabled !== true;
     // Persona segue, em ordem de prioridade: (1) override do professor, (2)
     // gênero da voz em modo áudio, (3) sorteio balanceado em modo texto.
     // A pré-geração no /start já escolheu uma persona; só re-picka se a config

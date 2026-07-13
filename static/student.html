@@ -7,8 +7,8 @@
   <title>ORATIA — Aluno</title>
   <link rel="stylesheet" href="/static/css/app.css" />
   <script src="/static/js/theme.js"></script>
+  <script src="/static/js/commandZones.js"></script>
   <script src="/static/js/interviewSetup.js"></script>
-  <script src="/static/js/gestureControl.js"></script>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
@@ -1559,21 +1559,19 @@
       label.className = 'dica-label';
       label.textContent = 'Dica';
       div.appendChild(label);
+      // Compacta: só o título (negrito) + a transcrição, com fonte MAIOR (visível a
+      // ~1,5 m). O corpo explicativo (body) é omitido de propósito.
       if (title) {
         const t = document.createElement('div');
         t.className = 'dica-title';
         t.textContent = title;
+        t.style.fontSize = '18px'; t.style.fontWeight = '700';
         div.appendChild(t);
-      }
-      if (body) {
-        const b = document.createElement('div');
-        b.className = 'dica-body';
-        b.textContent = body;
-        div.appendChild(b);
       }
       if (transcript) {
         const tr = document.createElement('div');
         tr.className = 'dica-transcript';
+        tr.style.fontSize = '16px'; tr.style.lineHeight = '1.5'; tr.style.marginTop = '6px';
         tr.innerHTML = highlightUnclear(transcript, unclear);
         div.appendChild(tr);
       }
@@ -1804,6 +1802,15 @@
         const ok = await ensureConsent(interactionMode);
         if (!ok) return;
       }
+
+      // Fiscalização por vídeo — reentrada de entrevista EM ANDAMENTO: religa câmera +
+      // gravação + áreas de comando (sem refazer o setup nem o consentimento). Fail-open.
+      if (phase === 'intro' || phase === 'interviewing') {
+        try {
+          const cfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json();
+          if (cfg && cfg.proctoring_enabled) startProctoring(null, null, null, true);
+        } catch {}
+      }
     }
 
     document.getElementById('sendFile').onclick = async () => {
@@ -1811,70 +1818,65 @@
       if (!f) return alert('Escolha um arquivo.');
       const sendBtn = document.getElementById('sendFile');
       sendBtn.disabled = true;
-      const status = appendStatus('Enviando arquivo...');
+      const status = appendStatus('Enviando o trabalho…');
       const form = new FormData();
       form.append('file', f);
-      status.textContent = 'Analisando trabalho...';
 
-      try {
-        const r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form }));
-        const j = await r.json();
+      // O upload (que roda a ANÁLISE do trabalho) segue EM PARALELO — o aluno já
+      // avança para o setup de fiscalização em vez de esperar a análise. Ao concluir
+      // o setup, o resultado do upload provavelmente já está pronto.
+      const uploadPromise = sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/upload`, { method: 'POST', body: form }))
+        .then(r => r.json())
+        .catch(() => ({ __neterr: true }));
+
+      // Trata o resultado do upload e devolve releaseInterviewer() (ou null em erro).
+      const finishUpload = (j) => {
         document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
         status.remove();
-        if (j.error) { appendStatus(j.message || j.error, true); return; }
-        if (!j.assistant) return;
-
+        sendBtn.disabled = false;
+        if (j.__neterr) { appendStatus('Não foi possível enviar o trabalho. Verifique sua conexão e tente novamente.', true); return null; }
+        if (j.error) { appendStatus(j.message || j.error, true); return null; }
+        if (!j.assistant) return null;
         document.getElementById('upload-area').classList.add('hidden');
         phase = 'intro';
         syncTopbarActions();
-
-        // Função que renderiza o balão do entrevistador + dispara o turno.
-        // Em modo áudio, fica gated atrás do checkbox Ciente do orientador
-        // (releaseInterviewer é o callback). Em modo texto, executa direto.
-        const releaseInterviewer = () => {
+        return () => {
           const wrap = appendTA(j.assistant, j.audio_url);
           if (j.audio_error) appendStatus('Áudio do entrevistador indisponível desta vez — mostrando texto.', true);
           handleTurn(j, wrap);
         };
-        const startIntro = () => {
-          if (interactionMode === 'audio' && j.narrator?.audio_url) {
-            // Modo áudio: mostra primeiro o balão do orientador com checkbox
-            // Ciente. A saudação do entrevistador (texto + URL já em cache no
-            // servidor) só nasce no DOM quando o aluno marca Ciente.
-            appendNarrator(j.narrator.audio_url, releaseInterviewer);
-          } else {
-            releaseInterviewer();
-          }
-        };
+      };
 
-        // Proctoring por vídeo (opt-in do professor): antes da entrevista, o aluno
-        // passa pelo setup (conexão/ruído/calibração + posição por câmera). Fail-open:
-        // qualquer erro cai direto na entrevista. Só roda se o trabalho tem proctoring.
-        let setupCfg = null;
-        try { setupCfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json(); } catch {}
-        if (setupCfg && setupCfg.proctoring_enabled && window.runProctoringSetup) {
-          const box = document.getElementById('proctor-setup');
-          document.getElementById('chat-area')?.classList.add('hidden');
-          box.classList.remove('hidden');
-          try {
-            await window.runProctoringSetup({
-              submissionToken, config: setupCfg, container: box,
-              onDone: () => {
-                box.classList.add('hidden');
-                document.getElementById('chat-area')?.classList.remove('hidden');
-                startProctoring(); // câmera ligada: grava o vídeo + habilita o controle por gesto
-              },
-            });
-          } catch { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); }
-          startIntro();
-        } else {
-          startIntro();
-        }
-      } catch {
-        status.remove();
-        appendStatus('Não foi possível enviar o trabalho. Verifique sua conexão e tente novamente.', true);
-      } finally {
-        sendBtn.disabled = false;
+      // setup-config (rápido) decide se há fiscalização por vídeo.
+      let setupCfg = null;
+      try { setupCfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json(); } catch {}
+
+      if (setupCfg && setupCfg.proctoring_enabled && window.runProctoringSetup) {
+        // Mostra o SETUP já, enquanto o upload roda em paralelo.
+        const box = document.getElementById('proctor-setup');
+        document.getElementById('upload-area').classList.add('hidden');
+        document.getElementById('chat-area')?.classList.add('hidden');
+        box.classList.remove('hidden');
+        let camStream = null, setupOk = false;
+        try {
+          await window.runProctoringSetup({
+            submissionToken, config: setupCfg, container: box,
+            onDone: (cs) => { camStream = cs; setupOk = true; box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); },
+          });
+        } catch { box.classList.add('hidden'); document.getElementById('chat-area')?.classList.remove('hidden'); }
+        const j = await uploadPromise; // aluno terminou o setup → já espera o resultado
+        const release = finishUpload(j);
+        if (!release) { if (camStream) try { camStream.getTracks().forEach(t => t.stop()); } catch {} return; }
+        if (setupOk) startProctoring(camStream, release, j.narrator?.audio_url); // "Ciente – Começar" solta o entrevistador
+        else if (interactionMode === 'audio' && j.narrator?.audio_url) appendNarrator(j.narrator.audio_url, release);
+        else release();
+      } else {
+        // Sem fiscalização: espera o upload e começa (comportamento normal).
+        const j = await uploadPromise;
+        const release = finishUpload(j);
+        if (!release) return;
+        if (interactionMode === 'audio' && j.narrator?.audio_url) appendNarrator(j.narrator.audio_url, release);
+        else release();
       }
     };
 
@@ -2362,23 +2364,46 @@
       await stopRecordingAndSend();
     });
 
-    // ---- Proctoring por vídeo + controle por gesto (só com proctoring ligado) ----
-    // Camada PARALELA: a gravação de áudio/STT acima NÃO muda. A câmera grava um
-    // vídeo contínuo (revisão humana) e o gesto apenas CLICA os botões existentes.
-    let proctorStream = null, proctorRecorder = null, proctorChunks = [], gestureCtl = null, proctorDone = false;
-    async function startProctoring() {
-      try { proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: true }); }
-      catch { return; } // sem câmera → segue a entrevista normalmente (sem vídeo/gesto)
-      const box = document.createElement('div');
-      box.id = 'proctor-selfview';
-      box.style.cssText = 'position:fixed;right:14px;bottom:14px;width:180px;z-index:50;text-align:center;font-size:12px';
-      box.innerHTML = '<video id="pv-cam" autoplay muted playsinline style="width:100%;border-radius:10px;background:#000;transform:scaleX(-1);display:block;box-shadow:0 2px 10px rgba(0,0,0,.25)"></video>'
-        + '<div id="pv-hint" style="margin-top:4px;color:#556;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:3px 6px">✋ palma=gravar · ✌️=enviar · ✊=cancelar</div>'
-        + '<div style="height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden;margin-top:3px"><div id="pv-bar" style="height:100%;width:0;background:#2563eb;transition:width .05s linear"></div></div>';
-      document.body.appendChild(box);
+    // ---- Proctoring por vídeo + ÁREAS DE COMANDO (só com proctoring ligado) ----
+    // Camada PARALELA: a gravação de áudio/STT NÃO muda. A câmera grava um vídeo
+    // contínuo (revisão humana) e as áreas de comando apenas CLICAM os botões
+    // existentes. Sem gestos — mão numa área do canto conta 1-2-3 e comanda.
+    let proctorStream = null, proctorRecorder = null, proctorChunks = [], zonesCtl = null, proctorDone = false;
+    const REC_ZONES = [
+      { id: 'record', corner: 'tl', label: 'GRAVAR',   color: '#16a34a' }, // vê: sup./dir.
+      { id: 'cancel', corner: 'tr', label: 'CANCELAR', color: '#dc2626' }, // vê: sup./esq.
+      { id: 'send',   corner: 'bl', label: 'ENVIAR',   color: '#2563eb' }, // vê: inf./dir.
+      { id: 'repeat', corner: 'br', label: 'REPETIR',  color: '#0891b2' }, // vê: inf./esq.
+    ];
+    // resume=true: reentrada de entrevista em andamento — sem setup nem consentimento,
+    // já entra com as áreas de gravação (Gravar/Enviar/Cancelar/Repetir).
+    async function startProctoring(camStream, onConsent, narratorUrl, resume) {
+      if (proctorStream) return; // já ligado nesta sessão
+      proctorStream = camStream || null;
+      if (!proctorStream) { // setup não entregou a câmera → tenta abrir; senão, segue sem proctoring
+        try { proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }); }
+        catch { if (typeof onConsent === 'function') onConsent(); return; }
+      }
+      // self-view GRANDE acima da troca de mensagens (como na prova oral)
+      const stage = document.createElement('div');
+      stage.id = 'proctor-stage';
+      stage.style.cssText = 'position:relative;width:100%;max-width:360px;aspect-ratio:4/3;margin:6px auto 10px;background:#000;border-radius:12px;overflow:hidden';
+      stage.innerHTML = '<video id="pv-cam" autoplay muted playsinline style="position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);object-fit:cover"></video>'
+        + '<canvas id="pv-canvas" style="position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)"></canvas>'
+        + '<div id="pv-hint" style="position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-size:12px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.72));text-align:center">Comande <strong>CIENTE – COMEÇAR</strong> (área verde, canto superior direito) para iniciar.</div>';
+      const chatArea = document.getElementById('chat-area');
+      chatArea.insertBefore(stage, chatArea.firstChild);
+      // o self-view ocupa o topo; limita o chat NA TELA p/ os controles de baixo
+      // ficarem sempre visíveis (o chat rola internamente e vai ao fim a cada msg).
+      try { const ch = document.getElementById('chat'); ch.style.minHeight = '110px'; ch.style.maxHeight = '30vh'; } catch {}
+      // compacta a faixa dos botões (Instruções/Desistir) p/ recuperar espaço no topo.
+      try { document.getElementById('meta')?.style.setProperty('display', 'none'); } catch {} // some o subtítulo (libera espaço)
+      try { const ia = document.getElementById('interview-actions'); if (ia) ia.style.margin = '0'; } catch {}
       const pv = document.getElementById('pv-cam'); pv.srcObject = proctorStream;
-      // gravação contínua (bitrate baixo — é para revisão humana)
-      try { proctorRecorder = new MediaRecorder(proctorStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
+      if (resume) { const h = document.getElementById('pv-hint'); if (h) h.innerHTML = 'GRAVAR (↗) · CANCELAR (↖) · ENVIAR (↘) · REPETIR (↙)'; }
+
+      // gravação contínua (bitrate baixo — é para revisão humana; vídeo sem áudio)
+      try { proctorRecorder = new MediaRecorder(proctorStream, { videoBitsPerSecond: 400000 }); }
       catch { try { proctorRecorder = new MediaRecorder(proctorStream); } catch { proctorRecorder = null; } }
       if (proctorRecorder) {
         proctorChunks = [];
@@ -2386,28 +2411,53 @@
         proctorRecorder.onstop = uploadProctorVideo;
         proctorRecorder.start(2000);
       }
-      // camada de gesto: só CLICA os botões conforme o estado (idle → gravar; gravando → enviar/cancelar)
-      if (window.createGestureControl) {
-        const vis = el => el && !el.classList.contains('hidden') && !el.disabled;
-        gestureCtl = window.createGestureControl({
-          videoEl: pv,
-          onCommand: (kind) => {
+
+      // instruções faladas (orientador) + a área "Ciente – Começar"
+      let narratorAudio = null;
+      if (narratorUrl) { try { narratorAudio = new Audio(narratorUrl); narratorAudio.play().catch(() => {}); } catch {} }
+      let consented = !!resume; // reentrada já entrou; não pede consentimento de novo
+      let curAudio = null; // áudio do entrevistador tocando por REPETIR (p/ Gravar off / Cancelar parar)
+      const audioPlaying = () => curAudio && !curAudio.paused && !curAudio.ended;
+      const vis = el => el && !el.classList.contains('hidden') && !el.disabled;
+      if (window.createCommandZones) {
+        zonesCtl = window.createCommandZones({
+          videoEl: pv, canvasEl: document.getElementById('pv-canvas'), dwellMs: 2000, size: 0.22,
+          zones: resume ? REC_ZONES : [{ id: 'consent', corner: 'tl', label: 'CIENTE – COMEÇAR', color: '#16a34a' }],
+          // habilita só o que faz sentido: espelha a visibilidade dos botões reais
+          // (parado → Gravar; gravando → Enviar/Cancelar; vez do entrevistador → nenhuma).
+          enabledFn: (id) => {
+            if (id === 'consent') return !consented;
             const rec = document.getElementById('record-btn'), stop = document.getElementById('stop-btn'), send = document.getElementById('stop-send-btn');
-            if (kind === 'start' && vis(rec)) rec.click();
-            else if (kind === 'send' && vis(send)) send.click();
-            else if (kind === 'cancel' && vis(stop)) stop.click();
+            const playing = audioPlaying();
+            if (id === 'record') return vis(rec) && !playing;   // não gravar enquanto ouve o entrevistador
+            if (id === 'send') return vis(send);
+            if (id === 'cancel') return playing || vis(stop);   // parar o áudio OU descartar a gravação
+            if (id === 'repeat') return vis(rec) && !playing && !!document.querySelector('#chat audio');
+            return true;
           },
-          onFeedback: ({ pose, progress, label }) => {
-            const bar = document.getElementById('pv-bar'); if (bar) bar.style.width = (progress || 0) + '%';
-            const hint = document.getElementById('pv-hint'); if (!hint) return;
-            if (label) hint.textContent = label;
-            else if (pose === 'OPEN_PALM') hint.textContent = '✋ segure para GRAVAR';
-            else if (pose === 'V_SIGN') hint.textContent = '✌️ segure para ENVIAR';
-            else if (pose === 'FIST') hint.textContent = '✊ segure para CANCELAR';
-            else hint.textContent = '✋ palma=gravar · ✌️=enviar · ✊=cancelar';
+          onFire: (id) => {
+            if (!consented && id === 'consent') {
+              consented = true;
+              try { if (narratorAudio) { narratorAudio.pause(); narratorAudio.currentTime = 0; } } catch {} // não fala por cima do entrevistador
+              const hint = document.getElementById('pv-hint'); if (hint) hint.innerHTML = 'GRAVAR (↗) · CANCELAR (↖) · ENVIAR (↘) · REPETIR (↙)';
+              zonesCtl.setZones(REC_ZONES);
+              if (typeof onConsent === 'function') onConsent();
+            } else if (consented) {
+              const rec = document.getElementById('record-btn'), stop = document.getElementById('stop-btn'), send = document.getElementById('stop-send-btn');
+              if (id === 'record' && vis(rec) && !audioPlaying()) rec.click();
+              else if (id === 'send' && vis(send)) send.click();
+              else if (id === 'cancel') {
+                if (audioPlaying()) { try { curAudio.pause(); } catch {} curAudio = null; } // para o áudio do REPETIR
+                else if (vis(stop)) stop.click();                                            // ou descarta a gravação
+              }
+              else if (id === 'repeat') { // re-ouvir o entrevistador (rastreia p/ Gravar off / Cancelar parar)
+                const a = [...document.querySelectorAll('#chat audio')].pop();
+                if (a) { try { a.currentTime = 0; a.play(); curAudio = a; a.addEventListener('ended', () => { if (curAudio === a) curAudio = null; }, { once: true }); } catch {} }
+              }
+            }
           },
         });
-      }
+      } else if (typeof onConsent === 'function') { onConsent(); } // sem o módulo → não trava
     }
     function uploadProctorVideo() {
       if (!proctorChunks.length) return;
@@ -2418,13 +2468,13 @@
     }
     function stopProctoringAndUpload() {
       if (proctorDone || !proctorStream) return; proctorDone = true;
-      try { gestureCtl && gestureCtl.stop(); } catch {}
+      try { zonesCtl && zonesCtl.stop(); } catch {}
       try {
         if (proctorRecorder && proctorRecorder.state !== 'inactive') proctorRecorder.stop(); // onstop → upload
         else uploadProctorVideo();
       } catch {}
       try { proctorStream.getTracks().forEach(t => t.stop()); } catch {}
-      const box = document.getElementById('proctor-selfview'); if (box) setTimeout(() => box.remove(), 800);
+      const stage = document.getElementById('proctor-stage'); if (stage) setTimeout(() => stage.remove(), 500);
     }
 
     // ---- Sugestão de resposta do aluno (conversa de TESTE — professor) ----
