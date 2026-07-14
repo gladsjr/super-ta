@@ -33,6 +33,15 @@ function publicConfig(config) {
     return { candidates: config.candidates, judges: config.judges, case_ids: config.case_ids, max_cost_usd: config.limits.max_cost_usd, random_seed: config.random_seed };
 }
 
+function providerStatus(config) {
+    return [
+        { key: "openai", name: "OpenAI", configured: Boolean(process.env.OPENAI_API_KEY), cost: "estimado por tokens" },
+        { key: "anthropic", name: "Anthropic", configured: Boolean(process.env.ANTHROPIC_API_KEY), cost: Object.keys(config.providers?.anthropic?.pricing || {}).length ? "estimado por tokens" : "tabela nao configurada" },
+        { key: "gemini", name: "Google Gemini", configured: Boolean(process.env.GEMINI_API_KEY), cost: Object.keys(config.providers?.gemini?.pricing || {}).length ? "estimado por tokens" : "tabela nao configurada" },
+        { key: "xai", name: "xAI", configured: Boolean(process.env.XAI_API_KEY), cost: "exato por resposta" },
+    ];
+}
+
 function resolveConfig(body = {}) {
     const config = defaultConfig();
     if (Array.isArray(body.candidates) && body.candidates.length) config.candidates = body.candidates.map(String);
@@ -70,12 +79,7 @@ router.get("/api/benchmark/config", requireAdmin, (_req, res) => {
 
 router.get("/api/benchmark/providers", requireAdmin, (_req, res) => {
     const config = defaultConfig();
-    res.json({ providers: [
-        { key: "openai", name: "OpenAI", configured: Boolean(process.env.OPENAI_API_KEY), cost: "estimado por tokens" },
-        { key: "anthropic", name: "Anthropic", configured: Boolean(process.env.ANTHROPIC_API_KEY), cost: Object.keys(config.providers?.anthropic?.pricing || {}).length ? "estimado por tokens" : "tabela nao configurada" },
-        { key: "gemini", name: "Google Gemini", configured: Boolean(process.env.GEMINI_API_KEY), cost: Object.keys(config.providers?.gemini?.pricing || {}).length ? "estimado por tokens" : "tabela nao configurada" },
-        { key: "xai", name: "xAI", configured: Boolean(process.env.XAI_API_KEY), cost: "exato por resposta" },
-    ] });
+    res.json({ providers: providerStatus(config), models: Array.isArray(config.model_catalog) ? config.model_catalog : [] });
 });
 
 router.get("/api/benchmark/cases", requireAdmin, (_req, res) => {

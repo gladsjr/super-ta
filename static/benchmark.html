@@ -35,6 +35,8 @@
     .artifact-btn { width:100%; border:0; border-bottom:1px solid var(--ink-100); background:transparent; text-align:left; padding:8px; font:inherit; font-size:var(--fs-xs); cursor:pointer; overflow-wrap:anywhere }
     .artifact-btn:hover { background:var(--ink-50) }
     .artifact-view { min-height:300px; max-height:520px; margin:0; white-space:pre-wrap; overflow:auto }
+    .model-picker { display:flex; gap:8px; align-items:center; margin-bottom:6px }
+    .model-picker .select { flex:1; min-width:0 }
     .hidden { display:none !important }
     .muted { color:var(--ink-500) }
     .error-box { color:var(--danger-700); background:var(--danger-50); padding:10px; border-radius:var(--r-sm); white-space:pre-wrap }
@@ -70,7 +72,7 @@
 
   <main class="page-wide">
     <div class="page-header"><h1>ORATIA Bench</h1><p class="subtitle">Execuções versionadas, resultados e artefatos de auditoria.</p></div>
-    <div class="view-tabs" role="tablist"><button class="view-tab active" data-view="cases" type="button">Casos</button><button class="view-tab" data-view="setup" type="button">Setup</button><button class="view-tab" data-view="generations" type="button">Gerações</button><button class="view-tab" data-view="versions" type="button">Versões</button><button class="view-tab" data-view="juries" type="button">Conselhos</button><button class="view-tab" data-view="executions" type="button">Execuções</button><button class="view-tab" data-view="results" type="button">Resultados</button></div>
+    <div class="view-tabs" role="tablist"><button class="view-tab active" data-view="juries" type="button">Conselhos</button><button class="view-tab" data-view="setup" type="button">Setup</button><button class="view-tab" data-view="versions" type="button">Vers&otilde;es</button><button class="view-tab" data-view="cases" type="button">Casos</button><button class="view-tab" data-view="executions" type="button">Execu&ccedil;&otilde;es</button><button class="view-tab" data-view="results" type="button">Resultados</button></div>
     <div id="global-error" class="error-box hidden"></div>
     <div id="executions-view" class="hidden">
       <div style="max-width:720px">
@@ -78,8 +80,8 @@
           <h2>Nova execução</h2>
           <div id="provider-status" class="field-help" style="margin-bottom:14px"></div>
           <div class="field"><label for="release-key">Versão do benchmark</label><select id="release-key" class="select"></select><div id="release-summary" class="field-help"></div></div>
-          <div class="field"><label for="candidates">Modelos candidatos</label><textarea id="candidates" class="textarea input-mono" rows="3"></textarea><div class="field-help">Um por linha: fornecedor:modelo:esforço</div></div>
-          <div class="field"><label for="max-cost">Limite de custo (US$)</label><input id="max-cost" class="input" type="number" min="0.01" max="1000" step="1"></div>
+          <div class="field"><label for="candidates">Modelos candidatos</label><div id="candidate-picker"></div><textarea id="candidates" class="textarea input-mono" rows="3"></textarea><div class="field-help">Um por linha: fornecedor:modelo:esforço</div></div>
+          <div class="field"><label for="max-cost">Limite de custo (US$)</label><input id="max-cost" class="input" type="number" min="0.01" max="1000" step="0.01" inputmode="decimal"></div>
           <div class="field"><label for="seed">Semente A/B</label><input id="seed" class="input input-mono"></div>
           <button id="start-run" class="btn btn-primary" type="submit">Iniciar execução</button>
           <span id="form-message" class="field-help"></span>
@@ -115,16 +117,22 @@
         <div id="case-browser-list" class="case-browser-list"></div>
       </aside>
       <section id="case-detail" class="panel">
-        <div class="table-empty">Selecione um caso para examinar seus documentos e a entrevista canônica.</div>
+        <div class="table-empty">Selecione um caso para examinar os documentos de entrada.</div>
       </section>
     </div>
 
-    <div id="setup-view" class="bench-layout hidden">
-      <aside class="panel"><div class="toolbar"><h2>Rascunhos</h2><button id="new-setup" class="btn btn-sm" type="button">Novo</button></div><div id="setup-draft-list" class="case-browser-list"></div></aside>
-      <section id="setup-editor" class="panel"><div class="table-empty">Selecione ou crie um rascunho de setup.</div></section>
+    <div id="setup-view" class="hidden">
+      <div class="content-tabs" role="tablist"><button class="content-tab active" data-setup-tab="config" type="button">Configura&ccedil;&atilde;o</button><button class="content-tab" data-setup-tab="interviews" type="button">Entrevistas geradas</button></div>
+      <div id="setup-tab-config" class="setup-tab-content bench-layout">
+        <aside class="panel"><div class="toolbar"><h2>Rascunhos</h2><button id="new-setup" class="btn btn-sm" type="button">Novo</button></div><div id="setup-draft-list" class="case-browser-list"></div></aside>
+        <section id="setup-editor" class="panel"><div class="table-empty">Selecione ou crie um rascunho de setup.</div></section>
+      </div>
+      <div id="setup-tab-interviews" class="setup-tab-content panel hidden">
+        <div class="toolbar"><div><h2>Entrevistas geradas</h2><p class="muted">Registros produzidos a partir dos rascunhos antes da publica&ccedil;&atilde;o.</p></div><button id="refresh-generations" class="btn btn-sm" type="button">Atualizar</button></div>
+        <div id="generation-list"></div>
+        <div id="generation-detail" style="margin-top:20px"></div>
+      </div>
     </div>
-
-    <div id="generations-view" class="panel hidden"><div class="toolbar"><div><h2>Gerações do setup</h2><p class="muted">Registros produzidos a partir dos rascunhos antes da publicação.</p></div><button id="refresh-generations" class="btn btn-sm" type="button">Atualizar</button></div><div id="generation-list"></div></div>
 
     <div id="versions-view" class="bench-layout hidden">
       <section class="panel"><h2>Versões S publicadas</h2><div id="setup-version-list"></div></section>
@@ -133,18 +141,42 @@
 
     <div id="juries-view" class="bench-layout hidden">
       <section class="panel"><h2>Conselhos J publicados</h2><div id="jury-version-list"></div></section>
-      <aside class="panel"><h2>Novo conselho</h2><div class="field"><label for="jury-version">Versão</label><input id="jury-version" class="input input-mono" placeholder="1.0"></div><div class="field"><label for="jury-name">Nome</label><input id="jury-name" class="input"></div><div class="field"><label for="jury-models">Juízes</label><textarea id="jury-models" class="textarea input-mono" rows="5" placeholder="openai:gpt-5.6-sol:high"></textarea></div><button id="publish-jury" class="btn btn-primary" type="button">Publicar J</button><div id="jury-message" class="field-help"></div></aside>
+      <aside class="panel"><h2>Novo conselho</h2><div class="field"><label for="jury-version">Versão</label><input id="jury-version" class="input input-mono" placeholder="1.0"></div><div class="field"><label for="jury-name">Nome</label><input id="jury-name" class="input"></div><div class="field"><label for="jury-models">Juízes</label><div id="jury-picker"></div><textarea id="jury-models" class="textarea input-mono" rows="5" placeholder="openai:gpt-5.6-sol:high"></textarea></div><button id="publish-jury" class="btn btn-primary" type="button">Publicar J</button><div id="jury-message" class="field-help"></div></aside>
     </div>
   </main>
 
 <script>
-const state = { selectedRun: null, selectedCase: null, selectedDraft: null, cases: [], drafts: [], generations: [], setupVersions: [], juryVersions: [], releases: [], poll: null };
+const state = { selectedRun: null, selectedCase: null, selectedDraft: null, selectedGeneration: null, cases: [], drafts: [], generations: [], setupVersions: [], juryVersions: [], releases: [], providers: [], modelCatalog: [], poll: null };
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const specs = (id) => $(id).value.split(/\r?\n|,/).map(v => v.trim()).filter(Boolean);
 const money = (v) => v == null ? '-' : 'US$ ' + Number(v).toFixed(4);
 const number = (v, d=3) => v == null ? '-' : Number(v).toFixed(d);
 const date = (v) => v ? new Date(v).toLocaleString('pt-BR') : '-';
+function providerName(key) { return state.providers.find(p => p.key === key)?.name || key; }
+function modelOptions(role) {
+  return state.modelCatalog
+    .filter(item => !role || !Array.isArray(item.roles) || item.roles.includes(role))
+    .map(item => {
+      const provider = String(item.spec || '').split(':')[0];
+      const label = `${item.label || item.spec}${state.providers.find(p => p.key === provider)?.configured === false ? ' (sem chave)' : ''}`;
+      return `<option value="${esc(item.spec)}">${esc(label)}</option>`;
+    }).join('');
+}
+function attachModelPicker(containerId, targetId, role) {
+  const container = $(containerId);
+  if (!container) return;
+  container.innerHTML = `<div class="model-picker"><select class="select" data-model-select="${esc(targetId)}">${modelOptions(role)}</select><button class="btn btn-sm" type="button" data-model-add="${esc(targetId)}">Adicionar</button></div>`;
+  const button = container.querySelector('[data-model-add]');
+  const select = container.querySelector('[data-model-select]');
+  button.onclick = () => {
+    const target = $(targetId);
+    if (!target || !select.value) return;
+    const current = specs(targetId);
+    if (!current.includes(select.value)) current.push(select.value);
+    target.value = current.join('\n');
+  };
+}
 
 function showError(message) { $('global-error').textContent = message; $('global-error').classList.toggle('hidden', !message); }
 async function api(url, options) {
@@ -159,16 +191,25 @@ async function loadSetup() {
   const [configData, caseData, providerData] = await Promise.all([api('/api/benchmark/config'), api('/api/benchmark/cases'), api('/api/benchmark/providers')]);
   const c = configData.config;
   $('candidates').value = c.candidates.join('\n'); $('max-cost').value = c.max_cost_usd; $('seed').value = c.random_seed;
+  state.providers = providerData.providers || [];
+  state.modelCatalog = providerData.models || [];
   state.cases = caseData.cases;
   const areas = [...new Set(caseData.cases.map(item => item.large_area))].sort();
   $('case-area-filter').innerHTML += areas.map(area => `<option value="${esc(area)}">${esc(area)}</option>`).join('');
   renderCaseBrowser();
   $('provider-status').innerHTML = providerData.providers.map(p => `<span class="badge ${p.configured ? 'status-completed' : ''}" title="${esc(p.cost)}">${esc(p.name)}: ${p.configured ? 'pronto' : 'sem chave'}</span>`).join(' ');
+  attachModelPicker('candidate-picker', 'candidates', 'candidate');
+  attachModelPicker('jury-picker', 'jury-models', 'judge');
 }
 
 function switchView(view) {
   document.querySelectorAll('[data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
-  ['executions','results','cases','setup','generations','versions','juries'].forEach(name => $(`${name}-view`).classList.toggle('hidden', name !== view));
+  ['executions','results','cases','setup','versions','juries'].forEach(name => $(`${name}-view`).classList.toggle('hidden', name !== view));
+}
+
+function switchSetupTab(tab) {
+  document.querySelectorAll('[data-setup-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.setupTab === tab));
+  document.querySelectorAll('.setup-tab-content').forEach(content => content.classList.toggle('hidden', content.id !== `setup-tab-${tab}`));
 }
 
 function renderCaseBrowser() {
@@ -191,16 +232,17 @@ async function openCase(id) {
   $('case-detail').innerHTML = '<div class="table-empty">Carregando caso...</div>';
   const data = await api(`/api/benchmark/cases/${encodeURIComponent(id)}`);
   const c = data.case;
-  $('case-detail').innerHTML = `<div class="detail-head"><div><h2>${esc(c.area)}</h2><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div></div><span class="badge" title="Hash dos documentos">${esc(c.document_hash.slice(0,12))}</span></div><div class="content-tabs" role="tablist"><button class="content-tab active" data-case-tab="assignment" type="button">Enunciado</button><button class="content-tab" data-case-tab="work" type="button">Trabalho</button><button class="content-tab" data-case-tab="persona" type="button">Persona</button><button class="content-tab" data-case-tab="turns" type="button">Entrevista canônica</button><button class="content-tab" data-case-tab="rag" type="button">RAG</button></div><div id="case-tab-assignment" class="case-tab-content document-text">${esc(c.assignment)}</div><div id="case-tab-work" class="case-tab-content document-text hidden">${esc(c.student_work)}</div><div id="case-tab-persona" class="case-tab-content hidden"><div class="persona-block"><h3>${esc(c.persona.key)}</h3><p>${esc(c.persona.description)}</p></div></div><div id="case-tab-turns" class="case-tab-content hidden">${renderTurns(c)}</div><div id="case-tab-rag" class="case-tab-content hidden">${renderRag(data.rag)}</div>`;
+  $('case-detail').innerHTML = `<div class="detail-head"><div><h2>${esc(c.area)}</h2><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div></div><span class="badge" title="Hash dos documentos">${esc(c.document_hash.slice(0,12))}</span></div><div class="content-tabs" role="tablist"><button class="content-tab active" data-case-tab="assignment" type="button">Enunciado</button><button class="content-tab" data-case-tab="work" type="button">Trabalho</button><button class="content-tab" data-case-tab="persona" type="button">Persona</button><button class="content-tab" data-case-tab="rag" type="button">RAG</button></div><div id="case-tab-assignment" class="case-tab-content document-text">${esc(c.assignment)}</div><div id="case-tab-work" class="case-tab-content document-text hidden">${esc(c.student_work)}</div><div id="case-tab-persona" class="case-tab-content hidden"><div class="persona-block"><h3>${esc(c.persona.key)}</h3><p>${esc(c.persona.description)}</p></div></div><div id="case-tab-rag" class="case-tab-content hidden">${renderRag(data.rag)}</div>`;
   document.querySelectorAll('[data-case-tab]').forEach(btn => btn.onclick = () => { document.querySelectorAll('[data-case-tab]').forEach(item => item.classList.toggle('active', item === btn)); document.querySelectorAll('.case-tab-content').forEach(content => content.classList.toggle('hidden', content.id !== `case-tab-${btn.dataset.caseTab}`)); });
 }
 
 function setupConfigFromEditor() {
+  const setupCouncil = specs('setup-council');
   return {
     case_ids: [...document.querySelectorAll('#setup-case-selection input:checked')].map(input => input.value),
     prompts: { candidate: $('setup-prompt-candidate').value, judge: $('setup-prompt-judge').value },
-    generation_council: specs('setup-generation-council'),
-    validation_council: specs('setup-validation-council'),
+    generation_council: setupCouncil,
+    validation_council: setupCouncil,
     rag: { strategy: 'lexical-v1', chunk_chars: 1800, top_k: 8 },
     consensus: { disagreement_threshold: 0.65, deliberation_enabled: false }
   };
@@ -215,7 +257,9 @@ function openDraft(id) {
   const draft = state.drafts.find(item => String(item.id) === String(id)); if (!draft) return;
   state.selectedDraft = draft.id; renderDraftList();
   const config = draft.config_json || {}, selected = new Set(config.case_ids || []);
-  $('setup-editor').innerHTML = `<div class="detail-head"><div><h2>${esc(draft.name)}</h2><div class="muted">Rascunho editável · #${draft.id}</div></div></div><div class="field"><label for="setup-name">Nome</label><input id="setup-name" class="input" value="${esc(draft.name)}"></div><div class="field"><label for="setup-description">Descrição</label><textarea id="setup-description" class="textarea" rows="2">${esc(draft.description)}</textarea></div><div class="field"><label>Casos incluídos</label><div id="setup-case-selection" class="case-list">${state.cases.map(item => `<label class="case-option"><input type="checkbox" value="${esc(item.id)}" ${!selected.size || selected.has(item.id) ? 'checked' : ''}><span><strong>${esc(item.area)}</strong><small>${esc(item.id)}</small></span></label>`).join('')}</div></div><div class="field"><label for="setup-generation-council">Conselho de geração</label><textarea id="setup-generation-council" class="textarea input-mono" rows="3">${esc((config.generation_council || []).join('\n'))}</textarea></div><div class="field"><label for="setup-validation-council">Conselho de validação do setup</label><textarea id="setup-validation-council" class="textarea input-mono" rows="3">${esc((config.validation_council || []).join('\n'))}</textarea></div><div class="field"><label for="setup-prompt-candidate">Prompt de geração da próxima fala</label><textarea id="setup-prompt-candidate" class="textarea input-mono" rows="5">${esc(config.prompts?.candidate || '')}</textarea></div><div class="field"><label for="setup-prompt-judge">Prompt de validação e julgamento</label><textarea id="setup-prompt-judge" class="textarea input-mono" rows="5">${esc(config.prompts?.judge || '')}</textarea></div><div class="row"><button id="save-setup" class="btn" type="button">Salvar rascunho</button><button id="generate-setup" class="btn btn-primary" type="button">Gerar entrevistas</button><span id="setup-message" class="field-help"></span></div><div class="notice notice-info" style="margin-top:16px">A geração atual cria um snapshot dos fixtures simplificados e não chama LLMs. O registro de proveniência deixará isso explícito.</div>`;
+  const setupCouncil = (config.generation_council?.length ? config.generation_council : config.validation_council) || [];
+  $('setup-editor').innerHTML = `<div class="detail-head"><div><h2>${esc(draft.name)}</h2><div class="muted">Rascunho editável · #${draft.id}</div></div></div><div class="field"><label for="setup-name">Nome</label><input id="setup-name" class="input" value="${esc(draft.name)}"></div><div class="field"><label for="setup-description">Descrição</label><textarea id="setup-description" class="textarea" rows="2">${esc(draft.description)}</textarea></div><div class="field"><label>Casos incluídos</label><div id="setup-case-selection" class="case-list">${state.cases.map(item => `<label class="case-option"><input type="checkbox" value="${esc(item.id)}" ${!selected.size || selected.has(item.id) ? 'checked' : ''}><span><strong>${esc(item.area)}</strong><small>${esc(item.id)}</small></span></label>`).join('')}</div></div><div class="field"><label for="setup-council">Conselho do setup</label><div id="setup-picker"></div><textarea id="setup-council" class="textarea input-mono" rows="3">${esc(setupCouncil.join('\n'))}</textarea><div class="field-help">Usado tanto para gerar as entrevistas canonicas quanto para validar o setup.</div></div><div class="field"><label for="setup-prompt-candidate">Prompt de geração da próxima fala</label><textarea id="setup-prompt-candidate" class="textarea input-mono" rows="5">${esc(config.prompts?.candidate || '')}</textarea></div><div class="field"><label for="setup-prompt-judge">Prompt de validação e julgamento</label><textarea id="setup-prompt-judge" class="textarea input-mono" rows="5">${esc(config.prompts?.judge || '')}</textarea></div><div class="row"><button id="save-setup" class="btn" type="button">Salvar rascunho</button><button id="generate-setup" class="btn btn-primary" type="button">Gerar entrevistas</button><span id="setup-message" class="field-help"></span></div><div class="notice notice-info" style="margin-top:16px">A geração atual cria um snapshot dos fixtures simplificados e não chama LLMs. O registro de proveniência deixará isso explícito.</div>`;
+  attachModelPicker('setup-picker', 'setup-council', 'setup');
   $('save-setup').onclick = () => saveDraft(false);
   $('generate-setup').onclick = () => saveDraft(true);
 }
@@ -228,19 +272,33 @@ async function saveDraft(generate) {
     if (generate) {
       const data = await api(`/api/benchmark/setup-drafts/${state.selectedDraft}/generate`, {method:'POST'});
       $('setup-message').textContent = `Geração ${data.generation.generation_key} criada sem custo.`;
-      await loadWorkflow(); switchView('generations');
+      state.selectedGeneration = data.generation.generation_key;
+      await loadWorkflow(); switchView('setup'); switchSetupTab('interviews');
     } else { $('setup-message').textContent = 'Rascunho salvo.'; await loadWorkflow(false); }
   } catch(err) { $('setup-message').textContent = err.message; }
 }
 
 function renderGenerations() {
-  $('generation-list').innerHTML = state.generations.length ? state.generations.map(item => `<div class="turn-block"><div class="detail-head"><div><h3>${esc(item.setup_name)}</h3><div><code>${esc(item.generation_key)}</code> · ${statusBadge(item.status)} · ${esc(item.mode)}</div></div></div><p class="muted">${esc(item.result_json?.provenance?.note || '')}</p><div class="row"><input class="input input-mono" style="max-width:120px" data-generation-version="${esc(item.generation_key)}" placeholder="0.1.0"><select class="select" style="max-width:150px" data-generation-class="${esc(item.generation_key)}"><option value="experimental">Experimental</option><option value="fixture">Fixture</option><option value="validated">Validado</option></select><button class="btn btn-primary btn-sm" data-publish-generation="${esc(item.generation_key)}" type="button">Publicar S</button><span class="field-help" data-generation-message="${esc(item.generation_key)}"></span></div></div>`).join('') : '<div class="table-empty">Nenhuma geração.</div>';
+  $('generation-list').innerHTML = state.generations.length ? state.generations.map(item => `<div class="turn-block"><div class="detail-head"><div><h3>${esc(item.setup_name)}</h3><div><code>${esc(item.generation_key)}</code> - ${statusBadge(item.status)} - ${esc(item.mode)}</div></div><button class="btn btn-sm" data-open-generation="${esc(item.generation_key)}" type="button">Ver entrevistas</button></div><p class="muted">${esc(item.result_json?.provenance?.note || '')}</p><div class="row"><input class="input input-mono" style="max-width:120px" data-generation-version="${esc(item.generation_key)}" placeholder="0.1.0"><select class="select" style="max-width:150px" data-generation-class="${esc(item.generation_key)}"><option value="experimental">Experimental</option><option value="fixture">Fixture</option><option value="validated">Validado</option></select><button class="btn btn-primary btn-sm" data-publish-generation="${esc(item.generation_key)}" type="button">Publicar S</button><span class="field-help" data-generation-message="${esc(item.generation_key)}"></span></div></div>`).join('') : '<div class="table-empty">Nenhuma geracao.</div>';
+  document.querySelectorAll('[data-open-generation]').forEach(btn => btn.onclick = () => openGeneration(btn.dataset.openGeneration));
   document.querySelectorAll('[data-publish-generation]').forEach(btn => btn.onclick = async () => {
     const key=btn.dataset.publishGeneration, version=document.querySelector(`[data-generation-version="${key}"]`).value, classification=document.querySelector(`[data-generation-class="${key}"]`).value, message=document.querySelector(`[data-generation-message="${key}"]`);
     try { const data=await api('/api/benchmark/setup-versions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation_key:key,version,classification,name:`Setup ${version}`})}); message.textContent=`Publicado ${data.version.version_key}.`; await loadWorkflow(); } catch(err){message.textContent=err.message;}
   });
+  if (!state.selectedGeneration && state.generations.length) state.selectedGeneration = state.generations[0].generation_key;
+  openGeneration(state.selectedGeneration);
 }
 
+function openGeneration(key) {
+  const detail = $('generation-detail');
+  if (!detail) return;
+  const item = state.generations.find(g => g.generation_key === key);
+  state.selectedGeneration = item ? key : null;
+  document.querySelectorAll('[data-open-generation]').forEach(btn => btn.classList.toggle('btn-primary', btn.dataset.openGeneration === state.selectedGeneration));
+  if (!item) { detail.innerHTML = state.generations.length ? '<div class="table-empty">Selecione uma geracao.</div>' : ''; return; }
+  const cases = item.result_json?.cases || [];
+  detail.innerHTML = `<hr><div class="detail-head"><div><h2>${esc(item.setup_name)}</h2><div class="muted"><code>${esc(item.generation_key)}</code> - ${date(item.finished_at || item.created_at)}</div></div></div>${cases.map(c => `<article class="turn-block"><h3>${esc(c.area)}</h3><div class="muted">${esc(c.large_area)} - ${esc(c.course_level)} - <code>${esc(c.id)}</code></div>${renderTurns(c)}</article>`).join('') || '<div class="table-empty">Esta geracao nao tem entrevistas registradas.</div>'}`;
+}
 function renderVersions() {
   $('setup-version-list').innerHTML = state.setupVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><div>${statusBadge(item.classification)} · publicado ${date(item.published_at)}</div><p>${esc(item.description)}</p><div class="field-help">Hash ${esc(item.manifest_hash)}</div></div>`).join('') || '<div class="table-empty">Nenhuma versão S.</div>';
   $('jury-version-list').innerHTML = state.juryVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><p>${esc(item.description)}</p><div class="field-help">${esc((item.config_json?.judges || []).join(', '))}</div></div>`).join('') || '<div class="table-empty">Nenhum conselho.</div>';
@@ -328,6 +386,7 @@ $('run-form').onsubmit = async (event) => {
 $('refresh').onclick = () => loadRuns().catch(err => showError(err.message));
 $('cancel-run').onclick = async () => { const key=$('cancel-run').dataset.run; await api(`/api/benchmark/runs/${encodeURIComponent(key)}/cancel`, {method:'POST'}); await loadRuns(); };
 document.querySelectorAll('[data-view]').forEach(btn => btn.onclick = () => switchView(btn.dataset.view));
+document.querySelectorAll('[data-setup-tab]').forEach(btn => btn.onclick = () => switchSetupTab(btn.dataset.setupTab));
 $('case-search').oninput = renderCaseBrowser;
 $('case-area-filter').onchange = renderCaseBrowser;
 $('release-key').onchange = updateReleaseSummary;
@@ -336,7 +395,7 @@ $('refresh-generations').onclick = () => loadWorkflow().catch(err => showError(e
 $('publish-jury').onclick = async () => { $('jury-message').textContent='Publicando...'; try{const data=await api('/api/benchmark/jury-versions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version:$('jury-version').value,name:$('jury-name').value,judges:specs('jury-models')})});$('jury-message').textContent=`Publicado ${data.version.version_key}.`;await loadWorkflow();}catch(err){$('jury-message').textContent=err.message;} };
 $('create-release').onclick = async () => { $('release-message').textContent='Criando...'; try{const data=await api('/api/benchmark/releases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({setup_version_key:$('release-setup').value,jury_version_key:$('release-jury').value,name:$('release-name').value})});$('release-message').textContent=`Criada ${data.release.release_key}.`;await loadWorkflow();}catch(err){$('release-message').textContent=err.message;} };
 
-Promise.all([loadSetup(), loadRuns(), loadWorkflow()]).then(() => { switchView('cases'); if(state.cases.length) openCase(state.cases[0].id); }).catch(err => showError(err.message));
+Promise.all([loadSetup(), loadRuns(), loadWorkflow()]).then(() => { switchView('juries'); if(state.cases.length) openCase(state.cases[0].id); }).catch(err => showError(err.message));
 </script>
 </body>
 </html>

@@ -22,6 +22,34 @@ candidates:
   - openai:gpt-5.6-luna:medium
 judges:
   - openai:gpt-5.6-sol:high
+model_catalog:
+  - spec: openai:gpt-5.4:high
+    label: OpenAI GPT-5.4 high
+    roles: [candidate]
+  - spec: openai:gpt-5.6-luna:medium
+    label: OpenAI GPT-5.6 Luna medium
+    roles: [candidate, judge, setup]
+  - spec: openai:gpt-5.6-luna:low
+    label: OpenAI GPT-5.6 Luna low
+    roles: [candidate]
+  - spec: openai:gpt-5.6-terra:medium
+    label: OpenAI GPT-5.6 Terra medium
+    roles: [candidate, judge, setup]
+  - spec: openai:gpt-5.6-sol:high
+    label: OpenAI GPT-5.6 Sol high
+    roles: [judge, setup]
+  - spec: anthropic:claude-opus-4-1
+    label: Anthropic Claude Opus 4.1
+    roles: [judge, setup]
+  - spec: anthropic:claude-sonnet-4
+    label: Anthropic Claude Sonnet 4
+    roles: [candidate, judge, setup]
+  - spec: gemini:gemini-2.5-pro
+    label: Google Gemini 2.5 Pro
+    roles: [judge, setup]
+  - spec: xai:grok-4
+    label: xAI Grok 4
+    roles: [judge, setup]
 storage:
   runs_dir: bench/runs
 limits:
