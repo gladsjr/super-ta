@@ -24,6 +24,9 @@
   .budget-edit-row { display: none; gap: var(--sp-2); margin-top: var(--sp-2); }
   .budget-edit-row.open { display: flex; flex-wrap: wrap; }
   .budget-edit-row input { width: 120px; }
+  .name-edit-row { display: none; gap: var(--sp-2); margin-top: var(--sp-2); align-items: center; }
+  .name-edit-row.open { display: flex; flex-wrap: wrap; }
+  .name-edit-row input { flex: 1; min-width: 200px; max-width: 360px; }
 
   .works-toolbar { display: flex; gap: var(--sp-3); align-items: center; margin: var(--sp-3) 0 var(--sp-2); flex-wrap: wrap; }
   .works-toolbar .filter-label { color: var(--ink-500); font-size: var(--fs-sm); }
@@ -104,6 +107,11 @@
         <option value="all">Todos</option>
         <option value="active" selected>Ativos</option>
         <option value="inactive">Desativados</option>
+      </select>
+      <label class="filter-label" for="works-sort">Ordenar:</label>
+      <select id="works-sort" class="select">
+        <option value="name">Nome (A → Z)</option>
+        <option value="date">Data (mais novo)</option>
       </select>
       <span class="spacer"></span>
     </div>
@@ -256,6 +264,13 @@ function renderWorks() {
     if (filter === 'inactive') return w.is_active === false;
     return true;
   });
+  // Ordenação escolhida pelo admin. 'date' mantém a ordem do servidor
+  // (created_at DESC = mais novo primeiro); 'name' ordena A→Z, ignorando
+  // maiúsculas/acentos (localeCompare pt-BR, sensitivity 'base').
+  const sortKey = document.getElementById('works-sort')?.value || 'name';
+  if (sortKey === 'name') {
+    filtered.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' }));
+  }
   if (filtered.length === 0) {
     el.innerHTML = '';
     filteredEmpty.classList.remove('hidden');
@@ -292,7 +307,16 @@ function renderWorks() {
     return `
       <div class="card work-card ${inactive ? 'inactive' : ''}" data-token="${escapeHtml(w.work_token)}">
         <div>
-          <h3>${escapeHtml(w.name)} ${w.kind === 'oral_realtime' ? '<span class="badge" title="Prova oral por voz (Realtime)">🎙️ Prova oral</span>' : ''} ${inactiveBadge}</h3>
+          <div class="row" style="gap: var(--sp-2); align-items: center; flex-wrap: wrap">
+            <h3 style="margin: 0">${escapeHtml(w.name)} ${w.kind === 'oral_realtime' ? '<span class="badge" title="Prova oral por voz (Realtime)">🎙️ Prova oral</span>' : ''} ${inactiveBadge}</h3>
+            <button class="btn btn-ghost btn-sm" onclick="toggleNameEdit('${w.work_token}')" title="Renomear trabalho">Editar nome</button>
+          </div>
+          <div class="name-edit-row" id="nedit-${w.work_token}">
+            <input type="text" class="input" maxlength="80" value="${escapeHtml(w.name)}" id="nedit-input-${w.work_token}"/>
+            <button class="btn btn-primary btn-sm" onclick="saveName('${w.work_token}')">Salvar</button>
+            <button class="btn btn-ghost btn-sm" onclick="toggleNameEdit('${w.work_token}')">Cancelar</button>
+            <span class="hint" id="nedit-msg-${w.work_token}"></span>
+          </div>
           <div class="work-stats">
             <span class="badge badge-pending">${pending} pendente${pending === 1 ? '' : 's'}</span>
             <span class="badge badge-in_progress">${inprog} em andamento</span>
@@ -367,6 +391,48 @@ async function deleteWork(workToken) {
 }
 
 document.getElementById('works-filter').addEventListener('change', renderWorks);
+
+// Ordenação: restaura a última escolha do admin e persiste ao trocar.
+(function initSort() {
+  const sel = document.getElementById('works-sort');
+  const saved = localStorage.getItem('admin-works-sort');
+  if (saved === 'name' || saved === 'date') sel.value = saved;
+  sel.addEventListener('change', () => {
+    localStorage.setItem('admin-works-sort', sel.value);
+    renderWorks();
+  });
+})();
+
+function toggleNameEdit(token) {
+  const row = document.getElementById('nedit-' + token);
+  if (!row) return;
+  const opening = !row.classList.contains('open');
+  row.classList.toggle('open');
+  if (opening) {
+    const input = document.getElementById('nedit-input-' + token);
+    if (input) { input.focus(); input.select(); }
+  }
+}
+
+async function saveName(token) {
+  const input = document.getElementById('nedit-input-' + token);
+  const msg = document.getElementById('nedit-msg-' + token);
+  if (!input) return;
+  const name = input.value.trim();
+  if (!name) { msg.textContent = 'Nome obrigatório.'; return; }
+  msg.textContent = 'Salvando...';
+  try {
+    const r = await fetch('/admin/works/' + encodeURIComponent(token) + '/name', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (r.status === 401) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao renomear'); return; }
+    msg.textContent = '';
+    loadWorks();
+  } catch { msg.textContent = 'Falha na comunicação'; }
+}
 
 function toggleBudgetEdit(token) {
   const row = document.getElementById('bedit-' + token);

@@ -64,6 +64,13 @@
     <div class="page-header">
       <div class="row" style="gap: var(--sp-2); align-items: center">
         <h1 id="work-name" style="margin: 0">—</h1>
+        <button id="edit-name-btn" class="btn btn-ghost btn-sm" type="button" title="Renomear prova">Editar nome</button>
+      </div>
+      <div class="row hidden" id="name-edit-row" style="gap: var(--sp-2); align-items: center; margin-top: var(--sp-2)">
+        <input id="name-edit-input" class="input" style="flex: 1; max-width: 360px" maxlength="80"/>
+        <button id="save-name-btn" class="btn btn-primary btn-sm" type="button">Salvar</button>
+        <button id="cancel-name-btn" class="btn btn-ghost btn-sm" type="button">Cancelar</button>
+        <span id="name-edit-msg" class="hint"></span>
       </div>
       <div class="meta-row" id="meta"></div>
     </div>
@@ -623,6 +630,35 @@
     document.getElementById('penalty-prompt-oral').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
   }
   document.getElementById('cfg-n').addEventListener('input', cfgWarn);
+
+  // ---------- Renomear a prova (reusa PATCH /w/:token/name) ----------
+  document.getElementById('edit-name-btn').onclick = () => {
+    document.getElementById('name-edit-input').value = document.getElementById('work-name').textContent;
+    document.getElementById('name-edit-row').classList.remove('hidden');
+    document.getElementById('name-edit-msg').textContent = '';
+    document.getElementById('name-edit-input').focus();
+  };
+  document.getElementById('cancel-name-btn').onclick = () => {
+    document.getElementById('name-edit-row').classList.add('hidden');
+  };
+  document.getElementById('save-name-btn').onclick = async () => {
+    const newName = document.getElementById('name-edit-input').value.trim();
+    const msg = document.getElementById('name-edit-msg');
+    msg.textContent = '';
+    if (!newName) { msg.textContent = 'Nome obrigatório.'; return; }
+    const r = await fetch(`${API}/name`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao renomear'); return; }
+    document.getElementById('work-name').textContent = j.name;
+    document.getElementById('name-edit-row').classList.add('hidden');
+  };
+  document.getElementById('name-edit-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('save-name-btn').click();
+    if (e.key === 'Escape') document.getElementById('cancel-name-btn').click();
+  });
 
   // ---------- Ações: PROVA ----------
   document.getElementById('upload-btn').onclick = async () => {

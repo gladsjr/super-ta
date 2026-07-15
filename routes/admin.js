@@ -87,6 +87,25 @@ router.delete("/admin/works/:workToken", requireAdmin, async (req, res) => {
     }
 });
 
+// Renomeia o trabalho pelo admin. Mesma validação (sanitizeLabel: 80 chars, sem
+// caracteres proibidos) da rota do professor `PATCH /w/:workToken/name`.
+router.patch("/admin/works/:workToken/name", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+    const workToken = String(req.params.workToken || "").toLowerCase();
+    let name;
+    try { name = sanitizeLabel(req.body?.name); }
+    catch (err) { return res.status(400).json({ error: err.message }); }
+    try {
+        const work = await db.getWorkByToken(workToken);
+        if (!work) return res.status(404).json({ error: "work not found" });
+        await db.renameWork(work.id, name);
+        log.info("ADMIN", `work renamed token=${workToken} to="${name}" by=${req.session.user.username}`);
+        res.json({ ok: true, work_token: workToken, name });
+    } catch (err) {
+        log.error("ADMIN", `rename work failed: ${err.message}`);
+        res.status(500).json({ error: "failed to rename work" });
+    }
+});
+
 router.patch("/admin/works/:workToken/budget", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
     const workToken = String(req.params.workToken || "").toLowerCase();
     const parsed = Number(req.body?.budget_usd);
