@@ -1,10 +1,11 @@
 modules = ["nodejs-20", "web", "python-3.11", "postgresql-16"]
 [agent]
 expertMode = true
-integrations = ["javascript_object_storage:2.0.0"]
+integrations = ["javascript_object_storage:2.0.0", "github:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["libGL", "libGLU"]
 
 [workflows]
 runButton = "Project"
