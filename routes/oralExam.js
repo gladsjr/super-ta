@@ -51,12 +51,12 @@ function proctorAlerts(p) {
     const f = p.flags, a = [];
     if (f.absent && f.absent.pct >= 20) a.push("ausência");
     if (f.multiple_people && f.multiple_people.pct >= 20) a.push("+1 pessoa");
-    // Celular: 2+ frames com telefone confiável (a detecção é intermitente mesmo
-    // com o celular presente — some/reaparece por ângulo — então "duração" por
-    // frames engana; ≥2 detecções já indica que não é fluke de 1 frame) OU 25% da
-    // prova. O limiar por frame (confiança+área) é a defesa contra falso-positivo;
-    // um blip de 1 frame não alerta, mas aparece no detalhe por aluno.
-    if (f.phone && (f.phone.count >= 2 || f.phone.pct >= 25)) a.push("celular");
+    // Celular: calibrado contra vídeo real SEM celular em que o aluno gesticula
+    // muito — as mãos perto do rosto geraram 7 frames confirmados (~1%) mesmo após
+    // a re-verificação com zoom. Por isso o selo exige ≥5% da prova (uso sustentado)
+    // OU ≥10 frames confirmados (provas longas diluem o percentual). Um relance
+    // curto não acende o selo, mas segue visível no detalhe por aluno (count/raw_count).
+    if (f.phone && (f.phone.pct >= 5 || f.phone.count >= 10)) a.push("celular");
     if (f.hands && f.hands.flag) a.push("mãos fora");
     return a;
 }

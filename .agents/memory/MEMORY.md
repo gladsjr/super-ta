@@ -12,4 +12,5 @@
 - [Dev tem binários que a VM não tem](replit-vm-missing-runtime-binaries.md) — "funciona no teste, ENOENT no prod": ffmpeg etc. vêm do replit-runtime-path no dev; a VM só tem o replit.nix. Declare via installSystemDependencies + republique.
 - [Arquivo grande p/ download do usuário](big-file-download-signed-url.md) — present_asset trava com binário grande; suba ao bucket (chave aleatória) + signed URL via sidecar 1106, link num .txt.
 - [Prova oral: examinador "muda" / clean=false](oral-realtime-mute-turnend.md) — semantic_vad eagerness:low+far_field pode não fechar o turno do aluno → examinador silencia e sessão cai (clean=false, "Conexão encerrada"); tell: transcrição termina em pergunta sem resposta.
+- [Proctoring: mãos viram "celular"](proctor-fp-zoom-verify.md) — yolov8n: gesto no rosto = "cell phone", braço na borda = "2ª pessoa"; zoom-verify corta 85% dos FP; conf não separa mão de celular.
 - [pg pool sem 'error' derruba o processo](pg-pool-error-handler-crash.md) — erro HTTP intermitente que "funciona no retry" = servidor caiu; conexão ociosa do node-postgres que cai vira exit status 1 sem pool.on('error') (pior em ops longas, ex.: avaliação ~72s).
