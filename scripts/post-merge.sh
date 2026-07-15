@@ -14,7 +14,9 @@ npm install --no-audit --no-fund --no-progress
 echo "[post-merge] deps Python do proctoring (requirements.txt)"
 export PYTHONUSERBASE="${PYTHONUSERBASE:-$PWD/.pythonlibs}"
 if command -v python >/dev/null 2>&1; then
-  python -m pip install --user --no-input -r requirements.txt
+  # --break-system-packages: o pip do Nix bloqueia qualquer install (PEP 668)
+  # mesmo com --user; com PYTHONUSERBASE=.pythonlibs nada toca o /nix/store.
+  python -m pip install --user --break-system-packages --no-input -r requirements.txt
 else
   echo "[post-merge] python ausente — proctoring de mãos/enquadramento indisponível"
 fi
