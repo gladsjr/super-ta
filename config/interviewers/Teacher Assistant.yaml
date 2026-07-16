@@ -1,3 +1,12 @@
+# Metadados de APRESENTAÇÃO (galeria do professor). O renderer da agenda
+# (lib/interviewerAgenda.js) IGNORA este bloco — nunca vai ao LLM.
+display:
+  label: "Arguição acadêmica"
+  icon: "🎓"
+  summary: "Banca acadêmica que cobra autoria e domínio do conteúdo."
+  when_to_use: "Padrão para trabalhos de disciplina. Foca em autoria e entendimento, sem enquadramento profissional."
+  order: 1
+
 agent:
   role: "teaching assistant"
   description: "Assistente do professor que argui o aluno para avaliar a autoria intelectual e o entendimento real do trabalho entregue, seja qual for o tema da disciplina."

@@ -2,6 +2,7 @@ import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
 import { renderAgentPreamble } from "../lib/agentPreamble.js";
 import { INTERVIEWER_YAML_SKELETON } from "../lib/interviewerAgenda.js";
+import { PERSONAS, personaFilenames, personaFilenamesQuoted, personaChoiceLines } from "../config/personas.js";
 
 /**
  * ConfigAssistantAgent
@@ -54,13 +55,8 @@ Você atua em cinco frentes:
 
 3. EXPLICAR O PERFIL ATUALMENTE CONFIGURADO. Quando há um entrevistador salvo, o estado traz o "PERFIL DO ENTREVISTADOR ATUALMENTE CONFIGURADO" — a agenda já com cada campo explicado e preenchido. Use-o para responder "como está meu entrevistador?", "o que esse perfil faz?", "ele vai cobrar o quê?". Traduza em linguagem simples: quem é, que autoridade tem, o que o preocupa, como vai conduzir. Aponte o que é genérico vs. o que já foi especializado ao enunciado. Se NÃO houver perfil salvo, diga isso e ofereça escolher uma persona pronta ou construir uma.
 
-4. AJUDAR A ESCOLHER OU ADAPTAR A PERSONA. Há 6 personas prontas:
-   - Teacher Assistant (arguição acadêmica padrão)
-   - Business Owner (cliente avaliando proposta de consultoria)
-   - Hiring Manager (entrevista técnica de processo seletivo)
-   - Investor (pitch de oportunidade de investimento)
-   - Executive Sponsor (aprovação interna de iniciativa)
-   - Journalist (entrevista jornalística de verificação)
+4. AJUDAR A ESCOLHER OU ADAPTAR A PERSONA. Há ${PERSONAS.length} personas prontas:
+${personaChoiceLines()}
 
    Para um trabalho típico de disciplina, "Teacher Assistant" é o default sensato. Para trabalhos enquadrados em cenário profissional simulado (consultoria, pitch, entrevista de emprego), as outras personas dão um enquadramento mais realista. Recomende com action.type = "recommend_persona" quando uma das 6 servir como ponto de partida.
 
@@ -124,7 +120,7 @@ Payloads:
 - recommend_persona: { "filename": "<arquivo.yaml>", "rationale": "<por que essa persona>" }
 - propose_interviewer_yaml: { "yaml": "<yaml completo, seguindo a ESTRUTURA DA PERSONA>", "rationale": "<o que mudou / por que esta configuração>", "based_on": "<arquivo.yaml da persona pronta mais próxima>" }
 
-Filenames válidos para personas: "Teacher Assistant.yaml", "Business Owner.yaml", "Hiring Manager.yaml", "Investor.yaml", "Executive Sponsor.yaml", "Journalist.yaml".`;
+Filenames válidos para personas: ${personaFilenamesQuoted()}.`;
     }
 
     async evaluate({ history, message, stateBlock, draft = null, meterCtx = null }) {
@@ -228,14 +224,7 @@ Responda apenas o JSON conforme o contrato.`;
         const type = String(rawAction.type ?? "");
         const payload = rawAction.payload && typeof rawAction.payload === "object" ? rawAction.payload : {};
 
-        const VALID_PERSONAS = new Set([
-            "Teacher Assistant.yaml",
-            "Business Owner.yaml",
-            "Hiring Manager.yaml",
-            "Investor.yaml",
-            "Executive Sponsor.yaml",
-            "Journalist.yaml",
-        ]);
+        const VALID_PERSONAS = new Set(personaFilenames());
 
         if (type === "request_assignment_check") {
             return { type, payload: {} };

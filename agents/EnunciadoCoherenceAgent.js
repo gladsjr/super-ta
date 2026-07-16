@@ -1,6 +1,7 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
 import { renderAgentPreamble } from "../lib/agentPreamble.js";
+import { personaFilenamesQuoted } from "../config/personas.js";
 
 /**
  * EnunciadoCoherenceAgent
@@ -67,7 +68,7 @@ REGRAS DURAS:
 - "poor" se business_context está "missing" ou se o PDF é ilegível/vazio.
 - NUNCA penalize o overall por ausência dos critérios opcionais (4, 5, 6). Para esses, status="missing" é aceitável e não exige fix_suggestion.
 - NUNCA comente sobre qualidade do conteúdo, didática, ou correção do trabalho em si.
-- suggested_personas: 1 a 3 itens. Filename SEMPRE em "Teacher Assistant.yaml", "Business Owner.yaml", "Hiring Manager.yaml", "Investor.yaml", "Executive Sponsor.yaml", "Journalist.yaml". Derive da posição de negócio implícita no enunciado — se for vago, escolha "Teacher Assistant.yaml" como default seguro.
+- suggested_personas: 1 a 3 itens. Filename SEMPRE em ${personaFilenamesQuoted()}. Derive da posição de negócio implícita no enunciado — se for vago, escolha "Teacher Assistant.yaml" como default seguro.
 - fix_suggestions: 0 a 5 itens, focados sobretudo em melhorar o business_context quando ele estiver fraco. Sugestões sobre critérios explícitos ou perfil detalhado do entrevistador só aparecem aqui se o professor PROVAVELMENTE precisaria delas — não como "melhores práticas" genéricas. Cada item deve ser concreto e acionável ("explicite quem é o cliente em uma frase no início do enunciado").
 
 # Saída
