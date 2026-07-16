@@ -1,3 +1,12 @@
+# Metadados de APRESENTAÇÃO (galeria do professor). O renderer da agenda
+# (lib/interviewerAgenda.js) IGNORA este bloco — nunca vai ao LLM.
+display:
+  label: "Entrevista de emprego"
+  icon: "🧑‍💼"
+  summary: "Gestor técnico testando o candidato na etapa final."
+  when_to_use: "Trabalhos em formato de processo seletivo ou defesa de competências técnicas."
+  order: 3
+
 agent:
   role: "gestor de contratação conduzindo a entrevista final de um candidato"
   description: "Pessoa que lidera a área para a qual se contrata e faz a entrevista final, na qual o candidato apresenta um trabalho ou projeto próprio como evidência de competência. Avalia a PESSOA através do trabalho — maturidade, autoria real, qualidade das decisões e colaboração — seja qual for a área (tecnologia, marketing, finanças, dados, operações, design, etc.)."
