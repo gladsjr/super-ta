@@ -93,7 +93,7 @@
 
   <main class="page-wide">
     <div class="page-header"><h1>ORATIA Bench</h1><p class="subtitle">Execuções versionadas, resultados e artefatos de auditoria.</p></div>
-    <div class="view-tabs" role="tablist"><button class="view-tab active" data-view="juries" type="button">Conselhos</button><button class="view-tab" data-view="setup" type="button">Setup</button><button class="view-tab" data-view="versions" type="button">Vers&otilde;es</button><button class="view-tab" data-view="cases" type="button">Casos</button><button class="view-tab" data-view="executions" type="button">Execu&ccedil;&otilde;es</button><button class="view-tab" data-view="results" type="button">Resultados</button><button class="view-tab" data-view="comparisons" type="button">Comparativo</button></div>
+    <div class="view-tabs" role="tablist"><button class="view-tab active" data-view="cases" type="button">Casos</button><button class="view-tab" data-view="juries" type="button">Conselhos</button><button class="view-tab" data-view="setup" type="button">Setup</button><button class="view-tab" data-view="versions" type="button">Vers&otilde;es</button><button class="view-tab" data-view="executions" type="button">Execu&ccedil;&otilde;es</button><button class="view-tab" data-view="results" type="button">Resultados</button><button class="view-tab" data-view="comparisons" type="button">Comparativo</button></div>
     <div id="global-error" class="error-box hidden"></div>
     <div id="executions-view" class="hidden">
       <div style="max-width:720px">
@@ -750,7 +750,7 @@ $('refresh-generations').onclick = () => loadWorkflow().catch(err => showError(e
 $('publish-jury').onclick = async () => { $('jury-message').textContent='Publicando...'; try{const data=await api('/api/benchmark/jury-versions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version:$('jury-version').value,name:$('jury-name').value,judges:specs('jury-models')})});$('jury-message').textContent=`Publicado ${data.version.version_key}.`;await loadWorkflow();}catch(err){$('jury-message').textContent=err.message;} };
 $('create-release').onclick = async () => { $('release-message').textContent='Criando...'; try{const data=await api('/api/benchmark/releases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({setup_version_key:$('release-setup').value,jury_version_key:$('release-jury').value,name:$('release-name').value})});$('release-message').textContent=`Criada ${data.release.release_key}.`;await loadWorkflow();}catch(err){$('release-message').textContent=err.message;} };
 
-Promise.all([loadSetup(), loadRuns(), loadWorkflow()]).then(() => { switchView('juries'); if(state.cases.length) openCase(state.cases[0].id); }).catch(err => showError(err.message));
+Promise.all([loadSetup(), loadRuns(), loadWorkflow()]).then(() => { switchView('cases'); if(state.cases.length) openCase(state.cases[0].id); }).catch(err => showError(err.message));
 </script>
 </body>
 </html>
