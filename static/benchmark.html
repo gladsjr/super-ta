@@ -170,7 +170,7 @@
     </div>
 
     <div id="versions-view" class="bench-layout hidden">
-      <section class="panel"><h2>Versões S publicadas</h2><div id="setup-version-list"></div></section>
+      <section class="panel"><h2>Versões S publicadas</h2><div id="setup-version-list"></div><div id="setup-version-detail"></div></section>
       <aside class="panel"><h2>Combinar S-J</h2><div class="field"><label for="release-setup">Setup</label><select id="release-setup" class="select"></select></div><div class="field"><label for="release-jury">Conselho</label><select id="release-jury" class="select"></select></div><div class="field"><label for="release-name">Nome</label><input id="release-name" class="input"></div><button id="create-release" class="btn btn-primary" type="button">Criar versão S-J</button><div id="release-message" class="field-help"></div><hr><h3>Versões disponíveis</h3><div id="release-list"></div></aside>
     </div>
 
@@ -380,7 +380,8 @@ async function openGeneration(key) {
   document.querySelectorAll('[data-generation-call]').forEach(button => button.onclick = async () => { const callData=await api(`/api/benchmark/setup-generations/${encodeURIComponent(key)}/calls/${button.dataset.generationCall}`); $('generation-call-view').textContent=JSON.stringify(callData.call,null,2); });
 }
 function renderVersions() {
-  $('setup-version-list').innerHTML = state.setupVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><div>${statusBadge(item.classification)} · publicado ${date(item.published_at)}</div><p>${esc(item.description)}</p><div class="field-help">Hash ${esc(item.manifest_hash)}</div></div>`).join('') || '<div class="table-empty">Nenhuma versão S.</div>';
+  $('setup-version-list').innerHTML = state.setupVersions.map(item => `<div class="turn-block"><div class="detail-head"><div><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><div>${statusBadge(item.classification)} · publicado ${date(item.published_at)}</div></div><button class="btn btn-sm" data-open-setup-version="${esc(item.version_key)}" type="button">Ver entrevistas</button></div><p>${esc(item.description)}</p><div class="field-help">Hash ${esc(item.manifest_hash)} · geração de origem <code>${esc(item.source_generation_key || '—')}</code></div></div>`).join('') || '<div class="table-empty">Nenhuma versão S.</div>';
+  document.querySelectorAll('[data-open-setup-version]').forEach(btn => btn.onclick = () => openSetupVersion(btn.dataset.openSetupVersion).catch(err => showError(err.message)));
   $('jury-version-list').innerHTML = state.juryVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><p>${esc(item.description)}</p><div class="field-help">${esc((item.config_json?.judges || []).join(', '))}</div></div>`).join('') || '<div class="table-empty">Nenhum conselho.</div>';
   $('release-list').innerHTML = state.releases.map(item => `<div class="turn-block"><strong><code>${esc(item.release_key)}</code></strong><div class="field-help">${esc(item.name)} · ${esc(item.classification)}</div></div>`).join('') || '<div class="table-empty">Nenhuma versão combinada.</div>';
   $('release-setup').innerHTML = state.setupVersions.map(item => `<option value="${esc(item.version_key)}">${esc(item.version_key)} · ${esc(item.name)}</option>`).join('');
@@ -395,6 +396,17 @@ function renderVersions() {
 }
 
 function updateReleaseSummary() { const item=state.releases.find(r=>r.release_key===$('release-key').value); $('release-summary').textContent=item ? `${item.setup_name} · ${item.jury_name} · ${item.classification}` : 'Nenhuma versão S-J disponível.'; }
+
+// Abre o CONTEÚDO de uma versão S publicada (o manifesto congelado gravado na
+// publicação) — independente de a geração de origem ainda existir. Reusa o
+// mesmo renderizador de entrevistas da tela de geração.
+async function openSetupVersion(key) {
+  const data = await api(`/api/benchmark/setup-versions/${encodeURIComponent(key)}`);
+  const v = data.version || {};
+  const cases = v.manifest_json?.cases || [];
+  $('setup-version-detail').innerHTML = `<hr><div class="detail-head"><div><h2><code>${esc(v.version_key)}</code> · ${esc(v.name)}</h2><div class="muted">${statusBadge(v.classification)} · publicado ${date(v.published_at)} · geração de origem <code>${esc(v.source_generation_key || '—')}</code></div></div><span class="badge" title="Hash do manifesto publicado">${esc(String(v.manifest_hash || '').slice(0, 12))}</span></div>${cases.map(c => `<article class="turn-block"><h3>${esc(c.area)}</h3><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div>${renderTurns(c)}</article>`).join('') || '<div class="table-empty">O manifesto desta versão não contém casos.</div>'}`;
+  $('setup-version-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 async function loadWorkflow(preserveEditor=true) {
   const [drafts,generations,setups,juries,releases] = await Promise.all([api('/api/benchmark/setup-drafts'),api('/api/benchmark/setup-generations'),api('/api/benchmark/setup-versions'),api('/api/benchmark/jury-versions'),api('/api/benchmark/releases')]);

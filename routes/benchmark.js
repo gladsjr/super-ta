@@ -228,6 +228,18 @@ router.get("/api/benchmark/setup-versions", requireAdmin, async (_req, res) => {
     catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Detalhe de uma versão S publicada, COM o manifesto (as entrevistas
+// congeladas) — a listagem acima não o carrega. É o que permite inspecionar
+// o conteúdo de uma versão sem depender da geração de origem existir.
+router.get("/api/benchmark/setup-versions/:versionKey", requireAdmin, async (req, res) => {
+    try {
+        await ensureVersions();
+        const version = await versions.getSetupVersion(req.params.versionKey);
+        if (!version) return res.status(404).json({ error: "versao nao encontrada" });
+        res.json({ version });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post("/api/benchmark/setup-versions", requireAdmin, async (req, res) => {
     try {
         const generation = await versions.getGeneration(req.body?.generation_key);
