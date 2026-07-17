@@ -194,7 +194,10 @@ test("geracao por conselho congela falas, propostas, votos e politica", async ()
         },
         async generateSetupProposal({ prompt }) {
             proposalIndex += 1;
-            proposalKind = prompt.includes('"ask"') ? "ask" : "follow_up";
+            // Fareja o tipo esperado SÓ na seção da trajetória planejada — o
+            // prompt agora contém o contrato anotado inteiro (que cita "ask"
+            // em todo estado), então farejar o prompt todo dispararia sempre.
+            proposalKind = String(prompt.split("TRAJETÓRIA PLANEJADA")[1] || "").includes('"ask"') ? "ask" : "follow_up";
             const parsed = output(proposalKind);
             if (proposalIndex === 1) parsed.rationale = "";
             return { parsed, request: { type: "proposal", prompt }, response: {}, usage: {}, latency_ms: 12, cost: { cost_usd: 0.02, cost_source: "estimated" } };

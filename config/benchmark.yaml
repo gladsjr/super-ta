@@ -1,6 +1,9 @@
 benchmark: ORATIA-Bench
 setup_version: S0
-context_version: C0
+# C1: candidato recebe o contrato anotado de produção + histórico numerado
+# [Tn]; juiz deixa de ver a política canônica; métrica decomposta em
+# executável/conforme/adequada. Resultados C0 não são comparáveis aos C1.
+context_version: C1
 jury_version: J0
 mode: frozen-turn
 random_seed: 20260711
