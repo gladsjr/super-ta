@@ -8,7 +8,8 @@ Per-turn orchestration is **delegated to a single reasoning-model call** (`Super
 Deep detail lives in `docs/architecture.md` and `docs/super-orchestrator-plan.md` (rationale + action schema).
 
 ## User Preferences
-Not specified.
+- Timezone: America/Sao_Paulo (GMT-3, Rio de Janeiro). Sempre converter horários de logs (UTC) para GMT-3 ao falar com o usuário.
+- Comunicação em português, formato escaneável; usuário não usa Shell nem copia-colar para o Shell.
 
 ## System Architecture
 
