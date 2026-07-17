@@ -170,8 +170,8 @@
     </div>
 
     <div id="versions-view" class="bench-layout hidden">
-      <section class="panel"><h2>Versões S publicadas</h2><div id="setup-version-list"></div><div id="setup-version-detail"></div></section>
-      <aside class="panel"><h2>Combinar S-J</h2><div class="field"><label for="release-setup">Setup</label><select id="release-setup" class="select"></select></div><div class="field"><label for="release-jury">Conselho</label><select id="release-jury" class="select"></select></div><div class="field"><label for="release-name">Nome</label><input id="release-name" class="input"></div><button id="create-release" class="btn btn-primary" type="button">Criar versão S-J</button><div id="release-message" class="field-help"></div><hr><h3>Versões disponíveis</h3><div id="release-list"></div></aside>
+      <aside class="panel"><h2>Versões S publicadas</h2><div id="setup-version-list" class="case-browser-list"></div><hr><h2>Combinar S-J</h2><div class="field"><label for="release-setup">Setup</label><select id="release-setup" class="select"></select></div><div class="field"><label for="release-jury">Conselho</label><select id="release-jury" class="select"></select></div><div class="field"><label for="release-name">Nome</label><input id="release-name" class="input"></div><button id="create-release" class="btn btn-primary" type="button">Criar versão S-J</button><div id="release-message" class="field-help"></div><hr><h3>Versões S-J disponíveis</h3><div id="release-list"></div></aside>
+      <section id="setup-version-detail" class="panel">Selecione uma versão S à esquerda para explorar seu conteúdo completo — entrevistas congeladas, enunciado, trabalho, personas, plano, estados e proveniência.</section>
     </div>
 
     <div id="juries-view" class="bench-layout hidden">
@@ -380,10 +380,10 @@ async function openGeneration(key) {
   document.querySelectorAll('[data-generation-call]').forEach(button => button.onclick = async () => { const callData=await api(`/api/benchmark/setup-generations/${encodeURIComponent(key)}/calls/${button.dataset.generationCall}`); $('generation-call-view').textContent=JSON.stringify(callData.call,null,2); });
 }
 function renderVersions() {
-  $('setup-version-list').innerHTML = state.setupVersions.map(item => `<div class="turn-block"><div class="detail-head"><div><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><div>${statusBadge(item.classification)} · publicado ${date(item.published_at)}</div></div><button class="btn btn-sm" data-open-setup-version="${esc(item.version_key)}" type="button">Ver entrevistas</button></div><p>${esc(item.description)}</p><div class="field-help">Hash ${esc(item.manifest_hash)} · geração de origem <code>${esc(item.source_generation_key || '—')}</code></div></div>`).join('') || '<div class="table-empty">Nenhuma versão S.</div>';
-  document.querySelectorAll('[data-open-setup-version]').forEach(btn => btn.onclick = () => openSetupVersion(btn.dataset.openSetupVersion).catch(err => showError(err.message)));
+  $('setup-version-list').innerHTML = state.setupVersions.map(item => `<button class="case-browser-item ${state.selectedSetupVersion === item.version_key ? 'active' : ''}" data-open-setup-version="${esc(item.version_key)}" type="button"><strong><code>${esc(item.version_key)}</code> ${esc(item.name)}</strong><small>${esc(item.classification)} · publicado ${date(item.published_at)} · origem ${esc(item.source_generation_key || '—')}</small></button>`).join('') || '<div class="table-empty">Nenhuma versão S.</div>';
   $('jury-version-list').innerHTML = state.juryVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><p>${esc(item.description)}</p><div class="field-help">${esc((item.config_json?.judges || []).join(', '))}</div></div>`).join('') || '<div class="table-empty">Nenhum conselho.</div>';
-  $('release-list').innerHTML = state.releases.map(item => `<div class="turn-block"><strong><code>${esc(item.release_key)}</code></strong><div class="field-help">${esc(item.name)} · ${esc(item.classification)}</div></div>`).join('') || '<div class="table-empty">Nenhuma versão combinada.</div>';
+  $('release-list').innerHTML = state.releases.map(item => `<button class="case-browser-item" data-open-setup-version="${esc(item.setup_version_key)}" type="button" title="Abre o conteúdo do setup ${esc(item.setup_version_key)}"><strong><code>${esc(item.release_key)}</code></strong><small>${esc(item.name)} · ${esc(item.classification)}</small></button>`).join('') || '<div class="table-empty">Nenhuma versão combinada.</div>';
+  document.querySelectorAll('[data-open-setup-version]').forEach(btn => btn.onclick = () => openSetupVersion(btn.dataset.openSetupVersion).catch(err => showError(err.message)));
   $('release-setup').innerHTML = state.setupVersions.map(item => `<option value="${esc(item.version_key)}">${esc(item.version_key)} · ${esc(item.name)}</option>`).join('');
   $('release-jury').innerHTML = state.juryVersions.map(item => `<option value="${esc(item.version_key)}">${esc(item.version_key)} · ${esc(item.name)}</option>`).join('');
   $('release-key').innerHTML = state.releases.map(item => `<option value="${esc(item.release_key)}">${esc(item.release_key)} · ${esc(item.name)}</option>`).join('');
@@ -397,15 +397,37 @@ function renderVersions() {
 
 function updateReleaseSummary() { const item=state.releases.find(r=>r.release_key===$('release-key').value); $('release-summary').textContent=item ? `${item.setup_name} · ${item.jury_name} · ${item.classification}` : 'Nenhuma versão S-J disponível.'; }
 
-// Abre o CONTEÚDO de uma versão S publicada (o manifesto congelado gravado na
-// publicação) — independente de a geração de origem ainda existir. Reusa o
-// mesmo renderizador de entrevistas da tela de geração.
+// Explorador de uma versão S publicada — o manifesto congelado é um
+// "mini-mundo" completo (enunciado, trabalho, personas, plano, estados,
+// entrevistas canônicas, config e proveniência) e fica navegável aqui,
+// independente de a geração de origem ainda existir.
 async function openSetupVersion(key) {
+  state.selectedSetupVersion = key;
+  document.querySelectorAll('[data-open-setup-version]').forEach(b => b.classList.toggle('active', b.dataset.openSetupVersion === key));
   const data = await api(`/api/benchmark/setup-versions/${encodeURIComponent(key)}`);
-  const v = data.version || {};
-  const cases = v.manifest_json?.cases || [];
-  $('setup-version-detail').innerHTML = `<hr><div class="detail-head"><div><h2><code>${esc(v.version_key)}</code> · ${esc(v.name)}</h2><div class="muted">${statusBadge(v.classification)} · publicado ${date(v.published_at)} · geração de origem <code>${esc(v.source_generation_key || '—')}</code></div></div><span class="badge" title="Hash do manifesto publicado">${esc(String(v.manifest_hash || '').slice(0, 12))}</span></div>${cases.map(c => `<article class="turn-block"><h3>${esc(c.area)}</h3><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div>${renderTurns(c)}</article>`).join('') || '<div class="table-empty">O manifesto desta versão não contém casos.</div>'}`;
-  $('setup-version-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  state.versionDetail = data.version || {};
+  state.selectedVersionCase = (state.versionDetail.manifest_json?.cases || [])[0]?.id || null;
+  renderVersionDetail();
+}
+
+function renderVersionDetail() {
+  const v = state.versionDetail || {};
+  const m = v.manifest_json || {};
+  const cases = m.cases || [];
+  const prov = m.provenance || {};
+  const totalStates = cases.reduce((sum, c) => sum + (c.turns?.length || 0), 0);
+  const current = cases.find(c => c.id === state.selectedVersionCase) || cases[0];
+  $('setup-version-detail').innerHTML = `<div class="detail-head"><div><h2><code>${esc(v.version_key)}</code> · ${esc(v.name)}</h2><div class="muted">${statusBadge(v.classification)} · publicado ${date(v.published_at)} · geração de origem <code>${esc(v.source_generation_key || '—')}</code></div></div><span class="badge" title="Hash do manifesto publicado">${esc(String(v.manifest_hash || '').slice(0, 12))}</span></div>${v.description ? `<p>${esc(v.description)}</p>` : ''}<div class="metrics"><div class="metric"><div class="metric-label">Casos</div><div class="metric-value">${cases.length}</div></div><div class="metric"><div class="metric-label">Estados congelados</div><div class="metric-value">${totalStates}</div></div><div class="metric"><div class="metric-label">Chamadas da geração</div><div class="metric-value">${prov.calls ?? m.calls_count ?? '—'}</div></div><div class="metric"><div class="metric-label">Custo conhecido</div><div class="metric-value">${money(prov.known_cost_usd)}</div></div></div><div class="field-help">Conselho da geração: ${esc((prov.council || []).join(', ') || '—')} · gerado ${date(prov.generated_at)}</div><details><summary>Configuração e proveniência (JSON)</summary><pre>${esc(JSON.stringify({ setup_config: m.setup_config || {}, provenance: prov }, null, 2))}</pre></details>${cases.length ? `<div class="content-tabs" role="tablist" style="margin-top:16px">${cases.map(c => `<button class="content-tab ${current && c.id === current.id ? 'active' : ''}" data-version-case="${esc(c.id)}" type="button">${esc(c.area)}</button>`).join('')}</div>${renderVersionCase(current)}` : '<div class="table-empty">O manifesto desta versão não contém casos.</div>'}`;
+  document.querySelectorAll('[data-version-case]').forEach(btn => btn.onclick = () => { state.selectedVersionCase = btn.dataset.versionCase; renderVersionDetail(); });
+  document.querySelectorAll('[data-vcase-tab]').forEach(btn => btn.onclick = () => {
+    document.querySelectorAll('[data-vcase-tab]').forEach(item => item.classList.toggle('active', item === btn));
+    document.querySelectorAll('.vcase-tab-content').forEach(content => content.classList.toggle('hidden', content.id !== `vcase-tab-${btn.dataset.vcaseTab}`));
+  });
+}
+
+function renderVersionCase(c) {
+  if (!c) return '';
+  return `<div class="field-help" style="margin:8px 0"><code>${esc(c.id)}</code> · ${esc(c.large_area)} · ${esc(c.course_level)}</div><div class="content-tabs" role="tablist"><button class="content-tab active" data-vcase-tab="interview" type="button">Entrevista congelada</button><button class="content-tab" data-vcase-tab="assignment" type="button">Enunciado</button><button class="content-tab" data-vcase-tab="work" type="button">Trabalho</button><button class="content-tab" data-vcase-tab="personas" type="button">Personas</button><button class="content-tab" data-vcase-tab="plan" type="button">Plano</button><button class="content-tab" data-vcase-tab="states" type="button">Estados planejados</button></div><div id="vcase-tab-interview" class="vcase-tab-content">${renderTurns(c)}</div><div id="vcase-tab-assignment" class="vcase-tab-content document-text hidden">${esc(c.assignment)}</div><div id="vcase-tab-work" class="vcase-tab-content document-text hidden">${esc(c.student_work)}</div><div id="vcase-tab-personas" class="vcase-tab-content hidden"><div class="persona-block"><h3>Entrevistador · ${esc(c.interviewer_persona?.key)}</h3><p>${esc(c.interviewer_persona?.description)}</p></div><div class="persona-block" style="margin-top:16px"><h3>Aluno · ${esc(c.student_persona?.key)}</h3><p>${esc(c.student_persona?.description)}</p></div></div><div id="vcase-tab-plan" class="vcase-tab-content hidden"><h3>Pontos de investigação</h3><p class="document-text">${esc(c.investigation_points)}</p><h3>Pergunta inicial</h3><p class="document-text">${esc(c.interview_plan?.opening_question)}</p><h3>Objetivos da entrevista</h3>${list((c.interview_plan?.objectives || []).map(q => `${q.id}: ${q.description}`))}</div><div id="vcase-tab-states" class="vcase-tab-content hidden">${(c.student_states || []).map(s => `<article class="turn-block"><h3>Estado ${esc(s.id)}</h3><div class="field-help">Objetivo relacionado: <code>${esc(s.objective_id)}</code></div><h4>Comportamento</h4><p>${esc(s.behavior)}</p><h4>Orientação factual</h4><p>${esc(s.response_guidance)}</p><div class="field-help">Próximas ações compatíveis: ${esc((s.expected_action_kinds || []).join(', '))}</div></article>`).join('') || '<div class="table-empty">Sem estados planejados.</div>'}</div>`;
 }
 
 async function loadWorkflow(preserveEditor=true) {

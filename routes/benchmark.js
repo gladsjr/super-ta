@@ -236,6 +236,14 @@ router.get("/api/benchmark/setup-versions/:versionKey", requireAdmin, async (req
         await ensureVersions();
         const version = await versions.getSetupVersion(req.params.versionKey);
         if (!version) return res.status(404).json({ error: "versao nao encontrada" });
+        // O manifesto guarda também as chamadas cruas da geração (request/
+        // response por chamada — a maior parte dos bytes). Para exploração
+        // basta a contagem; a auditoria por chamada tem tela própria na aba
+        // Setup, enquanto a geração de origem existir.
+        if (Array.isArray(version.manifest_json?.calls)) {
+            const { calls, ...rest } = version.manifest_json;
+            version.manifest_json = { ...rest, calls_count: calls.length };
+        }
         res.json({ version });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
