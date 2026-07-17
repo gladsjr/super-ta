@@ -10,6 +10,8 @@ import { runBenchmark } from "../lib/bench/runner.js";
 import { generateCanonicalSetup } from "../lib/bench/setupGenerator.js";
 import * as store from "../lib/bench/store.js";
 import * as versions from "../lib/bench/versionStore.js";
+import { buildBundle, importBundle } from "../lib/bench/portable.js";
+import { summarizeBundle, validateBundle } from "../lib/bench/portableFormat.js";
 import { sha256 } from "../lib/bench/util.js";
 import log from "../lib/logger.js";
 
@@ -390,6 +392,36 @@ router.post("/api/benchmark/runs/:runKey/cancel", requireAdmin, (req, res) => {
     if (!controller) return res.status(409).json({ error: "run is not active" });
     controller.abort();
     res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Portabilidade de resultados entre ambientes.
+// Export: baixa um "super arquivo" JSON auto-contido (versoes S/J + releases +
+// runs completos). Import: grava esse arquivo no banco local de forma idempotente.
+// ---------------------------------------------------------------------------
+
+router.get("/api/benchmark/export", requireAdmin, async (req, res) => {
+    try {
+        const scope = req.query.run ? { runKey: String(req.query.run) }
+            : req.query.release ? { releaseKey: String(req.query.release) }
+            : { all: true };
+        const bundle = await buildBundle(scope);
+        const tag = scope.runKey ? `run-${scope.runKey}` : scope.releaseKey ? `release-${scope.releaseKey}` : "all";
+        const safeTag = tag.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
+        res.setHeader("Content-Disposition", `attachment; filename="oratia-bench-${safeTag}.json"`);
+        res.type("application/json").send(JSON.stringify(bundle, null, 2));
+    } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.post("/api/benchmark/import", requireAdmin, express.json({ limit: "200mb" }), async (req, res) => {
+    try {
+        const bundle = req.body;
+        validateBundle(bundle);
+        const summary = summarizeBundle(bundle);
+        const imported = await importBundle(bundle);
+        log.info("BENCH", `import bundle: ${JSON.stringify(imported)} (conteudo: ${JSON.stringify(summary)})`);
+        res.json({ ok: true, imported, bundle: summary });
+    } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 export default router;

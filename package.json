@@ -13,6 +13,8 @@
     "test:ab-orchestrator": "node -r dotenv/config tests/ab-orchestrator/run.mjs",
     "bench": "node scripts/bench-run.mjs",
     "bench:validate": "node scripts/bench-run.mjs --dry-run",
+    "bench:export": "node scripts/bench-export.mjs",
+    "bench:import": "node scripts/bench-import.mjs",
     "test:benchmark": "node --test tests/benchmark.test.mjs",
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"

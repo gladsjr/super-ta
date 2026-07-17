@@ -114,7 +114,7 @@
     <div id="results-view" class="hidden">
       <section>
         <div class="panel">
-          <div class="toolbar"><h2>Execuções</h2><div class="toolbar-actions"><button id="refresh" class="btn btn-sm" type="button">Atualizar</button></div></div>
+          <div class="toolbar"><h2>Execuções</h2><div class="toolbar-actions"><button id="export-all" class="btn btn-sm" type="button" title="Baixa um JSON com todos os resultados (versões S/J, releases e execuções) para transferir a outro ambiente">Baixar resultados</button><button id="import-results" class="btn btn-sm" type="button" title="Importa um JSON de resultados exportado de outro ambiente">Importar</button><input id="import-file" type="file" accept="application/json,.json" class="hidden"><button id="refresh" class="btn btn-sm" type="button">Atualizar</button></div></div>
           <div style="overflow:auto"><table class="table"><thead><tr><th>Execução</th><th>Versão</th><th>Estado</th><th>Progresso</th><th>Custo</th><th>Início</th></tr></thead><tbody id="runs-body"></tbody></table></div>
           <div id="runs-empty" class="table-empty hidden">Nenhuma execução registrada.</div>
         </div>
@@ -715,6 +715,19 @@ $('run-form').onsubmit = async (event) => {
   } catch (err) { $('form-message').textContent = err.message; } finally { $('start-run').disabled = false; }
 };
 $('refresh').onclick = () => loadRuns().catch(err => showError(err.message));
+$('export-all').onclick = () => { window.location.href = '/api/benchmark/export'; };
+$('import-results').onclick = () => $('import-file').click();
+$('import-file').onchange = async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const result = await api('/api/benchmark/import', { method:'POST', headers:{'Content-Type':'application/json'}, body:text });
+    window.alert(`Importado com sucesso.\nGravado: ${JSON.stringify(result.imported)}\nConteúdo do arquivo: ${JSON.stringify(result.bundle)}`);
+    await Promise.all([loadRuns(), loadWorkflow()]);
+  } catch (err) { showError(`Falha ao importar: ${err.message}`); }
+  finally { event.target.value = ''; }
+};
 $('refresh-comparison').onclick = () => loadComparison();
 $('download-comparison').onclick = downloadComparisonCsv;
 $('comparison-release').onchange = () => { state.selectedComparisonModel = null; loadComparison(); };
