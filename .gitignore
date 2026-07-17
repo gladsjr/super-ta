@@ -13,4 +13,6 @@ data/scenarios/
 scenarios-dev.mjs
 tmp/
 bench/runs/
+bench/setup-generations/
+.tools/
 .claude/launch.json

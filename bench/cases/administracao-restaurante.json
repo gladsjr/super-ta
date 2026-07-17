@@ -1,13 +1,35 @@
 {
+  "schema_version": 3,
   "id": "adm-restaurante-energia",
-  "large_area": "Ciencias Sociais Aplicadas",
-  "area": "Administracao",
+  "large_area": "Ciências Sociais Aplicadas",
+  "area": "Administração",
   "course_level": "MBA",
-  "persona": { "key": "cliente-decisora", "description": "Dona de um restaurante, pragmatica e orientada a risco. Quer entender a recomendacao para decidir, sem agir como professora." },
-  "assignment": "Recomendar entre sistemas fotovoltaicos de 30 kW e 40 kW, com VPL em dez anos e tres cenarios de sensibilidade.",
-  "student_work": "O texto declara taxa de desconto de 10%, mas a tabela usa 14%. A opcao A, 30 kW, tem VPL de R$ 85 mil; a B, 40 kW, tem VPL de R$ 102 mil. O grupo recomenda A pelo investimento inicial menor. Promete tres cenarios, mas apresenta apenas base e otimista.",
-  "turns": [
-    { "id": "t1", "history": [{"role":"interviewer","text":"Por que voces recomendam a opcao A?"}], "student_message": "Porque ela exige menos dinheiro no comeco e o retorno continua bom.", "canonical_response": "Entendo o desembolso menor, mas a opcao B tem VPL maior. Que risco ou restricao concreta faz voces abrirem mao desse valor?", "expected_intents": ["confrontar recomendacao com VPL maior", "pedir criterio decisorio concreto"], "known_contradictions": ["recomendacao A apesar de B ter VPL maior"] },
-    { "id": "t2", "history": [{"role":"interviewer","text":"Qual taxa de desconto orientou a decisao?"}], "student_message": "Usamos 10%, como esta na metodologia.", "canonical_response": "A tabela de fluxo menciona 14%. Qual das duas taxas sustentou os resultados e como essa divergencia afeta a confianca na recomendacao?", "expected_intents": ["capturar divergencia de taxa", "explorar confianca da decisao"], "known_contradictions": ["metodologia usa 10% e tabela usa 14%"] }
+  "interviewer_persona": {
+    "key": "cliente-decisora",
+    "description": "Dona de uma rede com três restaurantes, pragmática, cuidadosa com caixa e orientada a risco. Quer tomar uma decisão de investimento, não corrigir um trabalho acadêmico. Faz uma pergunta por vez e pede consequências operacionais concretas."
+  },
+  "student_persona": {
+    "key": "executivo-confiante-seletivo",
+    "description": "Aluno de MBA com experiência gerencial. Fala com segurança, mas tende a defender a recomendação antes de conferir premissas e contorna inconsistências numéricas quando pressionado."
+  },
+  "assignment": "Atuar como consultoria e recomendar, para uma rede de restaurantes, entre sistemas fotovoltaicos de 30 kW e 40 kW. Calcular VPL em dez anos, explicitar taxa de desconto e restrições de caixa e apresentar cenários pessimista, base e otimista. A recomendação deve ser coerente com as premissas, comparar riscos, declarar limites da evidência e ligar os resultados financeiros às consequências operacionais.",
+  "student_work": "## Recomendação\nO relatório recomenda o sistema A, de 30 kW, por exigir R$ 54 mil a menos no início. A metodologia declara taxa real de desconto de 10% ao ano, mas a planilha usa 14%. Na planilha, o VPL do A é R$ 85 mil e o do B é R$ 102 mil. O caixa livre aprovado para investimento é de R$ 390 mil, suficiente para ambas as opções.\n\n## Sensibilidade e visita técnica\nO texto promete cenários pessimista, base e otimista, mas omite o pessimista. A perda de produção por sombreamento é fixada em 4% sem medição no local. A unidade Centro recebe sombra de edifícios vizinhos entre 15h e 17h no inverno. A estimativa de 4% veio de um projeto anterior em outra cidade.",
+  "investigation_points": "A recomendação contraria o maior VPL sem demonstrar restrição de caixa; as taxas de desconto divergem; a sensibilidade está incompleta; e a perda por sombra foi transferida sem evidência local. A entrevista deve distinguir uma preferência gerencial defensável de um erro de premissa.",
+  "interview_plan": {
+    "opening_question": "Sua equipe recomenda o sistema de 30 kW. Qual foi o critério decisivo para abrir mão do VPL maior da alternativa de 40 kW?",
+    "objectives": [
+      { "id": "q1", "description": "Explicitar o critério que sustenta a escolha do sistema A apesar do maior VPL de B." },
+      { "id": "q2", "description": "Resolver a divergência entre taxas de desconto e estimar seu impacto." },
+      { "id": "q3", "description": "Avaliar robustez diante do cenário pessimista e do sombreamento não medido." },
+      { "id": "q4", "description": "Obter uma recomendação final condicionada e operacional." }
+    ]
+  },
+  "student_states": [
+    { "id": "t1", "responds_to": { "source": "opening_question" }, "objective_id": "q1", "behavior": "Seguro e evasivo: repete que o desembolso inicial menor reduz risco, sem reconhecer que o caixa comporta ambas as opções.", "response_guidance": "Defenda A pelo investimento inicial menor e diga genericamente que ele preserva caixa.", "expected_action_kinds": ["follow_up"], "expected_intents": ["confrontar a alegação de restrição com o caixa disponível", "pedir um risco concreto"], "known_risks": ["aceitar uma justificativa genérica que contradiz o trabalho"] },
+    { "id": "t2", "responds_to": { "source": "previous_canonical_action", "state_id": "t1" }, "objective_id": "q1", "behavior": "Reconhece o dado do caixa, mas tenta preservar a recomendação com uma justificativa ainda incompleta.", "response_guidance": "Admita que o caixa comporta ambas e diga que A deixaria uma reserva maior para manutenção, sem quantificar o benefício.", "expected_action_kinds": ["ask"], "required_action_fields": { "plan_question_id": "q2" }, "expected_intents": ["avançar para a consistência das taxas após esclarecer o critério"], "known_risks": ["permanecer no mesmo tópico sem ganho informacional"] },
+    { "id": "t3", "responds_to": { "source": "previous_canonical_action", "state_id": "t2" }, "objective_id": "q2", "behavior": "Confiante, mas contradiz o trabalho: afirma que todos os cálculos usaram 10%.", "response_guidance": "Diga que 10% foi a taxa usada e que 14% deve ser apenas uma anotação antiga.", "expected_action_kinds": ["follow_up"], "required_action_fields": { "follow_up_reason": "contradicts_work" }, "expected_intents": ["explicitar a contradição com a planilha", "pedir verificação do resultado"], "known_risks": ["inventar um recálculo ausente"] },
+    { "id": "t4", "responds_to": { "source": "previous_canonical_action", "state_id": "t3" }, "objective_id": "q2", "behavior": "Recuo técnico: reconhece que não conferiu a fórmula e limita o alcance da conclusão.", "response_guidance": "Admita que a planilha usa 14% e que seria necessário recalcular ambos os VPLs antes de sustentar a recomendação.", "expected_action_kinds": ["ask"], "required_action_fields": { "plan_question_id": "q3" }, "expected_intents": ["avançar para a robustez da recomendação"], "known_risks": ["pedir ao aluno que invente números que não calculou"] },
+    { "id": "t5", "responds_to": { "source": "previous_canonical_action", "state_id": "t4" }, "objective_id": "q3", "behavior": "Reconhece a ausência de medição, mas ainda trata o risco como pequeno.", "response_guidance": "Diga que não houve medição local, que os 4% vieram de outro projeto e que o cenário pessimista deveria considerar uma perda maior.", "expected_action_kinds": ["ask"], "required_action_fields": { "plan_question_id": "q4" }, "expected_intents": ["obter uma decisão final condicionada às evidências ausentes"], "known_risks": ["transformar a entrevista em consultoria técnica"] },
+    { "id": "t6", "responds_to": { "source": "previous_canonical_action", "state_id": "t5" }, "objective_id": "q4", "behavior": "Reformula com cautela e reconhece limites; oferece uma decisão condicionada.", "response_guidance": "Diga que manteria A apenas se a medição de sombra e o cenário pessimista confirmassem vantagem de liquidez; caso contrário, escolheria B após refazer os VPLs.", "expected_action_kinds": ["finalize"], "expected_intents": ["encerrar após verificar uma recomendação coerente"], "known_risks": ["seguir perguntando sem ganho informacional"] }
   ]
 }

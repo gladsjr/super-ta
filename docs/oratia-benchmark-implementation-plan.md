@@ -95,7 +95,7 @@ Novos modulos:
 
 Diretorios de dados:
 
-- `bench/cases/`: casos em YAML/JSON e documentos associados.
+- `bench/cases/`: casos JSON com enunciado, trabalho, personas e plano.
 - `bench/versions/`: manifestos `S/C/J`.
 - `bench/runs/`: resultados completos de cada execucao.
 - `bench/tmp/`: arquivos temporarios de execucao.
@@ -116,7 +116,7 @@ Diretorios de dados:
 - `course_type`
 - `difficulty`
 - `persona_key`
-- `document_hash`
+- `source_hash`
 - `metadata_json`
 - `created_at`
 
@@ -554,6 +554,8 @@ Prazo estimado: 3 a 5 dias.
 - migrations Postgres;
 - persistir runs, outputs, julgamentos e ledger;
 - pacote completo em `bench/runs`;
+- checkpoint atomico por resposta de candidato e julgamento;
+- retomada idempotente a partir do checkpoint ou reimportacao de `raw.json`;
 - hashes de documentos, prompts e respostas;
 - relatorio reproduzivel por run.
 

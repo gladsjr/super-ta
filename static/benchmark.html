@@ -55,10 +55,31 @@
     .criteria-list { margin:8px 0; padding-left:20px }.criteria-list li{margin:4px 0}
     .rag-chunk { border:1px solid var(--ink-100); border-radius:var(--r-sm); padding:12px; margin:10px 0 }
     .rag-meta { display:flex; flex-wrap:wrap; gap:8px; color:var(--ink-500); font-size:var(--fs-xs); margin-bottom:7px }
+    .help-pop { display:inline-flex; vertical-align:middle }
+    .help-pop-btn { display:inline-grid; place-items:center; width:16px; height:16px; min-width:0; margin-left:3px; padding:0; border:1px solid var(--ink-300); border-radius:50%; background:transparent; color:var(--ink-500); box-shadow:none; font:700 10px/1 system-ui,sans-serif; cursor:pointer; vertical-align:middle }
+    .help-pop-btn:hover,.help-pop-btn[aria-expanded="true"] { border-color:var(--accent-600); color:var(--accent-700); background:var(--accent-50) }
+    .help-pop-btn:focus-visible { outline:2px solid var(--accent-600); outline-offset:2px }
+    .help-popover { position:fixed; z-index:1000; width:min(290px,calc(100vw - 24px)); padding:11px 12px; border:1px solid var(--ink-200); border-radius:var(--r-sm); background:var(--bg-raised); color:var(--ink-700); box-shadow:0 8px 24px rgba(15,28,52,.16); font-size:var(--fs-xs); font-weight:400; line-height:1.5; letter-spacing:0; text-align:left; text-transform:none; white-space:normal }
+    .score-cell { text-align:center; white-space:nowrap }
+    .score-cell .field-help { text-align:center }
+    .comparison-filter { display:flex; align-items:end; gap:8px; min-width:min(430px,100%) }
+    .comparison-filter .field { flex:1; margin:0 }
+    .comparison-model-btn { border:0; padding:0; background:transparent; color:var(--accent-700); font:inherit; font-weight:600; text-align:left; cursor:pointer }
+    .comparison-model-btn:hover { text-decoration:underline }
+    .comparison-sort { display:inline-flex; align-items:center; gap:4px; padding:0; border:0; background:transparent; color:inherit; font:inherit; font-weight:inherit; text-align:left; text-transform:inherit; cursor:pointer }
+    .comparison-sort:hover { color:var(--accent-700) }
+    .comparison-sort-indicator { min-width:10px; color:var(--ink-400); font-size:10px }
+    .comparison-table th[aria-sort="ascending"] .comparison-sort-indicator,.comparison-table th[aria-sort="descending"] .comparison-sort-indicator { color:var(--accent-700) }
+    .comparison-rank { width:32px; color:var(--ink-500); font-variant-numeric:tabular-nums }
+    .comparison-table td { font-variant-numeric:tabular-nums }
+    .comparison-table tr.is-selected td { background:var(--accent-50) }
+    .comparison-history-head { display:flex; align-items:start; justify-content:space-between; gap:12px; margin-bottom:12px }
+    .quality-cell { white-space:nowrap }
     @media(max-width:850px){
       .page-wide{padding:24px 16px}.bench-layout{grid-template-columns:minmax(0,1fr)}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-layout{grid-template-columns:minmax(0,1fr)}
       .topbar-inner{padding-left:16px;padding-right:16px;gap:12px}.topbar-context{display:none}.topbar-right{margin-left:auto}
       .panel{padding:16px}.detail-head{display:block}.detail-head .btn{margin-top:8px}
+      .comparison-filter{min-width:100%;align-items:stretch;flex-direction:column}
     }
     @media(max-width:460px){.metrics{grid-template-columns:minmax(0,1fr)}.brand-word{height:18px}.topbar-right{font-size:var(--fs-xs)}}
   </style>
@@ -72,7 +93,7 @@
 
   <main class="page-wide">
     <div class="page-header"><h1>ORATIA Bench</h1><p class="subtitle">Execuções versionadas, resultados e artefatos de auditoria.</p></div>
-    <div class="view-tabs" role="tablist"><button class="view-tab active" data-view="juries" type="button">Conselhos</button><button class="view-tab" data-view="setup" type="button">Setup</button><button class="view-tab" data-view="versions" type="button">Vers&otilde;es</button><button class="view-tab" data-view="cases" type="button">Casos</button><button class="view-tab" data-view="executions" type="button">Execu&ccedil;&otilde;es</button><button class="view-tab" data-view="results" type="button">Resultados</button></div>
+    <div class="view-tabs" role="tablist"><button class="view-tab active" data-view="juries" type="button">Conselhos</button><button class="view-tab" data-view="setup" type="button">Setup</button><button class="view-tab" data-view="versions" type="button">Vers&otilde;es</button><button class="view-tab" data-view="cases" type="button">Casos</button><button class="view-tab" data-view="executions" type="button">Execu&ccedil;&otilde;es</button><button class="view-tab" data-view="results" type="button">Resultados</button><button class="view-tab" data-view="comparisons" type="button">Comparativo</button></div>
     <div id="global-error" class="error-box hidden"></div>
     <div id="executions-view" class="hidden">
       <div style="max-width:720px">
@@ -83,6 +104,7 @@
           <div class="field"><label for="candidates">Modelos candidatos</label><div id="candidate-picker"></div><textarea id="candidates" class="textarea input-mono" rows="3"></textarea><div class="field-help">Um por linha: fornecedor:modelo:esforço</div></div>
           <div class="field"><label for="max-cost">Limite de custo (US$)</label><input id="max-cost" class="input" type="number" min="0.01" max="1000" step="0.01" inputmode="decimal"></div>
           <div class="field"><label for="seed">Semente A/B</label><input id="seed" class="input input-mono"></div>
+          <div class="field"><label for="latency-repetitions">Repeticoes para latencia</label><input id="latency-repetitions" class="input" type="number" min="1" max="5" step="1"><div class="field-help">Cada repeticao faz uma nova chamada paga. A qualidade usa somente a primeira; todas entram nas estatisticas de latencia.</div></div>
           <button id="start-run" class="btn btn-primary" type="submit">Iniciar execução</button>
           <span id="form-message" class="field-help"></span>
         </form>
@@ -98,7 +120,7 @@
         </div>
 
         <div id="detail" class="panel hidden">
-          <div class="detail-head"><div><h2 id="detail-title"></h2><div id="detail-meta" class="muted"></div></div><button id="cancel-run" class="btn btn-danger-ghost btn-sm hidden" type="button">Cancelar</button></div>
+          <div class="detail-head"><div><h2 id="detail-title"></h2><div id="detail-meta" class="muted"></div></div><div class="toolbar-actions"><button id="resume-run" class="btn btn-primary btn-sm hidden" type="button">Retomar</button><button id="cancel-run" class="btn btn-danger-ghost btn-sm hidden" type="button">Cancelar</button></div></div>
           <div id="run-cases" class="row-tight" style="margin-top:10px"></div>
           <div id="detail-error" class="error-box hidden"></div>
           <div id="metrics" class="metrics"></div>
@@ -107,6 +129,19 @@
           <div class="artifact-layout"><div id="artifact-list" class="artifact-list"></div><pre id="artifact-view" class="artifact-view">Selecione um artefato.</pre></div>
         </div>
       </section>
+    </div>
+
+    <div id="comparisons-view" class="hidden">
+      <section class="panel">
+        <div class="toolbar">
+          <div><h2>Comparativo por vers&atilde;o S-J</h2><div id="comparison-release-meta" class="muted"></div></div>
+          <div class="comparison-filter"><div class="field"><label for="comparison-release">Vers&atilde;o do benchmark</label><select id="comparison-release" class="select"></select></div><button id="download-comparison" class="btn btn-sm" type="button">Baixar CSV</button><button id="refresh-comparison" class="btn btn-sm" type="button">Atualizar</button></div>
+        </div>
+        <div id="comparison-summary" class="metrics"></div>
+        <div id="comparison-table-wrap" style="overflow:auto"><table class="table comparison-table"><thead id="comparison-head"></thead><tbody id="comparison-body"></tbody></table></div>
+        <div id="comparison-empty" class="table-empty hidden">Nenhuma avalia&ccedil;&atilde;o conclu&iacute;da nesta vers&atilde;o.</div>
+      </section>
+      <section id="comparison-detail" class="panel hidden"></section>
     </div>
 
     <div id="cases-view" class="bench-layout hidden">
@@ -146,7 +181,7 @@
   </main>
 
 <script>
-const state = { selectedRun: null, selectedCase: null, selectedDraft: null, selectedGeneration: null, cases: [], drafts: [], generations: [], setupVersions: [], juryVersions: [], releases: [], providers: [], modelCatalog: [], poll: null };
+const state = { selectedRun: null, selectedCase: null, selectedDraft: null, selectedGeneration: null, selectedComparisonRelease: null, selectedComparisonModel: null, comparison: null, comparisonSort: { key: 'rank', direction: 'asc' }, cases: [], drafts: [], generations: [], setupVersions: [], juryVersions: [], releases: [], providers: [], modelCatalog: [], pendingModelCatalog: [], poll: null, workflowPoll: null };
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const specs = (id) => $(id).value.split(/\r?\n|,/).map(v => v.trim()).filter(Boolean);
@@ -159,7 +194,8 @@ function modelOptions(role) {
     .filter(item => !role || !Array.isArray(item.roles) || item.roles.includes(role))
     .map(item => {
       const provider = String(item.spec || '').split(':')[0];
-      const label = `${item.label || item.spec}${state.providers.find(p => p.key === provider)?.configured === false ? ' (sem chave)' : ''}`;
+      const providerInfo = state.providers.find(p => p.key === provider);
+      const label = `${item.label || item.spec}${providerInfo?.available === false ? ' (pendente)' : providerInfo?.configured === false ? ' (sem chave)' : ''}`;
       return `<option value="${esc(item.spec)}">${esc(label)}</option>`;
     }).join('');
 }
@@ -190,21 +226,26 @@ async function api(url, options) {
 async function loadSetup() {
   const [configData, caseData, providerData] = await Promise.all([api('/api/benchmark/config'), api('/api/benchmark/cases'), api('/api/benchmark/providers')]);
   const c = configData.config;
-  $('candidates').value = c.candidates.join('\n'); $('max-cost').value = c.max_cost_usd; $('seed').value = c.random_seed;
+  $('candidates').value = c.candidates.join('\n'); $('max-cost').value = c.max_cost_usd; $('seed').value = c.random_seed; $('latency-repetitions').value = c.latency_repetitions || 1;
   state.providers = providerData.providers || [];
   state.modelCatalog = providerData.models || [];
+  state.pendingModelCatalog = providerData.pending_models || [];
   state.cases = caseData.cases;
   const areas = [...new Set(caseData.cases.map(item => item.large_area))].sort();
   $('case-area-filter').innerHTML += areas.map(area => `<option value="${esc(area)}">${esc(area)}</option>`).join('');
   renderCaseBrowser();
-  $('provider-status').innerHTML = providerData.providers.map(p => `<span class="badge ${p.configured ? 'status-completed' : ''}" title="${esc(p.cost)}">${esc(p.name)}: ${p.configured ? 'pronto' : 'sem chave'}</span>`).join(' ');
+  const pending = state.pendingModelCatalog.length ? `<div class="field-help">Modelos catalogados, ainda sem execu&ccedil;&atilde;o: ${state.pendingModelCatalog.map(item => `<code title="${esc(item.reason || '')}">${esc(item.label || item.spec)}</code>`).join(' ')}</div>` : '';
+  $('provider-status').innerHTML = providerData.providers.map(p => {
+    const status = p.available === false ? 'pendente' : p.configured ? 'pronto' : 'sem chave';
+    return `<span class="badge ${p.configured && p.available !== false ? 'status-completed' : ''}" title="${esc(p.cost)}">${esc(p.name)}: ${status}</span>`;
+  }).join(' ') + pending;
   attachModelPicker('candidate-picker', 'candidates', 'candidate');
   attachModelPicker('jury-picker', 'jury-models', 'judge');
 }
 
 function switchView(view) {
   document.querySelectorAll('[data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
-  ['executions','results','cases','setup','versions','juries'].forEach(name => $(`${name}-view`).classList.toggle('hidden', name !== view));
+  ['executions','results','comparisons','cases','setup','versions','juries'].forEach(name => $(`${name}-view`).classList.toggle('hidden', name !== view));
 }
 
 function switchSetupTab(tab) {
@@ -215,37 +256,57 @@ function switchSetupTab(tab) {
 function renderCaseBrowser() {
   const query = $('case-search').value.trim().toLocaleLowerCase('pt-BR');
   const area = $('case-area-filter').value;
-  const filtered = state.cases.filter(item => (!area || item.large_area === area) && (!query || `${item.id} ${item.area} ${item.large_area} ${item.persona.key} ${item.persona.description}`.toLocaleLowerCase('pt-BR').includes(query)));
-  $('case-browser-list').innerHTML = filtered.length ? filtered.map(item => `<button class="case-browser-item ${state.selectedCase === item.id ? 'active' : ''}" data-case-id="${esc(item.id)}" type="button"><strong>${esc(item.area)}</strong><small>${esc(item.course_level)} · ${esc(item.persona.key)} · ${item.turns} turnos</small></button>`).join('') : '<div class="table-empty">Nenhum caso encontrado.</div>';
+  const filtered = state.cases.filter(item => (!area || item.large_area === area) && (!query || `${item.id} ${item.area} ${item.large_area} ${item.interviewer_persona.key} ${item.interviewer_persona.description}`.toLocaleLowerCase('pt-BR').includes(query)));
+  $('case-browser-list').innerHTML = filtered.length ? filtered.map(item => `<button class="case-browser-item ${state.selectedCase === item.id ? 'active' : ''}" data-case-id="${esc(item.id)}" type="button"><strong>${esc(item.area)}</strong><small>${esc(item.course_level)} · ${esc(item.interviewer_persona.key)} · ${item.states} estados</small></button>`).join('') : '<div class="table-empty">Nenhum caso encontrado.</div>';
   document.querySelectorAll('[data-case-id]').forEach(btn => btn.onclick = () => openCase(btn.dataset.caseId));
 }
 
 function list(items) { return items?.length ? `<ul class="criteria-list">${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul>` : '<span class="muted">Nenhum item registrado.</span>'; }
 function renderTurns(testCase) {
-  return testCase.turns.map((turn,index) => `<article class="turn-block"><h3>Turno ${index+1} <code>${esc(turn.id)}</code></h3>${turn.history.map(line => `<div class="conversation-line"><strong>${line.role === 'interviewer' ? 'Entrevistador' : 'Aluno'}:</strong> ${esc(line.text)}</div>`).join('')}<div class="conversation-line"><strong>Aluno:</strong> ${esc(turn.student_message)}</div><div class="canonical"><strong>Resposta canônica:</strong><br>${esc(turn.canonical_response)}</div><h4>Intenções pedagógicas</h4>${list(turn.expected_intents)}<h4>Contradições e riscos conhecidos</h4>${list(turn.known_contradictions)}</article>`).join('');
+  return (testCase.turns || []).map((turn,index) => { const canonical=turn.canonical || {}, action=canonical.output?.action || {}, policy=canonical.policy || {}; return `<article class="turn-block"><h3>Estado ${index+1} <code>${esc(turn.id)}</code></h3><div class="field-help">Objetivo relacionado: <code>${esc(turn.objective_id)}</code></div>${turn.history.map(line => `<div class="conversation-line"><strong>${line.role === 'interviewer' ? 'Entrevistador' : 'Aluno'}:</strong> ${esc(line.text)}</div>`).join('')}<div class="conversation-line"><strong>Aluno:</strong> ${esc(turn.student_message)}</div><div class="canonical"><strong>Saída canônica: <code>${esc(action.kind)}</code></strong><p>${esc(action.message)}</p><div class="field-help">Preferida: ${esc(policy.preferred_kind)} · Aceitáveis: ${esc((policy.acceptable_kinds || []).join(', '))} · Proibidas: ${esc((policy.forbidden_kinds || []).join(', ') || 'nenhuma')}</div></div><details><summary>Evidências recuperadas para este estado</summary><div class="field-help">Consulta: ${esc(turn.rag?.query || '')}</div>${renderCorpus(turn.rag?.chunks)}</details><details><summary>Saída completa, memória e política</summary><pre>${esc(JSON.stringify(canonical,null,2))}</pre></details><h4>Intenções esperadas</h4>${list(canonical.expected_intents)}<h4>Riscos conhecidos</h4>${list(canonical.known_risks)}</article>`; }).join('');
 }
-function renderRag(rag) {
-  return rag.map((pack,index) => `<article class="turn-block"><h3>Turno ${index+1} <code>${esc(pack.turn_id)}</code></h3><div class="rag-meta"><span>Estratégia: ${esc(pack.strategy)}</span><span>Pacote: <code>${esc(pack.package_hash.slice(0,12))}</code></span><span>Corpus: <code>${esc(pack.all_chunks_hash.slice(0,12))}</code></span></div><details><summary>Consulta de recuperação</summary><pre>${esc(pack.query)}</pre></details>${pack.chunks.map(chunk => `<div class="rag-chunk"><div class="rag-meta"><strong>${esc(chunk.id)}</strong><span>${esc(chunk.source)}</span><span>pontuação ${number(chunk.score)}</span><code>${esc(chunk.hash.slice(0,12))}</code></div><div class="document-text">${esc(chunk.content)}</div></div>`).join('')}</article>`).join('');
+function renderCorpus(chunks) {
+  return (chunks || []).map(chunk => `<div class="rag-chunk"><div class="rag-meta"><strong>${esc(chunk.id)}</strong><span>${esc(chunk.source)}</span><code>${esc(chunk.hash.slice(0,12))}</code></div><div class="document-text">${esc(chunk.content)}</div></div>`).join('');
 }
 async function openCase(id) {
   state.selectedCase = id; renderCaseBrowser();
   $('case-detail').innerHTML = '<div class="table-empty">Carregando caso...</div>';
   const data = await api(`/api/benchmark/cases/${encodeURIComponent(id)}`);
   const c = data.case;
-  $('case-detail').innerHTML = `<div class="detail-head"><div><h2>${esc(c.area)}</h2><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div></div><span class="badge" title="Hash dos documentos">${esc(c.document_hash.slice(0,12))}</span></div><div class="content-tabs" role="tablist"><button class="content-tab active" data-case-tab="assignment" type="button">Enunciado</button><button class="content-tab" data-case-tab="work" type="button">Trabalho</button><button class="content-tab" data-case-tab="persona" type="button">Persona</button><button class="content-tab" data-case-tab="rag" type="button">RAG</button></div><div id="case-tab-assignment" class="case-tab-content document-text">${esc(c.assignment)}</div><div id="case-tab-work" class="case-tab-content document-text hidden">${esc(c.student_work)}</div><div id="case-tab-persona" class="case-tab-content hidden"><div class="persona-block"><h3>${esc(c.persona.key)}</h3><p>${esc(c.persona.description)}</p></div></div><div id="case-tab-rag" class="case-tab-content hidden">${renderRag(data.rag)}</div>`;
+  const stateSource = s => s.responds_to?.source === 'opening_question' ? 'Pergunta inicial' : `Ação canônica após ${s.responds_to?.state_id || 'estado anterior'}`;
+  $('case-detail').innerHTML = `<div class="detail-head"><div><h2>${esc(c.area)}</h2><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div></div><span class="badge" title="Hash do enunciado e do trabalho">${esc(c.source_hash.slice(0,12))}</span></div><div class="content-tabs" role="tablist"><button class="content-tab active" data-case-tab="assignment" type="button">Enunciado</button><button class="content-tab" data-case-tab="work" type="button">Trabalho</button><button class="content-tab" data-case-tab="personas" type="button">Personas</button><button class="content-tab" data-case-tab="plan" type="button">Plano</button><button class="content-tab" data-case-tab="states" type="button">Estados do aluno</button></div><div id="case-tab-assignment" class="case-tab-content document-text">${esc(c.assignment)}</div><div id="case-tab-work" class="case-tab-content document-text hidden">${esc(c.student_work)}</div><div id="case-tab-personas" class="case-tab-content hidden"><div class="persona-block"><h3>Entrevistador · ${esc(c.interviewer_persona.key)}</h3><p>${esc(c.interviewer_persona.description)}</p></div><div class="persona-block" style="margin-top:16px"><h3>Aluno · ${esc(c.student_persona.key)}</h3><p>${esc(c.student_persona.description)}</p></div></div><div id="case-tab-plan" class="case-tab-content hidden"><h3>Pontos de investigação</h3><p class="document-text">${esc(c.investigation_points)}</p><h3>Pergunta inicial</h3><p class="document-text">${esc(c.interview_plan.opening_question)}</p><h3>Objetivos da entrevista</h3>${list(c.interview_plan.objectives.map(q => `${q.id}: ${q.description}`))}</div><div id="case-tab-states" class="case-tab-content hidden">${c.student_states.map(s => `<article class="turn-block"><h3>Estado ${esc(s.id)}</h3><div class="field-help">Responde a: ${esc(stateSource(s))} · Objetivo relacionado: <code>${esc(s.objective_id)}</code></div><h4>Comportamento</h4><p>${esc(s.behavior)}</p><h4>Orientação factual</h4><p>${esc(s.response_guidance)}</p><div class="field-help">Próximas ações compatíveis: ${esc((s.expected_action_kinds || []).join(', '))}</div></article>`).join('')}</div>`;
   document.querySelectorAll('[data-case-tab]').forEach(btn => btn.onclick = () => { document.querySelectorAll('[data-case-tab]').forEach(item => item.classList.toggle('active', item === btn)); document.querySelectorAll('.case-tab-content').forEach(content => content.classList.toggle('hidden', content.id !== `case-tab-${btn.dataset.caseTab}`)); });
 }
 
 function setupConfigFromEditor() {
-  const setupCouncil = specs('setup-council');
+  const setupJuryVersion = $('setup-jury-version')?.value || '';
   return {
     case_ids: [...document.querySelectorAll('#setup-case-selection input:checked')].map(input => input.value),
-    prompts: { candidate: $('setup-prompt-candidate').value, judge: $('setup-prompt-judge').value },
-    generation_council: setupCouncil,
-    validation_council: setupCouncil,
+    prompts: { candidate: $('setup-prompt-candidate').value, judge: $('setup-prompt-judge').value, student: $('setup-prompt-student').value },
+    setup_council_version: setupJuryVersion,
+    max_generation_cost_usd: Number($('setup-max-cost').value),
+    max_generation_calls: Number($('setup-max-calls').value),
     rag: { strategy: 'lexical-v1', chunk_chars: 1800, top_k: 8 },
     consensus: { disagreement_threshold: 0.65, deliberation_enabled: false }
   };
+}
+
+function judgesForJury(versionKey) {
+  return state.juryVersions.find(item => item.version_key === versionKey)?.config_json?.judges || [];
+}
+
+function findSetupJuryVersion(config, setupCouncil) {
+  if (config.setup_council_version && state.juryVersions.some(item => item.version_key === config.setup_council_version)) return config.setup_council_version;
+  const serialized = JSON.stringify(setupCouncil || []);
+  return state.juryVersions.find(item => JSON.stringify(item.config_json?.judges || []) === serialized)?.version_key || state.juryVersions[0]?.version_key || '';
+}
+
+function updateSetupCouncilPreview() {
+  const versionKey = $('setup-jury-version')?.value || '';
+  const jury = state.juryVersions.find(item => item.version_key === versionKey);
+  const judges = jury?.config_json?.judges || [];
+  if ($('setup-council')) $('setup-council').value = judges.join('\n');
+  if ($('setup-jury-summary')) $('setup-jury-summary').textContent = jury ? `${jury.name || versionKey} - ${judges.length} juiz(es). Usado para gerar as entrevistas canonicas e validar o setup.` : 'Cadastre um conselho J antes de gerar entrevistas.';
 }
 
 function renderDraftList() {
@@ -257,9 +318,22 @@ function openDraft(id) {
   const draft = state.drafts.find(item => String(item.id) === String(id)); if (!draft) return;
   state.selectedDraft = draft.id; renderDraftList();
   const config = draft.config_json || {}, selected = new Set(config.case_ids || []);
-  const setupCouncil = (config.generation_council?.length ? config.generation_council : config.validation_council) || [];
-  $('setup-editor').innerHTML = `<div class="detail-head"><div><h2>${esc(draft.name)}</h2><div class="muted">Rascunho editável · #${draft.id}</div></div></div><div class="field"><label for="setup-name">Nome</label><input id="setup-name" class="input" value="${esc(draft.name)}"></div><div class="field"><label for="setup-description">Descrição</label><textarea id="setup-description" class="textarea" rows="2">${esc(draft.description)}</textarea></div><div class="field"><label>Casos incluídos</label><div id="setup-case-selection" class="case-list">${state.cases.map(item => `<label class="case-option"><input type="checkbox" value="${esc(item.id)}" ${!selected.size || selected.has(item.id) ? 'checked' : ''}><span><strong>${esc(item.area)}</strong><small>${esc(item.id)}</small></span></label>`).join('')}</div></div><div class="field"><label for="setup-council">Conselho do setup</label><div id="setup-picker"></div><textarea id="setup-council" class="textarea input-mono" rows="3">${esc(setupCouncil.join('\n'))}</textarea><div class="field-help">Usado tanto para gerar as entrevistas canonicas quanto para validar o setup.</div></div><div class="field"><label for="setup-prompt-candidate">Prompt de geração da próxima fala</label><textarea id="setup-prompt-candidate" class="textarea input-mono" rows="5">${esc(config.prompts?.candidate || '')}</textarea></div><div class="field"><label for="setup-prompt-judge">Prompt de validação e julgamento</label><textarea id="setup-prompt-judge" class="textarea input-mono" rows="5">${esc(config.prompts?.judge || '')}</textarea></div><div class="row"><button id="save-setup" class="btn" type="button">Salvar rascunho</button><button id="generate-setup" class="btn btn-primary" type="button">Gerar entrevistas</button><span id="setup-message" class="field-help"></span></div><div class="notice notice-info" style="margin-top:16px">A geração atual cria um snapshot dos fixtures simplificados e não chama LLMs. O registro de proveniência deixará isso explícito.</div>`;
-  attachModelPicker('setup-picker', 'setup-council', 'setup');
+  const setupCouncil = judgesForJury(config.setup_council_version) || [];
+  const setupJuryVersion = findSetupJuryVersion(config, setupCouncil);
+  const juryOptions = state.juryVersions.map(item => `<option value="${esc(item.version_key)}" ${item.version_key === setupJuryVersion ? 'selected' : ''}>${esc(item.version_key)} - ${esc(item.name)}</option>`).join('');
+  $('setup-editor').innerHTML = `<div class="detail-head"><div><h2>${esc(draft.name)}</h2><div class="muted">Rascunho editável · #${draft.id}</div></div></div><div class="field"><label for="setup-name">Nome</label><input id="setup-name" class="input" value="${esc(draft.name)}"></div><div class="field"><label for="setup-description">Descrição</label><textarea id="setup-description" class="textarea" rows="2">${esc(draft.description)}</textarea></div><div class="field"><label>Casos incluídos</label><div id="setup-case-selection" class="case-list">${state.cases.map(item => `<label class="case-option"><input type="checkbox" value="${esc(item.id)}" ${!selected.size || selected.has(item.id) ? 'checked' : ''}><span><strong>${esc(item.area)}</strong><small>${esc(item.id)} · ${item.states} estados</small></span></label>`).join('')}</div></div><div class="field"><label for="setup-council">Versão do conselho do setup</label><div id="setup-picker"></div><textarea id="setup-council" class="textarea input-mono" rows="3">${esc(setupCouncil.join('\n'))}</textarea><div class="field-help">O mesmo conselho gera propostas, vota e valida as entrevistas canônicas.</div></div><div class="field"><label for="setup-max-cost">Limite de custo da geração (US$)</label><input id="setup-max-cost" class="input" type="number" min="0.01" max="1000" step="0.01" value="${esc(config.max_generation_cost_usd || 50)}"><div class="field-help">A geração é interrompida antes de iniciar uma nova chamada quando o custo conhecido atinge este valor.</div></div><div class="field"><label for="setup-prompt-student">Prompt de simulação do aluno</label><textarea id="setup-prompt-student" class="textarea input-mono" rows="4">${esc(config.prompts?.student || '')}</textarea></div><div class="field"><label for="setup-prompt-candidate">Rubrica de geração do superorquestrador</label><textarea id="setup-prompt-candidate" class="textarea input-mono" rows="5">${esc(config.prompts?.candidate || '')}</textarea></div><div class="field"><label for="setup-prompt-judge">Rubrica de votação e validação</label><textarea id="setup-prompt-judge" class="textarea input-mono" rows="5">${esc(config.prompts?.judge || '')}</textarea></div><div class="row"><button id="save-setup" class="btn" type="button">Salvar rascunho</button><button id="generate-setup" class="btn btn-primary" type="button">Gerar entrevistas</button><span id="setup-message" class="field-help"></span></div><div class="notice notice-info" style="margin-top:16px">A geração chama o conselho e pode ter custo relevante. Cada estado inclui uma simulação do aluno, uma proposta por modelo e um voto por modelo.</div>`;
+  $('setup-prompt-student')?.closest('.field')?.insertAdjacentHTML('beforebegin', `<div class="field"><label for="setup-max-calls">Limite absoluto de chamadas</label><input id="setup-max-calls" class="input" type="number" min="1" max="5000" step="1" value="${esc(config.max_generation_calls || 250)}"><div class="field-help">Protege a geração mesmo quando um fornecedor não informa custo.</div></div>`);
+  if ($('setup-picker')) $('setup-picker').innerHTML = `<select id="setup-jury-version" class="select">${juryOptions}</select>`;
+  const setupCouncilInput = $('setup-council');
+  if (setupCouncilInput) {
+    setupCouncilInput.readOnly = true;
+    const help = setupCouncilInput.nextElementSibling;
+    if (help) help.id = 'setup-jury-summary';
+  }
+  const setupCouncilLabel = document.querySelector('label[for="setup-council"]');
+  if (setupCouncilLabel) setupCouncilLabel.setAttribute('for', 'setup-jury-version');
+  if ($('setup-jury-version')) $('setup-jury-version').onchange = updateSetupCouncilPreview;
+  updateSetupCouncilPreview();
   $('save-setup').onclick = () => saveDraft(false);
   $('generate-setup').onclick = () => saveDraft(true);
 }
@@ -271,7 +345,7 @@ async function saveDraft(generate) {
     await api(`/api/benchmark/setup-drafts/${state.selectedDraft}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if (generate) {
       const data = await api(`/api/benchmark/setup-drafts/${state.selectedDraft}/generate`, {method:'POST'});
-      $('setup-message').textContent = `Geração ${data.generation.generation_key} criada sem custo.`;
+      $('setup-message').textContent = `Geração ${data.generation.generation_key} iniciada.`;
       state.selectedGeneration = data.generation.generation_key;
       await loadWorkflow(); switchView('setup'); switchSetupTab('interviews');
     } else { $('setup-message').textContent = 'Rascunho salvo.'; await loadWorkflow(false); }
@@ -279,25 +353,31 @@ async function saveDraft(generate) {
 }
 
 function renderGenerations() {
-  $('generation-list').innerHTML = state.generations.length ? state.generations.map(item => `<div class="turn-block"><div class="detail-head"><div><h3>${esc(item.setup_name)}</h3><div><code>${esc(item.generation_key)}</code> - ${statusBadge(item.status)} - ${esc(item.mode)}</div></div><button class="btn btn-sm" data-open-generation="${esc(item.generation_key)}" type="button">Ver entrevistas</button></div><p class="muted">${esc(item.result_json?.provenance?.note || '')}</p><div class="row"><input class="input input-mono" style="max-width:120px" data-generation-version="${esc(item.generation_key)}" placeholder="0.1.0"><select class="select" style="max-width:150px" data-generation-class="${esc(item.generation_key)}"><option value="experimental">Experimental</option><option value="fixture">Fixture</option><option value="validated">Validado</option></select><button class="btn btn-primary btn-sm" data-publish-generation="${esc(item.generation_key)}" type="button">Publicar S</button><span class="field-help" data-generation-message="${esc(item.generation_key)}"></span></div></div>`).join('') : '<div class="table-empty">Nenhuma geracao.</div>';
+  $('generation-list').innerHTML = state.generations.length ? state.generations.map(item => { const total=Number(item.progress_total||0),done=Number(item.progress_done||0),pct=total?Math.round(done/total*100):0,active=['queued','running'].includes(item.status),completed=item.status==='completed'; return `<div class="turn-block"><div class="detail-head"><div><h3>${esc(item.setup_name)}</h3><div><code>${esc(item.generation_key)}</code> · ${statusBadge(item.status)} · ${esc(item.mode)}</div></div><div class="toolbar-actions"><button class="btn btn-sm" data-open-generation="${esc(item.generation_key)}" type="button">Ver entrevistas</button>${active?`<button class="btn btn-danger-ghost btn-sm" data-cancel-generation="${esc(item.generation_key)}" type="button">Cancelar</button>`:''}</div></div><div class="row"><div class="progress" title="${done}/${total}"><span style="width:${pct}%"></span></div><span class="field-help">${done}/${total} chamadas · ${money(item.known_cost_usd)}</span></div>${item.error_text?`<div class="error-box">${esc(item.error_text)}</div>`:''}${completed?`<div class="row"><input class="input input-mono" style="max-width:120px" data-generation-version="${esc(item.generation_key)}" placeholder="0.0.1"><select class="select" style="max-width:150px" data-generation-class="${esc(item.generation_key)}"><option value="experimental">Experimental</option><option value="validated">Validado</option></select><button class="btn btn-primary btn-sm" data-publish-generation="${esc(item.generation_key)}" type="button">Publicar S</button><span class="field-help" data-generation-message="${esc(item.generation_key)}"></span></div>`:''}</div>`; }).join('') : '<div class="table-empty">Nenhuma geração.</div>';
   document.querySelectorAll('[data-open-generation]').forEach(btn => btn.onclick = () => openGeneration(btn.dataset.openGeneration));
+  document.querySelectorAll('[data-cancel-generation]').forEach(btn => btn.onclick = async () => { await api(`/api/benchmark/setup-generations/${encodeURIComponent(btn.dataset.cancelGeneration)}/cancel`,{method:'POST'}); await loadWorkflow(); });
   document.querySelectorAll('[data-publish-generation]').forEach(btn => btn.onclick = async () => {
     const key=btn.dataset.publishGeneration, version=document.querySelector(`[data-generation-version="${key}"]`).value, classification=document.querySelector(`[data-generation-class="${key}"]`).value, message=document.querySelector(`[data-generation-message="${key}"]`);
     try { const data=await api('/api/benchmark/setup-versions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation_key:key,version,classification,name:`Setup ${version}`})}); message.textContent=`Publicado ${data.version.version_key}.`; await loadWorkflow(); } catch(err){message.textContent=err.message;}
   });
   if (!state.selectedGeneration && state.generations.length) state.selectedGeneration = state.generations[0].generation_key;
-  openGeneration(state.selectedGeneration);
+  if (state.selectedGeneration) openGeneration(state.selectedGeneration);
 }
 
-function openGeneration(key) {
+async function openGeneration(key) {
   const detail = $('generation-detail');
   if (!detail) return;
-  const item = state.generations.find(g => g.generation_key === key);
+  let item = state.generations.find(g => g.generation_key === key);
   state.selectedGeneration = item ? key : null;
   document.querySelectorAll('[data-open-generation]').forEach(btn => btn.classList.toggle('btn-primary', btn.dataset.openGeneration === state.selectedGeneration));
   if (!item) { detail.innerHTML = state.generations.length ? '<div class="table-empty">Selecione uma geracao.</div>' : ''; return; }
-  const cases = item.result_json?.cases || [];
-  detail.innerHTML = `<hr><div class="detail-head"><div><h2>${esc(item.setup_name)}</h2><div class="muted"><code>${esc(item.generation_key)}</code> - ${date(item.finished_at || item.created_at)}</div></div></div>${cases.map(c => `<article class="turn-block"><h3>${esc(c.area)}</h3><div class="muted">${esc(c.large_area)} - ${esc(c.course_level)} - <code>${esc(c.id)}</code></div>${renderTurns(c)}</article>`).join('') || '<div class="table-empty">Esta geracao nao tem entrevistas registradas.</div>'}`;
+  detail.innerHTML = '<div class="table-empty">Carregando geração...</div>';
+  const data = await api(`/api/benchmark/setup-generations/${encodeURIComponent(key)}`);
+  item = { ...item, ...data.generation };
+  const cases = item.result_json?.cases || [], calls=item.calls || [];
+  const provenance = item.result_json?.provenance || {};
+  detail.innerHTML = `<hr><div class="detail-head"><div><h2>${esc(item.setup_name)}</h2><div class="muted"><code>${esc(item.generation_key)}</code> · ${date(item.finished_at || item.created_at)}</div></div><span class="badge">${provenance.calls || calls.length} chamadas · ${money(provenance.known_cost_usd)}</span></div>${cases.map(c => `<article class="turn-block"><h3>${esc(c.area)}</h3><div class="muted">${esc(c.large_area)} · ${esc(c.course_level)} · <code>${esc(c.id)}</code></div>${renderTurns(c)}</article>`).join('') || '<div class="table-empty">As entrevistas aparecerão aqui quando a geração for concluída.</div>'}${calls.length?`<hr><h3>Chamadas auditadas</h3><div class="artifact-layout"><div class="artifact-list">${calls.map(call=>`<button class="artifact-btn" type="button" data-generation-call="${call.id}">${esc(call.case_id)}/${esc(call.turn_id)} · ${esc(call.role)}<br><span class="muted">${esc(call.provider+':'+call.model+(call.effort?':'+call.effort:''))} · ${call.latency_ms||'-'} ms</span></button>`).join('')}</div><pre id="generation-call-view" class="artifact-view">Selecione uma chamada para ver prompt, resposta e uso.</pre></div>`:''}`;
+  document.querySelectorAll('[data-generation-call]').forEach(button => button.onclick = async () => { const callData=await api(`/api/benchmark/setup-generations/${encodeURIComponent(key)}/calls/${button.dataset.generationCall}`); $('generation-call-view').textContent=JSON.stringify(callData.call,null,2); });
 }
 function renderVersions() {
   $('setup-version-list').innerHTML = state.setupVersions.map(item => `<div class="turn-block"><h3><code>${esc(item.version_key)}</code> ${esc(item.name)}</h3><div>${statusBadge(item.classification)} · publicado ${date(item.published_at)}</div><p>${esc(item.description)}</p><div class="field-help">Hash ${esc(item.manifest_hash)}</div></div>`).join('') || '<div class="table-empty">Nenhuma versão S.</div>';
@@ -306,6 +386,11 @@ function renderVersions() {
   $('release-setup').innerHTML = state.setupVersions.map(item => `<option value="${esc(item.version_key)}">${esc(item.version_key)} · ${esc(item.name)}</option>`).join('');
   $('release-jury').innerHTML = state.juryVersions.map(item => `<option value="${esc(item.version_key)}">${esc(item.version_key)} · ${esc(item.name)}</option>`).join('');
   $('release-key').innerHTML = state.releases.map(item => `<option value="${esc(item.release_key)}">${esc(item.release_key)} · ${esc(item.name)}</option>`).join('');
+  const comparisonRelease = $('comparison-release');
+  const selectedComparisonRelease = state.selectedComparisonRelease || comparisonRelease.value || state.releases[0]?.release_key;
+  comparisonRelease.innerHTML = state.releases.map(item => `<option value="${esc(item.release_key)}">${esc(item.release_key)} · ${esc(item.name)}</option>`).join('');
+  if (state.releases.some(item => item.release_key === selectedComparisonRelease)) comparisonRelease.value = selectedComparisonRelease;
+  state.selectedComparisonRelease = comparisonRelease.value || null;
   updateReleaseSummary();
 }
 
@@ -316,6 +401,8 @@ async function loadWorkflow(preserveEditor=true) {
   state.drafts=drafts.drafts; state.generations=generations.generations; state.setupVersions=setups.versions; state.juryVersions=juries.versions; state.releases=releases.releases;
   renderDraftList(); renderGenerations(); renderVersions();
   if (preserveEditor && state.selectedDraft) openDraft(state.selectedDraft);
+  clearTimeout(state.workflowPoll);
+  if (state.generations.some(item => ['queued','running'].includes(item.status))) state.workflowPoll = setTimeout(() => loadWorkflow().catch(err => showError(err.message)), 3000);
 }
 
 function statusBadge(status) { return `<span class="badge status status-${esc(status)}">${esc(status)}</span>`; }
@@ -340,9 +427,252 @@ function renderMetrics(run) {
     ['Modelos', Object.keys(models).length], ['Estados avaliados', first?.judgments ?? '-']
   ].map(([label,value]) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join('');
   $('model-results').innerHTML = Object.entries(models).map(([key,result]) => {
-    const o=result.overall,q=o.quality,l=o.latency_ms,c=o.cost;
-    return `<h3>${esc(key)}</h3><div style="overflow:auto"><table class="table"><thead><tr><th>Qualidade média (IC 95%)</th><th>Mediana</th><th>Vitórias / empates / derrotas</th><th>Teste de sinais p</th><th>Discordâncias</th><th>Custo candidato</th><th>Custo dos juízes</th><th>Latência p50 / p95</th></tr></thead><tbody><tr><td>${number(q.mean)} (${number(q.mean_ci95?.low)} a ${number(q.mean_ci95?.high)})</td><td>${number(q.median)}</td><td>${q.wins} / ${q.ties} / ${q.losses}</td><td>${number(q.sign_test?.p_value,4)}</td><td>${q.needs_deliberation ?? 0}</td><td>${money(c.candidate_usd)}</td><td>${money(c.judge_usd)}</td><td>${number(l.p50,0)} / ${number(l.p95,0)} ms</td></tr></tbody></table></div>`;
+    const o=result.overall,q=o.quality,l=o.latency_ms,c=o.cost,a=o.action_policy||{},dims=q.dimensions||{};
+    return `<h3>${esc(key)}</h3><div style="overflow:auto"><table class="table"><thead><tr><th>Qualidade média (IC 95%)</th><th>Mediana</th><th>D/E/V ${helpPopover('Derrotas, empates e vitorias do modelo contra a resposta canonica. A segunda linha distribui a intensidade dos julgamentos: -1 e -0.5 sao derrotas, 0 e empate, +0.5 e +1 sao vitorias.')}</th><th>Teste de sinais p</th><th>Discordâncias</th><th>Schema válido</th><th>Ação aceitável</th><th>Ação preferida</th><th>Ação proibida</th><th>Custo candidato</th><th>Custo dos juízes</th><th>Latência p50 / p95</th></tr></thead><tbody><tr><td class="quality-cell">${qualityCell(q)}</td><td>${number(q.median)}</td><td class="score-cell">${scoreCell(q)}</td><td>${number(q.sign_test?.p_value,4)}</td><td>${q.needs_deliberation ?? 0}</td><td>${number((a.schema_valid_rate||0)*100,1)}%</td><td>${number((a.acceptable_rate||0)*100,1)}%</td><td>${number((a.preferred_rate||0)*100,1)}%</td><td>${number((a.forbidden_rate||0)*100,1)}%</td><td>${money(c.candidate_usd)}</td><td>${money(c.judge_usd)}</td><td>${number(l.p50,0)} / ${number(l.p95,0)} ms<div class="field-help">${l.samples || a.states || 0} amostras</div></td></tr></tbody></table></div><details><summary>Dimensões do conselho e matriz de ações</summary><div class="metrics">${Object.entries(dims).map(([name,value])=>`<div class="metric"><div class="metric-label">${esc(name)}</div><div class="metric-value">${number(value)}</div></div>`).join('')}</div><pre>${esc(JSON.stringify(a.confusion||{},null,2))}</pre></details>`;
   }).join('');
+  attachHelpPopovers();
+}
+
+function helpPopover(text) {
+  return `<span class="help-pop"><button class="help-pop-btn" type="button" aria-label="Explicar coluna D/E/V" aria-expanded="false" data-help-pop data-help-text="${esc(text)}">?</button></span>`;
+}
+
+function attachHelpPopovers() {
+  document.querySelectorAll('[data-help-pop]').forEach(button => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      const wasOpen = button.getAttribute('aria-expanded') === 'true';
+      closeHelpPopover();
+      if (wasOpen) return;
+
+      const popover = document.createElement('div');
+      popover.id = 'metric-help-popover';
+      popover.className = 'help-popover';
+      popover.setAttribute('role', 'tooltip');
+      popover.textContent = button.dataset.helpText || '';
+      document.body.appendChild(popover);
+
+      const anchor = button.getBoundingClientRect();
+      const box = popover.getBoundingClientRect();
+      const margin = 12;
+      const gap = 8;
+      const left = Math.max(margin, Math.min(anchor.left + anchor.width / 2 - box.width / 2, window.innerWidth - box.width - margin));
+      const below = anchor.bottom + gap;
+      const top = below + box.height <= window.innerHeight - margin ? below : Math.max(margin, anchor.top - box.height - gap);
+      popover.style.left = `${left}px`;
+      popover.style.top = `${top}px`;
+      button.setAttribute('aria-expanded', 'true');
+      button.setAttribute('aria-describedby', popover.id);
+    };
+  });
+}
+
+function closeHelpPopover() {
+  document.getElementById('metric-help-popover')?.remove();
+  document.querySelectorAll('[data-help-pop][aria-expanded="true"]').forEach(button => {
+    button.setAttribute('aria-expanded', 'false');
+    button.removeAttribute('aria-describedby');
+  });
+}
+
+document.addEventListener('click', closeHelpPopover);
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeHelpPopover(); });
+window.addEventListener('resize', closeHelpPopover);
+window.addEventListener('scroll', closeHelpPopover, true);
+
+function scoreCell(q) {
+  const d = q.score_distribution || {};
+  return `<div>${q.losses}-${q.ties}-${q.wins}</div><div class="field-help">${d['-1'] ?? 0}-${d['-0.5'] ?? 0}-${d['0'] ?? 0}-${d['+0.5'] ?? 0}-${d['+1'] ?? 0}</div>`;
+}
+
+function qualityCell(q) {
+  return `<div>${number(q.mean)}</div><div class="field-help">(${number(q.mean_ci95?.low)} a ${number(q.mean_ci95?.high)})</div>`;
+}
+
+async function loadComparison() {
+  const releaseKey = $('comparison-release').value;
+  state.selectedComparisonRelease = releaseKey || null;
+  if (!releaseKey) {
+    state.comparison = null;
+    renderComparison();
+    return;
+  }
+  $('refresh-comparison').disabled = true;
+  try {
+    const data = await api(`/api/benchmark/comparisons/${encodeURIComponent(releaseKey)}`);
+    state.comparison = data;
+    renderComparison();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    $('refresh-comparison').disabled = false;
+  }
+}
+
+function comparisonRanks() {
+  return new Map((state.comparison?.comparison?.models || []).map((model,index) => [model.candidate_key,index+1]));
+}
+
+function comparisonSortValue(model, key, ranks) {
+  const quality = model.overall?.quality || {}, cost = model.overall?.cost || {}, latency = model.overall?.latency_ms || {}, action = model.overall?.action_policy || {};
+  const values = {
+    rank: ranks.get(model.candidate_key),
+    model: model.candidate_key,
+    quality: quality.mean,
+    median: quality.median,
+    dev: model.judgments ? (Number(quality.wins || 0) - Number(quality.losses || 0)) / model.judgments : null,
+    evaluations: model.evaluations,
+    coverage: model.unique_states,
+    acceptable: action.acceptable_rate,
+    candidate_cost: cost.candidate_per_evaluation_usd,
+    judge_cost: cost.judge_per_evaluation_usd,
+    latency: latency.p50,
+  };
+  return values[key];
+}
+
+function sortedComparisonModels() {
+  const models = state.comparison?.comparison?.models || [], ranks = comparisonRanks();
+  const { key, direction } = state.comparisonSort;
+  return [...models].sort((a,b) => {
+    const left = comparisonSortValue(a,key,ranks), right = comparisonSortValue(b,key,ranks);
+    if (left == null && right == null) return ranks.get(a.candidate_key) - ranks.get(b.candidate_key);
+    if (left == null) return 1;
+    if (right == null) return -1;
+    const result = typeof left === 'string' ? left.localeCompare(right,'pt-BR') : left - right;
+    return (direction === 'asc' ? result : -result) || ranks.get(a.candidate_key) - ranks.get(b.candidate_key);
+  });
+}
+
+function comparisonSortHeader(label, key, help = '') {
+  const active = state.comparisonSort.key === key;
+  const direction = active ? state.comparisonSort.direction : null;
+  const indicator = !active ? '↕' : direction === 'asc' ? '▲' : '▼';
+  const ariaSort = !active ? 'none' : direction === 'asc' ? 'ascending' : 'descending';
+  return `<th aria-sort="${ariaSort}"><button class="comparison-sort" type="button" data-comparison-sort="${key}" aria-label="Ordenar por ${esc(label)}"><span>${label}</span><span class="comparison-sort-indicator">${indicator}</span></button>${help ? ` ${helpPopover(help)}` : ''}</th>`;
+}
+
+function renderComparisonHeader() {
+  $('comparison-head').innerHTML = `<tr>${[
+    comparisonSortHeader('#','rank'),
+    comparisonSortHeader('Modelo','model'),
+    comparisonSortHeader('Qualidade média (IC 95%)','quality'),
+    comparisonSortHeader('Mediana','median'),
+    comparisonSortHeader('D/E/V','dev','Derrotas, empates e vitórias. A primeira linha segue essa ordem; a segunda mostra os cinco níveis -1, -0.5, 0, +0.5 e +1. A ordenação usa o saldo proporcional entre vitórias e derrotas.'),
+    comparisonSortHeader('Avaliações','evaluations','Quantidade de execuções concluídas que avaliaram este modelo nesta mesma versão S-J. Quando há repetição, os julgamentos entram na amostra agregada e cada execução permanece disponível no histórico abaixo.'),
+    comparisonSortHeader('Cobertura','coverage'),
+    comparisonSortHeader('Ação aceitável','acceptable','Percentual de estados em que o tipo de ação e os campos condicionais respeitaram a política canônica. É uma medida objetiva separada do julgamento de qualidade.'),
+    comparisonSortHeader('Custo conhecido do candidato / avaliação','candidate_cost'),
+    comparisonSortHeader('Custo conhecido dos juízes / avaliação','judge_cost'),
+    comparisonSortHeader('Latência p50 / p95','latency'),
+  ].join('')}</tr>`;
+  document.querySelectorAll('[data-comparison-sort]').forEach(button => button.onclick = () => {
+    const key = button.dataset.comparisonSort;
+    if (state.comparisonSort.key === key) state.comparisonSort.direction = state.comparisonSort.direction === 'asc' ? 'desc' : 'asc';
+    else state.comparisonSort = { key, direction: ['rank','model'].includes(key) ? 'asc' : 'desc' };
+    renderComparison();
+  });
+}
+
+function renderComparison() {
+  const data = state.comparison;
+  const comparison = data?.comparison || { models: [] };
+  const release = state.releases.find(item => item.release_key === state.selectedComparisonRelease);
+  $('comparison-release-meta').textContent = release ? `${release.setup_name} · ${release.jury_name} · ${release.classification}` : '';
+  $('comparison-summary').innerHTML = [
+    ['Execuções concluídas', comparison.completed_runs ?? 0],
+    ['Avaliações de modelo', comparison.model_evaluations ?? 0],
+    ['Modelos', comparison.models?.length ?? 0],
+    ['Estados canônicos', comparison.unique_states ?? 0],
+    ['Julgamentos agregados', comparison.judgments ?? 0],
+  ].map(([label,value]) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join('');
+
+  const sourceModels = comparison.models || [], models = sortedComparisonModels(), ranks = comparisonRanks();
+  $('download-comparison').disabled = sourceModels.length === 0;
+  $('comparison-empty').classList.toggle('hidden', sourceModels.length > 0);
+  $('comparison-table-wrap').classList.toggle('hidden', sourceModels.length === 0);
+  renderComparisonHeader();
+  if (!sourceModels.some(model => model.candidate_key === state.selectedComparisonModel)) state.selectedComparisonModel = sourceModels[0]?.candidate_key || null;
+  $('comparison-body').innerHTML = models.map((model) => {
+    const o=model.overall,q=o.quality,l=o.latency_ms,c=o.cost,a=o.action_policy||{};
+    const selected = model.candidate_key === state.selectedComparisonModel ? 'is-selected' : '';
+    const candidateUnknown = model.cost_completeness?.candidate_unknown_calls || 0;
+    const judgeUnknown = model.cost_completeness?.judge_unknown_calls || 0;
+    return `<tr class="${selected}"><td class="comparison-rank">${ranks.get(model.candidate_key)}</td><td><button class="comparison-model-btn" data-comparison-model="${esc(model.candidate_key)}" type="button">${esc(model.candidate_key)}</button><div class="field-help">Última: ${date(model.last_finished_at)}</div></td><td class="quality-cell">${qualityCell(q)}</td><td>${number(q.median)}</td><td class="score-cell">${scoreCell(q)}</td><td>${model.evaluations}</td><td>${model.unique_states} únicos<div class="field-help">${model.judgments} julgamentos</div></td><td>${a.acceptable_rate==null?'-':number(a.acceptable_rate*100,1)+'%'}<div class="field-help">preferida ${a.preferred_rate==null?'-':number(a.preferred_rate*100,1)+'%'}</div></td><td>${money(c.candidate_per_evaluation_usd)}<div class="field-help">total ${money(c.candidate_usd)}${candidateUnknown ? ` · ${candidateUnknown} sem preço` : ''}</div></td><td>${money(c.judge_per_evaluation_usd)}<div class="field-help">total ${money(c.judge_usd)}${judgeUnknown ? ` · ${judgeUnknown} sem preço` : ''}</div></td><td>${number(l.p50,0)} / ${number(l.p95,0)} ms</td></tr>`;
+  }).join('');
+  document.querySelectorAll('[data-comparison-model]').forEach(button => button.onclick = () => {
+    state.selectedComparisonModel = button.dataset.comparisonModel;
+    renderComparison();
+  });
+  attachHelpPopovers();
+  renderComparisonDetail();
+}
+
+function csvCell(value) {
+  return `"${String(value ?? '').replaceAll('"','""')}"`;
+}
+
+function downloadComparisonCsv() {
+  const models = sortedComparisonModels(), ranks = comparisonRanks();
+  if (!models.length) return;
+  const columns = [
+    ['versao_sj', () => state.selectedComparisonRelease],
+    ['posicao_qualidade', model => ranks.get(model.candidate_key)],
+    ['modelo', model => model.candidate_key],
+    ['qualidade_media', model => model.overall.quality.mean],
+    ['ic95_inferior', model => model.overall.quality.mean_ci95?.low],
+    ['ic95_superior', model => model.overall.quality.mean_ci95?.high],
+    ['mediana', model => model.overall.quality.median],
+    ['derrotas', model => model.overall.quality.losses],
+    ['empates', model => model.overall.quality.ties],
+    ['vitorias', model => model.overall.quality.wins],
+    ['notas_dev', model => `${model.overall.quality.losses}-${model.overall.quality.ties}-${model.overall.quality.wins}`],
+    ['notas_menos_1', model => model.overall.quality.score_distribution?.['-1']],
+    ['notas_menos_0_5', model => model.overall.quality.score_distribution?.['-0.5']],
+    ['notas_0', model => model.overall.quality.score_distribution?.['0']],
+    ['notas_mais_0_5', model => model.overall.quality.score_distribution?.['+0.5']],
+    ['notas_mais_1', model => model.overall.quality.score_distribution?.['+1']],
+    ['avaliacoes', model => model.evaluations],
+    ['estados_unicos', model => model.unique_states],
+    ['julgamentos', model => model.judgments],
+    ['taxa_schema_valido', model => model.overall.action_policy?.schema_valid_rate],
+    ['taxa_acao_aceitavel', model => model.overall.action_policy?.acceptable_rate],
+    ['taxa_acao_preferida', model => model.overall.action_policy?.preferred_rate],
+    ['taxa_acao_proibida', model => model.overall.action_policy?.forbidden_rate],
+    ['custo_candidato_conhecido_por_avaliacao_usd', model => model.overall.cost.candidate_per_evaluation_usd],
+    ['custo_candidato_conhecido_total_usd', model => model.overall.cost.candidate_usd],
+    ['chamadas_candidato_sem_preco', model => model.cost_completeness?.candidate_unknown_calls],
+    ['custo_juizes_conhecido_por_avaliacao_usd', model => model.overall.cost.judge_per_evaluation_usd],
+    ['custo_juizes_conhecido_total_usd', model => model.overall.cost.judge_usd],
+    ['chamadas_juizes_sem_preco', model => model.cost_completeness?.judge_unknown_calls],
+    ['latencia_media_ms', model => model.overall.latency_ms.mean],
+    ['latencia_p50_ms', model => model.overall.latency_ms.p50],
+    ['latencia_p95_ms', model => model.overall.latency_ms.p95],
+    ['primeira_avaliacao_em', model => model.first_finished_at],
+    ['ultima_avaliacao_em', model => model.last_finished_at],
+  ];
+  const csv = [columns.map(([label]) => csvCell(label)).join(','), ...models.map(model => columns.map(([,value]) => csvCell(value(model))).join(','))].join('\r\n');
+  const blob = new Blob(['\uFEFF',csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `oratia-comparativo-${String(state.selectedComparisonRelease || 'sem-versao').replace(/[^A-Za-z0-9._-]/g,'-')}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function renderComparisonDetail() {
+  const detail = $('comparison-detail');
+  const model = state.comparison?.comparison?.models?.find(item => item.candidate_key === state.selectedComparisonModel);
+  detail.classList.toggle('hidden', !model);
+  if (!model) { detail.innerHTML = ''; return; }
+  detail.innerHTML = `<div class="comparison-history-head"><div><h2>${esc(model.candidate_key)}</h2><div class="muted">${model.evaluations} avaliação(ões) nesta versão S-J</div></div><span class="badge">${model.unique_states} estados únicos</span></div><div style="overflow:auto"><table class="table"><thead><tr><th>Execução</th><th>Qualidade média (IC 95%)</th><th>Mediana</th><th>D/E/V</th><th>Custo candidato</th><th>Custo dos juízes</th><th>Latência p50 / p95</th><th>Conclusão</th></tr></thead><tbody>${model.runs.map(item => { const o=item.overall,q=o.quality,l=o.latency_ms,c=o.cost; return `<tr><td><button class="btn btn-ghost btn-sm" data-comparison-run="${esc(item.run_key)}" type="button">${esc(item.run_key)}</button></td><td class="quality-cell">${qualityCell(q)}</td><td>${number(q.median)}</td><td class="score-cell">${scoreCell(q)}</td><td>${money(c.candidate_usd)}</td><td>${money(c.judge_usd)}</td><td>${number(l.p50,0)} / ${number(l.p95,0)} ms</td><td>${date(item.finished_at)}</td></tr>`; }).join('')}</tbody></table></div>`;
+  document.querySelectorAll('[data-comparison-run]').forEach(button => button.onclick = async () => {
+    switchView('results');
+    await openRun(button.dataset.comparisonRun);
+  });
 }
 
 async function loadArtifacts(key) {
@@ -360,7 +690,8 @@ async function openRun(key, resetArtifact=true) {
   $('detail').classList.remove('hidden'); $('detail-title').textContent = key;
   $('detail-meta').innerHTML = `${statusBadge(run.status)} &nbsp; ${esc(run.benchmark)} ${esc(run.setup_version)}.${esc(run.context_version)}.${esc(run.jury_version)} · ${date(run.started_at)}`;
   $('detail-error').textContent = run.error_text || ''; $('detail-error').classList.toggle('hidden', !run.error_text);
-  $('cancel-run').classList.toggle('hidden', !['queued','running'].includes(run.status)); $('cancel-run').dataset.run = key;
+  $('cancel-run').classList.toggle('hidden', !run.active); $('cancel-run').dataset.run = key;
+  $('resume-run').classList.toggle('hidden', !run.resumable); $('resume-run').dataset.run = key;
   let caseIds = [...new Set((outputs || []).map(item => item.case_id))];
   if (!caseIds.length) caseIds = run.config_json?.case_ids?.length ? run.config_json.case_ids : state.cases.map(item => item.id);
   $('run-cases').innerHTML = caseIds.map(id => `<button class="btn btn-ghost btn-sm" data-run-case="${esc(id)}" type="button">${esc(state.cases.find(item => item.id === id)?.area || id)}</button>`).join('');
@@ -371,7 +702,7 @@ async function openRun(key, resetArtifact=true) {
 $('run-form').onsubmit = async (event) => {
   event.preventDefault(); $('start-run').disabled = true; $('form-message').textContent = 'Criando execução...';
   try {
-    const payload={ release_key:$('release-key').value, candidates:specs('candidates'), max_cost_usd:Number($('max-cost').value), random_seed:$('seed').value };
+    const payload={ release_key:$('release-key').value, candidates:specs('candidates'), max_cost_usd:Number($('max-cost').value), random_seed:$('seed').value, latency_repetitions:Number($('latency-repetitions').value) };
     let data;
     try { data=await api('/api/benchmark/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); }
     catch(err) {
@@ -384,8 +715,19 @@ $('run-form').onsubmit = async (event) => {
   } catch (err) { $('form-message').textContent = err.message; } finally { $('start-run').disabled = false; }
 };
 $('refresh').onclick = () => loadRuns().catch(err => showError(err.message));
+$('refresh-comparison').onclick = () => loadComparison();
+$('download-comparison').onclick = downloadComparisonCsv;
+$('comparison-release').onchange = () => { state.selectedComparisonModel = null; loadComparison(); };
 $('cancel-run').onclick = async () => { const key=$('cancel-run').dataset.run; await api(`/api/benchmark/runs/${encodeURIComponent(key)}/cancel`, {method:'POST'}); await loadRuns(); };
-document.querySelectorAll('[data-view]').forEach(btn => btn.onclick = () => switchView(btn.dataset.view));
+$('resume-run').onclick = async () => {
+  const button=$('resume-run'),key=button.dataset.run; button.disabled=true; button.textContent='Retomando...';
+  try { const result=await api(`/api/benchmark/runs/${encodeURIComponent(key)}/resume`, {method:'POST'}); await loadRuns(); await openRun(key); if(result.recovery==='artifacts_reimported') $('detail-error').classList.add('hidden'); }
+  catch(err) { showError(err.message); } finally { button.disabled=false; button.textContent='Retomar'; }
+};
+document.querySelectorAll('[data-view]').forEach(btn => btn.onclick = () => {
+  switchView(btn.dataset.view);
+  if (btn.dataset.view === 'comparisons') loadComparison();
+});
 document.querySelectorAll('[data-setup-tab]').forEach(btn => btn.onclick = () => switchSetupTab(btn.dataset.setupTab));
 $('case-search').oninput = renderCaseBrowser;
 $('case-area-filter').onchange = renderCaseBrowser;

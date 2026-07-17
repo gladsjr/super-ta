@@ -7,7 +7,7 @@ Data: 11/jul/2026.
 1. O benchmark nao deve misturar qualidade, custo e latencia em um unico indice.
    Qualidade deve ter varios indices proprios. Custo e latencia ficam como eixos
    independentes de decisao.
-2. A entrevista canonica deve representar a persona antes de tudo. Ela nao e um
+2. A entrevista canonica deve representar a persona do entrevistador antes de tudo. Ela nao e um
    gabarito rigido para imitacao literal; e uma referencia forte, acompanhada de
    metadados que explicam intencao pedagogica, pontos de pressao e contradicoes.
 3. O conselho de sabios deve julgar de forma independente primeiro. Deliberacao
@@ -26,10 +26,12 @@ Um caso contem:
 - area, grande area, nivel, tipo de curso e dificuldade;
 - enunciado original;
 - trabalho do aluno;
-- documentos de apoio permitidos;
+- persona do entrevistador;
 - persona do aluno;
-- comportamento esperado da persona;
-- objetivos pedagogicos da entrevista;
+- pontos de investigacao;
+- pergunta inicial literal;
+- objetivos da entrevista;
+- estados comportamentais do aluno ligados a fala que respondem;
 - contradicoes conhecidas;
 - pontos de verificacao por area;
 - riscos de resposta indevida;
@@ -273,12 +275,14 @@ abrir arquivos crus manualmente.
 
 Telas recomendadas:
 
-- `Runs`: listar execucoes, status, versoes `S/C/J`, modelos, custo, latencia e
+- `Runs`: listar execucoes, status, versoes `S-J`, modelos, custo, latencia e
   score de qualidade.
 - `Run detail`: resumo executivo, intervalos de confianca, cortes por area,
   persona e dificuldade.
-- `Cases`: navegar pelo corpus, documentos, personas, estados congelados e
-  entrevista canonica.
+- `Cases`: navegar por enunciados, trabalhos, personas, planos e estados
+  planejados do aluno.
+- `Setup`: configurar a geracao e auditar entrevistas canonicas, incluindo os
+  trechos recuperados por RAG em cada estado.
 - `Artifacts`: ver prompts, chunks recuperados, respostas, votos individuais,
   deliberacoes, erros e repeticoes.
 - `Judges`: comparar comportamento dos juizes, concordancia, vieses e mudancas
@@ -287,7 +291,7 @@ Telas recomendadas:
 - `Latency`: distribuicoes p50/p90/p95/p99, timeouts e variancia.
 - `Config`: criar execucoes sem reprogramar, escolhendo modelos candidatos,
   conselho, amostra, cortes, concorrencia, limites de custo e politica de RAG.
-- `Versions`: visualizar diferencas entre `S`, `C` e `J`, com hashes dos
+- `Versions`: visualizar diferencas entre `S` e `J`, com hashes dos
   artefatos.
 
 Configuracoes editaveis pela interface:
@@ -316,30 +320,20 @@ Configuracoes que devem exigir nova versao formal, nao apenas clique:
 
 ## Versionamento
 
-Uma versao completa deve separar pelo menos:
+Uma versao completa separa:
 
-- `S`: setup/corpus canonico, entrevistas, estados e documentos;
-- `C`: contexto de avaliacao, incluindo personas, rubricas, prompts, schemas,
-  politica de RAG e instrucoes dos juizes;
-- `J`: conselho de juizes, modelos, parametros e agregador.
+- `S major.minor.build`: casos-fonte, personas, pontos de investigacao,
+  objetivos, prompts, politica de RAG, entrevistas canonicas, estados
+  congelados, propostas, votos e chamadas da geracao;
+- `J major.minor`: conselho de juizes usado para avaliar candidatos.
 
-Exemplo:
-
-`ORATIA-Bench S2.C4.J5`
-
-Se for desejavel manter a notacao curta de dois numeros, o primeiro numero deve
-agregar `S+C`, e o segundo deve representar `J`:
-
-`ORATIA-Bench 2.5`
-
-Nesse caso, qualquer mudanca em persona, rubrica, prompt, schema ou politica de
-RAG exige nova versao do primeiro numero.
+Exemplo: `ORATIA-Bench S2.1.3-J2.1`.
 
 ## Armazenamento por execucao
 
 Cada execucao deve guardar:
 
-- hash e conteudo dos documentos;
+- hash e conteudo do enunciado e do trabalho;
 - chunks e evidencias recuperadas;
 - prompts completos;
 - respostas completas;
@@ -354,6 +348,13 @@ Cada execucao deve guardar:
 - agregacao final;
 - relatorio gerado;
 - codigo ou commit do harness.
+
+Durante a execucao, `checkpoint.json` registra atomicamente cada resposta de
+candidato e cada julgamento concluido. Em uma retomada, essas unidades sao
+ignoradas e somente a unidade que estava em voo pode ser repetida. Ao final,
+`raw.json` e o pacote de artefatos sao a fonte auditavel; as tabelas Postgres
+sao uma projecao consultavel e podem ser reconstruidas sem novas chamadas aos
+modelos.
 
 ## Plano incremental
 

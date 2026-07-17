@@ -4,9 +4,10 @@ import path from "node:path";
 import yaml from "js-yaml";
 
 import { PROJECT_ROOT, requireAdmin } from "../lib/middleware.js";
-import { loadCases } from "../lib/bench/cases.js";
+import { loadCaseSeeds, validateFrozenCases } from "../lib/bench/cases.js";
+import { buildReleaseComparison } from "../lib/bench/comparison.js";
 import { runBenchmark } from "../lib/bench/runner.js";
-import { retrieveEvidence } from "../lib/bench/rag.js";
+import { generateCanonicalSetup } from "../lib/bench/setupGenerator.js";
 import * as store from "../lib/bench/store.js";
 import * as versions from "../lib/bench/versionStore.js";
 import { sha256 } from "../lib/bench/util.js";
@@ -14,6 +15,7 @@ import log from "../lib/logger.js";
 
 const router = express.Router();
 const activeRuns = new Map();
+const activeGenerations = new Map();
 const defaultConfigPath = path.join(PROJECT_ROOT, "config", "benchmark.yaml");
 let bootstrapPromise = null;
 
@@ -21,16 +23,19 @@ function defaultConfig() { return yaml.load(fs.readFileSync(defaultConfigPath, "
 async function ensureVersions() {
     if (!bootstrapPromise) {
         const config = defaultConfig();
-        const cases = loadCases(path.resolve(PROJECT_ROOT, config.cases_dir));
-        const setupManifest = { classification: "fixture", cases, config: { rag: config.rag, consensus: config.consensus, prompts: config.prompts, generation_council: [], validation_council: config.judges } };
         const juryConfig = { judges: config.judges, operational_policy: { minimum_available: 1 } };
-        bootstrapPromise = versions.bootstrapFixtureVersions({ setupManifest, juryConfig });
+        const draftConfig = {
+            case_ids: [], rag: config.rag, consensus: config.consensus, prompts: config.prompts,
+            setup_council_version: "J0.1", max_generation_cost_usd: config.limits.max_cost_usd, max_generation_calls: 250,
+        };
+        bootstrapPromise = versions.ensureInitialBenchmark({ draftConfig, juryConfig });
     }
     return bootstrapPromise;
 }
 function runKey() { return new Date().toISOString().replace(/[:.]/g, "-"); }
+function runArtifactDir(config, key) { return path.resolve(config.storage.runs_dir, key); }
 function publicConfig(config) {
-    return { candidates: config.candidates, judges: config.judges, case_ids: config.case_ids, max_cost_usd: config.limits.max_cost_usd, random_seed: config.random_seed };
+    return { candidates: config.candidates, judges: config.judges, case_ids: config.case_ids, max_cost_usd: config.limits.max_cost_usd, random_seed: config.random_seed, latency_repetitions: config.limits.latency_repetitions || 1 };
 }
 
 function providerStatus(config) {
@@ -39,6 +44,7 @@ function providerStatus(config) {
         { key: "anthropic", name: "Anthropic", configured: Boolean(process.env.ANTHROPIC_API_KEY), cost: Object.keys(config.providers?.anthropic?.pricing || {}).length ? "estimado por tokens" : "tabela nao configurada" },
         { key: "gemini", name: "Google Gemini", configured: Boolean(process.env.GEMINI_API_KEY), cost: Object.keys(config.providers?.gemini?.pricing || {}).length ? "estimado por tokens" : "tabela nao configurada" },
         { key: "xai", name: "xAI", configured: Boolean(process.env.XAI_API_KEY), cost: "exato por resposta" },
+        { key: "meta", name: "Meta", configured: Boolean(process.env.META_API_KEY), available: false, cost: process.env.META_API_KEY ? "chave configurada; adaptador pendente" : "sem chave; adaptador pendente" },
     ];
 }
 
@@ -49,20 +55,22 @@ function resolveConfig(body = {}) {
     if (Array.isArray(body.case_ids)) config.case_ids = body.case_ids.map(String);
     if (body.max_cost_usd != null) config.limits.max_cost_usd = Number(body.max_cost_usd);
     if (body.random_seed != null) config.random_seed = String(body.random_seed);
+    if (body.latency_repetitions != null) config.limits.latency_repetitions = Number(body.latency_repetitions);
     if (!Number.isFinite(config.limits.max_cost_usd) || config.limits.max_cost_usd <= 0 || config.limits.max_cost_usd > 1000) throw new Error("max_cost_usd deve estar entre 0 e 1000");
+    if (!Number.isInteger(config.limits.latency_repetitions) || config.limits.latency_repetitions < 1 || config.limits.latency_repetitions > 5) throw new Error("repeticoes de latencia deve estar entre 1 e 5");
     for (const spec of [...config.candidates, ...config.judges]) {
         if (!/^(openai|anthropic|gemini|xai):[A-Za-z0-9._-]+(?::[A-Za-z0-9._-]+)?$/.test(spec)) throw new Error(`modelo ou fornecedor invalido: ${spec}`);
     }
     return config;
 }
 
-function launch(config, key, casesOverride = null) {
+function launch(config, key, casesOverride = null, { resume = false } = {}) {
     const controller = new AbortController();
     activeRuns.set(key, controller);
     void (async () => {
         try {
-            await store.markRunning(key);
-            const result = await runBenchmark({ ...config, run_key: key }, { signal: controller.signal, casesOverride, onProgress: (done) => store.updateProgress(key, done) });
+            await store.markRunning(key, runArtifactDir(config, key));
+            const result = await runBenchmark({ ...config, run_key: key }, { signal: controller.signal, casesOverride, resume, onProgress: (done) => store.updateProgress(key, done) });
             const raw = JSON.parse(fs.readFileSync(path.join(result.runDir, "raw.json"), "utf8"));
             await store.completeRun(key, result, raw);
         } catch (err) {
@@ -73,19 +81,46 @@ function launch(config, key, casesOverride = null) {
     })();
 }
 
+function launchGeneration({ key, draft, cases, council, config, artifactDir }) {
+    const controller = new AbortController();
+    activeGenerations.set(key, controller);
+    void (async () => {
+        try {
+            await versions.markGenerationRunning(key);
+            const result = await generateCanonicalSetup({
+                key, cases, council, config, artifactDir, signal: controller.signal,
+                onProgress: (progress) => versions.updateGenerationProgress(key, progress),
+            });
+            await versions.completeGeneration(key, result, result.calls);
+        } catch (err) {
+            const status = err?.code === "BENCH_CANCELLED" ? "cancelled" : "failed";
+            log.error("BENCHMARK_SETUP", `generation=${key} ${status}: ${err.message}`);
+            await versions.failGeneration(key, err, status, err.generationCalls || []).catch((dbErr) => log.error("BENCHMARK_SETUP", `falha ao persistir erro generation=${key}: ${dbErr.message}`));
+        } finally { activeGenerations.delete(key); }
+    })();
+}
+
 router.get("/api/benchmark/config", requireAdmin, (_req, res) => {
     try { res.json({ config: publicConfig(defaultConfig()) }); } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.get("/api/benchmark/providers", requireAdmin, (_req, res) => {
     const config = defaultConfig();
-    res.json({ providers: providerStatus(config), models: Array.isArray(config.model_catalog) ? config.model_catalog : [] });
+    res.json({
+        providers: providerStatus(config),
+        models: Array.isArray(config.model_catalog) ? config.model_catalog : [],
+        pending_models: Array.isArray(config.model_catalog_pending) ? config.model_catalog_pending : [],
+    });
 });
 
 router.get("/api/benchmark/cases", requireAdmin, (_req, res) => {
     try {
         const config = defaultConfig();
-        const cases = loadCases(path.resolve(PROJECT_ROOT, config.cases_dir)).map((item) => ({ id: item.id, area: item.area, large_area: item.large_area, course_level: item.course_level, persona: item.persona, turns: item.turns.length, document_hash: item.document_hash }));
+        const cases = loadCaseSeeds(path.resolve(PROJECT_ROOT, config.cases_dir)).map((item) => ({
+            id: item.id, area: item.area, large_area: item.large_area, course_level: item.course_level,
+            interviewer_persona: item.interviewer_persona, student_persona: item.student_persona,
+            states: item.student_states.length, source_hash: item.source_hash,
+        }));
         res.json({ cases });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -93,9 +128,8 @@ router.get("/api/benchmark/cases", requireAdmin, (_req, res) => {
 router.get("/api/benchmark/cases/:caseId", requireAdmin, (req, res) => {
     try {
         const config = defaultConfig();
-        const testCase = loadCases(path.resolve(PROJECT_ROOT, config.cases_dir), [req.params.caseId])[0];
-        const rag = testCase.turns.map((turn) => ({ turn_id: turn.id, ...retrieveEvidence(testCase, turn, config.rag || {}) }));
-        res.json({ case: testCase, rag });
+        const testCase = loadCaseSeeds(path.resolve(PROJECT_ROOT, config.cases_dir), [req.params.caseId])[0];
+        res.json({ case: testCase });
     } catch (err) {
         const missing = String(err.message || "").includes("casos nao encontrados");
         res.status(missing ? 404 : 500).json({ error: missing ? "case not found" : err.message });
@@ -113,7 +147,7 @@ router.post("/api/benchmark/setup-drafts", requireAdmin, async (req, res) => {
         const config = defaultConfig();
         const draft = await versions.createSetupDraft({
             name: req.body?.name, description: req.body?.description,
-            config: req.body?.config || { case_ids: [], rag: config.rag, consensus: config.consensus, prompts: config.prompts, generation_council: [], validation_council: config.judges },
+            config: req.body?.config || { case_ids: [], rag: config.rag, consensus: config.consensus, prompts: config.prompts, setup_council_version: "J0.1", max_generation_cost_usd: config.limits.max_cost_usd, max_generation_calls: 250 },
             userId: req.session.user.id,
         });
         res.status(201).json({ draft });
@@ -129,27 +163,62 @@ router.post("/api/benchmark/setup-drafts/:id/generate", requireAdmin, async (req
     try {
         const draft = await versions.getSetupDraft(req.params.id);
         if (!draft) return res.status(404).json({ error: "setup draft not found" });
+        const active = await versions.findActiveGeneration(draft.id);
+        if (active) return res.status(409).json({ error: `ja existe uma geracao ativa para este setup: ${active.generation_key}` });
         const config = defaultConfig();
         const caseIds = draft.config_json?.case_ids || [];
-        const cases = loadCases(path.resolve(PROJECT_ROOT, config.cases_dir), caseIds);
+        const cases = loadCaseSeeds(path.resolve(PROJECT_ROOT, config.cases_dir), caseIds);
+        const councilVersionKey = draft.config_json?.setup_council_version;
+        const councilVersion = await versions.getJuryVersion(councilVersionKey);
+        if (!councilVersion) return res.status(400).json({ error: "versao do conselho do setup obrigatoria" });
+        const council = councilVersion.config_json?.judges || [];
+        if (!council.length) return res.status(400).json({ error: "conselho do setup sem modelos" });
         const key = `setup-${runKey()}`;
-        const result = {
-            cases,
+        const maxGenerationCost = Number(req.body?.max_cost_usd || draft.config_json?.max_generation_cost_usd || config.limits.max_cost_usd);
+        if (!Number.isFinite(maxGenerationCost) || maxGenerationCost <= 0 || maxGenerationCost > 1000) return res.status(400).json({ error: "limite de custo da geracao deve estar entre 0 e 1000" });
+        const maxGenerationCalls = Number(draft.config_json?.max_generation_calls || 250);
+        if (!Number.isInteger(maxGenerationCalls) || maxGenerationCalls < 1 || maxGenerationCalls > 5000) return res.status(400).json({ error: "limite de chamadas da geracao deve estar entre 1 e 5000" });
+        const generationConfig = {
+            ...config,
             setup_config: draft.config_json,
-            provenance: {
-                mode: "fixture_snapshot",
-                generated_at: new Date().toISOString(),
-                note: "Snapshot dos casos simplificados; nenhuma LLM foi chamada nesta geracao.",
-            },
+            rag: draft.config_json?.rag || config.rag,
+            prompts: draft.config_json?.prompts || config.prompts,
+            limits: { ...config.limits, max_cost_usd: maxGenerationCost, max_calls: maxGenerationCalls },
         };
-        const generation = await versions.createGeneration({ key, setupDraftId: draft.id, config: draft.config_json, result, userId: req.session.user.id });
-        res.status(201).json({ generation });
+        const progressTotal = cases.reduce((sum, item) => sum + item.student_states.length, 0) * (1 + 2 * council.length);
+        const artifactDir = path.resolve(PROJECT_ROOT, "bench", "setup-generations", key);
+        const generation = await versions.createGeneration({ key, setupDraftId: draft.id, config: generationConfig, artifactDir, userId: req.session.user.id, progressTotal });
+        launchGeneration({ key, draft, cases, council, config: generationConfig, artifactDir });
+        res.status(202).json({ generation });
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 router.get("/api/benchmark/setup-generations", requireAdmin, async (_req, res) => {
     try { await ensureVersions(); res.json({ generations: await versions.listGenerations() }); }
     catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/api/benchmark/setup-generations/:key", requireAdmin, async (req, res) => {
+    try {
+        const generation = await versions.getGenerationForDisplay(req.params.key);
+        if (!generation) return res.status(404).json({ error: "geracao nao encontrada" });
+        res.json({ generation });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/api/benchmark/setup-generations/:key/calls/:id", requireAdmin, async (req, res) => {
+    try {
+        const call = await versions.getGenerationCall(req.params.key, req.params.id);
+        if (!call) return res.status(404).json({ error: "chamada nao encontrada" });
+        res.json({ call });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post("/api/benchmark/setup-generations/:key/cancel", requireAdmin, (req, res) => {
+    const controller = activeGenerations.get(req.params.key);
+    if (!controller) return res.status(409).json({ error: "geracao nao esta ativa" });
+    controller.abort();
+    res.json({ ok: true });
 });
 
 router.get("/api/benchmark/setup-versions", requireAdmin, async (_req, res) => {
@@ -202,13 +271,30 @@ router.post("/api/benchmark/releases", requireAdmin, async (req, res) => {
 });
 
 router.get("/api/benchmark/runs", requireAdmin, async (req, res) => {
-    try { res.json({ runs: await store.listRuns(req.query.limit) }); } catch (err) { res.status(500).json({ error: err.message }); }
+    try {
+        const runs = (await store.listRuns(req.query.limit)).map((run) => ({
+            ...run, active: activeRuns.has(run.run_key),
+            resumable: run.status !== "completed" && !activeRuns.has(run.run_key),
+        }));
+        res.json({ runs });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get("/api/benchmark/comparisons/:releaseKey", requireAdmin, async (req, res) => {
+    try {
+        const release = await versions.getRelease(req.params.releaseKey);
+        if (!release) return res.status(404).json({ error: "versao S-J nao encontrada" });
+        const data = await store.getCompletedReleaseData(release.release_key);
+        res.json({ release, comparison: buildReleaseComparison(data) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.get("/api/benchmark/runs/:runKey", requireAdmin, async (req, res) => {
     try {
         const details = await store.getRunDetails(req.params.runKey);
         if (!details) return res.status(404).json({ error: "run not found" });
+        details.run.active = activeRuns.has(details.run.run_key);
+        details.run.resumable = details.run.status !== "completed" && !details.run.active;
         res.json(details);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -248,8 +334,7 @@ router.post("/api/benchmark/runs", requireAdmin, async (req, res) => {
         await ensureVersions();
         const release = await versions.getRelease(req.body?.release_key);
         if (!release) return res.status(400).json({ error: "versao S-J obrigatoria" });
-        const frozenCases = release.setup_manifest?.cases;
-        if (!Array.isArray(frozenCases) || !frozenCases.length) return res.status(400).json({ error: "setup publicado sem casos congelados" });
+        const frozenCases = validateFrozenCases(release.setup_manifest?.cases);
         const config = resolveConfig({ ...req.body, judges: release.jury_config?.judges, case_ids: frozenCases.map((item) => item.id) });
         config.setup_version = release.setup_version_key;
         config.context_version = "embedded";
@@ -261,11 +346,42 @@ router.post("/api/benchmark/runs", requireAdmin, async (req, res) => {
         const duplicate = await versions.findDuplicateRun(release.release_key, fingerprint);
         if (duplicate && req.body?.allow_repeat !== true) return res.status(409).json({ error: "duplicate_evaluation", existing_run: duplicate });
         const cases = frozenCases;
-        const total = cases.reduce((sum, item) => sum + item.turns.length, 0) * config.candidates.length * (1 + config.judges.length);
+        const total = cases.reduce((sum, item) => sum + item.turns.length, 0) * config.candidates.length * (config.limits.latency_repetitions + config.judges.length);
         const key = runKey();
-        await store.createRun({ runKey: key, config: { ...config, run_key: key }, userId: req.session.user.id, progressTotal: total, releaseKey: release.release_key, candidateFingerprint: fingerprint });
+        const runConfig = { ...config, run_key: key };
+        await store.createRun({ runKey: key, config: runConfig, userId: req.session.user.id, progressTotal: total, releaseKey: release.release_key, candidateFingerprint: fingerprint, artifactDir: runArtifactDir(runConfig, key) });
         launch(config, key, cases);
         res.status(202).json({ run_key: key, status: "queued", progress_total: total });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.post("/api/benchmark/runs/:runKey/resume", requireAdmin, async (req, res) => {
+    try {
+        const key = req.params.runKey;
+        if (activeRuns.has(key)) return res.status(409).json({ error: "execucao ja esta ativa" });
+        const run = await store.getRun(key);
+        if (!run) return res.status(404).json({ error: "execucao nao encontrada" });
+        if (run.status === "completed") return res.status(409).json({ error: "execucao ja esta concluida" });
+
+        const config = { ...run.config_json, run_key: key };
+        const runDir = run.artifact_dir || runArtifactDir(config, key);
+        const rawFile = path.join(runDir, "raw.json");
+        if (fs.existsSync(rawFile)) {
+            const raw = JSON.parse(fs.readFileSync(rawFile, "utf8"));
+            if (raw?.run?.run_key !== key) throw new Error("artefato raw.json pertence a outra execucao");
+            const metrics = JSON.parse(fs.readFileSync(path.join(runDir, "metrics.json"), "utf8"));
+            await store.markRunning(key, runDir);
+            await store.completeRun(key, { run: raw.run, metrics, runDir }, raw);
+            return res.json({ run_key: key, status: "completed", recovery: "artifacts_reimported" });
+        }
+
+        const checkpointFile = path.join(runDir, "checkpoint.json");
+        if (!fs.existsSync(checkpointFile)) return res.status(409).json({ error: "execucao sem artefato final ou checkpoint retomavel" });
+        const release = await versions.getRelease(run.release_key);
+        if (!release) throw new Error("versao S-J da execucao nao foi encontrada");
+        const cases = validateFrozenCases(release.setup_manifest?.cases);
+        launch(config, key, cases, { resume: true });
+        res.status(202).json({ run_key: key, status: "queued", recovery: "checkpoint" });
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
