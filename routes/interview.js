@@ -1415,6 +1415,9 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             message: forcedMessage,
             completion_reason: "complete",
             finalize_reason: "max_turns",
+            // Lacunas registradas pelo orquestrador ao avançar (guardrail de
+            // insistência): persistidas aqui para o InterviewEvaluator vê-las.
+            open_threads: Array.isArray(sess.superOrchestratorMemory?.open_threads) ? sess.superOrchestratorMemory.open_threads : [],
             at: new Date().toISOString(),
         };
         await persistFinalization(req, "complete");
@@ -1712,6 +1715,9 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             message: assistantMessage,
             completion_reason: completionReason,
             finalize_reason: parsed.action.finalize_reason ?? null,
+            // Lacunas registradas pelo orquestrador ao avançar (guardrail de
+            // insistência): persistidas aqui para o InterviewEvaluator vê-las.
+            open_threads: Array.isArray(sess.superOrchestratorMemory?.open_threads) ? sess.superOrchestratorMemory.open_threads : [],
             at: new Date().toISOString(),
         };
         await persistFinalization(req, completionReason);
