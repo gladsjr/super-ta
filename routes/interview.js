@@ -1604,6 +1604,21 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     };
 
     if (kind === "follow_up" || kind === "ask_repeat" || kind === "hint") {
+        // Telemetria do guardrail de insistência (regra no prompt do
+        // SuperOrchestrator): mede violações do orçamento (1 follow_up p/
+        // incomplete/incoherence, 2 p/ contradições) SEM bloquear — se a
+        // obediência for boa, não precisamos de bloqueio duro no despachante.
+        if (kind === "follow_up" && currentTurn) {
+            const fupReason = parsed.action.follow_up_reason ?? null;
+            const prior = Array.isArray(currentTurn.interventions) ? currentTurn.interventions : [];
+            const softPrior = prior.filter(iv => iv?.follow_up_reason === "incomplete" || iv?.follow_up_reason === "incoherence").length;
+            const contraPrior = prior.filter(iv => iv?.follow_up_reason === "contradicts_work" || iv?.follow_up_reason === "contradicts_earlier_self").length;
+            if ((fupReason === "incomplete" || fupReason === "incoherence") && softPrior >= 1) {
+                log.info("GUARDRAIL", `violação do orçamento de insistência (soft): reason=${fupReason} já_usados=${softPrior}/1`);
+            } else if ((fupReason === "contradicts_work" || fupReason === "contradicts_earlier_self") && contraPrior >= 2) {
+                log.info("GUARDRAIL", `violação do orçamento de insistência (contradição): reason=${fupReason} já_usados=${contraPrior}/2`);
+            }
+        }
         // Intervenções: NÃO criam novo turno. Empurram fala visível +
         // registram a interação no currentTurn.interventions para auditoria.
         await pushAssistantVisible({ intervention: kind });
