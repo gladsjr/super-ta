@@ -125,6 +125,7 @@ Prioridade entre os dois quando coexistem: (1) é mais grave. Cobre primeiro a c
 LIMITES:
 - "Refinamento" não é contradição. A outra ponta pode complementar, qualificar, adicionar nuance — isso é resposta evoluindo. Contradição é quando a NOVA afirmação INVALIDA a anterior (ou a da entrega). Só dispare quando você vê um conflito real, não uma variação aceitável.
 - Se a contradição for trivial ou claramente lapso de fala (ex.: errou um número óbvio, depois corrigiu na mesma frase), NÃO dispare follow_up. Trate como ruído e siga.
+- CONVENÇÃO NUMÉRICA: a entrega pode usar convenção pt-BR (ponto de milhar, vírgula decimal: 1.234,56) ou en-US (1,234.56). Antes de tratar divergência de escala/ordem de grandeza como contradição, reconcilie a convenção pelo próprio documento (confira via file_search dois ou mais números independentes cuja grandeza o contexto revela). Divergência que desaparece lendo o separador na outra convenção NÃO é contradição citável — não dispare follow_up por ela, e NUNCA induza a outra ponta a "corrigir" números com base só na sua leitura do separador.
 - O cap dos 2 follow_ups consecutivos por turno vale igualmente aqui: se a outra ponta não reconcilia em 2 tentativas, registre em memory.open_threads ou free_notes e siga em ask.
 
 REGISTRO EM MEMORY:

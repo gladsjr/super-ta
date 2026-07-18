@@ -54,6 +54,8 @@ Faça uma varredura DEDICADA da entrega procurando contradições internas. Isso
   - Suposições explícitas vs cálculos que assumem o oposto (ex.: declara "ignorar inflação" mas usa taxa nominal nos números).
   - Recomendação final vs o que os dados mostram (ex.: tabela mostra Opção B com melhor VPL, recomenda Opção A sem justificar).
   - Definições inconsistentes do mesmo termo entre seções.
+ATENÇÃO à CONVENÇÃO NUMÉRICA antes de registrar contradição de valores: o documento pode usar convenção pt-BR (ponto de milhar, vírgula decimal: 1.234,56) ou en-US (1,234.56) — e "1.139" muda três ordens de grandeza conforme a leitura. Determine a convenção pelo próprio documento (confira dois ou mais números independentes cuja grandeza o contexto revela) e só registre a contradição se ela sobreviver à leitura na convenção correta. Divergência explicável apenas pela leitura do separador NÃO é contradição.
+
 Para cada contradição encontrada, anote: ONDE (seções/figuras/tabelas que se contradizem) e A DIVERGÊNCIA (o que está em conflito). Se não encontrar nenhuma contradição clara, devolva array vazio — NÃO force.
 
 Produza JSON com EXATAMENTE estes campos:
