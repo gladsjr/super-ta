@@ -603,21 +603,16 @@ router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUp
 // sintetizados por TTS na voz do trabalho e cacheados em memória (texto fixo).
 const SETUP_SCRIPTS = {
     position: "Vamos ajustar a sua posição para a prova. Fique de frente para a câmera, a cerca de um metro e meio de distância, de forma que apareçam a sua cabeça e o seu tronco. Deixe as duas mãos à mostra. Você precisa estar sozinho, sem outras pessoas no quadro, e não pode usar o celular durante a prova. Se algo estiver fora do lugar, a tela vai avisar com uma borda vermelha e uma mensagem embaixo. Ajuste a sua posição até ficar tudo certo.",
-    commands: "Agora vamos praticar os comandos. Na entrevista, você responde gravando mensagens de áudio e, como fica longe do teclado, comanda tudo com a mão, nas áreas dos cantos da tela. Em cima à direita, Gravar. Em cima à esquerda, Cancelar. Embaixo à direita, Enviar. Ponha a mão sobre uma área e segure enquanto ela conta até três. Pode testar à vontade, porque nada está sendo gravado. Quando quiser começar a entrevista de verdade, comande Iniciar, no canto inferior esquerdo.",
+    commands: "Agora vamos praticar os comandos. Na entrevista, você responde gravando mensagens de áudio e, como fica longe do teclado, comanda tudo com a mão, nas áreas dos cantos da tela. Em cima à direita, Gravar. Em cima à esquerda, Cancelar. Embaixo à direita, Enviar. Ponha a mão sobre uma área e segure enquanto ela conta até três. Apenas os comandos que podem ser usados ficam ativos.",
 };
 const setupAudioCache = new Map(); // `${which}|${voice}` -> Buffer
 router.get("/s/:submissionToken/setup-audio", requireSubmissionToken, async (req, res) => {
     try {
         const which = String(req.query.which || "");
-        let text = SETUP_SCRIPTS[which];
+        const text = SETUP_SCRIPTS[which];
         if (!text) return res.status(400).json({ error: "which inválido" });
-        // Conversa de teste (professor): a geração das respostas por IA é por teclado/mouse.
-        const isTest = req.submission && req.submission.is_test === true;
-        if (which === "commands" && isTest) {
-            text += " Atenção: esta é uma conversa de teste. Aqui, a geração das respostas por inteligência artificial é feita pelos controles de teclado e mouse na tela; as áreas de comando por câmera valem para o aluno de verdade.";
-        }
         const voice = req.work.voice || "coral";
-        const key = `${which}|${voice}|${isTest ? "t" : "n"}`;
+        const key = `${which}|${voice}`;
         let buf = setupAudioCache.get(key);
         if (!buf) { buf = await synthesizeSpeech(openai, TTS_MODEL, text, voice); setupAudioCache.set(key, buf); }
         res.type("audio/mpeg").send(buf);
