@@ -1880,10 +1880,19 @@
       }
     };
 
+    // Id de idempotência do /chat: um por AÇÃO de envio. O sessionAwareFetch pode
+    // reexecutar o fetch (retry de transporte); como o id é gerado FORA da lambda,
+    // o retry reusa o id e o servidor não processa o turno duas vezes.
+    function newClientMsgId() {
+      return (crypto.randomUUID && crypto.randomUUID())
+        || (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+    }
+
     document.getElementById('send').onclick = async () => {
       const input = document.getElementById('msg');
       const m = input.value.trim();
       if (!m) return;
+      const clientMsgId = newClientMsgId();
       const userNode = appendUser(m);
       input.value = '';
       // Balão "pensando" do entrevistador enquanto o servidor processa o turno.
@@ -1895,7 +1904,7 @@
       try {
         r = await sessionAwareFetch(() => fetch(`/s/${encodeURIComponent(submissionToken)}/chat`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: m })
+          body: JSON.stringify({ message: m, client_msg_id: clientMsgId })
         }));
         j = await r.json();
       } catch {
@@ -2264,6 +2273,7 @@
 
       const form = new FormData();
       // Campos de texto ANTES do arquivo (busboy/multer expõe em req.body).
+      form.append('client_msg_id', newClientMsgId());
       if (snrEstimate != null) form.append('acoustic_snr', String(snrEstimate));
       if (timeToStartMs != null) form.append('client_time_to_start_ms', String(timeToStartMs));
       if (recordDurationMs != null) form.append('client_record_duration_ms', String(recordDurationMs));
