@@ -17,6 +17,27 @@
   const POS_OK_HOLD_MS = 1500; // posição precisa ficar ok por este tempo p/ avançar
   const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
+  // Fotos de exemplo de posição — as MESMAS da prova oral (static/oral-poses/):
+  // 1 com mesa + 1 sem mesa, sorteadas garantindo gênero E raça diferentes entre
+  // as duas imagens (diversidade nos exemplos). Mesma lógica de oral-student.html.
+  const POSES = [
+    { f: 'sem-mesa__m__latino.jpg',   s: 'sem', g: 'm', r: 'latino' },
+    { f: 'sem-mesa__f__branca.jpg',   s: 'sem', g: 'f', r: 'branca' },
+    { f: 'sem-mesa__m__asiatico.jpg', s: 'sem', g: 'm', r: 'asiatico' },
+    { f: 'sem-mesa__f__negra.jpg',    s: 'sem', g: 'f', r: 'negra' },
+    { f: 'com-mesa__m__branco.jpg',   s: 'com', g: 'm', r: 'branca' },
+    { f: 'com-mesa__f__latina.jpg',   s: 'com', g: 'f', r: 'latino' },
+    { f: 'com-mesa__m__negro.jpg',    s: 'com', g: 'm', r: 'negra' },
+    { f: 'com-mesa__f__asiatica.jpg', s: 'com', g: 'f', r: 'asiatico' },
+  ];
+  function pickPosePair() {
+    const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const com = shuffle(POSES.filter(p => p.s === 'com'));
+    const sem = shuffle(POSES.filter(p => p.s === 'sem'));
+    for (const c of com) { const m = sem.find(s => s.g !== c.g && s.r !== c.r); if (m) return [c, m]; }
+    return [com[0], sem[0]];
+  }
+
   window.runProctoringSetup = function ({ submissionToken, config, container, onDone }) {
     return new Promise((resolve) => {
       const calib = config && config.calibration && config.calibration.enabled ? config.calibration : null;
@@ -60,6 +81,12 @@
           <!-- 2) posicionamento -->
           <div id="ps-position" style="display:none">
             <div style="display:flex;align-items:center;gap:10px;margin:0 0 8px"><strong>Posicionamento</strong><button id="ps-audio-pos" type="button" class="ps-btn ghost" style="padding:5px 10px;font-size:13px">🔊 Ouvir instruções</button></div>
+            <!-- fotos de referência de posição (as mesmas da prova oral) — a orientação
+                 das mãos cita "como nas fotos de exemplo"; elas precisam estar aqui. -->
+            <div style="display:flex;gap:10px;margin:0 0 10px">
+              <figure style="margin:0;flex:1"><img id="ps-pose-a" alt="exemplo de posição com mesa" style="width:100%;border:1px solid #e5e7eb;border-radius:10px;display:block"/><figcaption style="text-align:center;font-size:12px;color:#667;margin-top:3px">Com mesa</figcaption></figure>
+              <figure style="margin:0;flex:1"><img id="ps-pose-b" alt="exemplo de posição sem mesa" style="width:100%;border:1px solid #e5e7eb;border-radius:10px;display:block"/><figcaption style="text-align:center;font-size:12px;color:#667;margin-top:3px">Sem mesa</figcaption></figure>
+            </div>
             <div class="ps-stage" id="ps-pos-stage"><video id="ps-pos-cam" autoplay muted playsinline></video></div>
             <div id="ps-pos-guid" class="ps-guid" style="background:#fff7e6;color:#8a6d1a">Iniciando a câmera…</div>
             <div id="ps-pos-err" style="color:#c0453b;text-align:center;margin-top:8px"></div>
@@ -83,6 +110,7 @@
         </div>`;
 
       const $ = id => container.querySelector('#' + id);
+      { const pair = pickPosePair(); $('ps-pose-a').src = '/static/oral-poses/' + pair[0].f; $('ps-pose-b').src = '/static/oral-poses/' + pair[1].f; }
       const banner = (el, text, kind) => {
         el.textContent = text;
         const c = kind === 'ok' ? ['#eaf7ef', '#1e6b3b'] : kind === 'bad' ? ['#fdecec', '#8a2020'] : ['#fff7e6', '#8a6d1a'];
