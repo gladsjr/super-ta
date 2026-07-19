@@ -3,6 +3,7 @@ import { meteredResponses } from "../lib/billing.js";
 import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { ACTION_SCHEMA_DESCRIPTION, validateAction, extractReadyAction } from "../lib/superOrchestrator/actionSchema.js";
+import { extractFirstJsonObject } from "../lib/jsonExtract.js";
 
 /**
  * SuperOrchestratorAgent — FASE 3: real.
@@ -365,13 +366,16 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
             }
         }
         if (apiErr) throw apiErr;
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) {
+        const extracted = extractFirstJsonObject(text);
+        if (!extracted) {
             log.error("AGENT:SuperOrchestrator", `no JSON in response: ${log.preview(text, 200)}`);
             throw new Error("SuperOrchestratorAgent: no JSON in response");
         }
+        if (extracted.trailing) {
+            log.warn("AGENT:SuperOrchestrator", `texto residual após o JSON ignorado (${extracted.trailing.length} chars): ${log.preview(extracted.trailing, 120)}`);
+        }
         let parsed;
-        try { parsed = JSON.parse(match[0]); }
+        try { parsed = JSON.parse(extracted.json); }
         catch (err) {
             log.error("AGENT:SuperOrchestrator", `JSON parse failed: ${err.message}`);
             throw new Error(`SuperOrchestratorAgent: invalid JSON (${err.message})`);
