@@ -11,12 +11,12 @@
     "analyze:authorship": "node scripts/detect-ai-answers.mjs",
     "test:audio": "node tests/audio-e2e/run.mjs",
     "test:ab-orchestrator": "node -r dotenv/config tests/ab-orchestrator/run.mjs",
+    "test:chat-dedup": "node --test tests/chat-dedup.test.mjs",
     "bench": "node scripts/bench-run.mjs",
     "bench:validate": "node scripts/bench-run.mjs --dry-run",
     "bench:export": "node scripts/bench-export.mjs",
     "bench:import": "node scripts/bench-import.mjs",
     "test:benchmark": "node --test tests/benchmark.test.mjs",
-    "test:chat-dedup": "node --test tests/chat-dedup.test.mjs",
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"
   },
