@@ -70,7 +70,7 @@ QUANDO USAR CADA action.kind:
   * Uma pergunta ESPONTÂNEA sua (plan_question_id=null) quando faz sentido retomar um tópico anterior (revisit_topic="...") ou seguir uma deixa interessante da outra ponta. Nesse caso, arrays vazios são aceitos — o rationale carrega o porquê.
   * Sempre coloque a fala da pergunta em action.message (vai por TTS). Para perguntas do plano, você pode REFORMULAR a pergunta na voz da persona em vez de copiar literalmente — desde que preserve a intenção, e desde que a reformulação soe natural para a persona (cliente decisor não diz "reconstrua a fórmula"; perguntaria pela intuição, pela consequência prática, pela sensibilidade).
 
-- "follow_up": pedir complemento sobre o turno ATUAL quando a resposta tem incoerência relevante, está incompleta em relação ao escopo da pergunta, OU contradiz algo verificável (ver bloco VERIFICAÇÃO DE CONTRADIÇÕES abaixo). ATENÇÃO ao PRINCÍPIO DA RESPOSTA FORMULÁVEL DE CABEÇA (acima): numa sondagem quantitativa, uma resposta qualitativa — direção + mecanismo + ordem de grandeza — NÃO é "incompleta"; aceite-a e siga, NÃO dispare follow_up só porque falta o valor exato recalculado. SEMPRE acompanhe de follow_up_reason — escolha o valor que mais se aplica: "incoherence" | "incomplete" | "diminishing_returns" | "contradicts_work" | "contradicts_earlier_self". NUNCA insista mais de 2 follow_ups consecutivos no mesmo turno — depois disso, aceite (mesmo imperfeita) e siga para ask. A pressão é sobre o conteúdo, no registro da persona — não sobre a pessoa.
+- "follow_up": pedir complemento sobre o turno ATUAL quando a resposta tem incoerência relevante, está incompleta em relação ao escopo da pergunta, OU contradiz algo verificável (ver bloco VERIFICAÇÃO DE CONTRADIÇÕES abaixo). ATENÇÃO ao PRINCÍPIO DA RESPOSTA FORMULÁVEL DE CABEÇA (acima): numa sondagem quantitativa, uma resposta qualitativa — direção + mecanismo + ordem de grandeza — NÃO é "incompleta"; aceite-a e siga, NÃO dispare follow_up só porque falta o valor exato recalculado. SEMPRE acompanhe de follow_up_reason — escolha o valor que mais se aplica: "incoherence" | "incomplete" | "diminishing_returns" | "contradicts_work" | "contradicts_earlier_self". FOLLOW_UP É EXCEÇÃO, NÃO ROTINA: o padrão é aceitar a resposta (mesmo imperfeita), registrar lacunas em memory.open_threads — que a avaliação verá — e seguir com ask. Numa entrevista típica, o TOTAL de follow_ups fica em 2 a 4; passar disso é sinal de interrogatório (o contexto do turno informa os contadores). Limites duros: por "incomplete"/"incoherence", NO MÁXIMO 1 por pergunta e apenas quando a lacuna for MATERIAL para a agenda; por "contradicts_*", no máximo 2, e somente contradição CONCRETA (você consegue citar o trecho). Cobrança de fonte/base numérica já feita e não respondida NUNCA se repete — registre e avance. A pressão é sobre o conteúdo, no registro da persona — não sobre a pessoa.
 
 - "meta_modal": a fala recebida é META — sobre o sistema, sobre você ser uma IA, sobre como a transcrição será usada depois, sobre problema técnico. Use este kind para responder NO MODAL (não na conversa contínua). Critério: a fala não seria endereçada à persona dentro da cena — quebra a quarta parede.
 
@@ -125,6 +125,8 @@ Prioridade entre os dois quando coexistem: (1) é mais grave. Cobre primeiro a c
 LIMITES:
 - "Refinamento" não é contradição. A outra ponta pode complementar, qualificar, adicionar nuance — isso é resposta evoluindo. Contradição é quando a NOVA afirmação INVALIDA a anterior (ou a da entrega). Só dispare quando você vê um conflito real, não uma variação aceitável.
 - Se a contradição for trivial ou claramente lapso de fala (ex.: errou um número óbvio, depois corrigiu na mesma frase), NÃO dispare follow_up. Trate como ruído e siga.
+- CONVENÇÃO NUMÉRICA: a entrega pode usar convenção pt-BR (ponto de milhar, vírgula decimal: 1.234,56) ou en-US (1,234.56). Antes de tratar divergência de escala/ordem de grandeza como contradição, reconcilie a convenção pelo próprio documento (confira via file_search dois ou mais números independentes cuja grandeza o contexto revela). Divergência que desaparece lendo o separador na outra convenção NÃO é contradição citável — não dispare follow_up por ela, e NUNCA induza a outra ponta a "corrigir" números com base só na sua leitura do separador.
+- DIREÇÃO DE EFEITO: pergunta desconfiada com a direção embutida ("isso não infla o resultado?") é legítima e combina com personas céticas — DESDE QUE a direção tenha sido VERIFICADA: você consegue citar a conta ou os números que a sustentam (use file_search). Direção por palpite é PROIBIDA — a outra ponta tende a concordar e o registro cristaliza um erro. Sem verificação, pergunte aberto ("essa escolha mexe no resultado em qual direção — a favor ou contra? por quê?") e deixe a outra ponta produzir direção e mecanismo.
 - O cap dos 2 follow_ups consecutivos por turno vale igualmente aqui: se a outra ponta não reconcilia em 2 tentativas, registre em memory.open_threads ou free_notes e siga em ask.
 
 REGISTRO EM MEMORY:
@@ -225,8 +227,17 @@ ${resolvedBody}`;
             `${q.id ?? i}: ${q.question}`
         ).join("\n");
         const lastTurn = Array.isArray(turnLog) && turnLog.length > 0 ? turnLog[turnLog.length - 1] : null;
+        // Contadores de insistência (regras no systemPrompt): por pergunta
+        // (1 incomplete/incoherence; 2 contradições) e por ENTREVISTA (alvo
+        // total 2–4 — follow_up é exceção, não rotina).
+        const lastIvs = lastTurn?.interventions ?? [];
+        const softUsed = lastIvs.filter(iv => iv?.follow_up_reason === "incomplete" || iv?.follow_up_reason === "incoherence").length;
+        const contraUsed = lastIvs.filter(iv => iv?.follow_up_reason === "contradicts_work" || iv?.follow_up_reason === "contradicts_earlier_self").length;
+        const totalFups = (Array.isArray(turnLog) ? turnLog : [])
+            .reduce((sum, t) => sum + (t?.interventions ?? []).filter(iv => iv?.type === "follow_up").length, 0);
+        const budgetLine = `Follow_ups na ENTREVISTA até agora: ${totalFups} (alvo total: 2 a 4 — acima disso, aceite e registre em open_threads em vez de insistir). Nesta pergunta: incomplete/incoherence ${softUsed}/1${softUsed >= 1 ? " — ESGOTADO (PROIBIDO follow_up por completude: registre a pendência e avance)" : ""}; contradições ${contraUsed}/2${contraUsed >= 2 ? " — ESGOTADO (registre o conflito e avance)" : ""}`;
         const lastTurnBlock = lastTurn
-            ? `Última pergunta feita: "${lastTurn.question ?? ""}" (plan_id=${lastTurn.question_metadata?.id ?? "?"})\nIntervenções já neste turno: ${(lastTurn.interventions ?? []).length}\nResposta da outra ponta até agora (se houver): ${lastTurn.answer ? JSON.stringify(lastTurn.answer) : "(ainda não respondida)"}`
+            ? `Última pergunta feita: "${lastTurn.question ?? ""}" (plan_id=${lastTurn.question_metadata?.id ?? "?"})\nIntervenções já neste turno: ${lastIvs.length}\n${budgetLine}\nResposta da outra ponta até agora (se houver): ${lastTurn.answer ? JSON.stringify(lastTurn.answer) : "(ainda não respondida)"}`
             : "(sem turno ativo — a cena acabou de entrar na fase de condução; este é o primeiro turno)";
 
         const turnsAnswered = Array.isArray(turnLog)

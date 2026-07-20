@@ -268,11 +268,22 @@ REGRAS QUE PERMANECEM (mesmo sendo critério): conteúdo e espontaneidade são E
 ${this.systemPromptBody}${spontaneityBlock}`;
         const agendaBlock = renderInterviewerAgenda(interviewerYamlText);
         const transcript = renderTranscriptForEvaluation(conversation, audioArtifacts);
+        // Lacunas que o entrevistador registrou ao AVANÇAR em vez de insistir
+        // (guardrail de insistência): são achados de avaliação de pleno direito
+        // — o aluno teve a chance e não sanou o ponto.
+        const openThreads = Array.isArray(conversation?.finalization?.open_threads)
+            ? conversation.finalization.open_threads.filter(t => typeof t === "string" && t.trim())
+            : [];
+        const openThreadsBlock = openThreads.length ? `
+
+**PONTOS NÃO RESOLVIDOS (registrados pelo entrevistador ao avançar, em vez de insistir)**
+${openThreads.map(t => `- ${t}`).join("\n")}
+Trate cada item acima como lacuna JÁ CARACTERIZADA na entrevista: o entrevistador deu a oportunidade, a resposta não sanou o ponto, e ele avançou por disciplina de condução (não por aceitação do conteúdo). Pese-os na avaliação como pontos não demonstrados.` : "";
         const userText = `**AGENDA DO ENTREVISTADOR**
 ${agendaBlock}
 
 **TRANSCRIÇÃO DA ENTREVISTA**
-${transcript}
+${transcript}${openThreadsBlock}
 
 Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a perspectiva do entrevistador da agenda e produza o relatório JSON conforme o contrato.`;
 
