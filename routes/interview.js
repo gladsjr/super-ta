@@ -474,6 +474,7 @@ router.post("/s/:submissionToken/start", requireSubmissionToken, async (req, res
                     sess.interviewerPersona = pickPersona({
                         voiceGender: newVoiceGender,
                         overrides: identityOverride,
+                        seed: req.work.work_token,
                     });
                 }
             }
@@ -681,6 +682,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         sess.interviewerPersona = pickPersona({
             voiceGender: newVoiceGender,
             overrides: identityOverride,
+            seed: req.work.work_token,
         });
         sess.preGeneratedGreeting = null;
     }
