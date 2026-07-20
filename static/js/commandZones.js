@@ -1,6 +1,6 @@
 // Áreas de comando por vídeo — EXCLUSIVO da entrevista (não toca na prova oral).
-// Substitui o controle por gesto: quatro/três caixas nos cantos; a mão dentro de
-// uma caixa conta 1‑2‑3 e dispara onFire(id). Detecta as DUAS mãos e desenha o
+// Substitui o controle por gesto: áreas CIRCULARES nos cantos; a mão dentro de
+// uma área conta 1‑2‑3 e dispara onFire(id). Detecta as DUAS mãos e desenha o
 // rastreador (esqueleto). Reusa o HandLandmarker self-hosted em /static/vision.
 // Mecânica validada no PoC (static/poc/gesture.html na branch de PoC).
 (function () {
@@ -37,7 +37,14 @@
       const top  = corner[0] === 't' ? M : 1 - M - h;
       return { x0: left, x1: left + w, y0: top, y1: top + h };
     }
-    const inRect = (c, r) => c && c.x>=r.x0 && c.x<=r.x1 && c.y>=r.y0 && c.y<=r.y1;
+    // A área é o CÍRCULO inscrito no quadrado de rectOf (visual e acerto iguais).
+    // Coordenadas normalizadas: divide pelos semi-eixos p/ compensar o aspecto.
+    const inZone = (c, r) => {
+      if (!c) return false;
+      const dx = (c.x - (r.x0 + r.x1) / 2) / ((r.x1 - r.x0) / 2);
+      const dy = (c.y - (r.y0 + r.y1) / 2) / ((r.y1 - r.y0) / 2);
+      return dx * dx + dy * dy <= 1;
+    };
     const hexA = (hex, a) => { const n = parseInt(hex.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
 
     function drawHand(L) {
@@ -60,7 +67,7 @@
       octx.fillStyle = color || '#fff'; octx.fillText(txt, X, cy);
       octx.restore();
     }
-    // rótulo CENTRALIZADO no quadrado, auto-ajustado para caber na largura da caixa.
+    // rótulo CENTRALIZADO na área, auto-ajustado para caber na largura útil.
     function drawFitLabel(txt, cx, cy, boxW, maxFont, baseline, color) {
       octx.font = `bold ${maxFont}px system-ui`;
       if (octx.measureText(txt).width <= boxW * 0.9) { drawText(txt, cx, cy, `bold ${maxFont}px system-ui`, color || '#fff', baseline); return; }
@@ -86,24 +93,29 @@
       for (const L of hands) drawHand(L);
       for (const z of Z) {
         const r = z._r || rectOf(z.corner);
-        const x = r.x0*W, y = r.y0*H, w = (r.x1-r.x0)*W, h = (r.y1-r.y0)*H;
+        const cx = (r.x0 + r.x1) / 2 * W, cy = (r.y0 + r.y1) / 2 * H, rad = (r.x1 - r.x0) * W / 2;
+        const circle = (rr) => { octx.beginPath(); octx.arc(cx, cy, rr ?? rad, 0, 2 * Math.PI); };
+        const fitW = rad * 1.56; // corda útil p/ o rótulo caber dentro do círculo
         if (!z._on) { // DESABILITADA: esmaecida, tracejada, sem contagem
-          octx.fillStyle = 'rgba(110,110,110,0.16)'; octx.fillRect(x, y, w, h);
-          octx.strokeStyle = 'rgba(200,200,200,0.45)'; octx.lineWidth = 3; octx.setLineDash([7, 6]); octx.strokeRect(x, y, w, h); octx.setLineDash([]);
-          drawFitLabel(z.label, x + w/2, y + h/2, w, Math.round(W * 0.042), 'middle', 'rgba(255,255,255,0.5)');
+          circle(); octx.fillStyle = 'rgba(110,110,110,0.16)'; octx.fill();
+          circle(); octx.strokeStyle = 'rgba(200,200,200,0.45)'; octx.lineWidth = 3; octx.setLineDash([7, 6]); octx.stroke(); octx.setLineDash([]);
+          drawFitLabel(z.label, cx, cy, fitW, Math.round(W * 0.042), 'middle', 'rgba(255,255,255,0.5)');
           continue;
         }
         const inside = z._inside;
         const progress = Math.min(100, (z.since/dwellMs)*100);
         const count = inside && z.since>0 ? Math.min(3, Math.floor(z.since/(dwellMs/3))+1) : 0;
-        octx.fillStyle = hexA(z.color, inside ? 0.32 : 0.18); octx.fillRect(x, y, w, h);
-        if (inside && progress>0) { octx.fillStyle = hexA(z.color, 0.55); const fh = h*(progress/100); octx.fillRect(x, y+h-fh, w, fh); }
-        octx.strokeStyle = z.color; octx.lineWidth = inside ? 6 : 4; octx.strokeRect(x, y, w, h);
-        if (count > 0) { // contando: rótulo pequeno no topo + número grande no centro
-          drawFitLabel(z.label, x + w/2, y + Math.max(11, W * 0.026), w, Math.round(W * 0.032), 'top', '#fff');
-          drawText(String(count), x + w/2, y + h/2 + Math.round(W * 0.02), `bold ${Math.round(W * 0.15)}px system-ui`, '#fff', 'middle');
-        } else { // parado: rótulo centralizado no quadrado
-          drawFitLabel(z.label, x + w/2, y + h/2, w, Math.round(W * 0.042), 'middle', '#fff');
+        circle(); octx.fillStyle = hexA(z.color, inside ? 0.32 : 0.18); octx.fill();
+        circle(); octx.strokeStyle = z.color; octx.lineWidth = inside ? 6 : 4; octx.stroke();
+        if (inside && progress > 0) { // progresso: anel varrendo o contorno em sentido horário
+          octx.beginPath(); octx.arc(cx, cy, rad - 4, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * progress / 100);
+          octx.strokeStyle = hexA(z.color, 0.9); octx.lineWidth = 8; octx.stroke();
+        }
+        if (count > 0) { // contando: rótulo pequeno acima do centro + número grande no centro
+          drawFitLabel(z.label, cx, cy - rad * 0.5, fitW, Math.round(W * 0.03), 'middle', '#fff');
+          drawText(String(count), cx, cy + rad * 0.12, `bold ${Math.round(W * 0.13)}px system-ui`, '#fff', 'middle');
+        } else { // parado: rótulo centralizado no círculo
+          drawFitLabel(z.label, cx, cy, fitW, Math.round(W * 0.042), 'middle', '#fff');
         }
       }
     }
@@ -121,7 +133,7 @@
       for (const z of Z) {
         const r = rectOf(z.corner);
         const on = enabledFn ? !!enabledFn(z.id) : true; // máquina de estados por zona
-        const inside = on && centroids.some(c => inRect(c, r));
+        const inside = on && centroids.some(c => inZone(c, r));
         if (!inside) { z.canFire = true; z.since = 0; }
         else if (z.canFire) { z.since += dt; if (enabled && z.since >= dwellMs) { z.canFire = false; z.since = 0; onFire && onFire(z.id); } }
         else { z.since = 0; } // já disparou: fica INERTE até a mão SAIR (evita 2ª contagem)

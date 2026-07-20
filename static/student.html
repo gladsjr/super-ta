@@ -31,10 +31,22 @@
       background: var(--bg-muted);
     }
 
+    /* Rótulo ("Você" / "Entrevistador · IA") ao LADO do balão, não em cima —
+       cada mensagem economiza uma linha inteira de altura. No "você" (balão à
+       direita) o rótulo fica na borda direita; no entrevistador, à esquerda.
+       Em telas estreitas volta a empilhar para não espremer o balão. */
     .msg {
       display: flex;
-      flex-direction: column;
-      max-width: 78%;
+      flex-direction: row;
+      align-items: flex-start;
+      gap: var(--sp-2);
+      max-width: 88%;
+    }
+    .msg.you { flex-direction: row-reverse; }
+    @media (max-width: 640px) {
+      .msg { flex-direction: column; gap: 0; max-width: 88%; }
+      .msg.you { flex-direction: column; align-items: flex-end; }
+      .msg .who { margin: 0 0 var(--sp-1); }
     }
 
     .msg.ta {
@@ -48,10 +60,12 @@
     .msg .who {
       font-size: var(--fs-xs);
       color: var(--ink-500);
-      margin-bottom: var(--sp-1);
+      margin: 0.8rem 0 0; /* alinha com a primeira linha do balão (padding 0.65rem + borda) */
       font-weight: 500;
       letter-spacing: 0.02em;
       text-transform: uppercase;
+      flex: 0 0 auto;
+      white-space: nowrap;
     }
 
     .msg .bubble {
@@ -173,10 +187,14 @@
     .msg.narrator {
       align-self: center;
       max-width: 92%;
+      flex-direction: column; /* orientador segue com rótulo ACIMA, centralizado */
+      gap: 0;
     }
     .msg.narrator .who {
       color: #1a5a85;
       text-align: center;
+      margin: 0 0 var(--sp-1);
+      white-space: normal;
     }
     .msg.narrator .bubble {
       background: #eaf2f9;
@@ -489,16 +507,26 @@
       gap: var(--sp-3);
     }
 
-    /* Barra de ações do aluno (Instruções / Desistir) — vive logo acima do
-       chat para ficar visível e clicável, principalmente no desktop onde
-       acabava sumindo dentro da topbar. No mobile vira coluna pra não
-       espremer os botões. */
+    /* Barra de ações do aluno (Instruções / Desistir) — alinhada ao TÍTULO da
+       página (não à topbar fixa, onde sumia no desktop): o page-header vira uma
+       linha flexível com o bloco de título à esquerda e os botões à direita,
+       recuperando a linha inteira que os botões ocupavam sozinhos. No mobile o
+       flex-wrap derruba os botões para baixo do título. */
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--sp-2) var(--sp-4);
+      flex-wrap: wrap;
+    }
+    .page-header-main { min-width: 0; }
     .interview-actions {
       display: flex;
       gap: var(--sp-2);
       justify-content: flex-end;
       flex-wrap: wrap;
-      margin: var(--sp-3) 0 var(--sp-2);
+      margin: 0;
+      padding-top: 0.4rem;
     }
     .interview-actions .btn-give-up {
       color: #b8732a;
@@ -511,6 +539,19 @@
     @media (max-width: 560px) {
       .interview-actions { justify-content: stretch; }
       .interview-actions .btn { flex: 1; }
+    }
+
+    /* Modo fiscalizado (fiscalização por vídeo): aproveitamento da LARGURA — em
+       telas largas o vídeo (self-view com as áreas de comando) fica fixo à
+       esquerda e o chat ganha o resto da largura e da altura; em telas estreitas
+       empilha como antes. A ALTURA do chat é calculada em JS (fitChat) para a
+       página inteira caber no viewport sem rolagem externa. */
+    .pv-stage { position: relative; max-width: 360px; margin: 6px auto 10px; }
+    #chat-area.proctored { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+    #chat-area.proctored .pv-stage { position: sticky; top: var(--sp-2); max-width: none; margin: 0; }
+    @media (max-width: 900px) {
+      #chat-area.proctored { display: block; }
+      #chat-area.proctored .pv-stage { position: relative; max-width: 360px; margin: 6px auto 10px; }
     }
 
     #instructions-dialog { max-width: 640px; line-height: 1.55; }
@@ -585,10 +626,16 @@
 
     <div id="main" class="hidden">
       <div class="page-header">
-        <div class="eyebrow">Arguição oral</div>
-        <h1 id="work-name">—</h1>
-        <div class="subtitle" id="meta">Responda com clareza e profundidade. Você pode editar sua resposta antes de
-          enviar.</div>
+        <div class="page-header-main">
+          <div class="eyebrow">Arguição oral</div>
+          <h1 id="work-name">—</h1>
+          <div class="subtitle" id="meta">Responda com clareza e profundidade. Você pode editar sua resposta antes de
+            enviar.</div>
+        </div>
+        <div id="interview-actions" class="interview-actions hidden">
+          <button id="btn-instructions" class="btn hidden" type="button">Instruções</button>
+          <button id="btn-give-up" class="btn btn-give-up hidden" type="button">Desistir da entrevista</button>
+        </div>
       </div>
 
       <div id="upload-area" class="card">
@@ -602,11 +649,6 @@
           <button id="sendFile" class="btn btn-primary">Enviar</button>
         </div>
         <div id="fileRef" class="hint"></div>
-      </div>
-
-      <div id="interview-actions" class="interview-actions hidden">
-        <button id="btn-instructions" class="btn hidden" type="button">Instruções</button>
-        <button id="btn-give-up" class="btn btn-give-up hidden" type="button">Desistir da entrevista</button>
       </div>
 
       <!-- Setup de proctoring por vídeo (só quando o trabalho tem proctoring ligado);
@@ -2397,18 +2439,28 @@
       // self-view GRANDE acima da troca de mensagens (como na prova oral)
       const stage = document.createElement('div');
       stage.id = 'proctor-stage';
-      stage.style.cssText = 'position:relative;width:100%;max-width:360px;aspect-ratio:4/3;margin:6px auto 10px;background:#000;border-radius:12px;overflow:hidden';
+      stage.className = 'pv-stage';
+      stage.style.cssText = 'width:100%;aspect-ratio:4/3;background:#000;border-radius:12px;overflow:hidden';
       stage.innerHTML = '<video id="pv-cam" autoplay muted playsinline style="position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);object-fit:cover"></video>'
         + '<canvas id="pv-canvas" style="position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)"></canvas>'
         + '<div id="pv-hint" style="position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-size:12px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.72));text-align:center">Comande <strong>CIENTE – COMEÇAR</strong> (área verde, canto superior direito) para iniciar.</div>';
       const chatArea = document.getElementById('chat-area');
+      chatArea.classList.add('proctored'); // telas largas: vídeo e chat lado a lado (CSS)
       chatArea.insertBefore(stage, chatArea.firstChild);
-      // o self-view ocupa o topo; limita o chat NA TELA p/ os controles de baixo
-      // ficarem sempre visíveis (o chat rola internamente e vai ao fim a cada msg).
-      try { const ch = document.getElementById('chat'); ch.style.minHeight = '110px'; ch.style.maxHeight = '30vh'; } catch {}
-      // compacta a faixa dos botões (Instruções/Desistir) p/ recuperar espaço no topo.
+      // Cabe-na-tela: o chat recebe a altura que SOBRA do viewport (a página não
+      // rola; o chat rola por dentro e vai ao fim a cada mensagem). Recalculado no
+      // resize. Substitui o antigo teto fixo de 30vh, que ou desperdiçava tela ou
+      // deixava a página estourar o viewport.
+      const fitChat = () => { try {
+        const ch = document.getElementById('chat'); const card = document.getElementById('chat-card');
+        if (!ch || !card) return;
+        const below = card.getBoundingClientRect().bottom - ch.getBoundingClientRect().bottom; // controles sob o chat
+        const avail = window.innerHeight - ch.getBoundingClientRect().top - below - 16;
+        ch.style.minHeight = '110px';
+        ch.style.maxHeight = Math.max(140, avail) + 'px';
+      } catch {} };
+      fitChat(); setTimeout(fitChat, 150); window.addEventListener('resize', fitChat);
       try { document.getElementById('meta')?.style.setProperty('display', 'none'); } catch {} // some o subtítulo (libera espaço)
-      try { const ia = document.getElementById('interview-actions'); if (ia) ia.style.margin = '0'; } catch {}
       const pv = document.getElementById('pv-cam'); pv.srcObject = proctorStream;
       if (resume) { const h = document.getElementById('pv-hint'); if (h) h.innerHTML = 'GRAVAR (↗) · CANCELAR (↖) · ENVIAR (↘) · REPETIR (↙)'; }
 
