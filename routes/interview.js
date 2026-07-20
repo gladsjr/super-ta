@@ -21,6 +21,7 @@ import { openai } from "../lib/openaiClient.js";
 import { transcribeAudio, synthesizeSpeech, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
+import { decideChatDedup, markChatDone, abortChatDedup } from "../lib/chatDedup.js";
 import { STT_MODEL, TTS_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
@@ -988,6 +989,42 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         return res.status(400).json({ error: "esta entrevista está em modo texto — envie uma mensagem escrita" });
     }
 
+    // Idempotência do turno: o frontend envia um client_msg_id por AÇÃO de envio
+    // (retries de transporte reusam o id). Repetição de turno concluído → replay
+    // do resultado em cache, sem reprocessar (era o bug do turno duplicado);
+    // repetição com o original ainda em curso → 409. Antes do STT: repetição não
+    // paga transcrição. Sem id (cliente antigo) → comportamento de sempre.
+    const clientMsgId = (req.body?.client_msg_id || "").toString().slice(0, 80) || null;
+    {
+        const dd = decideChatDedup(sess.chatDedup ?? null, clientMsgId, Date.now());
+        if (dd.decision === "replay") {
+            log.warn("CHAT", `client_msg_id repetido (${clientMsgId}) — replay do resultado em cache, turno NÃO reprocessado`);
+            if (isAudioMode) {
+                res.writeHead(200, {
+                    "Content-Type": "text/event-stream; charset=utf-8",
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                });
+                res.write(`event: result\ndata: ${JSON.stringify(dd.next.result)}\n\n`);
+                return res.end();
+            }
+            return res.json(dd.next.result);
+        }
+        if (dd.decision === "reject_in_flight") {
+            log.warn("CHAT", `client_msg_id ${clientMsgId} ainda em processamento — 409`);
+            return res.status(409).json({ error: "duplicate_in_flight", detail: "Esta mensagem já está sendo processada. Aguarde a resposta." });
+        }
+        sess.chatDedup = dd.next;
+    }
+    // Sucesso passa por aqui (sendFinal e saídas da intro); erro respondido ao
+    // cliente passa por dedupAbort para liberar reenvio imediato do mesmo id.
+    const dedupDone = (payload) => {
+        sess.chatDedup = markChatDone(sess.chatDedup ?? null, clientMsgId, payload, Date.now());
+        return payload;
+    };
+    const dedupAbort = () => { sess.chatDedup = abortChatDedup(sess.chatDedup ?? null, clientMsgId); };
+
     // Telemetria de latência (modo áudio): marcos absolutos por turno. Viram
     // deltas e são persistidos em server_timings via recordTurnTimings/sendFinal.
     const tMarks = { recv: Date.now(), stt: null, firstToken: null, ttsStart: null, ttsFirst: null, ttsDone: null, done: null };
@@ -1020,13 +1057,14 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             studentAudioMimetype = req.file.mimetype || null;
         } catch (err) {
             log.error("CHAT", `STT failed: ${err.message}`);
+            dedupAbort();
             return res.status(400).json({ error: "transcription_failed", detail: "Não consegui entender o áudio. Tente gravar de novo." });
         }
     } else {
         message = (req.body?.message || "").toString();
     }
     tMarks.stt = Date.now();
-    if (!message) return res.status(400).json({ error: "empty message" });
+    if (!message) { dedupAbort(); return res.status(400).json({ error: "empty message" }); }
     // Instrumentação de espontaneidade (Fase 2): tempos do cliente (modo áudio).
     // time_to_start = da pergunta pronta ao apertar gravar; record_duration = fala.
     // Gravados no turno (conversation_json) para a avaliação da espontaneidade.
@@ -1116,7 +1154,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         }
         if (combined.tier === "repetir") {
             const result = await runAudioRepeat({ sess, transcript: message, spans, aggregate, persist, reason });
-            return res.json(result.response);
+            return res.json(dedupDone(result.response));
         } else if (combined.tier === "avisar") {
             dicaPayload = buildAvisarDica(message, spans, reason);
         }
@@ -1189,7 +1227,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             log.info("CHAT", `intro present_self${sess.studentName ? ` name="${sess.studentName}"` : ""} ${log.preview(intro.message, 120)}`);
             await logLastConvItem(sess.conversationId_chat, "CONV:chat");
             persist();
-            return res.json({ channel: "chat", assistant: intro.message, ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) });
+            return res.json(dedupDone({ channel: "chat", assistant: intro.message, ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) }));
         }
 
         // ---- Beat begin: o aluno deu o "ok". Garante o plano e transiciona. ----
@@ -1290,7 +1328,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             await logLastConvItem(sess.conversationId_chat, "CONV:chat");
             persist();
 
-            const payload = { channel: "chat", assistant: combined, phase: "interviewing", ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) };
+            const payload = dedupDone({ channel: "chat", assistant: combined, phase: "interviewing", ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) });
             if (beginUseSSE) {
                 clearBeginHeartbeat();
                 res.write(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -1362,6 +1400,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         if (dicaPayload && !payload.audio_intelligibility) {
             payload = { ...payload, audio_intelligibility: { hint: dicaPayload } };
         }
+        payload = dedupDone(payload);
         if (useSSE) {
             clearHeartbeat();
             res.write(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -1373,6 +1412,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     // Em SSE não dá pra usar res.status() depois do writeHead, então erros
     // viram event:error com o status no payload.
     const sendError = (status, payload) => {
+        dedupAbort();
         if (useSSE) {
             clearHeartbeat();
             res.write(`event: error\ndata: ${JSON.stringify({ ...payload, status })}\n\n`);
