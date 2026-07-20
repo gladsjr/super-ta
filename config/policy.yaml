@@ -4,11 +4,11 @@ challenge_task: true
 
 # Model configuration
 models:
-  # EXPERIMENTO (branch exp/terra-teto-duro-followup): gpt-5.6-terra como
-  # principal + teto DURO de follow_up (routes/interview.js). Hipótese: terra é
-  # melhor entrevistador, mas caro por fazer follow_ups demais; o teto duro (1
-  # por pergunta) o amarra à disciplina do 5.4 mantendo a qualidade da pergunta.
-  # Produção segue em gpt-5.4 — NÃO mergear esta linha sem os números do teste.
+  # RECOMENDADO (exp/terra-teto-duro-followup): gpt-5.6-terra é melhor entrevistador
+  # que o 5.4 — veredito CEGO UNÂNIME de 3 juízes de famílias distintas (Codex/gpt-5.5,
+  # Claude, Gemini) em transcripts-tetoduro/: N(terra) > M(5.4), forte em auditoria
+  # numérica e em quebrar evasivas do aluno complacente. Custo +18% ($0,94 vs $0,80).
+  # Teto duro de follow-up (routes/interview.js) fica como rede de segurança (dormente).
   principal_reasoning_model: "gpt-5.6-terra"
   # Esforço de raciocínio aplicado SEMPRE que o modelo principal é usado (todos os
   # agentes que o consomem). Injetado em lib/openaiClient.js. Valores válidos:
@@ -17,6 +17,9 @@ models:
   # de áudio −33% de custo e −31% de latência vs "high", qualidade igual-ou-melhor em
   # avaliação cega (2 rodadas) e notas equivalentes com juiz fixo (4,85 vs 4,93; como
   # avaliador, medium ≈ high: 4,89 vs 4,85). Voltar a "high" = reverter esta linha.
+  # EXPERIMENTO (exp/terra-teto-duro-followup): terra:medium — melhor entrevistador
+  # (a validar em leitura cega) a custo ~paridade e mais rápido que o high. O teto
+  # duro do routes/interview.js fica como rede de segurança (dormente no medium).
   principal_reasoning_effort: "medium"
   fast_model: "gpt-5.4-mini"
   # Audio (modo de interação áudio com o aluno; ver replit.md)
