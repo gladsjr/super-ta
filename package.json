@@ -16,6 +16,7 @@
     "bench:export": "node scripts/bench-export.mjs",
     "bench:import": "node scripts/bench-import.mjs",
     "test:benchmark": "node --test tests/benchmark.test.mjs",
+    "test:json-extract": "node --test tests/json-extract.test.mjs",
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js"
   },
