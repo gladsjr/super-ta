@@ -187,6 +187,11 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
      * @param {number|null} [p.minTurnsBeforeFinalize] - piso de turnos antes de
      *        poder finalizar; derivado do nº de perguntas em routes/interview.js.
      * @param {number|null} [p.maxTurns] - teto duro de turnos; idem.
+     * @param {string|null} [p.forceAdvanceDirective] - diretriz VINCULANTE do
+     *        servidor (teto duro de insistência). Quando setada, é anexada ao
+     *        `input` (NUNCA ao `instructions`, para não invalidar o cache do
+     *        prefixo estável) obrigando o modelo a emitir `ask` neste retorno —
+     *        usada na re-chamada após um follow_up vetado por cota esgotada.
      */
     async evaluate({
         interviewerYamlText,
@@ -205,6 +210,7 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
         onMessageReady = null,
         minTurnsBeforeFinalize = null,
         maxTurns = null,
+        forceAdvanceDirective = null,
     }) {
         // Guardrails de turno: a fonte de verdade das fórmulas é routes/interview.js
         // (maxTurnsFor / minTurnsBeforeFinalizeFor), que passa os valores já
@@ -268,7 +274,10 @@ Turnos respondidos até agora: ${turnsAnswered}
 """
 ${studentMessage}
 """
-
+${forceAdvanceDirective ? `
+**DIRETRIZ VINCULANTE DO SERVIDOR (TETO DE INSISTÊNCIA ATINGIDO)**
+${forceAdvanceDirective}
+` : ""}
 Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
 
         const payload = {

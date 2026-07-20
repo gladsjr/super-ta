@@ -4,7 +4,12 @@ challenge_task: true
 
 # Model configuration
 models:
-  principal_reasoning_model: "gpt-5.4"
+  # EXPERIMENTO (branch exp/terra-teto-duro-followup): gpt-5.6-terra como
+  # principal + teto DURO de follow_up (routes/interview.js). Hipótese: terra é
+  # melhor entrevistador, mas caro por fazer follow_ups demais; o teto duro (1
+  # por pergunta) o amarra à disciplina do 5.4 mantendo a qualidade da pergunta.
+  # Produção segue em gpt-5.4 — NÃO mergear esta linha sem os números do teste.
+  principal_reasoning_model: "gpt-5.6-terra"
   # Esforço de raciocínio aplicado SEMPRE que o modelo principal é usado (todos os
   # agentes que o consomem). Injetado em lib/openaiClient.js. Valores válidos:
   # minimal | low | medium | high. Vazio/ausente = padrão do modelo.

@@ -1501,6 +1501,22 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         }).then((a) => { tMarks.ttsDone = Date.now(); return a; })
           .catch((e) => { log.error("AUDIO", `early TTS falhou: ${e.message}`); return { audio_error: "tts_failed" }; });
     };
+    // ── Teto duro de insistência (guardrail v2 → VINCULANTE) ──────────────
+    // O orçamento de follow_up do #109 era conselho (só telemetria). Aqui vira
+    // BLOQUEIO: por pergunta, no MÁXIMO 1 follow_up de completude
+    // (incomplete/incoherence) e 2 de contradição. Modelos que "não cedem"
+    // (família terra) ignoram o conselho; o teto duro os amarra sem depender de
+    // obediência ao prompt. Contadores de ENTRADA (o que já foi gasto NESTA
+    // pergunta), calculados aqui para (a) suprimir o early-TTS de um follow_up
+    // que será vetado e (b) decidir o veto no pós-parse.
+    const priorIvsIn = (currentTurn && Array.isArray(currentTurn.interventions)) ? currentTurn.interventions : [];
+    const softPriorIn = priorIvsIn.filter(iv => iv?.follow_up_reason === "incomplete" || iv?.follow_up_reason === "incoherence").length;
+    const contraPriorIn = priorIvsIn.filter(iv => iv?.follow_up_reason === "contradicts_work" || iv?.follow_up_reason === "contradicts_earlier_self").length;
+    // Cota no limite entrando no turno → um follow_up desse tipo será convertido
+    // em ask. Desarma o early-TTS para não tocar a fala de um follow_up vetado
+    // (custa só a latência do early-TTS, e só nestes turnos de exceção).
+    const hardCapArmed = softPriorIn >= 1 || contraPriorIn >= 2;
+
     let parsed;
     try {
         parsed = await evaluateWithConversationLockRetry(() => superOrchestratorAgent.evaluate({
@@ -1525,7 +1541,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 if (tMarks.firstToken == null) tMarks.firstToken = Date.now();
                 res.write(`event: responding\ndata: {}\n\n`);
             } : null,
-            onMessageReady: useSSE ? onMessageReady : null,
+            onMessageReady: (useSSE && !hardCapArmed) ? onMessageReady : null,
         }));
     } catch (err) {
         log.error("SUPER_ORQ", `agent failed: ${err.message}`);
@@ -1546,6 +1562,56 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 action: { kind: "ask_repeat", message: "Desculpa, tive um problema aqui. Pode repetir a sua última resposta?" },
                 memory: sess.superOrchestratorMemory ?? null,
             };
+        }
+    }
+
+    // Teto duro (variante a): se o modelo insistiu ALÉM da cota da pergunta,
+    // veta o follow_up e RE-CHAMA o orquestrador forçando `ask` — ele escreve a
+    // ponte na voz da persona e escolhe a próxima pergunta, registrando a lacuna
+    // em open_threads. Só dispara na violação → uma chamada extra pontual, muito
+    // menor que o espiral de follow_ups que evita. Antes de persistir memory
+    // para que a memory FINAL (com a lacuna registrada) seja a gravada.
+    if (parsed?.action?.kind === "follow_up") {
+        const r = parsed.action.follow_up_reason ?? null;
+        const softExhausted = (r === "incomplete" || r === "incoherence") && softPriorIn >= 1;
+        const contraExhausted = (r === "contradicts_work" || r === "contradicts_earlier_self") && contraPriorIn >= 2;
+        if (softExhausted || contraExhausted) {
+            const cota = softExhausted ? `completude(${softPriorIn}/1)` : `contradição(${contraPriorIn}/2)`;
+            log.info("GUARDRAIL", `TETO DURO: follow_up "${r}" vetado — cota ${cota} esgotada; forçando avanço (ask)`);
+            const directive = `A cota de follow_up DESTA pergunta está ESGOTADA (${cota}). É PROIBIDO neste retorno: follow_up, hint, ask_repeat e finalize. Você DEVE emitir action.kind="ask": avance para a PRÓXIMA pergunta do plano ainda não coberta (ou uma espontânea, se claramente melhor), com uma ponte curta e natural na voz da persona que reconheça o que ficou em aberto SEM reabrir a cobrança. Registre a lacuna não esclarecida em memory.open_threads antes de avançar. NÃO repita a pergunta que a outra ponta já não respondeu.`;
+            try {
+                const advanced = await evaluateWithConversationLockRetry(() => superOrchestratorAgent.evaluate({
+                    interviewerYamlText: sess.interviewerYamlText ?? "",
+                    workAnalysis: sess.workAnalysis ?? null,
+                    interviewPlan: sess.interviewPlan ?? null,
+                    memory: sess.superOrchestratorMemory ?? null,
+                    turnLog: sess.turnLog,
+                    studentMessage: message,
+                    conversationId: sess.conversationId_chat,
+                    vectorStoreId: sess.vectorStoreId,
+                    studentName: sess.studentName ?? null,
+                    studentGenderHint: sess.studentGenderHint ?? null,
+                    interactionMode: sess.interactionMode,
+                    meterCtx: sessionMeterCtx(sess),
+                    minTurnsBeforeFinalize: minTurnsBeforeFinalizeFor(sess),
+                    maxTurns,
+                    forceAdvanceDirective: directive,
+                }));
+                if (advanced?.action?.kind === "ask") {
+                    parsed = advanced;
+                } else {
+                    // Desobediência rara: em vez de re-insistir (o que reabriria o
+                    // loop de cobrança que estamos matando), rebaixa localmente
+                    // para ask, aproveitando a fala já produzida como ponte.
+                    log.error("GUARDRAIL", `re-chamada não retornou ask (kind=${advanced?.action?.kind}); rebaixando p/ ask localmente`);
+                    parsed = advanced?.action?.message
+                        ? { rationale: advanced.rationale ?? "(teto duro: rebaixado p/ ask)", action: { kind: "ask", plan_question_id: null, message: advanced.action.message }, memory: advanced.memory ?? sess.superOrchestratorMemory ?? null }
+                        : { ...parsed, action: { ...parsed.action, kind: "ask", plan_question_id: null } };
+                }
+            } catch (err) {
+                log.error("GUARDRAIL", `re-chamada de avanço falhou: ${err.message}; rebaixando follow_up p/ ask localmente`);
+                parsed = { ...parsed, action: { ...parsed.action, kind: "ask", plan_question_id: null } };
+            }
         }
     }
 
