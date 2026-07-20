@@ -228,6 +228,26 @@ router.get("/api/benchmark/setup-versions", requireAdmin, async (_req, res) => {
     catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Detalhe de uma versão S publicada, COM o manifesto (as entrevistas
+// congeladas) — a listagem acima não o carrega. É o que permite inspecionar
+// o conteúdo de uma versão sem depender da geração de origem existir.
+router.get("/api/benchmark/setup-versions/:versionKey", requireAdmin, async (req, res) => {
+    try {
+        await ensureVersions();
+        const version = await versions.getSetupVersion(req.params.versionKey);
+        if (!version) return res.status(404).json({ error: "versao nao encontrada" });
+        // O manifesto guarda também as chamadas cruas da geração (request/
+        // response por chamada — a maior parte dos bytes). Para exploração
+        // basta a contagem; a auditoria por chamada tem tela própria na aba
+        // Setup, enquanto a geração de origem existir.
+        if (Array.isArray(version.manifest_json?.calls)) {
+            const { calls, ...rest } = version.manifest_json;
+            version.manifest_json = { ...rest, calls_count: calls.length };
+        }
+        res.json({ version });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post("/api/benchmark/setup-versions", requireAdmin, async (req, res) => {
     try {
         const generation = await versions.getGeneration(req.body?.generation_key);

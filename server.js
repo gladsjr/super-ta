@@ -66,7 +66,17 @@ const app = express();
 // allowlist testada é um passo separado.
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use("/static", express.static(path.join(__dirname, "static")));
-app.use(express.json({ limit: "2mb" }));
+
+// Parser JSON global, teto apertado (2mb) — vale para praticamente tudo.
+// EXCEÇÃO: rotas que declaram o próprio teto por serem legitimamente grandes.
+// Sem essa exclusão o parser global roda ANTES do router e estoura
+// PayloadTooLargeError, tornando o limite da rota código morto.
+const GLOBAL_JSON_SKIP = new Set(["/api/benchmark/import"]); // bundle de benchmark: express.json({limit:"200mb"}) em routes/benchmark.js
+const globalJsonParser = express.json({ limit: "2mb" });
+app.use((req, res, next) => {
+    if (GLOBAL_JSON_SKIP.has(req.path)) return next();
+    return globalJsonParser(req, res, next);
+});
 app.use(sessionMiddleware);
 
 // Auth (público). Rate limit no /login para travar força bruta de senha de

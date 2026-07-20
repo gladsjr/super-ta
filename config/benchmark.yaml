@@ -1,6 +1,9 @@
 benchmark: ORATIA-Bench
 setup_version: S0
-context_version: C0
+# C1: candidato recebe o contrato anotado de produção + histórico numerado
+# [Tn]; juiz deixa de ver a política canônica; métrica decomposta em
+# executável/conforme/adequada. Resultados C0 não são comparáveis aos C1.
+context_version: C1
 jury_version: J0
 mode: frozen-turn
 random_seed: 20260711
@@ -83,7 +86,9 @@ storage:
   runs_dir: bench/runs
 limits:
   max_cost_usd: 50
-  max_concurrency: 1
+  # Unidades (caso×turno×candidato na execução; casos na geração) em voo ao
+  # mesmo tempo. O gargalo é a chamada dos modelos; 4 vias ~4x mais rápido.
+  max_concurrency: 4
   timeout_ms: 90000
   retries: 2
   latency_repetitions: 1
