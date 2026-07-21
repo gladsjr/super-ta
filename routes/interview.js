@@ -261,12 +261,12 @@ async function runAudioRepeat({ sess, transcript, spans, aggregate, persist, rea
     });
     sess.history = sess.conv_chat;
     try {
-        await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: markedStudent }] });
-        await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: phrased.message }] });
+        await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: markedStudent }] });
+        await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: phrased.message }] });
     } catch (err) {
         log.error("CHAT", `remote write (audio repeat) failed: ${err.message}`);
     }
-    await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+    await logLastConvItem(sess.conversationId_chat, "CONV:chat", sess.openai);
 
     // Registra a intervenção para auditoria do professor. Reusa os campos
     // padrão (student_message, assistant_response, type, channel, at) para o
@@ -776,7 +776,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         sess.history = sess.conv_chat;
 
         try {
-            await openai.conversations.items.create(sess.conversationId_chat, {
+            await sess.openai.conversations.items.create(sess.conversationId_chat, {
                 items: [{ role: "assistant", content: greeting.message }],
             });
         } catch (err) {
@@ -784,7 +784,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         }
 
         log.info("CHAT", `intro greeting persona=${sess.interviewerPersona.name}/${sess.interviewerPersona.city} ${log.preview(greeting.message, 120)}`);
-        await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+        await logLastConvItem(sess.conversationId_chat, "CONV:chat", sess.openai);
 
         await persistConversationLog(sess);
 
@@ -1178,7 +1178,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.conv_eval.push({ role: "user", content: message, metadata: { phase: "intro", timestamp: Date.now() } });
         sess.history = sess.conv_chat;
         try {
-            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
+            await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
         } catch (err) {
             log.error("CHAT", `remote write (intro user) failed: ${err.message}`);
         }
@@ -1217,12 +1217,12 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             sess.conv_eval.push({ role: "assistant", content: intro.message, metadata: { phase: "intro", student_name: sess.studentName ?? null, timestamp: Date.now() } });
             sess.history = sess.conv_chat;
             try {
-                await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: intro.message }] });
+                await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: intro.message }] });
             } catch (err) {
                 log.error("CHAT", `remote write (intro present_self) failed: ${err.message}`);
             }
             log.info("CHAT", `intro present_self${sess.studentName ? ` name="${sess.studentName}"` : ""} ${log.preview(intro.message, 120)}`);
-            await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+            await logLastConvItem(sess.conversationId_chat, "CONV:chat", sess.openai);
             persist();
             return res.json(dedupDone({ channel: "chat", assistant: intro.message, ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) }));
         }
@@ -1317,12 +1317,12 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             });
             sess.history = sess.conv_chat;
             try {
-                await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: combined }] });
+                await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: combined }] });
             } catch (err) {
                 log.error("CHAT", `remote write (intro begin) failed: ${err.message}`);
             }
             log.info("CHAT", `intro begin + first plan question ${log.preview(combined, 160)}`);
-            await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+            await logLastConvItem(sess.conversationId_chat, "CONV:chat", sess.openai);
             persist();
 
             const payload = dedupDone({ channel: "chat", assistant: combined, phase: "interviewing", ...audio, ...(dicaPayload ? { audio_intelligibility: { hint: dicaPayload } } : {}) });
@@ -1429,7 +1429,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.conv_eval.push({ role: "user", content: message, metadata: { timestamp: Date.now() } });
         sess.history = sess.conv_chat;
         try {
-            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
+            await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
         } catch (err) { log.error("CHAT", `remote write (user, cap) failed: ${err.message}`); }
         if (currentTurn && currentTurn.answer == null) {
             currentTurn.answer = message;
@@ -1442,7 +1442,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.conv_eval.push({ role: "assistant", content: forcedMessage, metadata: { kind: "finalize", forced: "max_turns", timestamp: Date.now() } });
         sess.history = sess.conv_chat;
         try {
-            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: forcedMessage }] });
+            await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: forcedMessage }] });
         } catch (err) { log.error("CHAT", `remote write (assistant, cap) failed: ${err.message}`); }
         sess.currentPhase = "finalizing";
         sess.conversationCompleted = true;
@@ -1480,7 +1480,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         // Espelho remoto SÓ na conv_chat (lida pelo orquestrador via `conversation`).
         // A conv_eval vive apenas no array LOCAL (→ conversation_json p/ o professor):
         // nada lê a conv_eval REMOTA, então paramos de escrevê-la a cada turno.
-        await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
+        await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "user", content: message }] });
     } catch (err) { log.error("CHAT", `remote write (user) failed: ${err.message}`); }
     log.info("CHAT", `user ${log.preview(message, 140)}`);
 
@@ -1704,9 +1704,9 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         sess.conv_eval.push({ role: "assistant", content: assistantMessage, metadata: { kind, rationale, ...extraEvalMeta, timestamp: Date.now() } });
         sess.history = sess.conv_chat;
         try {
-            await openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: assistantMessage }] });
+            await sess.openai.conversations.items.create(sess.conversationId_chat, { items: [{ role: "assistant", content: assistantMessage }] });
         } catch (err) { log.error("CHAT", `remote write (assistant, kind=${kind}) failed: ${err.message}`); }
-        await logLastConvItem(sess.conversationId_chat, "CONV:chat");
+        await logLastConvItem(sess.conversationId_chat, "CONV:chat", sess.openai);
     };
 
     if (kind === "follow_up" || kind === "ask_repeat" || kind === "hint") {
