@@ -126,7 +126,7 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
                 if (wantStream) {
                     payload.stream = true;
                     const stream = await log.span(label, `responses.create[stream]${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
-                        meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => this.client.responses.create(payload)));
+                        meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => (meterCtx?.openai ?? this.client).responses.create(payload)));
                     const collected = []; let finalResponse = null, messageSignaled = false, msgSent = 0, speakerSignaled = false;
                     for await (const event of stream) {
                         if (event?.type === "response.output_text.delta") {
@@ -155,7 +155,7 @@ ${PERSONA_EXCHANGE_SCHEMA_DESCRIPTION}`;
                     text = finalResponse?.output_text ?? collected.join("") ?? "";
                 } else {
                     const response = await log.span(label, `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
-                        meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => this.client.responses.create(payload)));
+                        meteredResponses({ ...meterCtx, agentLabel: label, model: this.model }, () => (meterCtx?.openai ?? this.client).responses.create(payload)));
                     text = response.output_text || "";
                 }
                 apiErr = null;

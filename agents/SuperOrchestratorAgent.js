@@ -331,7 +331,7 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
                     const stream = await log.span("AGENT:SuperOrchestrator", `responses.create[stream]${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
                         meteredResponses(
                             { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
-                            () => this.client.responses.create(payload)
+                            () => (meterCtx?.openai ?? this.client).responses.create(payload)
                         )
                     );
                     const collected = [];
@@ -369,7 +369,7 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
                     const response = await log.span("AGENT:SuperOrchestrator", `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
                         meteredResponses(
                             { ...meterCtx, agentLabel: "AGENT:SuperOrchestrator", model: this.model },
-                            () => this.client.responses.create(payload)
+                            () => (meterCtx?.openai ?? this.client).responses.create(payload)
                         )
                     );
                     text = response.output_text || "";

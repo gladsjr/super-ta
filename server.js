@@ -37,6 +37,7 @@ import oralExamRoutes from "./routes/oralExam.js";
 import { attachOralRelay } from "./lib/oralRealtime.js";
 import diagRoutes from "./routes/diag.js";
 import benchmarkRoutes from "./routes/benchmark.js";
+import costAuditRoutes from "./routes/costAudit.js";
 import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
@@ -107,6 +108,7 @@ app.use(scenarioStudentRoutes); // /s/:submissionToken/scenario/* — fluxo do a
 app.use(oralExamRoutes); // /w/:t/oral/* e /s/:t/oral/* — prova oral (Realtime)
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 app.use(benchmarkRoutes); // /api/benchmark/* — benchmark interno (requireAdmin por rota)
+app.use(costAuditRoutes); // /api/cost-audit/* — auditoria de custo (Usage/Costs API; requireAdmin por rota)
 
 const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {

@@ -17,7 +17,7 @@ import express from "express";
 import multer from "multer";
 import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
-import { openai } from "../lib/openaiClient.js";
+import { openai, clientForWork } from "../lib/openaiClient.js";
 import { transcribeAudio, synthesizeSpeech, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
@@ -549,7 +549,7 @@ router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload
         if (!Number.isInteger(attempt) || attempt < 1) attempt = 1;
         if (attempt > MAX_CALIB_ATTEMPTS) attempt = MAX_CALIB_ATTEMPTS;
 
-        const { text } = await transcribeAudio(openai, STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
+        const { text } = await transcribeAudio(clientForWork(req.work), STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
         const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
 
         const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
@@ -616,7 +616,7 @@ router.get("/s/:submissionToken/setup-audio", requireSubmissionToken, async (req
         const voice = req.work.voice || "coral";
         const key = `${which}|${voice}`;
         let buf = setupAudioCache.get(key);
-        if (!buf) { buf = await synthesizeSpeech(openai, TTS_MODEL, text, voice); setupAudioCache.set(key, buf); }
+        if (!buf) { buf = await synthesizeSpeech(clientForWork(req.work), TTS_MODEL, text, voice); setupAudioCache.set(key, buf); }
         res.type("audio/mpeg").send(buf);
     } catch (err) {
         log.error("SUBMISSION", `setup-audio failed: ${err.message}`);
@@ -1043,7 +1043,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             );
             const sttResult = await meteredStt(
                 { ...sessionMeterCtx(sess), model: STT_MODEL },
-                () => transcribeAudio(openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm")
+                () => transcribeAudio(sess.openai || openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm")
             );
             message = sttResult.text;
             studentAudioLogprobs = sttResult.logprobs ?? null;

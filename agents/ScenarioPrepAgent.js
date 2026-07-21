@@ -78,7 +78,7 @@ ${this.prepSystemBody}`;
         for (let attempt = 1; attempt <= 2; attempt++) {
             try {
                 const response = await log.span("AGENT:ScenarioPrep", `prepInteraction.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
-                    meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioPrep", model: this.model }, () => this.client.responses.create(payload)));
+                    meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioPrep", model: this.model }, () => (meterCtx?.openai ?? this.client).responses.create(payload)));
                 text = response.output_text || "";
                 const match = text.match(/\{[\s\S]*\}/);
                 if (!match) { lastErr = "no JSON in response"; continue; }

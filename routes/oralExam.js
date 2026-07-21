@@ -13,7 +13,7 @@ import fs from "fs";
 import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
-import { openai } from "../lib/openaiClient.js";
+import { openai, clientForWork, apiKeyForWork } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { transcribeAudio } from "../lib/audio.js";
@@ -181,13 +181,13 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
         if (isTxt) {
             const text = req.file.buffer.toString("utf-8").replace(/^\uFEFF/, "").trim();
             if (!text) return res.status(400).json({ error: "o arquivo .txt está vazio" });
-            questions = await oralExamExtractorAgent.extract({ examText: text, meterCtx: { workId: req.work.id } });
+            questions = await oralExamExtractorAgent.extract({ examText: text, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
         } else {
             const examFile = await openai.files.create({
                 file: await OpenAI.toFile(req.file.buffer, req.file.originalname || "prova.pdf"),
                 purpose: "user_data",
             });
-            questions = await oralExamExtractorAgent.extract({ examFileId: examFile.id, meterCtx: { workId: req.work.id } });
+            questions = await oralExamExtractorAgent.extract({ examFileId: examFile.id, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
         }
         // Peso 1 default; rubrica vazia → rubric_stale=true (o professor gera). Novas
         // (sem id) recebem ids frescos do contador.
@@ -254,7 +254,7 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
         let generated = 0; const errors = [];
         await mapPool(targets, 4, async (q) => {
             try {
-                const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { workId: req.work.id } });
+                const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
                 await db.updateOralQuestionRubric(req.work.id, q.id, { rubric, weight });
                 generated++;
                 send({ type: "item", id: q.id, ok: true });
@@ -282,7 +282,7 @@ router.post("/w/:workToken/oral/questions/:qid/rubric/generate", requireWorkToke
         const q = (await db.getOralQuestions(req.work.id)).find(x => Number(x.id) === qid);
         if (!q) return res.status(404).json({ error: "questão não encontrada" });
         if (!String(q.answer || "").trim()) return res.status(409).json({ error: "esta questão não tem resposta esperada — escreva a rubrica à mão ou preencha a resposta" });
-        const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { workId: req.work.id } });
+        const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
         const updated = await db.updateOralQuestionRubric(req.work.id, qid, { rubric, weight });
         res.json({ ok: true, question: updated });
     } catch (err) {
@@ -314,7 +314,7 @@ router.post("/w/:workToken/oral/calibration/generate", requireWorkToken, require
             .map(q => ({ question: q.question, answer: q.answer }))
             .filter(it => String(it.question || "").trim() || String(it.answer || "").trim());
         if (!items.length) return res.status(409).json({ error: "a prova não tem perguntas para extrair termos" });
-        const { sentence, key_terms } = await oralCalibrationAgent.build({ items, meterCtx: { workId: req.work.id } });
+        const { sentence, key_terms } = await oralCalibrationAgent.build({ items, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
         const saved = await db.setOralCalibration(req.work.id, { sentence, key_terms });
         log.info("ORAL", `calibration generated work=${req.work.work_token} terms=${key_terms.length}`);
         res.json({ ok: true, calibration: saved });
@@ -347,7 +347,7 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
         const semRubrica = questions.filter(q => !String(q.rubric || "").trim());
         if (semRubrica.length) return res.status(409).json({ error: `gere ou escreva a rubrica de ${semRubrica.length} questão(ões) antes de avaliar (aba Avaliação & notas)` });
         const report = await oralExamEvaluatorAgent.evaluate({
-            questions, transcript, meterCtx: { workId: req.work.id, submissionId: req.submission.id },
+            questions, transcript, meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: req.submission.id },
         });
         await db.setOralEvaluation(req.submission.id, report);
         await applyEvalDefaults(req.work, req.submission.id, detail, report, questions); // nota default (+ penalidade)
@@ -537,7 +537,7 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
                     return;
                 }
                 const report = await oralExamEvaluatorAgent.evaluate({
-                    questions, transcript, meterCtx: { workId: req.work.id, submissionId: s.id },
+                    questions, transcript, meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: s.id },
                 });
                 await db.setOralEvaluation(s.id, report);
                 await applyEvalDefaults(req.work, s.id, detail, report, questions); // nota default (+ penalidade)
@@ -684,7 +684,7 @@ router.post("/w/:workToken/oral/proctor-all", requireWorkToken, requireOral, asy
 // (modelo, voz, instruções com as perguntas, VAD de servidor, transcrição da
 // fala do aluno). A nossa OPENAI_API_KEY nunca vai ao navegador — só o segredo
 // efêmero de ~1 min. Usamos fetch cru para não acoplar à versão do SDK.
-async function mintRealtimeSecret({ instructions, voice }) {
+async function mintRealtimeSecret({ instructions, voice, apiKey = process.env.OPENAI_API_KEY }) {
     const body = {
         session: {
             type: "realtime",
@@ -706,7 +706,7 @@ async function mintRealtimeSecret({ instructions, voice }) {
     const r = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
         method: "POST",
         headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
@@ -733,7 +733,7 @@ router.post("/s/:submissionToken/oral/session", requireSubmissionToken, async (r
         const sampled = sampleKeepingOrder(all, n);
         const voice = isValidVoice(req.work.voice) ? req.work.voice : "verse";
         const instructions = buildExamInstructions(sampled, req.work.name);
-        const secret = await mintRealtimeSecret({ instructions, voice });
+        const secret = await mintRealtimeSecret({ instructions, voice, apiKey: apiKeyForWork(req.work) });
         log.info("ORAL", `session minted submission=${req.submission.submission_token} n=${n}/${all.length} voice=${voice}`);
         res.json({
             client_secret: secret.value,
@@ -783,7 +783,7 @@ router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibU
 
         // Extensão pelo mimetype real: MediaRecorder varia por navegador (webm no
         // Chrome/Firefox, mp4/m4a no Safari) e o STT infere o formato pela extensão.
-        const { text } = await transcribeAudio(openai, STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
+        const { text } = await transcribeAudio(clientForWork(req.work), STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
         const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
 
         // Acumula o registro (todas as tentativas) para o professor.

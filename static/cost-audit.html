@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditoria de custo — ORATIA</title>
+<style>
+  :root { --bg:#f6f8fb; --card:#fff; --ink:#12233b; --muted:#5a6472; --line:#ccd4de; --accent:#1c3557; --ok:#1a7f37; --warn:#b25e00; --bad:#b42318; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI",system-ui,Arial,sans-serif; background:var(--bg); color:var(--ink); font-size:14px; line-height:1.45; }
+  header { background:var(--accent); color:#fff; padding:14px 20px; }
+  header h1 { margin:0; font-size:18px; }
+  header .sub { color:#cfd9e6; font-size:12.5px; margin-top:2px; }
+  main { max-width:1100px; margin:0 auto; padding:18px 20px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin:0 0 16px; }
+  .card h2 { margin:0 0 8px; font-size:15px; color:var(--accent); }
+  .hint { color:var(--muted); font-size:12.5px; }
+  label { display:block; font-size:12.5px; color:var(--muted); margin:8px 0 3px; }
+  input[type=text], input[type=datetime-local] { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1 1 200px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; }
+  button.ghost { background:#eef2f7; color:var(--accent); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; }
+  th,td { border:1px solid var(--line); padding:5px 8px; text-align:left; vertical-align:top; }
+  th { background:#edf1f6; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11.5px; font-weight:600; }
+  .pill.pending { background:#fff3e0; color:var(--warn); }
+  .pill.settled { background:#e6f4ea; color:var(--ok); }
+  .pill.error { background:#fdeceb; color:var(--bad); }
+  .scroll { overflow-x:auto; }
+  .delta-pos { color:var(--bad); } .delta-neg { color:var(--ok); } .delta-zero { color:var(--muted); }
+  .msg { font-size:12.5px; margin:8px 0; min-height:1em; }
+  .msg.err { color:var(--bad); } .msg.ok { color:var(--ok); }
+  code { background:#eef2f7; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .clickable { cursor:pointer; }
+  .clickable:hover { background:#f0f5fb; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Auditoria de custo</h1>
+  <div class="sub">Reconcilia o custo calculado (work_cost_events) contra o consumo real da OpenAI (Usage/Costs API). Requer login de admin.</div>
+</header>
+<main>
+  <div class="card">
+    <h2>Rodar reconciliação</h2>
+    <p class="hint">Informe o <code>benchmark_run_id</code> (a janela é derivada dos eventos do run) OU uma janela de tempo explícita. A Usage API confere os <b>tokens</b> em ~minutos/horas; a Costs API (US$ faturado do projeto) fecha ~no dia seguinte — por isso a auditoria nasce <span class="pill pending">pending</span> e vira <span class="pill settled">settled</span> ao fechar (botão “Fechar” no detalhe).</p>
+    <div class="row">
+      <div>
+        <label>benchmark_run_id</label>
+        <input type="text" id="runId" placeholder="ex.: bench-1721580000000">
+      </div>
+      <div>
+        <label>início (opcional)</label>
+        <input type="datetime-local" id="startAt">
+      </div>
+      <div>
+        <label>fim (opcional)</label>
+        <input type="datetime-local" id="endAt">
+      </div>
+    </div>
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+      <label style="display:inline-flex; align-items:center; gap:6px; margin:0; color:var(--ink)"><input type="checkbox" id="skipCosts"> pular Costs API (só tokens)</label>
+      <button id="runBtn">Reconciliar e salvar</button>
+      <button class="ghost" id="refreshBtn">Atualizar lista</button>
+    </div>
+    <div class="msg" id="runMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Auditorias</h2>
+    <div class="scroll">
+      <table id="auditsTbl">
+        <thead><tr>
+          <th>#</th><th>run</th><th>janela (UTC)</th>
+          <th class="num">calc US$</th><th class="num">ref US$</th><th class="num">Δ US$</th><th class="num">Δ %</th>
+          <th class="num">Costs projeto US$</th><th>status</th><th>criada</th>
+        </tr></thead>
+        <tbody id="auditsBody"><tr><td colspan="10" class="hint">Carregando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="detailCard" style="display:none">
+    <h2>Detalhe <span id="detailId" class="hint"></span></h2>
+    <div id="detailBody"></div>
+    <div style="margin-top:10px"><button class="ghost" id="settleBtn">Fechar (re-buscar Usage+Costs)</button> <span class="msg" id="settleMsg" style="display:inline"></span></div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const usd = (v) => v == null ? "—" : "$" + Number(v).toFixed(4);
+const pct = (v) => v == null ? "—" : Number(v).toFixed(1) + "%";
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const fmtDate = (s) => s ? new Date(s).toISOString().replace("T"," ").slice(0,16) : "—";
+function deltaCls(v) { if (v == null) return "delta-zero"; if (v > 0.0000005) return "delta-pos"; if (v < -0.0000005) return "delta-neg"; return "delta-zero"; }
+
+async function api(method, url, body) {
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  const r = await fetch(url, opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || (r.status + " " + r.statusText));
+  return j;
+}
+
+async function loadList() {
+  try {
+    const { audits } = await api("GET", "/api/cost-audit?limit=100");
+    const body = $("auditsBody");
+    if (!audits.length) { body.innerHTML = '<tr><td colspan="10" class="hint">Nenhuma auditoria ainda.</td></tr>'; return; }
+    body.innerHTML = audits.map(a => `
+      <tr class="clickable" data-id="${a.id}">
+        <td>${a.id}</td>
+        <td>${esc(a.benchmark_run_id || "—")}</td>
+        <td>${fmtDate(a.window_start)} → ${fmtDate(a.window_end)}</td>
+        <td class="num">${usd(a.calculated_usd)}</td>
+        <td class="num">${usd(a.reference_usd)}</td>
+        <td class="num ${deltaCls(a.delta_usd)}">${usd(a.delta_usd)}</td>
+        <td class="num ${deltaCls(a.delta_usd)}">${pct(a.delta_pct)}</td>
+        <td class="num">${usd(a.costs_api_project_usd)}</td>
+        <td><span class="pill ${esc(a.status)}">${esc(a.status)}</span></td>
+        <td>${fmtDate(a.created_at)}</td>
+      </tr>`).join("");
+    body.querySelectorAll("tr.clickable").forEach(tr => tr.onclick = () => showDetail(tr.dataset.id));
+  } catch (err) {
+    $("auditsBody").innerHTML = `<tr><td colspan="10" class="msg err">${esc(err.message)}</td></tr>`;
+  }
+}
+
+function tokenTable(calcJson, actualJson, deltaJson) {
+  const calc = calcJson || {}, act = actualJson || {}, dlt = deltaJson || {};
+  const models = [...new Set([...Object.keys(calc), ...Object.keys(act)])].sort();
+  if (!models.length) return '<p class="hint">Sem detalhamento por modelo.</p>';
+  const rows = models.map(m => {
+    const c = calc[m] || {}, a = act[m] || {}, d = dlt[m] || {};
+    return `<tr>
+      <td>${esc(m)}</td>
+      <td class="num">${(c.input_tokens ?? 0).toLocaleString()}</td>
+      <td class="num">${(a.input_tokens ?? 0).toLocaleString()}</td>
+      <td class="num ${deltaCls(d.input_tokens)}">${d.input_tokens != null ? d.input_tokens.toLocaleString() : "—"}</td>
+      <td class="num">${(c.output_tokens ?? 0).toLocaleString()}</td>
+      <td class="num">${(a.output_tokens ?? 0).toLocaleString()}</td>
+      <td class="num ${deltaCls(d.output_tokens)}">${d.output_tokens != null ? d.output_tokens.toLocaleString() : "—"}</td>
+      <td class="num">${(c.cached_tokens ?? 0).toLocaleString()}</td>
+      <td class="num">${(a.cached_tokens ?? 0).toLocaleString()}</td>
+    </tr>`;
+  }).join("");
+  return `<div class="scroll"><table>
+    <thead><tr>
+      <th rowspan="2">modelo</th><th class="num" colspan="3">input</th><th class="num" colspan="3">output</th><th class="num" colspan="2">cached</th>
+    </tr><tr>
+      <th class="num">calc</th><th class="num">real</th><th class="num">Δ</th>
+      <th class="num">calc</th><th class="num">real</th><th class="num">Δ</th>
+      <th class="num">calc</th><th class="num">real</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+let currentDetailId = null;
+async function showDetail(id) {
+  currentDetailId = id;
+  $("settleMsg").textContent = "";
+  try {
+    const { audit: a } = await api("GET", "/api/cost-audit/" + id);
+    $("detailCard").style.display = "";
+    $("detailId").textContent = `#${a.id} · ${a.benchmark_run_id || "janela livre"} · ${fmtDate(a.window_start)} → ${fmtDate(a.window_end)} UTC`;
+    const summary = `
+      <table style="max-width:520px; margin-bottom:12px">
+        <tr><th>Custo calculado (local)</th><td class="num">${usd(a.calculated_usd)}</td></tr>
+        <tr><th>Referência (tokens reais × pricing.yaml)</th><td class="num">${usd(a.reference_usd)}</td></tr>
+        <tr><th>Δ US$ (referência − calculado)</th><td class="num ${deltaCls(a.delta_usd)}">${usd(a.delta_usd)} (${pct(a.delta_pct)})</td></tr>
+        <tr><th>Costs API — projeto/dia (cross-check)</th><td class="num">${usd(a.costs_api_project_usd)}</td></tr>
+        <tr><th>Status</th><td><span class="pill ${esc(a.status)}">${esc(a.status)}</span></td></tr>
+      </table>`;
+    const note = a.note ? `<p class="hint"><b>Notas:</b> ${esc(a.note)}</p>` : "";
+    const caveat = `<p class="hint">Divergências esperadas concentram-se em TTS (estimado por caractere), STT (sem usage → custo 0 local) e realtime (input pode ser superestimado). No mesmo projeto OpenAI, a Costs projeto/dia inclui produção — é teto/sanidade, não o US$ isolado do benchmark.</p>`;
+    $("detailBody").innerHTML = summary + tokenTable(a.calculated_tokens_json, a.actual_usage_tokens_json, a.delta_tokens_json) + note + caveat;
+    $("detailCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    $("detailBody").innerHTML = `<p class="msg err">${esc(err.message)}</p>`;
+    $("detailCard").style.display = "";
+  }
+}
+
+$("runBtn").onclick = async () => {
+  const btn = $("runBtn"); btn.disabled = true;
+  const msg = $("runMsg"); msg.className = "msg"; msg.textContent = "Reconciliando…";
+  try {
+    const body = {};
+    const runId = $("runId").value.trim();
+    if (runId) body.benchmark_run_id = runId;
+    if ($("startAt").value) body.start_time = new Date($("startAt").value).toISOString();
+    if ($("endAt").value) body.end_time = new Date($("endAt").value).toISOString();
+    if ($("skipCosts").checked) body.skip_costs = true;
+    const { audit } = await api("POST", "/api/cost-audit/run", body);
+    msg.className = "msg ok"; msg.textContent = `Auditoria #${audit.id} criada (calc ${usd(audit.calculated_usd)}, ref ${usd(audit.reference_usd)}, Δ ${pct(audit.delta_pct)}).`;
+    await loadList();
+    if (audit.id) showDetail(audit.id);
+  } catch (err) {
+    msg.className = "msg err"; msg.textContent = err.message;
+  } finally { btn.disabled = false; }
+};
+
+$("refreshBtn").onclick = loadList;
+$("settleBtn").onclick = async () => {
+  if (!currentDetailId) return;
+  const m = $("settleMsg"); m.className = "msg"; m.textContent = "Re-buscando…";
+  try {
+    await api("POST", `/api/cost-audit/${currentDetailId}/settle`);
+    m.className = "msg ok"; m.textContent = "Fechada.";
+    await loadList(); await showDetail(currentDetailId);
+  } catch (err) { m.className = "msg err"; m.textContent = err.message; }
+};
+
+loadList();
+</script>
+</body>
+</html>
