@@ -38,8 +38,38 @@ const SCRATCH = path.join(process.env.TEMP || "C:/temp", "bench-worktext");
 const PERSONA_BY_LEVEL = { bom: "dominante_generico", medio: "medio_generico", fraco: "fraco_generico" };
 const LEVELS = ["fraco", "medio", "bom"];
 
+// A PERSONA ENTREVISTADORA está explícita em cada enunciado (campo "Persona: X"),
+// e X bate com o display.label de um dos 6 templates. Lemos do enunciado (fiel;
+// nada de chutar). Chave normalizada (sem acento, minúscula) p/ robustez de encoding.
+// Match por palavra-chave ASCII distintiva de cada persona — imune a mojibake de
+// acento na extração do PDF (ex.: "Arguição acadêmica" pode sair "Argui??o acad?mica").
+const PERSONA_MATCHERS = [
+    { kw: "consultoria", tpl: "Business Owner.yaml" },   // Cliente de consultoria
+    { kw: "sponsor", tpl: "Executive Sponsor.yaml" },    // Sponsor executivo
+    { kw: "emprego", tpl: "Hiring Manager.yaml" },        // Entrevista de emprego
+    { kw: "jornalista", tpl: "Journalist.yaml" },         // Jornalista
+    { kw: "investidor", tpl: "Startup Investor.yaml" },   // Investidor
+    { kw: "argui", tpl: "Teacher Assistant.yaml" },       // Arguição acadêmica
+];
+function normalizePersona(s) {
+    // tira acentos decomponíveis E qualquer não-ascii remanescente (mojibake), minúscula.
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, "").toLowerCase().trim();
+}
+// Extrai o campo "Persona:" do PDF do enunciado (pypdf) e resolve o template.
+function templateForEnunciado(enunciadoPath) {
+    const py = `from pypdf import PdfReader\nimport re,sys\nt="\\n".join((p.extract_text() or "") for p in PdfReader(r"${enunciadoPath}").pages)\nm=re.search(r"Persona:\\s*([^|\\n]+)",t)\nsys.stdout.write(m.group(1).strip() if m else "")`;
+    const res = spawnSync("python", ["-c", py], { encoding: "utf-8" });
+    if (res.status !== 0) throw new Error(`leitura da persona falhou: ${res.stderr || res.stdout}`);
+    const label = String(res.stdout || "").trim();
+    const key = normalizePersona(label);
+    const hit = PERSONA_MATCHERS.find(m => key.includes(m.kw));
+    if (!hit) throw new Error(`persona do enunciado não reconhecida: "${label}" (normalizada: "${key}")`);
+    return { template: hit.tpl, personaLabel: label };
+}
+
 function parseArgs(argv) {
-    const a = { items: null, runId: null, template: "Business Owner.yaml", voice: "coral", questions: 6, budget: 20, base: "http://127.0.0.1:5000", headed: false, dryRun: false };
+    // template null = usa TEMPLATE_BY_NN por enunciado; --template força um p/ todos.
+    const a = { items: null, runId: null, template: null, voice: "coral", questions: 5, budget: 20, base: "http://127.0.0.1:5000", headed: false, dryRun: false };
     for (let i = 0; i < argv.length; i++) {
         const t = argv[i];
         if (t === "--items") a.items = argv[++i];
@@ -133,8 +163,12 @@ async function main() {
         const studentPdf = path.join(folder, `Trabalho do aluno - ${level}.pdf`);
         if (!fs.existsSync(studentPdf)) { console.log(`! ${nn}:${level} PDF do aluno ausente, pulando`); continue; }
 
-        console.log(`\n--- ${nn}:${level} ---`);
-        const work = await configureBenchmarkWork({ nn, level, folder, template: A.template, voice: A.voice, questions: A.questions, budget: A.budget, runId });
+        // Persona entrevistadora vem do próprio enunciado (--template força um p/ todos).
+        let template, personaLabel;
+        if (A.template) { template = A.template; personaLabel = "(forçado por --template)"; }
+        else { ({ template, personaLabel } = templateForEnunciado(path.join(folder, "Enunciado do trabalho.pdf"))); }
+        console.log(`\n--- ${nn}:${level} (persona: ${personaLabel} → ${template.replace(".yaml", "")}) ---`);
+        const work = await configureBenchmarkWork({ nn, level, folder, template, voice: A.voice, questions: A.questions, budget: A.budget, runId });
         console.log(`work=${work.work_token} (audio, ${A.questions}q) configurado`);
 
         const workTextFile = path.join(SCRATCH, `${nn}-${level}.txt`);
