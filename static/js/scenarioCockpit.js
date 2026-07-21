@@ -25,7 +25,7 @@
       <td style="text-align:center">${yn(r.has_devolutiva)}</td>
       <td style="text-align:center">${r.has_grades ? (r.grade_final ?? '✓') : '—'}</td>
       <td style="text-align:center">${pub || '—'}</td>
-      <td><a href="#" class="sc-view" data-tok="${esc(r.submission_token)}">ver ↗</a></td>
+      <td style="white-space:nowrap"><a href="/s/${esc(r.submission_token)}" target="_blank" rel="noopener" title="abrir a tela do aluno (entrar e conversar)">abrir ↗</a> · <a href="#" class="sc-copy" data-tok="${esc(r.submission_token)}" title="copiar o link do aluno">copiar</a> · <a href="#" class="sc-view" data-tok="${esc(r.submission_token)}" title="ver a conversa (somente leitura)">ver</a></td>
     </tr>`;
   }
 
@@ -87,6 +87,7 @@
     const tb = document.getElementById('sc-rows'); if (!tb) return;
     tb.innerHTML = RUNS.length ? RUNS.map(rowHtml).join('') : '<tr><td colspan="7" class="hint">Nenhum aluno ainda. Crie tokens acima.</td></tr>';
     tb.querySelectorAll('.sc-view').forEach(a => a.onclick = e => { e.preventDefault(); openDrawer(a.dataset.tok); });
+    tb.querySelectorAll('.sc-copy').forEach(a => a.onclick = async e => { e.preventDefault(); const url = location.origin + '/s/' + a.dataset.tok; try { await navigator.clipboard.writeText(url); const o = a.textContent; a.textContent = 'copiado ✓'; setTimeout(() => a.textContent = o, 1500); } catch { prompt('Copie o link do aluno:', url); } });
   }
   function renderRubric() {
     const el = document.getElementById('sc-rubric'); if (!el) return;

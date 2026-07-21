@@ -22,7 +22,7 @@ const STUDIO_MARKUP = `
     <button class="btn" id="st-test">▶ Testar</button>
     <button class="btn" id="st-export" title="Exportar este cenário inteiro como YAML">⬇ Exportar YAML</button>
     <button class="btn" id="st-import" title="Importar um cenário inteiro ou uma persona de um YAML">⬆ Importar YAML</button>
-    <label class="hint" style="display:inline-flex;align-items:center;gap:5px" title="Testar abre a tela do aluno (custa tokens). 'rápido' usa um modelo barato para iterar; 'final' usa o gpt-5.5 (fiel ao que o aluno vai viver).">modelo do teste: <select class="select" id="st-test-model" style="max-width:150px"><option value="">final (gpt-5.5)</option><option value="fast">rápido</option></select></label>
+    <label class="hint" style="display:inline-flex;align-items:center;gap:5px" title="Testar abre a tela do aluno (custa tokens). 'rápido' usa um modelo barato para iterar; 'final' usa o modelo de produção definido em config/policy.yaml (fiel ao que o aluno vai viver).">modelo do teste: <select class="select" id="st-test-model" style="max-width:150px"><option value="">final (modelo de produção)</option><option value="fast">rápido</option></select></label>
     <span class="hint" id="st-msg"></span>
   </div>
   <div class="overlay hidden" id="persona-modal"><div class="modal" id="persona-modal-body"></div></div>
