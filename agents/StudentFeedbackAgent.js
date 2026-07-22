@@ -227,7 +227,7 @@ ${JSON.stringify(internalReport, null, 2)}${proctorBlock}${hiddenReminder}`;
                 const response = await log.span("AGENT:StudentFeedback", `responses.create${attempt > 1 ? ` retry#${attempt}` : ""}`, () =>
                     meteredResponses(
                         { ...meterCtx, agentLabel: "AGENT:StudentFeedback", model: this.model },
-                        () => this.client.responses.create(payload)
+                        () => (meterCtx?.openai ?? this.client).responses.create(payload)
                     )
                 );
                 const text = response.output_text || "";

@@ -129,7 +129,7 @@ Responda SOMENTE com o JSON do formato especificado.`;
         if (typeof onReplyDelta === "function") {
             const stream = await log.span("AGENT:ScenarioAssistant", "responses.create[stream]", () =>
                 meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioAssistant", model: this.model }, () =>
-                    this.client.responses.create({ ...payload, stream: true })));
+                    (meterCtx?.openai ?? this.client).responses.create({ ...payload, stream: true })));
             const collected = []; let finalResponse = null, sent = 0, lastProg = 0;
             for await (const event of stream) {
                 if (event?.type === "response.output_text.delta") {
@@ -150,7 +150,7 @@ Responda SOMENTE com o JSON do formato especificado.`;
         } else {
             const response = await log.span("AGENT:ScenarioAssistant", "responses.create", () =>
                 meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioAssistant", model: this.model }, () =>
-                    this.client.responses.create(payload)));
+                    (meterCtx?.openai ?? this.client).responses.create(payload)));
             text = response.output_text || "";
         }
         const parsed = extractJsonObject(text || "");

@@ -126,7 +126,7 @@ Analise a entrega (PDF anexo) à luz do documento motivador (PDF também anexo) 
         const response = await log.span("AGENT:PrepBuilder", "analyzeWork.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:PrepBuilder:analyzeWork", model: this.model },
-                () => this.client.responses.create(payload)
+                () => (meterCtx?.openai ?? this.client).responses.create(payload)
             )
         );
 
@@ -214,7 +214,7 @@ ${renderedWithAnalysis}`;
         const response = await log.span("AGENT:PrepBuilder", "buildPlan.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:PrepBuilder:buildPlan", model: this.model },
-                () => this.client.responses.create(payload)
+                () => (meterCtx?.openai ?? this.client).responses.create(payload)
             )
         );
 

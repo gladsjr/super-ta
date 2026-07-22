@@ -170,7 +170,7 @@ Responda apenas o JSON conforme o contrato.`;
         const response = await log.span("AGENT:ConfigAssistant", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:ConfigAssistant", model: this.model },
-                () => this.client.responses.create(payload)
+                () => (meterCtx?.openai ?? this.client).responses.create(payload)
             )
         );
 

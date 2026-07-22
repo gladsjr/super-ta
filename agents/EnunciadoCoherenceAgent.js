@@ -114,7 +114,7 @@ ${this.systemPromptBody}`;
         const response = await log.span("AGENT:EnunciadoCoherence", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:EnunciadoCoherence", model: this.model },
-                () => this.client.responses.create(payload)
+                () => (meterCtx?.openai ?? this.client).responses.create(payload)
             )
         );
 

@@ -18,6 +18,7 @@ const STATIC_DIR = path.join(PROJECT_ROOT, "static");
 router.get("/", (_req, res) => res.sendFile(path.join(STATIC_DIR, "index.html")));
 router.get("/admin", (_req, res) => res.sendFile(path.join(STATIC_DIR, "admin.html")));
 router.get("/benchmark", (_req, res) => res.sendFile(path.join(STATIC_DIR, "benchmark.html")));
+router.get("/cost-audit", (_req, res) => res.sendFile(path.join(STATIC_DIR, "cost-audit.html")));
 router.get("/trabalho", (_req, res) => res.sendFile(path.join(STATIC_DIR, "trabalho.html")));
 router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.html")));
 router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "professor.html")));

@@ -164,7 +164,7 @@ Produza a fala deste beat (${step}). Retorne apenas o JSON.`;
         const response = await log.span("AGENT:Introduction", "responses.create", () =>
             meteredResponses(
                 { ...meterCtx, agentLabel: "AGENT:Introduction", model: this.model },
-                () => this.client.responses.create(payload)
+                () => (meterCtx?.openai ?? this.client).responses.create(payload)
             )
         );
         const text = response.output_text || "";

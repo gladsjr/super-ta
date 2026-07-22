@@ -107,7 +107,7 @@ Avalie POR PERSONA (consolidado) + o overall e retorne SOMENTE o JSON do formato
         log.prompt("AGENT:ScenarioEvaluator", `system+user (${systemPrompt.length + userContent.length} chars) personas=${grouped.length}`);
         const response = await log.span("AGENT:ScenarioEvaluator", "responses.create", () =>
             meteredResponses({ ...meterCtx, agentLabel: "AGENT:ScenarioEvaluator", model: this.model }, () =>
-                this.client.responses.create({ model: this.model, instructions: systemPrompt, input: [{ role: "user", content: userContent }], truncation: "auto" })));
+                (meterCtx?.openai ?? this.client).responses.create({ model: this.model, instructions: systemPrompt, input: [{ role: "user", content: userContent }], truncation: "auto" })));
         const parsed = extractJsonObject(response.output_text || "");
         if (!parsed || !Array.isArray(parsed.per_persona) || !parsed.overall) {
             throw new Error("ScenarioEvaluatorAgent: relatório inválido (sem per_persona/overall)");
