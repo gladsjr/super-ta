@@ -1,0 +1,25 @@
+Preciso medir a taxa de cache hit real do modelo entrevistador (a família gpt-5.x-terra/reasoning) nas entrevistas reais de alunos, direto do banco de produção. Isso é para calibrar um parâmetro de custo — quero saber, no uso real (com a demora natural do aluno entre turnos), quanto do input do orquestrador vem cacheado.
+▎
+▎ Rode esta query no banco de produção (usa só a tabela work_cost_events + works, nada de esquema novo):
+▎
+▎ SELECT
+▎   e.model,
+▎   count(*)                                                         AS eventos,
+▎   sum(e.input_tokens)                                              AS input_tokens,
+▎   sum(e.cached_tokens)                                             AS cached_tokens,
+▎   round(100.0 * sum(e.cached_tokens) / nullif(sum(e.input_tokens),0), 1) AS cache_pct,
+▎   sum(e.output_tokens)                                             AS output_tokens,
+▎   round(sum(e.cost_usd)::numeric, 4)                              AS cost_usd,
+▎   count(distinct e.work_id)                                        AS works
+▎ FROM work_cost_events e
+▎ JOIN works w ON w.id = e.work_id
+▎ WHERE e.event_type = 'responses'
+▎   AND w.kind IN ('interview','oral_realtime')     -- só entrevistas/provas reais
+▎ GROUP BY e.model
+▎ ORDER BY sum(e.input_tokens) DESC;
+▎
+▎ Me devolva a tabela inteira. Quero, em especial, a linha do modelo do entrevistador (o de raciocínio principal): o cache_pct e os totais de input/cached/output tokens.
+▎
+▎ Se der pouca linha (uso recente baixo), rode sem recorte de tempo (é o padrão da query acima — pega tudo). Se quiser recortar, adicione AND e.created_at > now() - interval '90 days'.
+▎
+▎ Contexto: work_cost_events é o ledger que o lib/billing.js grava a cada chamada (cached_tokens vem de usage.input_tokens_details.cached_tokens). works.kind='interview' são as entrevistas por mensagem/áudio; 'oral_realtime' é a prova oral. O harness antigo de comparação de modelos (lib/bench) grava noutra tabela (benchmark_call_ledger), então não entra aqui.
