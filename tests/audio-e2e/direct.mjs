@@ -28,7 +28,10 @@ import { PERSONAS, nextAnswer, speak } from "./student.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
-    const a = { base: "http://127.0.0.1:5000", work: null, pdf: null, workText: null, persona: "dominante_generico", maxTurns: 30 };
+    // --pace <seg>: atraso ANTES de cada resposta do aluno, simulando o tempo que
+    // um aluno real leva para pensar/responder. Testa o efeito do TTL do cache de
+    // prompt da OpenAI (turnos espaçados podem perder cache → custo maior).
+    const a = { base: "http://127.0.0.1:5000", work: null, pdf: null, workText: null, persona: "dominante_generico", maxTurns: 30, paceSec: 0 };
     for (let i = 0; i < argv.length; i++) {
         const v = argv[i];
         if (v === "--base") a.base = argv[++i];
@@ -37,6 +40,7 @@ function parseArgs(argv) {
         else if (v === "--work-text") a.workText = argv[++i];
         else if (v === "--persona") a.persona = argv[++i];
         else if (v === "--max-turns") a.maxTurns = Number(argv[++i]);
+        else if (v === "--pace") a.paceSec = Number(argv[++i]);
     }
     return a;
 }
@@ -107,6 +111,10 @@ async function main() {
         history.push({ role: "interviewer", text: assistant });
         log(`\n── ENTREVISTADOR (turno ${turn}, fase=${phase || "?"}) ──\n${String(assistant).slice(0, 240)}`);
         if (finalized) { log("\n[fim] entrevista finalizada."); break; }
+
+        // Pace: espera antes de responder, simulando o tempo do aluno real. Testa o
+        // TTL do cache (turnos espaçados podem perder cache → custo maior).
+        if (A.paceSec > 0) await new Promise(r => setTimeout(r, A.paceSec * 1000));
 
         // Aluno simulado (chave de PRODUÇÃO): texto → áudio mp3.
         const replyText = await nextAnswer({ persona, history, question: assistant, workText });

@@ -151,6 +151,19 @@ function runHarness({ workToken, base, studentPdf, workTextFile, persona, headed
     return { status: res.status, stdout: "", stderr: "" };
 }
 
+// Latência de resposta média (ms) = tempo do fim da fala do aluno até o 1º áudio do
+// entrevistador, por turno: stt + raciocínio-até-1º-token + 1º-token-até-tts + tts-1º.
+// Lida da telemetria server_timings gravada no conversation_json (server-side).
+async function avgResponseLatencyMs(workId) {
+    try {
+        const r = await pool.query("SELECT conversation_json FROM submissions WHERE work_id=$1 ORDER BY id DESC LIMIT 1", [workId]);
+        const cj = JSON.parse(r.rows[0]?.conversation_json || "{}");
+        const st = Array.isArray(cj.server_timings) ? cj.server_timings : [];
+        const vals = st.map(t => (t.stt_ms || 0) + (t.think_to_first_token_ms || 0) + (t.first_token_to_tts_ms || 0) + (t.tts_first_ms || 0)).filter(x => x > 0);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    } catch { return null; }
+}
+
 async function main() {
     const A = parseArgs(process.argv.slice(2));
     if (!A.items) throw new Error("--items obrigatório (ex.: --items 01:bom)");
@@ -191,14 +204,21 @@ async function main() {
         if (r.status !== 0) console.log(`stderr(tail): ${r.stderr.slice(-500)}`);
 
         const bal = await db.getWorkByToken(work.work_token);
-        console.log(`spent_usd(local calc)=$${Number(bal.spent_usd).toFixed(4)}`);
-        summary.push({ nn, level, work: work.work_token, status: r.status, secs, spent: Number(bal.spent_usd) });
+        const latMs = await avgResponseLatencyMs(work.id);
+        console.log(`spent_usd(local calc)=$${Number(bal.spent_usd).toFixed(4)} | latência média=${latMs ? Math.round(latMs) + "ms" : "-"}`);
+        summary.push({ nn, level, persona: personaLabel, work: work.work_token, status: r.status, secs, spent: Number(bal.spent_usd), latMs });
     }
 
     console.log(`\n=== Resumo do run ${runId} ===`);
     let total = 0;
-    for (const s of summary) { total += s.spent || 0; console.log(`  ${s.nn}:${s.level} work=${s.work} status=${s.status}${s.secs ? ` ${s.secs}s` : ""}${s.spent != null ? ` $${s.spent.toFixed(4)}` : ""}`); }
-    console.log(`  TOTAL calculado (local): $${total.toFixed(4)}`);
+    const lats = [];
+    for (const s of summary) {
+        total += s.spent || 0;
+        if (s.latMs) lats.push(s.latMs);
+        console.log(`  ${s.nn}:${s.level} [${s.persona || "?"}] work=${s.work} status=${s.status}${s.secs ? ` ${s.secs}s` : ""}${s.spent != null ? ` $${s.spent.toFixed(4)}` : ""}${s.latMs ? ` lat=${Math.round(s.latMs)}ms` : ""}`);
+    }
+    const avgLat = lats.length ? Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) : null;
+    console.log(`  TOTAL custo (local): $${total.toFixed(4)} | latência média do lote: ${avgLat ? avgLat + "ms" : "-"}`);
     console.log(`\nReconciliar depois: POST /api/cost-audit/run { "benchmark_run_id": "${runId}" }  (ou a página /cost-audit)`);
     await pool.end();
 }
