@@ -37,6 +37,8 @@ const studentScenario = (s) => ({
         return {
             id: it.id, title: it.title, kind: it.kind, includes_student_work: !!it.includes_student_work,
             time_limit_min: it.time_limit_min || null, instruction: it.instruction || "",
+            lock_previous: !!it.lock_previous,   // ao ENTRAR nesta etapa, tranca o retorno às anteriores
+
             opener_persona_id: it.opener_persona_id || (it.participants || [])[0]?.persona_id || null,   // p/ a UI mostrar quem abre durante o preparo (#49)
             header_meta,
             // Artefato (PDF) da etapa: só o nome vai ao aluno (o link é uma rota; os ids
@@ -87,16 +89,57 @@ function currentHeader(transcript) {
     for (let i = (transcript || []).length - 1; i >= 0; i--) if (transcript[i].kind === "interaction") return transcript[i];
     return null;
 }
+// Cabeçalho da etapa idx (o (idx+1)-ésimo kind:"interaction" do transcript).
+function headerOf(transcript, idx) {
+    let n = -1;
+    for (const e of transcript || []) if (e.kind === "interaction") { n++; if (n === idx) return e; }
+    return null;
+}
+// Insere entradas no FIM do segmento da etapa idx (antes do cabeçalho da etapa
+// idx+1). Para a etapa corrente (última) equivale a push no fim do transcript.
+// Necessário pelo RETORNO às conversas anteriores: a fala nova precisa ficar
+// dentro do segmento certo (a UI e o motor segmentam por cabeçalho).
+function insertAtSegmentEnd(transcript, idx, entries) {
+    let n = -1, pos = transcript.length;
+    for (let i = 0; i < transcript.length; i++) {
+        if (transcript[i].kind === "interaction") { n++; if (n === idx + 1) { pos = i; break; } }
+    }
+    transcript.splice(pos, 0, ...entries);
+}
+// RETORNO às conversas anteriores: piso retornável. Uma interação com
+// lock_previous, uma vez ENTRADA, tranca (definitivamente) todas as anteriores.
+function returnFloor(scenario, run) {
+    const entered = Math.min(run.interaction_index ?? 0, (scenario.interactions || []).length - 1);
+    let floor = 0;
+    for (let j = 0; j <= entered; j++) if (scenario.interactions[j]?.lock_previous) floor = j;
+    return floor;
+}
+// RELÓGIO POR ETAPA: só a etapa da conversa ATIVA tem o relógio andando. Um turno
+// na etapa idx congela as demais (left_at) e descongela a alvo, creditando o tempo
+// congelado como pausa. timeStateOf lê left_at como "agora" quando congelada.
+function activateStage(run, idx) {
+    const now = Date.now();
+    let n = -1;
+    for (const e of run.transcript || []) {
+        if (e.kind !== "interaction") continue;
+        n++;
+        if (!e.started_at) continue;
+        if (n === idx) {
+            if (e.left_at) { e.paused_ms = (e.paused_ms || 0) + Math.max(0, now - Date.parse(e.left_at)); delete e.left_at; }
+        } else if (!e.left_at) e.left_at = new Date(now).toISOString();
+    }
+}
 // A pausa manual marca `await_reveal_at` no cabeçalho quando a resposta fica
 // pronta; o /reveal o consome creditando o tempo. Se o aluno NÃO usou a pausa
 // (fluxo normal) ou recarregou a página, o marcador fica órfão. Como o hold não
 // sobrevive a reload nem a um novo turno/avanço, limpamos o resíduo nesses pontos
-// (nunca durante um hold ativo — aí nenhum destes endpoints é chamado). Devolve
-// true se removeu algo, p/ o chamador decidir persistir.
+// (nunca durante um hold ativo — aí nenhum destes endpoints é chamado). Varre
+// TODOS os cabeçalhos (com o retorno, o marcador pode estar numa etapa anterior).
+// Devolve true se removeu algo, p/ o chamador decidir persistir.
 function clearStaleReveal(run) {
-    const h = currentHeader(run?.transcript);
-    if (h && h.await_reveal_at) { delete h.await_reveal_at; return true; }
-    return false;
+    let removed = false;
+    for (const e of run?.transcript || []) if (e.kind === "interaction" && e.await_reveal_at) { delete e.await_reveal_at; removed = true; }
+    return removed;
 }
 // Carimba o início do relógio da etapa no cabeçalho corrente quando a abertura é
 // empurrada (1×). O relógio é wall-clock e desconta `paused_ms` (latência das personas).
@@ -109,7 +152,9 @@ function stampStart(run) {
 function timeStateOf(it, header) {
     const limitMs = (it && typeof it.time_limit_min === "number" && it.time_limit_min > 0) ? it.time_limit_min * 60000 : 0;
     if (!limitMs || !header?.started_at) return null;
-    const elapsed = Date.now() - Date.parse(header.started_at) - (header.paused_ms || 0);
+    // Etapa CONGELADA (o aluno saiu dela — left_at): o relógio para em left_at.
+    const nowRef = header.left_at ? Date.parse(header.left_at) : Date.now();
+    const elapsed = nowRef - Date.parse(header.started_at) - (header.paused_ms || 0);
     const remaining = limitMs - elapsed;
     const phase = remaining <= 0 ? "over" : (remaining <= 120000 ? "closing" : "normal");
     return { remaining_sec: Math.max(0, Math.round(remaining / 1000)), phase };
@@ -185,23 +230,33 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     if (!text) return bad(res, "mensagem vazia");
     const run = await store.getRunBySubmission(req.submission.id);
     if (!run) return res.status(404).json({ error: "execução não encontrada" });
+    if (run.done) return bad(res, "o cenário já foi concluído");
     const scenario = await store.getScenarioByWork(req.work.id);
     if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
-    const it = scenario.interactions[run.interaction_index];
+    // RETORNO às conversas anteriores: o turno pode mirar uma etapa JÁ percorrida
+    // (interaction_index no body), limitada pelo piso (lock_previous) e pelo tempo
+    // restante daquela etapa. Sem o campo, é a etapa corrente (fluxo normal).
+    const curIdx = run.interaction_index ?? 0;
+    const reqIdx = Number.isInteger(req.body?.interaction_index) ? req.body.interaction_index : curIdx;
+    if (reqIdx > curIdx) return bad(res, "esta etapa ainda não foi aberta");
+    if (reqIdx < curIdx && reqIdx < returnFloor(scenario, run)) return bad(res, "o retorno a esta conversa foi trancado por uma etapa posterior");
+    const it = scenario.interactions[reqIdx];
     if (!it || it.kind !== "student") return bad(res, "esta etapa não aceita resposta — avance");
     if (it.includes_student_work && !workVsId(run, it)) return bad(res, "anexe o seu trabalho desta etapa antes de responder");
     if (it.artifact?.file_id && !run.artifact_acks?.[it.id]) return bad(res, "leia o material desta etapa antes de responder");
     clearStaleReveal(run);   // novo turno consome a resposta anterior; persistido no saveRun deste turno
     const byId = personasById(scenario);
     const { agent, live } = await liveDeps(wantsFast(req));
-    const header = currentHeader(run.transcript);
-    const ts = timeStateOf(it, header);
+    const header = headerOf(run.transcript, reqIdx);
+    const ts = timeStateOf(it, header);   // congelada: lê left_at (o tempo fora da etapa não conta)
 
     // TEMPO ESGOTADO (wall-clock): a persona já se despediu — não chama o LLM.
     // Registra a fala tardia + um balão de DICA dizendo que a persona não responde.
     if (ts && ts.phase === "over") {
-        run.transcript.push({ speaker: "student", kind: "student", text });
-        run.transcript.push({ speaker: "system", kind: "hint", title: "⏰ Tempo esgotado", text: `O tempo desta etapa terminou — a persona não responde mais. Avance para a próxima etapa.` });
+        insertAtSegmentEnd(run.transcript, reqIdx, [
+            { speaker: "student", kind: "student", text },
+            { speaker: "system", kind: "hint", title: "⏰ Tempo esgotado", text: `O tempo desta etapa terminou — a persona não responde mais aqui.` },
+        ]);
         await store.saveRun(run);
         if (req.query.stream === "1") {
             res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
@@ -211,9 +266,13 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
         return res.json({ run: runView(run), action: { kind: "timeout" } });
     }
 
-    run.transcript.push({ speaker: "student", kind: "student", text });
+    activateStage(run, reqIdx);   // o relógio da etapa alvo volta a andar; as demais congelam
+    insertAtSegmentEnd(run.transcript, reqIdx, [{ speaker: "student", kind: "student", text }]);
     const timeState = ts && ts.phase !== "over" ? ts : null;   // só normal/closing vão ao LLM
-    const ctx = { scenario, interaction: it, personasById: byId, idx: run.interaction_index, total: scenario.interactions.length, transcript: run.transcript, memory: run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it), artifactVectorStoreId: it.artifact?.vector_store_id || null, privateArtifactVectorStoreIds: (it.private_info || []).map(pi => pi.artifact?.vector_store_id).filter(Boolean), timeState };
+    // Turno de RETORNO (reqIdx < curIdx): a memória viva (run.memory) é da etapa
+    // corrente — não serve; a persona reconstrói o contexto pelo próprio segmento.
+    const isReturn = reqIdx < curIdx;
+    const ctx = { scenario, interaction: it, personasById: byId, idx: reqIdx, total: scenario.interactions.length, transcript: run.transcript, memory: isReturn ? null : run.memory, interactionMode: req.work.interaction_mode || "text", meterCtx: { workId: req.work.id }, vectorStoreId: scenario.pdf?.vector_store_id || null, studentWorkVectorStoreId: workVsId(run, it), artifactVectorStoreId: it.artifact?.vector_store_id || null, privateArtifactVectorStoreIds: (it.private_info || []).map(pi => pi.artifact?.vector_store_id).filter(Boolean), timeState };
     // PAUSA do relógio: o tempo de processamento da persona (entre o aluno enviar e
     // receber) não conta no tempo dele — acumula em paused_ms do cabeçalho da etapa.
     const pause = (ms) => { if (header && ts) header.paused_ms = (header.paused_ms || 0) + ms; };
@@ -228,8 +287,8 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
         try {
             const r = await live.respondLive(agent, { ...ctx, onFirstDelta: () => send("responding"), onSpeaker: (id) => send("speaker", { persona_id: id }), onMessageDelta: (d) => send("message_delta", { delta: d }), onMessageReady: (msg) => send("message", { text: msg }) });
             pause(Date.now() - t0);
-            run.memory = r.memory ?? run.memory;
-            run.transcript.push(...r.entries);
+            if (!isReturn) run.memory = r.memory ?? run.memory;
+            insertAtSegmentEnd(run.transcript, reqIdx, r.entries);
             if (header) header.await_reveal_at = new Date().toISOString();   // marca "resposta pronta" p/ a pausa manual (/reveal credita o tempo)
             await store.saveRun(run);
             send("done", { run: runView(run), action: r.action || null });
@@ -241,8 +300,8 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
     try {
         const r = await live.respondLive(agent, ctx);
         pause(Date.now() - t0);
-        run.memory = r.memory ?? run.memory;
-        run.transcript.push(...r.entries);
+        if (!isReturn) run.memory = r.memory ?? run.memory;
+        insertAtSegmentEnd(run.transcript, reqIdx, r.entries);
         if (header) header.await_reveal_at = new Date().toISOString();
         await store.saveRun(run);
         res.json({ run: runView(run), action: r.action || null });
@@ -255,12 +314,15 @@ router.post("/s/:submissionToken/scenario/turn", requireSubmissionToken, json, a
 router.post("/s/:submissionToken/scenario/reveal", requireSubmissionToken, async (req, res) => {
     const run = await store.getRunBySubmission(req.submission.id);
     if (!run) return res.status(404).json({ error: "execução não encontrada" });
-    const h = currentHeader(run.transcript);
-    if (h && h.await_reveal_at) {
+    // Com o RETORNO, a resposta segurada pode estar numa etapa anterior — varre todas.
+    let credited = false;
+    for (const h of run.transcript || []) {
+        if (h.kind !== "interaction" || !h.await_reveal_at) continue;
         h.paused_ms = (h.paused_ms || 0) + Math.max(0, Date.now() - Date.parse(h.await_reveal_at));
         delete h.await_reveal_at;
-        await store.saveRun(run);
+        credited = true;
     }
+    if (credited) await store.saveRun(run);
     res.json({ run: runView(run) });
 });
 
@@ -271,6 +333,10 @@ router.post("/s/:submissionToken/scenario/advance", requireSubmissionToken, asyn
     const scenario = await store.getScenarioByWork(req.work.id);
     if (!scenario) return res.status(404).json({ error: "cenário não encontrado" });
     clearStaleReveal(run);   // avançar consome a resposta da etapa anterior
+    // Congela o relógio da etapa que está sendo deixada (o retorno, se permitido,
+    // retoma de onde parou — o tempo fora da conversa não conta).
+    const leaving = headerOf(run.transcript, run.interaction_index ?? 0);
+    if (leaving?.started_at && !leaving.left_at) leaving.left_at = new Date().toISOString();
     const total = scenario.interactions.length;
     const next = (run.interaction_index ?? 0) + 1;
     if (next >= total) {
@@ -363,7 +429,7 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work-generate", requ
         const { generateWorkText, textToPdfBuffer } = await import("../lib/scenarios/testWorkGen.js");
         const { openai } = await import("../lib/openaiClient.js");
         const { createVectorStoreWithFiles } = await import("../lib/sessionLifecycle.js");
-        const text = await generateWorkText({ scenario, interaction: it, enunciadoFileId: scenario.pdf?.file_id || null, meterCtx: { workId: req.work.id } });
+        const text = await generateWorkText({ scenario, interaction: it, transcript: run.transcript, enunciadoFileId: scenario.pdf?.file_id || null, meterCtx: { workId: req.work.id } });
         if (!text) return bad(res, "não consegui gerar o trabalho — tente de novo");
         const pdf = await textToPdfBuffer(`Trabalho (teste) — ${it.title || ""}`, text);
         const name = `trabalho-teste-${it.id}.pdf`;
@@ -375,7 +441,9 @@ router.post("/s/:submissionToken/scenario/interactions/:iid/work-generate", requ
         const storageKey = `student-work/${run.id}/${it.id}.pdf`;
         await putAudio({ key: storageKey, buffer: pdf, mimetype: "application/pdf" });
         run.student_work = run.student_work || {};
-        run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, storage_key: storageKey, uploaded_at: new Date().toISOString(), generated: true };
+        // `text` fica no run p/ o SIMULADOR DE ALUNO falar coerente com o próprio
+        // trabalho (ex.: recomendar o MESMO fornecedor). Não vai ao cliente (runView).
+        run.student_work[it.id] = { filename: name, file_id: uploaded.id, vector_store_id: vsId, storage_key: storageKey, uploaded_at: new Date().toISOString(), generated: true, text };
         // Igual ao upload: se é a etapa corrente e a abertura ainda não rodou, o prep
         // lê o contexto (com o trabalho gerado) e a persona abre já informada.
         const curIt = scenario.interactions[run.interaction_index];
@@ -465,11 +533,14 @@ router.post("/s/:submissionToken/scenario/simulate-student", requireSubmissionTo
         const profile = STUDENT_PROFILES[str(req.body?.profile)] ? str(req.body.profile) : null;
         const behavior = profile ? STUDENT_PROFILES[profile].system : "Responda como alguém que domina razoavelmente o assunto, mas pode ter lacunas — nem perfeito, nem evasivo.";
         const sys = `Você é a OUTRA PONTA de uma cena de role-play: o protagonista (estudante) que apresenta/sustenta o próprio trabalho ou conduz a conversa, conforme a dinâmica. ${behavior} Responda à última fala da persona em 1 a 3 frases, em primeira pessoa, sem markdown. Não quebre o personagem nem comente que é um teste.`;
+        // Trabalho entregue nesta etapa (gerado no modo teste guarda o texto):
+        // o simulador PRECISA falar coerente com ele — é o trabalho "dele".
+        const workText = str(run.student_work?.[it.id]?.text);
         const usr = `CENÁRIO: ${scenario.name} — ${scenario.description}
 ESTA ETAPA: ${it.title}
 DINÂMICA: ${formDynamics(normalizeForm(it))}
 INSTRUÇÃO AO ALUNO: ${it.instruction || "(livre)"}
-
+${workText ? `\nSEU TRABALHO ENTREGUE NESTA ETAPA (foi VOCÊ que escreveu — sua fala DEVE ser coerente com ele: mesma recomendação, mesmos argumentos e números):\n${workText.slice(0, 6000)}\n` : ""}
 HISTÓRICO DA ETAPA:
 ${history || "(início)"}
 

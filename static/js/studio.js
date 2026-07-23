@@ -452,6 +452,7 @@ function interactionCardHtml(it) {
       </div>
       <div class="field"><label>Prompt da dinâmica <span class="hint">obrigatório na forma "Personalizada"; opcional como nuance nas demais</span></label><textarea class="textarea it-form-prompt" rows="2" placeholder="Ex.: você é um jurado de hackathon cético; interrompa se enrolar e exija números">${esc(it.form_prompt||'')}</textarea></div>
       <div class="field it-student-only"><label>Tempo máximo (min) <span class="hint">opcional — mostra cronômetro e a persona conduz pelo tempo; vazio = sem limite</span></label><input class="input it-time-limit" type="number" min="1" step="1" style="max-width:140px" value="${it.time_limit_min||''}" placeholder="sem limite"/></div>
+      <div class="field"><label class="hint" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="it-lock-prev" ${it.lock_previous?'checked':''}/> 🔒 ao entrar nesta etapa, trancar o retorno às conversas anteriores</label><span class="hint" style="display:block;margin-top:2px">sem a marca, o aluno pode voltar às conversas já percorridas (dentro do tempo restante de cada uma); com ela, a partir desta etapa as anteriores ficam somente leitura — típico da etapa final</span></div>
       <div class="field"><label>Participantes <span class="hint it-student-only">personas do cenário + papéis</span><span class="hint it-exchange-only">exatamente 2 personas que conversam</span></label>
         <div class="it-parts">${(it.participants||[]).map(p=>partRowHtml(p, pkind)).join('') || partRowHtml(null, pkind)}</div>
         <button class="btn btn-sm it-add-part" type="button">+ participante</button></div>
@@ -507,6 +508,7 @@ function harvestInteractions() {
     instruction: card.querySelector('.it-instruction').value.trim(),
     example_questions: card.querySelector('.it-questions').value.split('\n').map(x=>x.trim()).filter(Boolean),
     time_limit_min: (() => { const n = parseInt((card.querySelector('.it-time-limit')?.value||'').trim(), 10); return (n && n > 0) ? n : null; })(),
+    lock_previous: !!card.querySelector('.it-lock-prev')?.checked,
     private_info: [...card.querySelectorAll('.it-private .pi-row')].map(r=>{ const pid=r.dataset.piId||undefined; return { id:pid, text:r.querySelector('.pi-text').value.trim(), persona_ids:[...r.querySelectorAll('.pi-persona:checked')].map(c=>c.value), artifact:(card.dataset.id&&pid&&piArtById[`${card.dataset.id}:${pid}`])||null }; }).filter(x=>x.text || x.artifact),
   }))
   // Descarta o card-placeholder em branco (renderInteracoesPane sempre mostra ao

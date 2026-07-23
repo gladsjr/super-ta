@@ -9,7 +9,6 @@ import { renderPersonaAgenda, renderInteractionBriefing } from "../lib/scenarios
 import { validateScenarioTurn, validatePersonaExchange } from "../lib/scenarios/scenarioActionSchema.js";
 import {
     interactionStartLive, respondLive, buildRunMemory, studentTurnsInCurrent,
-    MAX_STUDENT_TURNS_PER_INTERACTION,
 } from "../lib/scenarios/liveEngine.js";
 import { interactionStart as mockStart, respond as mockRespond, interactionHeader, scenarioFrame } from "../lib/scenarios/mockEngine.js";
 import { resolveSpeaker } from "../agents/ScenarioOrchestratorAgent.js";
@@ -117,15 +116,28 @@ section("guardrail: falante inválido cai no 1º participante");
 const rBad = await respondLive(badSpeakerStub, { scenario, interaction: iArguicao, personasById, idx: 1, total: 4, transcript: tr });
 ok(rBad.entries[0].name === "Marcos", "fallback do falante para o 1º participante");
 
-section("guardrail: teto de turnos força advance");
-const capped = [interactionHeader(iArguicao, personasById, 1, 4)];
-for (let i = 0; i < MAX_STUDENT_TURNS_PER_INTERACTION; i++) capped.push({ speaker: "student", kind: "student", text: `t${i}` });
-ok(studentTurnsInCurrent(capped) === MAX_STUDENT_TURNS_PER_INTERACTION, "contagem de turnos do aluno");
+section("retorno a conversa anterior: responde pelo segmento da etapa idx");
+let seenMsg = null;
+const capMsgStub = { ...stub, studentTurn: async (args) => { seenMsg = args.studentMessage; return stub.studentTurn(args); } };
+const trRet = [
+    scenarioFrame(scenario),
+    interactionHeader(iAbertura, personasById, 0, 4), { speaker: "student", kind: "student", text: "pergunta antiga" },
+    interactionHeader(iArguicao, personasById, 1, 4), { speaker: "student", kind: "student", text: "pergunta atual" },
+];
+await respondLive(capMsgStub, { scenario, interaction: iAbertura, personasById, idx: 0, total: 4, transcript: trRet });
+ok(seenMsg === "pergunta antiga", "turno de retorno (idx=0) usa a fala do segmento da etapa 0, não da última");
+await respondLive(capMsgStub, { scenario, interaction: iArguicao, personasById, idx: 1, total: 4, transcript: trRet });
+ok(seenMsg === "pergunta atual", "turno da etapa corrente segue usando o último segmento");
+
+section("sem teto de turnos: muitos turnos ainda chamam o agente");
+const many = [interactionHeader(iArguicao, personasById, 1, 4)];
+for (let i = 0; i < 30; i++) many.push({ speaker: "student", kind: "student", text: `t${i}` });
+ok(studentTurnsInCurrent(many) === 30, "contagem de turnos do aluno");
 let agentCalled = false;
-const spyStub = { ...stub, studentTurn: async () => { agentCalled = true; return stub.studentTurn({ interaction: iArguicao }); } };
-const rCap = await respondLive(spyStub, { scenario, interaction: iArguicao, personasById, idx: 1, total: 4, transcript: capped });
-ok(rCap.action.kind === "advance" && rCap.capped === true, "teto força advance");
-ok(agentCalled === false, "no teto, nem chama o agente (economia)");
+const spyStub = { ...stub, studentTurn: async (args) => { agentCalled = true; return stub.studentTurn(args); } };
+const rMany = await respondLive(spyStub, { scenario, interaction: iArguicao, personasById, idx: 1, total: 4, transcript: many });
+ok(agentCalled === true, "sem teto: o agente é chamado mesmo com 30 turnos (a trava é o tempo da etapa)");
+ok(rMany.entries.length === 1 && rMany.entries[0].kind === "persona", "persona responde normalmente");
 
 section("buildRunMemory (determinístico)");
 const trMem = [
