@@ -19,7 +19,7 @@
   function rowHtml(r) {
     const pub = (r.evaluation_published_at ? '📣' : '') + (r.grade_published_at ? '🏷️' : '');
     return `<tr>
-      <td>${esc(r.student_label || '—')}${r.is_test ? ' <span class="chip">teste</span>' : ''}</td>
+      <td>${esc(r.student_label || '—')}${r.is_test ? ' <span class="badge badge-accent" title="submissão de TESTE do professor — não é um aluno real">⚙ teste</span>' : ''}</td>
       <td><span class="badge badge-${r.status}">${STATUS_LABEL[r.status] || r.status}</span>${(r.status !== 'pending' && !r.student_turns) ? ' <span class="hint" title="sem nenhuma mensagem do aluno — não há conversa para avaliar">sem conversa</span>' : ''}</td>
       <td style="text-align:center">${yn(r.has_evaluation)}</td>
       <td style="text-align:center">${yn(r.has_devolutiva)}</td>

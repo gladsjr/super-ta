@@ -206,6 +206,7 @@ function cleanInteraction(it, i) {
         instruction: str(it.instruction),
         example_questions: lines(it.example_questions),
         time_limit_min: (typeof it.time_limit_min === "number" && it.time_limit_min > 0) ? Math.round(it.time_limit_min) : null,
+        lock_previous: !!it.lock_previous,   // ao entrar nesta etapa, tranca o retorno às anteriores
         private_info: privateInfo,
         artifact: cleanArtifact(it.artifact),
     };

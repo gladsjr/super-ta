@@ -927,7 +927,14 @@ details.penalty-inline > .penalty-inline-body { margin-top: var(--sp-2); }
 :root[data-theme="dark"] .cockpit-nav,
 :root[data-theme="dark"] .create-panel,
 :root[data-theme="dark"] .drawer,
-:root[data-theme="dark"] .help-pop {
+:root[data-theme="dark"] .help-pop,
+/* ilhas da página do cenário (scenario-student.html) */
+:root[data-theme="dark"] .transcript,
+:root[data-theme="dark"] .rules-panel,
+:root[data-theme="dark"] .task-note,
+:root[data-theme="dark"] .final-panel,
+:root[data-theme="dark"] .rn-tab,
+:root[data-theme="dark"] .it-timer {
   --ink-900: #181f39; --ink-700: #2c3e55; --ink-600: #3f5570; --ink-500: #5a6b80;
   --ink-400: #7a8a9c; --ink-300: #a3aebc; --ink-200: #ced6de; --ink-100: #e4e9ee; --ink-50: #f3f5f8;
   --teal-700: #2a7382;

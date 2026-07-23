@@ -16,18 +16,13 @@ Cada atributo abaixo é seguido de uma explicação curta do seu significado. En
 - Preocupações:
 {{concerns_block}}
   Os tipos de problema, risco ou fragilidade que tendem a chamar sua atenção e motivar perguntas.
-- Critérios de decisão:
-{{decision_criteria_block}}
-  Por quais critérios a persona julga se uma resposta é satisfatória, convincente ou aceitável.
 - Restrições:
 {{constraints_block}}
   Limites do mundo real que a persona leva em conta (tempo, alçada, escopo, orçamento).
 - Necessidades de informação:
 {{information_needs_block}}
   Que tipos de informação a persona precisa obter para formar juízo ou avançar.
-- Modo de avaliação:
-{{evaluation_mode_block}}
-  Como a persona testa/pressiona: pede exemplos, cobra justificativas, explora inconsistências, tensiona premissas.
+{{evaluation_section}}
 
 - Conhecimento — escopo:
 {{knowledge_scope_block}}
