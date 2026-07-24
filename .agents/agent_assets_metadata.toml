@@ -83,3 +83,9 @@ id = "pY7m3VmjxkkXjeKZQPHNj"
 uri = "file://tmp/ORATIA_Documentacao_Arquitetural.docx"
 type = "word_document"
 title = "ORATIA – Documentação Arquitetural (docx)"
+
+[[outputs]]
+id = "hdNzzHdULeWH5JFoHgWlx"
+uri = "file://docs/diagnostico-cache-terra-jul2026.md"
+type = "text"
+title = "Diagnóstico completo dos cache misses no terra (jul/2026)"
