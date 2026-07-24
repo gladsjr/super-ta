@@ -2,6 +2,40 @@ web_access: false
 max_turns: 12
 challenge_task: true
 
+# Cache de prompt (modelos 5.6+). Contexto: diagnóstico jul/2026 — misses
+# anômalos (cached=0 com prefixo estável) crescem com o gap entre turnos
+# (3% a 20-40s → 47% a 2,5min → 35% em produção com aluno real). Causa
+# aparente: lookup/roteamento do lado da OpenAI na forma real da requisição
+# (conversation + file_search); bug report preparado. Vereditos dos A/Bs
+# (pace 150s, mesmos 10 itens): original $1,05/47% miss; breakpoints
+# $1,01/73% (REPROVADO); dedup $0,71/31% (VENCEDOR, qualidade validada por
+# 2 juízes cegos); dedup+keepalive $0,85/37% (REPROVADO).
+prompt_cache:
+  # Breakpoint explícito no input do turno + ttl 30m. REPROVADO no A/B
+  # (miss PIOROU 47%→73%). Mantido como infra de teste; não ligar em prod.
+  # Só surte efeito em modelos 5.6+ (anteriores rejeitam o parâmetro).
+  explicit_breakpoints: false
+  # Dedup dos blocos ESTÁVEIS do orquestrador (agenda + análise + plano): quando
+  # ligado, eles vão nas `instructions` (por-requisição, NUNCA armazenadas na
+  # Conversation) em vez do input de cada turno. Sem isso, com o parâmetro
+  # `conversation`, o input de cada turno (com os ~7,7k tokens estáveis) é
+  # apensado ao histórico — no turno 10, ~70k dos ~100k de input são CÓPIAS
+  # redundantes. Com dedup: input por turno ~1k, histórico cresce só com o
+  # diálogo + file_search; pico ~30-40k; compactação vira só válvula.
+  # ADOTADO (24/jul/2026): A/B no harness de benchmark = −32% de custo
+  # ($0,71 vs $1,05/entrevista no regime realista) E qualidade preservada/
+  # melhor em avaliação CEGA por 2 juízes independentes (Claude: dedup 3-1-1;
+  # ChatGPT Sol Pro: dedup 4-0-1, notas 4,8 vs 4,2). Desligar = reverter aqui.
+  static_blocks_in_instructions: true
+  # Keep-alive do cache entre turnos (0 = desligado): pinga a cada N segundos
+  # repetindo as instructions da última chamada (sem `conversation`; cap 8
+  # pings/gap). REPROVADO no A/B: os pings acertavam o próprio cache a 92%
+  # mas NÃO reduziram o miss dos turnos reais (37% vs 31%) — a entrada estava
+  # comprovadamente quente e a requisição real (com conversation+file_search)
+  # ainda deu cached=0: evidência-chave do bug report à OpenAI. Mantido como
+  # infra de teste; não ligar em prod. Ver lib/cacheKeepalive.js.
+  keepalive_seconds: 0
+
 # Model configuration
 models:
   # RECOMENDADO (exp/terra-teto-duro-followup): gpt-5.6-terra é melhor entrevistador

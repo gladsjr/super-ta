@@ -70,7 +70,8 @@ function templateForEnunciado(enunciadoPath) {
 function parseArgs(argv) {
     // template null = lê a persona do enunciado; --template força um p/ todos.
     // driver: "direct" (sem browser, rápido) ou "browser" (Playwright, tempo real).
-    const a = { items: null, runId: null, template: null, voice: "coral", questions: 5, budget: 20, base: "http://127.0.0.1:5000", driver: "direct", headed: false, dryRun: false };
+    // paceSec: atraso entre turnos do driver direct (simula a demora do aluno real).
+    const a = { items: null, runId: null, template: null, voice: "coral", questions: 5, budget: 20, base: "http://127.0.0.1:5000", driver: "direct", paceSec: 0, headed: false, dryRun: false };
     for (let i = 0; i < argv.length; i++) {
         const t = argv[i];
         if (t === "--items") a.items = argv[++i];
@@ -81,6 +82,7 @@ function parseArgs(argv) {
         else if (t === "--budget") a.budget = Number(argv[++i]);
         else if (t === "--base") a.base = argv[++i];
         else if (t === "--driver") a.driver = argv[++i];
+        else if (t === "--pace") a.paceSec = Number(argv[++i]);
         else if (t === "--headed") a.headed = true;
         else if (t === "--dry-run") a.dryRun = true;
     }
@@ -132,7 +134,7 @@ async function configureBenchmarkWork({ nn, level, folder, template, voice, ques
     return work;
 }
 
-function runHarness({ workToken, base, studentPdf, workTextFile, persona, headed, driver }) {
+function runHarness({ workToken, base, studentPdf, workTextFile, persona, headed, driver, paceSec }) {
     // direct = tests/audio-e2e/direct.mjs (sem browser, POST do áudio no /chat, rápido);
     // browser = tests/audio-e2e/run.mjs (Playwright + microfone falso, tempo real).
     const script = driver === "browser" ? "tests/audio-e2e/run.mjs" : "tests/audio-e2e/direct.mjs";
@@ -144,10 +146,13 @@ function runHarness({ workToken, base, studentPdf, workTextFile, persona, headed
         "--work-text", workTextFile,
         "--persona", persona,
     ];
+    if (paceSec > 0 && driver !== "browser") args.push("--pace", String(paceSec));
     if (headed && driver === "browser") args.push("--headed");
     // stdio inherit: a saída do harness (progresso por turno) transmite ao vivo,
     // em vez de ficar em buffer até o fim. Facilita ver onde trava.
-    const res = spawnSync("node", args, { cwd: PROJECT_ROOT, encoding: "utf-8", stdio: ["ignore", "inherit", "inherit"], env: process.env, timeout: 20 * 60 * 1000 });
+    // Timeout dimensionado pelo pace: ~12 turnos × pace + 15 min de folga (mín. 20 min).
+    const timeoutMs = Math.max(20 * 60 * 1000, (12 * (paceSec || 0) + 15 * 60) * 1000);
+    const res = spawnSync("node", args, { cwd: PROJECT_ROOT, encoding: "utf-8", stdio: ["ignore", "inherit", "inherit"], env: process.env, timeout: timeoutMs });
     return { status: res.status, stdout: "", stderr: "" };
 }
 
@@ -195,9 +200,9 @@ async function main() {
         if (A.dryRun) { console.log(`(dry-run: harness não disparado)`); summary.push({ nn, level, work: work.work_token, status: "dry" }); continue; }
 
         const persona = PERSONA_BY_LEVEL[level];
-        console.log(`rodando (${A.driver}, persona=${persona})…`);
+        console.log(`rodando (${A.driver}${A.paceSec ? `, pace=${A.paceSec}s` : ""}, persona=${persona})…`);
         const t0 = Date.now();
-        const r = runHarness({ workToken: work.work_token, base: A.base, studentPdf, workTextFile, persona, headed: A.headed, driver: A.driver });
+        const r = runHarness({ workToken: work.work_token, base: A.base, studentPdf, workTextFile, persona, headed: A.headed, driver: A.driver, paceSec: A.paceSec });
         const secs = Math.round((Date.now() - t0) / 1000);
         const okLine = (r.stdout.match(/\[done\][^\n]*/) || r.stdout.match(/relat[óo]rio[^\n]*/) || [""])[0];
         console.log(`harness saiu status=${r.status} em ${secs}s ${okLine ? "| " + okLine : ""}`);
