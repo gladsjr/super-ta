@@ -1,6 +1,6 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
-import { PROMPT_CACHE_EXPLICIT, PROMPT_STATIC_IN_INSTRUCTIONS } from "../lib/config.js";
+import { PROMPT_CACHE_EXPLICIT, PROMPT_STATIC_IN_INSTRUCTIONS, PROMPT_CACHE_TTL30M } from "../lib/config.js";
 import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { ACTION_SCHEMA_DESCRIPTION, validateAction, extractReadyAction } from "../lib/superOrchestrator/actionSchema.js";
@@ -330,7 +330,8 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
         // todos os alunos do mesmo trabalho (mesma agenda no prefixo estável).
         if (meterCtx?.workId) payload.prompt_cache_key = `iv:${meterCtx.workId}`;
         // ttl 30m = vida MÍNIMA do prefixo cacheado (5.6+; único valor suportado).
-        if (PROMPT_CACHE_EXPLICIT) payload.prompt_cache_options = { ttl: "30m" };
+        // Enviado com os breakpoints OU sozinho (ttl_30m — hipótese eviction/opt-in).
+        if (PROMPT_CACHE_EXPLICIT || PROMPT_CACHE_TTL30M) payload.prompt_cache_options = { ttl: "30m" };
         if (this.reasoningEffort) {
             payload.reasoning = { effort: this.reasoningEffort };
         }

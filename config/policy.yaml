@@ -15,6 +15,13 @@ prompt_cache:
   # (miss PIOROU 47%→73%). Mantido como infra de teste; não ligar em prod.
   # Só surte efeito em modelos 5.6+ (anteriores rejeitam o parâmetro).
   explicit_breakpoints: false
+  # ttl "30m" SOZINHO (sem breakpoints): prompt_cache_options {ttl:"30m"} no
+  # payload do orquestrador. Testava a hipótese eviction/opt-in do diagnóstico
+  # do Replit. REPROVADO no braço E (24/jul): miss 52% vs 31% sem ttl — pedir
+  # a retenção mínima documentada NÃO restaura os hits; a hipótese que resta é
+  # lookup/roteamento na forma real da requisição (bug report à OpenAI).
+  # Mantido como infra de teste; 5.6+ apenas.
+  ttl_30m: false
   # Dedup dos blocos ESTÁVEIS do orquestrador (agenda + análise + plano): quando
   # ligado, eles vão nas `instructions` (por-requisição, NUNCA armazenadas na
   # Conversation) em vez do input de cada turno. Sem isso, com o parâmetro
