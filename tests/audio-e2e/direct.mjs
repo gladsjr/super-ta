@@ -76,6 +76,32 @@ function normalizeChat(payload) {
 
 const log = (...m) => console.log(...m);
 
+// Resiliência a quedas TRANSITÓRIAS de rede (a do benchmark de 24/jul derrubou
+// 6 entrevistas): re-tenta quando o fetch LANÇA (rede caiu) ou o servidor devolve
+// 5xx (ele próprio sem alcançar a OpenAI). 4xx é erro real → não re-tenta.
+// 6 tentativas × 30s ≈ sobrevive a ~3 min de queda.
+async function withRetry(label, fn, { tries = 6, backoffMs = 30000 } = {}) {
+    let lastErr;
+    for (let i = 1; i <= tries; i++) {
+        try {
+            const r = await fn();
+            // Response de fetch: 5xx é transitório (repassa 4xx/ok ao caller).
+            if (r && typeof r.status === "number" && r.status >= 500) {
+                lastErr = new Error(`${label}: HTTP ${r.status} — ${(await r.text()).slice(0, 200)}`);
+            } else {
+                return r;
+            }
+        } catch (err) {
+            lastErr = err;
+        }
+        if (i < tries) {
+            log(`[retry] ${label} falhou (${String(lastErr.message).slice(0, 120)}) — tentativa ${i}/${tries}, aguardando ${backoffMs / 1000}s…`);
+            await new Promise(r => setTimeout(r, backoffMs));
+        }
+    }
+    throw lastErr;
+}
+
 async function main() {
     const A = parseArgs(process.argv.slice(2));
     if (!A.work) throw new Error("--work <token> obrigatório");
@@ -94,13 +120,15 @@ async function main() {
     log(`[direct] work=${A.work} sub=${subToken} pdf=${A.pdf ? path.basename(A.pdf) : "(teste padrão)"} persona=${A.persona}`);
 
     // /start
-    const startRes = await fetch(`${A.base}/s/${subToken}/start`, { method: "POST" });
+    const startRes = await withRetry("start", () => fetch(`${A.base}/s/${subToken}/start`, { method: "POST" }));
     if (!startRes.ok) throw new Error(`start: HTTP ${startRes.status} — ${(await startRes.text()).slice(0, 300)}`);
 
     // /upload (multipart "file") → dispara PrepBuilder e devolve a saudação.
-    const upFd = new FormData();
-    upFd.append("file", new Blob([studentPdf], { type: "application/pdf" }), "trabalho.pdf");
-    const upRes = await fetch(`${A.base}/s/${subToken}/upload`, { method: "POST", body: upFd });
+    const upRes = await withRetry("upload", () => {
+        const upFd = new FormData();
+        upFd.append("file", new Blob([studentPdf], { type: "application/pdf" }), "trabalho.pdf");
+        return fetch(`${A.base}/s/${subToken}/upload`, { method: "POST", body: upFd });
+    });
     if (!upRes.ok) throw new Error(`upload: HTTP ${upRes.status} — ${(await upRes.text()).slice(0, 300)}`);
     let { assistant, phase, finalized } = normalizeChat(await upRes.json());
     log(`[upload ok] saudação: ${String(assistant).slice(0, 90)}…`);
@@ -117,16 +145,20 @@ async function main() {
         if (A.paceSec > 0) await new Promise(r => setTimeout(r, A.paceSec * 1000));
 
         // Aluno simulado (chave de PRODUÇÃO): texto → áudio mp3.
-        const replyText = await nextAnswer({ persona, history, question: assistant, workText });
+        const replyText = await withRetry("aluno.gerar", () => nextAnswer({ persona, history, question: assistant, workText }));
         history.push({ role: "student", text: replyText });
         log(`── ALUNO ──\n${String(replyText).slice(0, 240)}`);
-        const audioB64 = await speak(replyText, persona.voice);
+        const audioB64 = await withRetry("aluno.tts", () => speak(replyText, persona.voice));
         const mp3 = Buffer.from(audioB64, "base64");
 
         // POST do áudio no /chat (campo "audio"). Resposta em SSE (modo áudio).
-        const fd = new FormData();
-        fd.append("audio", new Blob([mp3], { type: "audio/mpeg" }), "student.mp3");
-        const res = await fetch(`${A.base}/s/${subToken}/chat`, { method: "POST", body: fd });
+        // Retry só em falha de rede/5xx; se o servidor tiver processado e a
+        // resposta se perdido, o reenvio vira "aluno repetiu" — aceitável no benchmark.
+        const res = await withRetry(`chat turno ${turn}`, () => {
+            const fd = new FormData();
+            fd.append("audio", new Blob([mp3], { type: "audio/mpeg" }), "student.mp3");
+            return fetch(`${A.base}/s/${subToken}/chat`, { method: "POST", body: fd });
+        });
         const ct = res.headers.get("content-type") || "";
         const bodyText = await res.text();
         if (!res.ok) throw new Error(`chat turno ${turn}: HTTP ${res.status} — ${bodyText.slice(0, 300)}`);

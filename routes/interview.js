@@ -22,6 +22,7 @@ import { transcribeAudio, synthesizeSpeech, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
 import { decideChatDedup, markChatDone, abortChatDedup } from "../lib/chatDedup.js";
+import { scheduleKeepalive, cancelKeepalive } from "../lib/cacheKeepalive.js";
 import { STT_MODEL, TTS_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
@@ -967,6 +968,8 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
     if (!sess) return res.status(400).json({ error: "call /start first" });
+    // O aluno respondeu — para os pings de keep-alive do gap anterior.
+    cancelKeepalive(sess);
     // O /upload move a sessão de "awaiting_upload" para "intro" e dispara
     // sess.interviewPreparation (uploads de arquivo + vector store + plan +
     // documentMap) em paralelo com a saudação. Durante intro, nada disso é
@@ -1566,6 +1569,11 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             };
         }
     }
+
+    // Keep-alive do cache (opt-in): enquanto o aluno pensa na resposta desta
+    // pergunta, pinga o prefixo para não esfriar (lib/cacheKeepalive.js). O
+    // cancel correspondente está na entrada do /chat (o aluno respondeu).
+    if (parsed?._keepalivePrompt) scheduleKeepalive(sess, parsed._keepalivePrompt, sessionMeterCtx(sess));
 
     // Teto duro (variante a): se o modelo insistiu ALÉM da cota da pergunta,
     // veta o follow_up e RE-CHAMA o orquestrador forçando `ask` — ele escreve a

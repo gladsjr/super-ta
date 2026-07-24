@@ -1,5 +1,6 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
+import { PROMPT_CACHE_EXPLICIT, PROMPT_STATIC_IN_INSTRUCTIONS } from "../lib/config.js";
 import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { ACTION_SCHEMA_DESCRIPTION, validateAction, extractReadyAction } from "../lib/superOrchestrator/actionSchema.js";
@@ -251,7 +252,13 @@ ${resolvedBody}`;
             ? turnLog.filter(t => t && t.answered_at).length
             : 0;
 
-        const userContent = `**AGENDA DO ENTREVISTADOR**
+        // Blocos ESTÁVEIS da entrevista (idênticos em todos os turnos): agenda,
+        // análise prévia e plano. Com PROMPT_STATIC_IN_INSTRUCTIONS (dedup), vão
+        // nas `instructions` — que são por-requisição e NUNCA entram na Conversation.
+        // Sem a flag (legado), seguem no input de cada turno — mas aí, com o
+        // parâmetro `conversation`, cada turno APENSA uma cópia deles ao histórico
+        // (~7,7k tokens/turno de duplicação; ver policy.yaml#prompt_cache).
+        const staticBlocks = `**AGENDA DO ENTREVISTADOR**
 ${agendaBlock}
 
 **ANÁLISE PRÉVIA DA ENTREGA** (gerada na prep)
@@ -261,9 +268,9 @@ ${JSON.stringify(workAnalysis ?? {}, null, 2)}
 ${planSummary || "(plano vazio — usar perguntas espontâneas)"}
 
 Detalhe completo do plano (para você consultar os arrays de YAML por pergunta):
-${JSON.stringify(interviewPlan ?? { questions: [] }, null, 2)}
+${JSON.stringify(interviewPlan ?? { questions: [] }, null, 2)}`;
 
-**MEMORY ATUAL** (seu estado interno carregado do turno anterior)
+        const dynamicBlocks = `**MEMORY ATUAL** (seu estado interno carregado do turno anterior)
 ${memoryBlock}
 
 **ESTADO DO TURNO ATUAL**
@@ -280,17 +287,41 @@ ${forceAdvanceDirective}
 ` : ""}
 Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
 
+        const finalSystemPrompt = PROMPT_STATIC_IN_INSTRUCTIONS
+            ? `${systemPrompt}\n\n${staticBlocks}`
+            : systemPrompt;
+        const userContent = PROMPT_STATIC_IN_INSTRUCTIONS
+            ? dynamicBlocks
+            : `${staticBlocks}\n\n${dynamicBlocks}`;
+
+        // Breakpoint explícito de cache (5.6+, opt-in via policy.yaml): marca o FIM
+        // do input deste turno — o breakpoint cobre TUDO renderizado antes dele
+        // (instructions + histórico da conversation + este input), com retenção
+        // mínima garantida (ttl 30m). Com o parâmetro `conversation`, o input deste
+        // turno vira item do histórico no próximo → o prefixo cacheado continua
+        // prefixo do próximo prompt. Mitiga os misses anômalos que crescem com o
+        // gap entre turnos (diagnóstico jul/2026). Modo implícito segue ativo por
+        // baixo (fail-safe): se o marcador falhar, o cache automático ainda vale.
+        const inputContent = PROMPT_CACHE_EXPLICIT
+            ? [{ type: "input_text", text: userContent, prompt_cache_breakpoint: { mode: "explicit" } }]
+            : userContent;
         const payload = {
             model: this.model,
-            instructions: systemPrompt,
-            input: [{ role: "user", content: userContent }],
+            instructions: finalSystemPrompt,
+            input: [{ role: "user", content: inputContent }],
             // Histórico injetado server-side via Conversations API. Mais barato
             // que re-enviar a cada turno; ortogonal à compaction abaixo.
             conversation: conversationId,
             // Compaction server-side (release 11/fev/2026). Param ainda não
             // tipado no SDK 6.17, mas costuma ser encaminhado como body field.
             // Se ignorado, conversas de até 30 turnos ainda cabem no contexto.
-            context_management: [{ type: "compaction", compact_threshold: 100000 }],
+            // Threshold 200k (era 100k): com a dedup dos blocos estáveis o pico
+            // de uma entrevista é ~30-40k, então a compactação virou VÁLVULA DE
+            // SEGURANÇA (nunca dispara no fluxo normal). A 100k ela disparava
+            // perto do fim da entrevista e custava $0,24-0,30 por evento
+            // (reescrita integral do prefixo) para economizar centavos nos 1-3
+            // turnos restantes — saldo negativo medido no ledger (jul/2026).
+            context_management: [{ type: "compaction", compact_threshold: 200000 }],
             // Salvaguarda extra caso a compaction não esteja disponível:
             // auto-truncation evita 4xx por estouro de contexto.
             truncation: "auto",
@@ -298,6 +329,8 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
         // Dica de roteamento de cache (não altera a saída): agrupa os turnos de
         // todos os alunos do mesmo trabalho (mesma agenda no prefixo estável).
         if (meterCtx?.workId) payload.prompt_cache_key = `iv:${meterCtx.workId}`;
+        // ttl 30m = vida MÍNIMA do prefixo cacheado (5.6+; único valor suportado).
+        if (PROMPT_CACHE_EXPLICIT) payload.prompt_cache_options = { ttl: "30m" };
         if (this.reasoningEffort) {
             payload.reasoning = { effort: this.reasoningEffort };
         }
@@ -311,7 +344,7 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
         // sem SSE) pode chamar sem callback e o agente segue blocking.
         const wantStream = typeof onFirstDelta === "function";
 
-        log.prompt("AGENT:SuperOrchestrator", `system+user (${systemPrompt.length + userContent.length} chars)${wantStream ? " [stream]" : ""}`);
+        log.prompt("AGENT:SuperOrchestrator", `system+user (${finalSystemPrompt.length + userContent.length} chars)${wantStream ? " [stream]" : ""}${PROMPT_STATIC_IN_INSTRUCTIONS ? " [dedup]" : ""}`);
 
         // Retry SÓ na chamada da API — a classe transitória (timeout/5xx/429)
         // que vira "tive um problema aqui" para o aluno sem culpa dele. NÃO
@@ -410,6 +443,11 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
         if (log.enabled("debug")) {
             log.debug("AGENT:SuperOrchestrator", `full action:\n${JSON.stringify(parsed, null, 2)}`);
         }
+        // Para o keep-alive de cache (lib/cacheKeepalive.js): as instructions desta
+        // chamada — o ping repete o MESMO prefixo estável para mantê-lo quente
+        // enquanto o aluno pensa. Propriedade não-enumerável: não vaza em
+        // JSON.stringify (persistência/logs).
+        Object.defineProperty(parsed, "_keepalivePrompt", { value: finalSystemPrompt, enumerable: false });
         return parsed;
     }
 }
