@@ -34,14 +34,19 @@ prompt_cache:
   # melhor em avaliação CEGA por 2 juízes independentes (Claude: dedup 3-1-1;
   # ChatGPT Sol Pro: dedup 4-0-1, notas 4,8 vs 4,2). Desligar = reverter aqui.
   static_blocks_in_instructions: true
-  # Keep-alive do cache entre turnos (0 = desligado): pinga a cada N segundos
-  # repetindo as instructions da última chamada (sem `conversation`; cap 8
-  # pings/gap). REPROVADO no A/B: os pings acertavam o próprio cache a 92%
-  # mas NÃO reduziram o miss dos turnos reais (37% vs 31%) — a entrada estava
-  # comprovadamente quente e a requisição real (com conversation+file_search)
-  # ainda deu cached=0: evidência-chave do bug report à OpenAI. Mantido como
-  # infra de teste; não ligar em prod. Ver lib/cacheKeepalive.js.
-  keepalive_seconds: 0
+  # Keep-alive do cache entre turnos (0 = desligado), v2.1 "PING CAMALEÃO"
+  # (ideia do Gladstone): enquanto o aluno pensa, pinga a cada N segundos com
+  # um prefixo BYTE-IDÊNTICO ao do turno real — mesmas instructions (com o
+  # protocolo de ping no INÍCIO; o distintivo [É PING]/[NÃO É PING] vai na
+  # ÚLTIMA linha do input), MESMA conversation (store:false — nada entra no
+  # histórico; validado), MESMAS tools e MESMO reasoning.effort (o effort faz
+  # parte do prefixo do cache — medido: trocá-lo zera o hit). Cap 8 pings/gap.
+  # ADOTADO (25/jul/2026): braço F2 = miss dos turnos reais de 31-52% para
+  # 2% (1/57); custo $0,64/entrevista JÁ com os pings (< $0,71 sem);
+  # qualidade validada às cegas (2 juízes: sem quebra de personagem, sem
+  # vazamento em 50 turnos, diferença = ruído). Histórico: v1 (prefixo
+  # divergente), breakpoints e ttl-sozinho reprovados — ver lib/cacheKeepalive.js.
+  keepalive_seconds: 60
 
 # Model configuration
 models:
