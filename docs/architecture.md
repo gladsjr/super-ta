@@ -21,7 +21,8 @@ flowchart TD
   IntroAgent1 --> OutGreeting>"Saudação ao aluno + pergunta o nome"]
   UploadHandler -.-> Prep(("Prep em background"))
   Prep --> VectorStore["createVectorStoreWithFiles (aluno + enunciado)"]
-  Prep --> Analyze["PrepBuilderAgent.analyzeWork"]
+  Prep --> BuildPrep["PrepBuilderAgent.buildPrep (padrão: análise + plano numa chamada)"]
+  BuildPrep -. fallback .-> Analyze["PrepBuilderAgent.analyzeWork"]
   Analyze --> BuildPlan["PrepBuilderAgent.buildPlan (consome análise)"]
 
   %% CHAT: dispara o ciclo principal a cada mensagem do aluno.
@@ -77,6 +78,7 @@ flowchart TD
   click Inteligibility "vscode://file/c:/Users/glads/src/super-ta/routes/interview.js:74" "Abre runAudioIntelligibilityGate"
   click SuperOrq "vscode://file/c:/Users/glads/src/super-ta/agents/SuperOrchestratorAgent.js:36" "Abre o systemPromptBody do SuperOrchestratorAgent"
   click ActionSchema "vscode://file/c:/Users/glads/src/super-ta/lib/superOrchestrator/actionSchema.js" "Abre o schema da ação"
+  click BuildPrep "vscode://file/c:/Users/glads/src/super-ta/agents/PrepBuilderAgent.js" "Abre _mergedPrep"
   click Analyze "vscode://file/c:/Users/glads/src/super-ta/agents/PrepBuilderAgent.js:42" "Abre analyzeSystemBody"
   click BuildPlan "vscode://file/c:/Users/glads/src/super-ta/agents/PrepBuilderAgent.js" "Abre buildPlan"
   click VectorStore "vscode://file/c:/Users/glads/src/super-ta/lib/sessionLifecycle.js:59" "Abre createVectorStoreWithFiles"
@@ -90,8 +92,9 @@ Use esta tabela se o clique no SVG não abrir nada. Cada linha tem o **bloco de 
 |---|---|---|
 | Handler do `/upload` | [routes/interview.js — /upload](../routes/interview.js) | — |
 | Preparação em background (`startInterviewPreparation`) | [lib/sessionLifecycle.js — startInterviewPreparation](../lib/sessionLifecycle.js) | ver agentes correspondentes |
-| `PrepBuilderAgent.analyzeWork` (1ª chamada da prep, analisa trabalho + enunciado) | [agents/PrepBuilderAgent.js — analyzeWork](../agents/PrepBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `analyzeSystemBody` + agenda |
-| `PrepBuilderAgent.buildPlan` (2ª chamada, recebe análise) | [agents/PrepBuilderAgent.js — buildPlan](../agents/PrepBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado + análise prévia |
+| `PrepBuilderAgent.buildPrep` (**caminho padrão** — análise + plano numa ÚNICA chamada; fallback → as duas abaixo) | [agents/PrepBuilderAgent.js — _mergedPrep](../agents/PrepBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `analyzeSystemBody` + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado + `buildPlanExtraInstructions`, num prompt só |
+| `PrepBuilderAgent.analyzeWork` (fallback — 1ª chamada, analisa trabalho + enunciado) | [agents/PrepBuilderAgent.js — analyzeWork](../agents/PrepBuilderAgent.js) | preâmbulo (`orchestrator_only`) + `analyzeSystemBody` + agenda |
+| `PrepBuilderAgent.buildPlan` (fallback — 2ª chamada, recebe análise) | [agents/PrepBuilderAgent.js — buildPlan](../agents/PrepBuilderAgent.js) | preâmbulo (`orchestrator_only`) + [interview_prompt_template.txt](../config/interview_prompt_template.txt) renderizado + análise prévia |
 | `createVectorStoreWithFiles` (aluno + enunciado, expandido na reforma) | [lib/sessionLifecycle.js:59](../lib/sessionLifecycle.js#L59) | — |
 | Handler do `/chat` | [routes/interview.js — /chat](../routes/interview.js) | — |
 | Pré-gate de inteligibilidade (algoritmo puro decide; `AudioIntelligibilityAgent` só fraseia) | [lib/audioIntelligibility.js](../lib/audioIntelligibility.js) + [agents/AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) | preâmbulo + `systemPromptBody` + agenda + transcrição + trechos detectados |
@@ -238,7 +241,7 @@ Lugar único onde encontrar **todo prompt enviado à LLM** no sistema:
    - **`EXTEMPORANEOUS_ANSWER_PRINCIPLE`** (constante exportada em [lib/agentPreamble.js](../lib/agentPreamble.js)) — princípio mode-independente "a pergunta deve pressupor resposta formulável de cabeça, assumindo domínio do trabalho". Fonte única, injetada IDENTICAMENTE nos dois pontos que emitem perguntas: o template do plano (via placeholder `{{extemporaneous_principle}}` em [interview_prompt_template.txt](../config/interview_prompt_template.txt), preenchido por [lib/interviewPrompt.js](../lib/interviewPrompt.js)) e o `systemPromptBody` do [SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js).
 
    **Conjunto ativo após a reforma do super-orquestrador:**
-   - [PrepBuilderAgent.js](../agents/PrepBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`. Duas chamadas serializadas em `/upload`: `analyzeWork` (análise do trabalho) → `buildPlan` (plano de 10 perguntas informado pela análise).
+   - [PrepBuilderAgent.js](../agents/PrepBuilderAgent.js) — modelo: `principal_reasoning_model`, audience: `orchestrator_only`. Em `/upload`, `buildPrep` gera análise + plano (até 10 perguntas) numa ÚNICA chamada consolidada (`_mergedPrep`, que reutiliza `analyzeSystemBody` + o template do plano e não reenvia os PDFs); cai automaticamente para as duas chamadas serializadas `analyzeWork` → `buildPlan` se a chamada única vier incompleta/inválida.
    - [IntroductionAgent.js](../agents/IntroductionAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`. Roteiro determinístico de 3 beats: `ask_name` / `present_self` / `begin`. Quando o trabalho tem `works.expect_spontaneous`, o beat `present_self` injeta um "contrato de espontaneidade" (`spontaneityContract()`): a persona combina, no registro dela, que se espera resposta "de cabeça" (pode pensar/pausar/se corrigir, mas com as próprias palavras, sem IA/pesquisa/leitura).
    - [AudioIntelligibilityAgent.js](../agents/AudioIntelligibilityAgent.js) — modelo: `fast_model`, audience: `student_via_interviewer_voice`. Pré-gate de áudio: o algoritmo em [lib/audioIntelligibility.js](../lib/audioIntelligibility.js) decide se vai gateiar (sobre logprobs do STT); o agente apenas fraseia o pedido de repetição ou a fala de give_up.
    - [SuperOrchestratorAgent.js](../agents/SuperOrchestratorAgent.js) — modelo: `principal_reasoning_model`, audience: `student_via_interviewer_voice`. **UMA chamada por turno** na fase `interviewing`. Devolve uma `action` no schema definido em [lib/superOrchestrator/actionSchema.js](../lib/superOrchestrator/actionSchema.js). Mantém estado entre turnos via `memory` em `runtime_state.super_orchestrator.memory`. Em modo áudio, roda com `stream: true` para sinalizar `responding` ao frontend via SSE no primeiro token de texto.
