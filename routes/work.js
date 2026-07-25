@@ -74,6 +74,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 has_enunciado: !!req.work.assignment_pdf,
                 has_interviewer: !!req.work.has_interviewer,
                 interaction_mode: req.work.interaction_mode,
+                interview_variant: req.work.interview_variant,
                 voice: req.work.voice,
                 question_count: req.work.question_count,
                 interviewer_name: req.work.interviewer_name,
@@ -212,6 +213,27 @@ router.post("/w/:workToken/interaction", requireWorkToken, express.json({ limit:
     } catch (err) {
         log.error("WORK", `set interaction failed: ${err.message}`);
         res.status(500).json({ error: "falha ao salvar modo de interação", detail: err.message });
+    }
+});
+
+// Variante da entrevista: 'messages' (profunda, por mensagens) ou 'realtime'
+// (simplificada, tempo real por voz — telas estilo prova oral, perguntas do
+// plano do PrepBuilder). Só faz sentido em kind='interview'.
+router.patch("/w/:workToken/interview-variant", requireWorkToken, express.json({ limit: "4kb" }), async (req, res) => {
+    const variant = String(req.body?.variant ?? "");
+    if (req.work.kind !== "interview") {
+        return res.status(400).json({ error: "variante só se aplica a trabalhos de entrevista" });
+    }
+    if (variant !== "messages" && variant !== "realtime") {
+        return res.status(400).json({ error: "variant deve ser 'messages' ou 'realtime'" });
+    }
+    try {
+        await db.setWorkInterviewVariant(req.work.id, variant);
+        log.info("WORK", `interview variant=${variant} work=${req.work.work_token}`);
+        res.json({ ok: true, interview_variant: variant });
+    } catch (err) {
+        log.error("WORK", `set interview variant failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar a variante da entrevista", detail: err.message });
     }
 });
 
@@ -386,7 +408,10 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
         // Proctoring por vídeo (entrevista): relatório já analisado (se houver) e se
         // existe vídeo gravado — a UI mostra os alertas, o botão "Analisar vídeo" e o player.
         let proctoring = null;
-        if (req.work.proctoring_enabled) {
+        // Na entrevista SIMPLIFICADA (tempo real) o vídeo é inerente à via
+        // (câmera sempre ligada, como na prova oral) — o painel de proctoring
+        // aparece independente do opt-in da entrevista por mensagens.
+        if (req.work.proctoring_enabled || req.work.interview_variant === "realtime") {
             const [detail, parts] = await Promise.all([
                 db.getOralSubmissionDetail(found.id),
                 db.getOralVideoParts(found.id),
@@ -410,7 +435,9 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
 // grava em submissions.oral_proctor_json. Alimenta a penalidade (lib/gradePenalty) e o painel.
 router.post("/w/:workToken/submissions/:subToken/proctor", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     try {
-        if (req.work.proctoring_enabled !== true) return res.status(400).json({ error: "proctoring desligado neste trabalho" });
+        if (req.work.proctoring_enabled !== true && req.work.interview_variant !== "realtime") {
+            return res.status(400).json({ error: "proctoring desligado neste trabalho" });
+        }
         const parts = await db.getOralVideoParts(req.submission.id);
         if (!parts.length) return res.status(409).json({ error: "esta submissão não tem vídeo gravado" });
         const report = await analyzeOralVideoParts(parts);

@@ -140,7 +140,12 @@ export function renderTranscriptForEvaluation(conversation, audioArtifacts = [])
 
     lines.push("");
     lines.push("=== CONTEXTO DOS SINAIS DE FORMA ===");
-    if (delivery.mode === "audio") {
+    if (conversation?.channel === "realtime_voice") {
+        // Entrevista SIMPLIFICADA (tempo real): conversa por VOZ ao vivo; as
+        // falas acima são transcrições automáticas da fala. Sem gravações por
+        // turno nem instrumentação de digitação — sinais de "texto" não valem.
+        lines.push("Entrevista por VOZ EM TEMPO REAL (fala-a-fala): as falas do respondente acima são transcrições automáticas da fala ao vivo. Sinais de digitação (caracteres/s) não se aplicam, e a transcrição pode ter suavizado disfluências — não trate fluidez do texto transcrito como evidência de leitura.");
+    } else if (delivery.mode === "audio") {
         lines.push("Entrevista em modo VOZ: as falas do respondente acima são transcrições automáticas (STT) de gravações.");
         if (delivery.mapped_by === "unreliable") {
             lines.push("Não foi possível casar com segurança cada gravação ao seu turno — os tempos por gravação foram omitidos.");

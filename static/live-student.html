@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Entrevista</title>
+  <style>
+    :root { --ink:#1c2530; --ink-soft:#5b6675; --line:#e1e6ec; --bg:#f6f8fa; --accent:#2a6df4; --ok:#1a8a4a; --danger:#c0392b; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px; }
+    .wrap { max-width: 880px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: var(--ink-soft); margin: 0 0 20px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 18px; }
+    .btn { font: inherit; padding: 12px 22px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
+    .btn.danger { background:#fff; color: var(--danger); border-color: var(--danger); }
+    .btn:disabled { opacity:.5; cursor: default; }
+    .status { display:flex; align-items:center; gap:10px; font-size:16px; margin: 16px 0; }
+    .dot { width:12px; height:12px; border-radius:50%; background:#bbb; flex:none; }
+    .dot.live { background: var(--ok); animation: pulse 1.4s infinite; }
+    .dot.err { background: var(--danger); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .hint { font-size: 13px; color: var(--ink-soft); }
+    .err { color: var(--danger); font-size: 14px; margin-top: 10px; white-space: pre-wrap; }
+    .big { font-size: 18px; text-align:center; padding: 10px 0; }
+    .banner { font-size:17px; font-weight:600; text-align:center; padding:12px 14px; border-radius:10px; margin:12px auto 0; max-width:380px; border:1px solid var(--line); min-height:68px; display:flex; align-items:center; justify-content:center; box-sizing:border-box; line-height:1.3; }
+    .banner.ok { color:#fff; background:var(--ok); border-color:var(--ok); }
+    .banner.adjust { color:#7a4a12; background:#fff6e0; border-color:#ecc874; }
+    .banner.wait { color:var(--ink-soft); background:#f1f3f5; }
+    .note-warn { font-size:14px; line-height:1.45; background:#fff8e6; border:1px solid #f0d27a; border-radius:10px; padding:12px 14px; margin:14px 0; }
+    .consent { border:1px solid var(--line); border-radius:10px; padding: 14px 16px; max-height: 360px; overflow:auto; background:#fbfcfd; font-size: 14px; margin: 14px 0; }
+    .consent h4 { margin: 12px 0 4px; font-size: 14px; }
+    .consent p, .consent li { line-height: 1.45; }
+    .accept { display:flex; align-items:flex-start; gap:10px; margin: 6px 0 14px; cursor:pointer; }
+    .accept input { margin-top: 3px; }
+    .filerow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin: 10px 0 14px; }
+    .filerow input[type=file] { font: inherit; }
+    video { width: 100%; max-width: 300px; border-radius: 10px; background:#000; transform: scaleX(-1); display:block; margin: 0 auto 10px; }
+    .qa-who { font-size:.72rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Entrevista sobre o seu trabalho</h1>
+
+    <div class="card">
+      <!-- Tela 0: termo (LGPD) + envio do trabalho -->
+      <div id="pre">
+        <p id="pre-intro">Você vai participar de uma <strong>entrevista por voz</strong>, com a câmera ligada, sobre o trabalho que você vai enviar agora. Leia o termo abaixo, confirme e envie o seu trabalho em PDF — nas telas seguintes você ajusta fones, posição e silêncio antes de começar.</p>
+        <div class="consent" id="consent-text">Carregando o termo…</div>
+        <label class="accept" id="accept-row"><input type="checkbox" id="accept"/> <span>Li e <strong>concordo</strong> com a gravação de voz e vídeo e com o uso descrito acima.</span></label>
+        <div class="filerow" id="file-row">
+          <label for="pdf-file"><strong>Seu trabalho (PDF):</strong></label>
+          <input type="file" id="pdf-file" accept="application/pdf"/>
+        </div>
+        <button class="btn" id="start-btn" disabled>Enviar trabalho e continuar</button>
+        <div class="err" id="pre-err"></div>
+      </div>
+
+      <!-- Tela 1: verificações sem câmera — conexão, silêncio, captação; a
+           PREPARAÇÃO da entrevista (análise do trabalho) roda em paralelo. -->
+      <div id="instr" style="display:none">
+        <p style="margin-top:0; background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:8px 12px"><strong>🎧 Use fones de ouvido.</strong></p>
+        <!-- Preparação (análise do trabalho + plano de perguntas) -->
+        <div class="banner wait" id="prep-banner">Analisando o seu trabalho e preparando a entrevista…</div>
+        <!-- Conexão -->
+        <div class="banner wait" id="conn-banner">Testando a conexão…</div>
+        <!-- Silêncio: medidor de ruído CONTÍNUO -->
+        <div style="max-width:380px; margin:14px auto 0">
+          <div class="hint" style="text-align:center; margin-bottom:4px">Nível de ruído do ambiente</div>
+          <div style="height:10px; background:#e5e7eb; border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:var(--ok); transition:width .1s linear"></div></div>
+          <div class="banner wait" id="noise-verdict" style="margin-top:6px">Medindo o ambiente…</div>
+        </div>
+        <!-- Captação da fala (calibração) — só aparece se o professor configurou -->
+        <div id="calib-block" style="display:none; margin-top:18px; border-top:1px solid var(--line); padding-top:14px">
+          <p style="margin:0 0 4px"><strong>Teste de captação da sua fala.</strong> Vamos conferir se o sistema transcreve bem o que você fala — a avaliação sai da transcrição, então isso ajuda a avaliação a refletir a sua resposta.</p>
+          <p class="hint" style="margin:0 0 8px">Fale em <strong>volume médio</strong>, num <strong>ritmo tranquilo</strong> (sem correr) e <strong>sem cortar o fim das palavras</strong>. Leia a frase abaixo em voz alta:</p>
+          <div class="card" style="text-align:center; font-size:18px; line-height:1.5; margin:0 0 10px" id="calib-sentence">…</div>
+          <div style="text-align:center"><button class="btn" id="calib-rec-btn">🎤 Gravar e ler a frase</button></div>
+          <div class="banner wait" id="calib-status" style="margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
+        </div>
+        <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
+      </div>
+
+      <!-- Tela 2: posicionamento na câmera (a entrevista começa sozinha quando ok) -->
+      <div id="setup" style="display:none">
+        <p style="margin:0"><strong>Posição:</strong> tronco à cabeça no quadro; ~1,5 m da câmera; mãos à mostra. A entrevista começa sozinha quando estiver tudo certo.</p>
+        <div style="display:flex; gap:10px; max-width:300px; margin:8px auto 10px">
+          <figure style="margin:0; flex:1"><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
+          <figure style="margin:0; flex:1"><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
+        </div>
+        <div class="note-warn"><strong>Importante:</strong> a entrevista não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
+        <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
+        <video id="setup-cam" autoplay muted playsinline style="margin:0 auto"></video>
+        <div class="banner wait" id="pos-guidance" style="margin-top:10px">Iniciando a câmera…</div>
+        <div style="margin-top:14px; text-align:center">
+          <button class="btn" id="pos-begin-btn" disabled>Começar a entrevista</button>
+        </div>
+        <div class="err" id="setup-err"></div>
+      </div>
+
+      <!-- Tela 3: entrevista ao vivo -->
+      <div id="live" style="display:none">
+        <video id="selfview" autoplay muted playsinline></video>
+        <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
+        <p class="hint" id="qinfo"></p>
+        <p class="hint">A entrevista <strong>encerra sozinha</strong> no fim das perguntas. Use <strong>"Encerrar agora"</strong> apenas para sair antes.</p>
+        <button class="btn danger" id="end-btn">Encerrar agora</button>
+      </div>
+
+      <div id="done" style="display:none">
+        <div class="big" id="done-msg">Encerrando…</div>
+        <p class="sub" style="text-align:center" id="done-sub"></p>
+      </div>
+
+      <!-- Pós-entrevista: revisão (7 dias) + comentário + resultado publicado -->
+      <div id="blocked" style="display:none">
+        <div class="big" id="blocked-title">Entrevista realizada</div>
+        <p class="sub" style="text-align:center" id="blocked-sub">Esta entrevista já foi realizada com este link e <strong>não pode ser refeita</strong>. Se precisar, fale com o(a) professor(a) para um novo link.</p>
+        <div id="review-transcript" style="margin-top:16px"></div>
+        <div id="review-comment" style="margin-top:16px"></div>
+        <div id="result" style="margin-top:16px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUB = (location.pathname.match(/\/s\/([0-9a-f]{12})/) || [])[1];
+    const $ = id => document.getElementById(id);
+    const SR = 24000;
+    let ws = null, ctx = null, micStream = null, srcNode = null, procNode = null;
+    let recorder = null, recChunks = [], playHead = 0, ended = false, activeSources = [];
+
+    function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
+    function show(id) { for (const s of ['pre', 'instr', 'setup', 'live', 'done', 'blocked']) $(s).style.display = s === id ? '' : 'none'; }
+
+    const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+    // Estado vindo do servidor: decide a tela inicial. `resumeMode` = trabalho já
+    // enviado e preparado (recarregou no meio ou caiu na entrevista) → sem novo
+    // upload; o relay retoma a conversa de onde parou.
+    let blocked = false, resumeMode = false, consented = false, prepReady = false, prepError = null;
+    (async () => {
+      try {
+        const st = await (await fetch(`/s/${SUB}/live/status`)).json();
+        consented = !!st.consented;
+        if (st.done) { blocked = true; enterPostInterview({}); return; }
+        if (st.prep_status === 'ready' || st.prep_status === 'preparing') {
+          resumeMode = true;
+          prepReady = st.prep_status === 'ready';
+          $('pre-intro').innerHTML = 'O seu trabalho <strong>já foi enviado</strong> e a entrevista está preparada. Toque em <strong>Continuar</strong> para retomar — se a conversa já tinha começado, o entrevistador continua de onde parou.';
+          $('file-row').style.display = 'none';
+          $('start-btn').textContent = 'Continuar';
+          if (consented) { $('accept-row').style.display = 'none'; $('start-btn').disabled = false; }
+        }
+      } catch {}
+    })();
+
+    // Tela de pós-entrevista: espelha a revisão da entrevista por mensagens —
+    // dentro da janela de 7 dias o aluno revê a conversa e pode deixar UM
+    // comentário; devolutiva/nota aparecem quando o professor publica.
+    function enterPostInterview(opts) {
+      show('blocked');
+      if (opts && opts.uploadNote) {
+        $('blocked-title').textContent = 'Entrevista encerrada';
+        $('blocked-sub').innerHTML = esc(opts.uploadNote) + ' Abaixo você pode revisar a conversa e deixar um comentário ao professor.';
+      }
+      renderPostInterview();
+    }
+
+    async function renderPostInterview() {
+      // Uma repetição: logo após encerrar, o servidor pode ainda não ter marcado
+      // a entrevista como concluída (corrida com o fechamento do relay).
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const rv = await fetch(`/s/${SUB}/review`);
+          if (rv.status === 409 && attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
+          if (rv.ok) {
+            const j = await rv.json();
+            renderReviewConversation(j.conversation || null);
+            renderCommentBox(j.comment || {});
+          } else if (rv.status === 410) {
+            $('review-transcript').innerHTML = '<p class="sub" style="text-align:center">A janela de revisão (7 dias) já se encerrou.</p>';
+          }
+        } catch {}
+        break;
+      }
+      loadPublishedResult();
+    }
+
+    function renderReviewConversation(conversation) {
+      const el = $('review-transcript');
+      const turns = conversation && Array.isArray(conversation.turns) ? conversation.turns : [];
+      if (!turns.length) { el.innerHTML = ''; return; }
+      const rows = turns.map(t => {
+        const q = `<div style="margin-bottom:4px"><div class="qa-who" style="color:#9a7b1f">Entrevistador</div><div style="white-space:pre-wrap">${esc(t.question)}</div></div>`;
+        const a = t.answer ? `<div><div class="qa-who" style="color:#5a6b80">Você</div><div style="white-space:pre-wrap">${esc(t.answer)}</div></div>` : '';
+        return `<div style="margin-bottom:14px">${q}${a}</div>`;
+      }).join('');
+      const farewell = conversation.finalization && conversation.finalization.message
+        ? `<div style="margin-bottom:10px"><div class="qa-who" style="color:#9a7b1f">Entrevistador</div><div style="white-space:pre-wrap">${esc(conversation.finalization.message)}</div></div>` : '';
+      el.innerHTML = `<h3 style="text-align:center">Sua entrevista</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${rows}${farewell}</div>`;
+    }
+
+    // Devolutiva/nota publicadas (independentes da janela de revisão) — mesmo
+    // endpoint e formato da entrevista por mensagens.
+    async function loadPublishedResult() {
+      try {
+        const r = await fetch(`/s/${SUB}/evaluation`);
+        if (!r.ok) { $('result').innerHTML = ''; return; }
+        const j = await r.json();
+        const parts = [];
+        if (j.published && j.evaluation) parts.push(renderStudentFeedback(j.evaluation));
+        if (j.grade) parts.push(renderStudentGrade(j.grade));
+        $('result').innerHTML = parts.length ? '<h3 style="text-align:center">Resultado</h3><div class="card" style="text-align:left">' + parts.join('') + '</div>' : '';
+      } catch { $('result').innerHTML = ''; }
+    }
+
+    function renderStudentFeedback(ev) {
+      const list = (title, items) => {
+        const arr = Array.isArray(items) ? items.filter(x => x && String(x).trim()) : [];
+        if (!arr.length) return '';
+        return `<h4 style="margin:12px 0 4px">${esc(title)}</h4><ul style="margin:0; padding-left:1.2rem">${arr.map(x => `<li style="margin:4px 0">${esc(x)}</li>`).join('')}</ul>`;
+      };
+      const opinion = ev.interviewer_opinion
+        ? `<h4 style="margin:12px 0 4px">Opinião do entrevistador</h4><p class="hint" style="margin:0 0 6px">Impressão de quem conduziu a entrevista, no papel que representava — <strong>não é a avaliação do professor</strong>.</p><p style="white-space:pre-wrap; margin:0">${esc(ev.interviewer_opinion)}</p>` : '';
+      const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q =>
+        `<div style="margin:6px 0"><div class="qa-who">Pergunta ${Number(q.turn_index) + 1}</div><div>${esc(q.question_gist ?? '')}</div><div class="hint">${esc(q.feedback ?? '')}</div></div>`).join('');
+      return `${opinion}
+        <h4 style="margin:12px 0 4px">Avaliação do professor</h4>
+        <p style="white-space:pre-wrap; margin:0">${esc(ev.summary ?? '')}</p>
+        ${perQuestion ? `<h4 style="margin:12px 0 4px">Pergunta a pergunta</h4>${perQuestion}` : ''}
+        ${list('O que você sustentou bem', ev.strengths)}
+        ${list('O que pode melhorar', ev.improvement_areas)}
+        ${list('Sugestões de estudo', ev.study_suggestions)}`;
+    }
+    function renderStudentGrade(grade) {
+      const criteria = grade && Array.isArray(grade.criteria) ? grade.criteria : [];
+      return `<h4 style="margin:12px 0 4px">Nota</h4><p style="margin:0"><strong>Nota final: ${esc(String(grade.final))}</strong></p>` +
+        (criteria.length ? `<ul style="margin:6px 0 0; padding-left:1.2rem">${criteria.map(c => `<li style="margin:4px 0">${esc(c.name ?? '')}: <strong>${esc(String(c.score))}</strong> <span class="hint">(peso ${esc(String(c.weight))})</span></li>`).join('')}</ul>` : '');
+    }
+
+    function renderCommentBox(comment) {
+      const el = $('review-comment');
+      if (comment.locked && comment.value) {
+        el.innerHTML = `<h3 style="text-align:center">Seu comentário</h3><div class="card" style="text-align:left;white-space:pre-wrap">${esc(comment.value)}</div><p class="sub" style="text-align:center">Comentário enviado. Não é mais editável.</p>`;
+        return;
+      }
+      el.innerHTML = `<h3 style="text-align:center">Comentário ao professor (opcional)</h3>`
+        + `<p class="sub" style="text-align:center">Confira a conversa acima. Se algo que você disse saiu diferente do que quis dizer, deixe um comentário — é opcional e enviado uma única vez. Você também pode simplesmente fechar a página.</p>`
+        + `<textarea id="live-comment" maxlength="2000" rows="4" style="width:100%;box-sizing:border-box;font:inherit;padding:8px" placeholder="Escreva aqui (opcional)…"></textarea>`
+        + `<div style="text-align:center;margin-top:8px"><button id="live-comment-btn" class="btn">Confirmar e enviar</button> <span class="sub" id="live-comment-msg"></span></div>`;
+      $('live-comment-btn').onclick = submitLiveComment;
+    }
+
+    async function submitLiveComment() {
+      const ta = $('live-comment'), btn = $('live-comment-btn'), msg = $('live-comment-msg');
+      const text = (ta.value || '').trim();
+      if (!text) {
+        btn.disabled = true; ta.disabled = true;
+        msg.textContent = 'Tudo certo — sua entrevista foi concluída. Você pode fechar a página.';
+        return;
+      }
+      btn.disabled = true; msg.textContent = 'Enviando…';
+      try {
+        const r = await fetch(`/s/${SUB}/comment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comment: text }) });
+        if (r.ok) { renderCommentBox({ locked: true, value: text }); }
+        else { const e = await r.json().catch(() => ({})); msg.textContent = e.detail || e.error || 'Falha ao enviar.'; btn.disabled = false; }
+      } catch { msg.textContent = 'Falha ao enviar.'; btn.disabled = false; }
+    }
+
+    // Termo de consentimento (voz + vídeo + PDF) — habilita o botão só após o
+    // aceite E a escolha do arquivo (fora do modo de retomada).
+    (async () => {
+      try {
+        const j = await (await fetch('/api/consent')).json();
+        $('consent-text').innerHTML = j.liveHtml || '(termo indisponível)';
+      } catch { $('consent-text').textContent = 'Não foi possível carregar o termo. Recarregue a página.'; }
+    })();
+    function refreshStartEnabled() {
+      if (resumeMode) { $('start-btn').disabled = !(consented || $('accept').checked); return; }
+      $('start-btn').disabled = !($('accept').checked && $('pdf-file').files.length);
+    }
+    $('accept').onchange = refreshStartEnabled;
+    $('pdf-file').onchange = refreshStartEnabled;
+
+    // --- Reprodução: PCM16 (do relay) → toca sem emendas ---
+    function playPcm(arrayBuf) {
+      if (!ctx || ended) return;
+      const i16 = new Int16Array(arrayBuf);
+      if (!i16.length) return;
+      const buf = ctx.createBuffer(1, i16.length, SR);
+      const f32 = buf.getChannelData(0);
+      for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+      const node = ctx.createBufferSource();
+      node.buffer = buf; node.connect(ctx.destination);
+      const t = Math.max(ctx.currentTime + 0.02, playHead);
+      node.start(t); playHead = t + buf.duration;
+      activeSources.push(node);
+      node.onended = () => { const i = activeSources.indexOf(node); if (i >= 0) activeSources.splice(i, 1); };
+    }
+    // Barge-in: descarta TODO o áudio do entrevistador já agendado, para ele
+    // calar na hora quando o aluno começa a falar.
+    function flushPlayback() {
+      for (const n of activeSources) { try { n.onended = null; n.stop(); } catch {} }
+      activeSources = [];
+      if (ctx) playHead = ctx.currentTime;
+    }
+
+    // --- Captura: microfone → PCM16 → WebSocket ---
+    function startCapture() {
+      srcNode = ctx.createMediaStreamSource(micStream);
+      procNode = ctx.createScriptProcessor(4096, 1, 1);
+      procNode.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const f32 = e.inputBuffer.getChannelData(0);
+        const i16 = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) { let s = Math.max(-1, Math.min(1, f32[i])); i16[i] = s < 0 ? s * 32768 : s * 32767; }
+        ws.send(i16.buffer);
+      };
+      srcNode.connect(procNode);
+      const sink = ctx.createGain(); sink.gain.value = 0;
+      procNode.connect(sink); sink.connect(ctx.destination);
+    }
+
+    async function start() {
+      if (blocked) { show('blocked'); return; }
+      $('pre-err').textContent = '';
+      $('start-btn').disabled = true;
+      // 1) registra o consentimento no servidor (o upload e o relay exigem)
+      try { await fetch(`/s/${SUB}/live/consent`, { method: 'POST' }); consented = true; } catch {}
+      // 2) envia o trabalho (fora do modo de retomada) — a preparação roda em
+      //    background no servidor; acompanhamos por polling na tela seguinte.
+      if (!resumeMode) {
+        const file = $('pdf-file').files[0];
+        if (!file) { $('pre-err').textContent = 'Escolha o PDF do seu trabalho.'; refreshStartEnabled(); return; }
+        $('start-btn').textContent = 'Enviando o trabalho…';
+        try {
+          const form = new FormData(); form.append('file', file, file.name || 'trabalho.pdf');
+          const r = await fetch(`/s/${SUB}/live/upload`, { method: 'POST', body: form });
+          if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            $('pre-err').textContent = e.detail || e.error || 'Falha ao enviar o trabalho.';
+            $('start-btn').textContent = 'Enviar trabalho e continuar';
+            refreshStartEnabled(); return;
+          }
+        } catch {
+          $('pre-err').textContent = 'Falha de comunicação ao enviar o trabalho. Tente de novo.';
+          $('start-btn').textContent = 'Enviar trabalho e continuar';
+          refreshStartEnabled(); return;
+        }
+      }
+      // 3) microfone + câmera
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+      } catch (e) {
+        $('start-btn').disabled = false;
+        $('start-btn').textContent = resumeMode ? 'Continuar' : 'Enviar trabalho e continuar';
+        $('pre-err').textContent = 'Não foi possível acessar microfone/câmera. Autorize o acesso e tente de novo.';
+        return;
+      }
+      // 4) Tela 1: verificações + acompanhamento da preparação.
+      show('instr');
+      pickAndShowPoses();
+      pollPrep();        // preparação (análise + plano) — banner com o andamento
+      connTest();        // conexão (em segundo plano)
+      startNoiseMeter(); // silêncio: medidor contínuo
+      initCalibration(); // captação da fala (se o professor configurou)
+    }
+    // Tela 2: liga a câmera no preview e começa a verificação CONTÍNUA de
+    // posição. Com posição, silêncio E preparação ok, começa sozinha (1-2-3).
+    function continueToCheck() {
+      show('setup');
+      $('setup-cam').srcObject = micStream;
+      startPositionLoop();
+    }
+
+    // Acompanha a PREPARAÇÃO da entrevista (o plano de perguntas nasce da
+    // análise do trabalho — leva alguns instantes; as telas de verificação
+    // costumam cobrir essa janela).
+    async function pollPrep() {
+      const bn = $('prep-banner');
+      if (prepReady) { bn.className = 'banner ok'; bn.textContent = 'Entrevista preparada ✓'; return; }
+      try {
+        const j = await (await fetch(`/s/${SUB}/live/prep-status`)).json();
+        if (j.status === 'ready') {
+          prepReady = true;
+          bn.className = 'banner ok'; bn.textContent = 'Entrevista preparada ✓';
+          return;
+        }
+        if (j.status === 'error' || j.status === 'none') {
+          prepError = j.detail || 'falha na preparação';
+          bn.className = 'banner adjust';
+          bn.textContent = '⚠ A preparação da entrevista falhou. Recarregue a página e envie o trabalho de novo.';
+          return;
+        }
+        bn.className = 'banner wait'; bn.textContent = 'Analisando o seu trabalho e preparando a entrevista…';
+      } catch {}
+      setTimeout(pollPrep, 3000);
+    }
+
+    // Exemplos de posição: 1 com mesa + 1 sem mesa, sorteados garantindo gênero
+    // E raça diferentes entre as duas imagens (diversidade nos exemplos).
+    const POSES = [
+      { f: 'sem-mesa__m__latino.jpg',   s: 'sem', g: 'm', r: 'latino' },
+      { f: 'sem-mesa__f__branca.jpg',   s: 'sem', g: 'f', r: 'branca' },
+      { f: 'sem-mesa__m__asiatico.jpg', s: 'sem', g: 'm', r: 'asiatico' },
+      { f: 'sem-mesa__f__negra.jpg',    s: 'sem', g: 'f', r: 'negra' },
+      { f: 'com-mesa__m__branco.jpg',   s: 'com', g: 'm', r: 'branca' },
+      { f: 'com-mesa__f__latina.jpg',   s: 'com', g: 'f', r: 'latino' },
+      { f: 'com-mesa__m__negro.jpg',    s: 'com', g: 'm', r: 'negra' },
+      { f: 'com-mesa__f__asiatica.jpg', s: 'com', g: 'f', r: 'asiatico' },
+    ];
+    function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
+    function pickAndShowPoses() {
+      const com = shuffle(POSES.filter(p => p.s === 'com'));
+      const sem = shuffle(POSES.filter(p => p.s === 'sem'));
+      let pair = null;
+      for (const c of com) { const m = sem.find(s => s.g !== c.g && s.r !== c.r); if (m) { pair = [c, m]; break; } }
+      if (!pair) pair = [com[0], sem[0]];
+      const base = '/static/oral-poses/';
+      const setPair = (a, b) => { $(a).src = base + pair[0].f; $(a + '-cap').textContent = 'Com mesa'; $(b).src = base + pair[1].f; $(b + '-cap').textContent = 'Sem mesa'; };
+      setPair('pose-a2', 'pose-b2');
+    }
+
+    // TESTE DE CONEXÃO: mede o RTT até o servidor algumas vezes. Numa conversa
+    // por voz em tempo real, latência alta/instável é o que mais atrapalha.
+    // Avisa se estiver ruim — mas NÃO impede começar.
+    async function connTest() {
+      const bn = $('conn-banner');
+      bn.className = 'banner wait'; bn.textContent = 'Testando a conexão…';
+      const times = []; let fails = 0;
+      for (let i = 0; i < 5; i++) {
+        const t0 = performance.now();
+        try {
+          const resp = await fetch(`/oral/ping?t=${i}-${Math.random()}`, { cache: 'no-store' });
+          if (!resp.ok) throw 0;
+          await resp.text();
+          times.push(performance.now() - t0);
+        } catch { fails++; }
+        await new Promise(res => setTimeout(res, 120));
+      }
+      if (!times.length) { bn.className = 'banner adjust'; bn.textContent = '⚠ Não consegui testar a conexão. Se a internet estiver instável, a entrevista por voz pode falhar — prefira uma rede melhor.'; return; }
+      times.sort((a, b) => a - b);
+      const med = Math.round(times[Math.floor(times.length / 2)]);
+      if (fails >= 2 || med >= 450) {
+        bn.className = 'banner adjust';
+        bn.textContent = `⚠ Conexão instável/lenta (~${med} ms${fails ? `, ${fails} falha(s)` : ''}). A entrevista é por voz em tempo real e pode ficar difícil — cortes e atrasos. Se puder, use uma rede melhor (Wi-Fi estável). Você ainda pode continuar.`;
+      } else {
+        bn.className = 'banner ok';
+        bn.textContent = `Conexão ok ✓ (~${med} ms)`;
+      }
+    }
+
+    // ---- Verificação de POSIÇÃO no NAVEGADOR (MediaPipe WASM), em tempo real ----
+    // Idêntica à da prova oral: Pose (tronco+cabeça/distância) + Hands (mãos à
+    // mostra) + ObjectDetector (celular e outra pessoa). Roda 100% no cliente.
+    const MP_BASE = '/static/vision';
+    const FACE_MAX = 0.16, FACE_MIN = 0.06;
+    let poseLm = null, handLm = null, objDet = null, visionReady = false, visionFailed = false;
+    async function initVision() {
+      try {
+        const mp = await import(`${MP_BASE}/vision_bundle.mjs`);
+        const fs = await mp.FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+        [poseLm, handLm, objDet] = await Promise.all([
+          mp.PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/pose_landmarker_lite.task` }, runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5 }),
+          mp.HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/hand_landmarker.task` }, runningMode: 'VIDEO', numHands: 2, minHandDetectionConfidence: 0.3 }),
+          mp.ObjectDetector.createFromOptions(fs, { baseOptions: { modelAssetPath: `${MP_BASE}/models/efficientdet_lite0.tflite` }, runningMode: 'VIDEO', scoreThreshold: 0.4, categoryAllowlist: ['cell phone', 'person'] }),
+        ]);
+        visionReady = true;
+      } catch (e) { visionFailed = true; console.warn('MediaPipe não carregou:', e); }
+    }
+
+    // Avalia 1 frame e devolve {ok, guidance}. Mesma cascata da prova oral:
+    // cabeça → de frente → tronco → distância → mãos → celular/2ª pessoa.
+    function evalFrame(vid, ts) {
+      const pr = poseLm.detectForVideo(vid, ts);
+      const hr = handLm.detectForVideo(vid, ts);
+      const od = objDet.detectForVideo(vid, ts);
+      const dets = od.detections || [];
+      const phone = dets.some(d => (d.categories || []).some(c => c.categoryName === 'cell phone' && c.score >= 0.4));
+      const people = dets.filter(d => (d.categories || []).some(c => c.categoryName === 'person' && c.score >= 0.5)).length;
+      const L = (pr.landmarks && pr.landmarks[0]) || null;
+
+      if (!L) return { ok: false, guidance: 'Apareça na câmera, de frente — mostre o rosto e o tronco.' };
+      const vis = i => (L[i].visibility != null ? L[i].visibility : 1);
+      const inFrame = i => L[i].x > 0.03 && L[i].x < 0.97 && L[i].y > 0.05 && L[i].y < 0.98;
+
+      const head = vis(0) > 0.6 && vis(2) > 0.5 && vis(5) > 0.5 && inFrame(0) && L[0].y > 0.08;
+      if (!head) return { ok: false, guidance: 'Mostre o ROSTO inteiro na câmera — sua cabeça precisa aparecer (não vale só as mãos).' };
+
+      const earMid = (L[7].x + L[8].x) / 2, faceW = Math.abs(L[7].x - L[8].x);
+      const facingFront = vis(7) > 0.5 && vis(8) > 0.5 && faceW > 0.001 && Math.abs(L[0].x - earMid) < 0.30 * faceW;
+      if (!facingFront) return { ok: false, guidance: 'Fique DE FRENTE para a câmera, olhando para ela (não de lado).' };
+
+      const trunk = vis(11) > 0.5 && vis(12) > 0.5 && inFrame(11) && inFrame(12);
+      if (!trunk) return { ok: false, guidance: 'Mostre o TRONCO: os dois ombros precisam aparecer (afaste-se se estiver perto demais).' };
+
+      if (faceW > FACE_MAX) return { ok: false, guidance: 'Afaste-se — você está perto demais; preciso ver do tronco até a cabeça.' };
+      if (faceW < FACE_MIN) return { ok: false, guidance: 'Aproxime-se um pouco da câmera.' };
+
+      if ((hr.landmarks || []).length < 2) return { ok: false, guidance: 'Deixe AS DUAS mãos visíveis, como nas fotos de exemplo.' };
+
+      if (phone) return { ok: false, guidance: 'Guarde o celular para começar.' };
+      if (people >= 2) return { ok: false, guidance: 'Você precisa estar sozinho — há outra pessoa no quadro.' };
+
+      return { ok: true, guidance: 'Posição e enquadramento ok!' };
+    }
+
+    // RUÍDO do ambiente: medidor CONTÍNUO (captação crua, sem AGC/supressão).
+    const NOISE_MAX_RMS = 0.035;
+    let noiseOk = false, calibRecording = false, noiseStream = null, noiseCtx = null, noiseRAF = 0;
+    async function startNoiseMeter() {
+      try { noiseStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
+      catch { $('noise-verdict').textContent = 'Não foi possível medir o ruído.'; noiseOk = true; return; } // não bloqueia se falhar
+      noiseCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = noiseCtx.createMediaStreamSource(noiseStream);
+      const an = noiseCtx.createAnalyser(); an.fftSize = 2048; src.connect(an);
+      const buf = new Float32Array(an.fftSize);
+      let ema = null;
+      const tick = () => {
+        if (calibRecording) {
+          const v = $('noise-verdict'); v.className = 'banner wait';
+          v.textContent = 'Medição de ruído pausada durante a leitura';
+          noiseRAF = requestAnimationFrame(tick); return;
+        }
+        an.getFloatTimeDomainData(buf);
+        let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+        const rms = Math.sqrt(s / buf.length);
+        ema = ema == null ? rms : ema * 0.9 + rms * 0.1;
+        noiseOk = ema <= NOISE_MAX_RMS;
+        $('noise-bar').style.width = Math.min(100, Math.round((rms / NOISE_MAX_RMS) * 70)) + '%';
+        $('noise-bar').style.background = noiseOk ? 'var(--ok)' : '#b8732a';
+        const v = $('noise-verdict');
+        v.className = 'banner ' + (noiseOk ? 'ok' : 'adjust');
+        v.textContent = noiseOk ? 'Silêncio ok ✓' : 'Muito barulho — procure um lugar mais silencioso';
+        noiseRAF = requestAnimationFrame(tick);
+      };
+      noiseRAF = requestAnimationFrame(tick);
+    }
+    function stopNoiseMeter() {
+      if (noiseRAF) { cancelAnimationFrame(noiseRAF); noiseRAF = 0; }
+      try { if (noiseCtx) noiseCtx.close(); } catch {}
+      if (noiseStream) noiseStream.getTracks().forEach(t => t.stop());
+      noiseStream = null; noiseCtx = null;
+    }
+
+    // POSIÇÃO: verificação CONTÍNUA (~2-3 fps). Quando posição, ruído E
+    // preparação ficam ok por ~1 s seguido, conta 1-2-3 e começa.
+    let posLoop = false, okStreak = 0;
+    function setPosBanner(cls, text) { const e = $('pos-guidance'); e.className = 'banner ' + cls; e.textContent = text; }
+    async function startPositionLoop() {
+      if (posLoop) return;
+      posLoop = true; okStreak = 0; $('setup-err').textContent = '';
+      if (!visionReady && !visionFailed) { setPosBanner('wait', 'Carregando o verificador de posição…'); await initVision(); }
+      if (visionFailed) { // MediaPipe não carregou: não dá pra checar a posição.
+        setPosBanner('adjust', 'Não consegui verificar a posição automaticamente. Posicione-se como nos exemplos; quando o silêncio estiver ok, toque em “Começar a entrevista”.');
+        const poll = () => { if (!posLoop) return; $('pos-begin-btn').disabled = !(noiseOk && prepReady); setTimeout(poll, 350); };
+        poll();
+        return;
+      }
+      const vid = $('setup-cam');
+      while (posLoop) {
+        try {
+          if (!vid.videoWidth || vid.readyState < 2) {
+            setPosBanner('wait', 'Aguardando a câmera…'); $('pos-begin-btn').disabled = true;
+          } else {
+            const res = evalFrame(vid, performance.now());
+            const ready = res.ok && noiseOk && prepReady; // posição + silêncio + preparação
+            $('pos-begin-btn').disabled = !ready;
+            if (!res.ok) setPosBanner('adjust', res.guidance);
+            else if (!noiseOk) setPosBanner('adjust', 'Posição ok! Falta o ambiente ficar mais silencioso.');
+            else if (!prepReady) setPosBanner(prepError ? 'adjust' : 'wait', prepError ? '⚠ A preparação falhou — recarregue a página e envie o trabalho de novo.' : 'Posição ok! Aguardando a preparação da entrevista…');
+            else setPosBanner('ok', 'Tudo pronto!');
+            okStreak = ready ? okStreak + 1 : 0;
+            if (okStreak >= 3) { posLoop = false; startCountdown(); return; } // ~1 s de posição boa
+          }
+        } catch (e) { /* erro pontual de frame: ignora e segue */ }
+        await new Promise(r => setTimeout(r, 350));
+      }
+    }
+    function startCountdown() {
+      let n = 3;
+      setPosBanner('ok', `Tudo certo! Começando em ${n}…`);
+      const tick = setInterval(() => {
+        n--;
+        if (n <= 0) { clearInterval(tick); beginInterview(); }
+        else setPosBanner('ok', `Tudo certo! Começando em ${n}…`);
+      }, 1000);
+    }
+
+    function stopVision() {
+      for (const d of [poseLm, handLm, objDet]) { try { d && d.close(); } catch {} }
+      poseLm = handLm = objDet = null; visionReady = false;
+    }
+
+    // Layer 2: durante a entrevista, checagem LEVE de presença (só a pose,
+    // ~1x/2,5s) alimenta o vigia de silêncio do servidor. Só envia quando muda.
+    let presenceTimer = 0, lastPresent = null;
+    function startPresenceWatch() {
+      try { handLm && handLm.close(); } catch {}
+      try { objDet && objDet.close(); } catch {}
+      handLm = objDet = null;
+      if (!poseLm) return;
+      const vid = $('selfview');
+      const tick = () => {
+        if (ended) return;
+        let present = lastPresent == null ? true : lastPresent;
+        try {
+          if (vid.videoWidth && vid.readyState >= 2) {
+            const pr = poseLm.detectForVideo(vid, performance.now());
+            present = !!(pr.landmarks && pr.landmarks[0]);
+          }
+        } catch {}
+        if (present !== lastPresent) {
+          lastPresent = present;
+          try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'presence', present })); } catch {}
+        }
+        presenceTimer = setTimeout(tick, 2500);
+      };
+      tick();
+    }
+    function stopPresenceWatch() {
+      if (presenceTimer) { clearTimeout(presenceTimer); presenceTimer = 0; }
+      try { poseLm && poseLm.close(); } catch {}
+      poseLm = null;
+    }
+
+    // --- Calibração de fala: pré-teste de captação, NON-BLOCKING. ---
+    let calibRec = null, calibChunks = [], calibAttempt = 0;
+    async function initCalibration() {
+      let cfg = null;
+      try { cfg = await (await fetch(`/s/${SUB}/live/calibrate-config`)).json(); } catch {}
+      if (!cfg || !cfg.enabled || !cfg.sentence) { $('calib-block').style.display = 'none'; return; } // fail-open
+      $('calib-sentence').textContent = cfg.sentence;
+      $('calib-block').style.display = '';
+    }
+    function calibToggleRecord() {
+      const btn = $('calib-rec-btn');
+      if (calibRec && calibRec.state === 'recording') { calibRec.stop(); return; }
+      if (!micStream) return;
+      calibChunks = [];
+      let stream; try { stream = new MediaStream(micStream.getAudioTracks()); } catch { stream = micStream; }
+      try { calibRec = new MediaRecorder(stream); } catch { return; }
+      calibRec.ondataavailable = e => { if (e.data && e.data.size) calibChunks.push(e.data); };
+      calibRec.onstop = calibSubmit;
+      calibRec.start();
+      calibRecording = true; // pausa o medidor de ruído (a fala não é "ambiente")
+      btn.textContent = '⏹ Parar e verificar';
+      const st = $('calib-status'); st.className = 'banner wait'; st.textContent = '🎤 Gravando… leia a frase e toque em “Parar e verificar”.';
+    }
+    async function calibSubmit() {
+      calibRecording = false; // retoma o medidor de ruído
+      const btn = $('calib-rec-btn'), st = $('calib-status');
+      btn.textContent = '🎤 Gravar e ler a frase'; btn.disabled = true;
+      st.className = 'banner wait'; st.textContent = 'Verificando a captação…';
+      calibAttempt++;
+      let j = null;
+      try {
+        const blob = new Blob(calibChunks, { type: (calibRec && calibRec.mimeType) || 'audio/webm' });
+        const form = new FormData(); form.append('file', blob, 'calib.webm'); form.append('attempt', String(calibAttempt));
+        j = await (await fetch(`/s/${SUB}/live/calibrate`, { method: 'POST', body: form })).json();
+      } catch {}
+      btn.disabled = false;
+      renderCalibResult(j);
+    }
+    function renderCalibResult(j) {
+      const st = $('calib-status'), rec = $('calib-rec-btn');
+      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui verificar agora. Você pode tentar de novo ou seguir (Continuar).'; return; }
+      if (j.ok) {
+        st.className = 'banner ok'; st.textContent = 'Captação ok ✓ Sua fala foi transcrita corretamente. Pode Continuar.';
+        rec.style.display = 'none'; return;
+      }
+      const left = Number(j.attempts_left) || 0;
+      if (left > 0) {
+        st.className = 'banner adjust';
+        st.textContent = (j.advice || 'A captação não ficou boa.') + ` Toque em “Gravar e ler a frase” e tente de novo (${left} tentativa(s) restante(s)).`;
+      } else {
+        st.className = 'banner adjust';
+        st.innerHTML = esc(j.advice || 'A captação não ficou ideal.') + ' <strong>Você pode seguir assim mesmo.</strong> Ao final, confira a transcrição da entrevista e, se algo tiver saído errado, avise o professor no comentário.';
+        rec.style.display = 'none';
+      }
+    }
+    $('calib-rec-btn').onclick = calibToggleRecord;
+
+    // Começa a entrevista de fato: grava o vídeo + conecta ao relay.
+    function beginInterview() {
+      posLoop = false;
+      stopNoiseMeter();
+      startPresenceWatch();
+      show('live');
+      $('selfview').srcObject = micStream;
+      setStatus('Conectando…');
+      // grava o vídeo (áudio + câmera) para avaliação posterior — bitrate baixo
+      // de propósito (revisão humana / proctoring, não precisa de HD).
+      try {
+        try { recorder = new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
+        catch (e0) { recorder = new MediaRecorder(micStream); }
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+        recorder.onstop = uploadVideo;
+        recorder.start(1000);
+      } catch (e) { /* sem gravação se o navegador não suportar — não bloqueia */ }
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
+      playHead = ctx.currentTime;
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}/s/${SUB}/live/relay`);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => { setStatus('Conectando ao entrevistador…'); startCapture(); };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data !== 'string') { playPcm(ev.data); return; }
+        let m; try { m = JSON.parse(ev.data); } catch { return; }
+        if (m.type === 'status') {
+          if (m.state === 'connected') { setStatus(m.resuming ? 'Retomando de onde você parou…' : 'Entrevista em andamento — ouça e responda', 'live'); if (m.total_questions) $('qinfo').textContent = `${m.total_questions} pergunta(s).`; }
+          else if (m.state === 'listening') { flushPlayback(); setStatus('🎤 Ouvindo você…', 'live'); }
+          else if (m.state === 'thinking') setStatus('…', 'live');
+        } else if (m.type === 'wrapup') { endAfterPlayback(); }
+        else if (m.type === 'ended') { finish(); }
+      };
+      ws.onerror = () => setStatus('Erro de conexão', 'err');
+      ws.onclose = () => {
+        if (ended) return;
+        stopPresenceWatch();
+        setStatus('Conexão encerrada', 'err');
+        salvageVideo(); // queda inesperada: sobe o vídeo parcial
+      };
+    }
+    $('to-check-btn').onclick = continueToCheck;
+    $('pos-begin-btn').onclick = beginInterview;
+
+    async function uploadVideo() {
+      const stopTracks = () => { try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} };
+      if (!recChunks.length) { stopTracks(); enterPostInterview({ uploadNote: 'Entrevista registrada.' }); return; }
+      $('done-msg').textContent = 'Enviando o vídeo…';
+      $('done-sub').textContent = 'Não feche a página até concluir.';
+      let note = 'Vídeo enviado.';
+      try {
+        const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
+        const form = new FormData(); form.append('file', blob, 'entrevista.webm');
+        const r = await fetch(`/s/${SUB}/live/video`, { method: 'POST', body: form });
+        note = r.ok ? 'Vídeo enviado.' : 'A entrevista foi registrada (o envio do vídeo falhou; avise o professor).';
+      } catch {
+        note = 'A entrevista foi registrada (o envio do vídeo falhou; avise o professor).';
+      } finally { stopTracks(); }
+      enterPostInterview({ uploadNote: note });
+    }
+
+    // Rede de segurança do vídeo: numa QUEDA inesperada, sobe o que já foi gravado.
+    let salvaged = false;
+    function salvageVideo() {
+      if (salvaged) return; salvaged = true;
+      try {
+        if (recorder && recorder.state !== 'inactive') { recorder.onstop = uploadVideoSilent; recorder.stop(); }
+        else uploadVideoSilent();
+      } catch {}
+    }
+    async function uploadVideoSilent() {
+      if (!recChunks.length) return;
+      try {
+        const blob = new Blob(recChunks, { type: (recorder && recorder.mimeType) || 'video/webm' });
+        const form = new FormData(); form.append('file', blob, 'entrevista.webm');
+        await fetch(`/s/${SUB}/live/video`, { method: 'POST', body: form });
+      } catch {}
+    }
+
+    // Auto-encerramento: o entrevistador terminou e o servidor mandou 'wrapup'.
+    // Esperamos o áudio da despedida terminar de tocar e então finish().
+    let wrappingUp = false;
+    function endAfterPlayback() {
+      if (ended || wrappingUp) return;
+      wrappingUp = true;
+      setStatus('Entrevista concluída', 'live');
+      const deadline = ctx ? ctx.currentTime + 20 : 0; // teto de segurança
+      (function waitTail() {
+        if (ended) return;
+        const pending = ctx && (activeSources.length || (playHead - ctx.currentTime) > 0.05);
+        if (pending && ctx.currentTime < deadline) { setTimeout(waitTail, 200); return; }
+        finish();
+      })();
+    }
+
+    function finish() {
+      if (ended) return;
+      ended = true;
+      stopPresenceWatch();
+      try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'bye' })); } catch {}
+      try { ws && ws.close(); } catch {}
+      try { procNode && (procNode.onaudioprocess = null, procNode.disconnect()); } catch {}
+      try { srcNode && srcNode.disconnect(); } catch {}
+      try { ctx && ctx.close(); } catch {}
+      show('done');
+      if (recorder && recorder.state !== 'inactive') { try { recorder.stop(); } catch { uploadVideo(); } }
+      else { uploadVideo(); }
+    }
+
+    $('start-btn').onclick = start;
+    $('end-btn').onclick = finish;
+    if (!SUB) { $('pre-err').textContent = 'Link inválido.'; $('start-btn').disabled = true; }
+  </script>
+</body>
+</html>

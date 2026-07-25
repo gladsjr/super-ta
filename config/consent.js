@@ -74,6 +74,41 @@ export const CONSENT_ORAL_HTML = `
 <p>Você pode solicitar acesso, correção ou exclusão dos seus dados — inclusive do vídeo — entrando em contato com o(a) responsável pelo trabalho. A gravação de vídeo é condição para realizar esta prova oral; se não concordar, fale com o(a) professor(a) sobre uma forma alternativa de avaliação.</p>
 `.trim();
 
+// Termo da ENTREVISTA SIMPLIFICADA (tempo real): entrevista por voz via
+// Realtime + GRAVAÇÃO DE VÍDEO da câmera (como na prova oral), sobre o
+// trabalho enviado pelo aluno (como na entrevista por mensagens). Mostrado no
+// modal antes do upload do PDF; aceite explícito registrado no servidor.
+export const CONSENT_LIVE_HTML = `
+<p><strong>Você está prestes a participar de uma entrevista por voz conduzida por um sistema de inteligência artificial (ORATIA)</strong> sobre o trabalho que você submeteu, com a câmera ligada.</p>
+
+<h4>Como funciona</h4>
+<ul>
+  <li>Você envia o PDF do seu trabalho; o sistema o analisa e prepara as perguntas.</li>
+  <li>Um entrevistador por voz fará as perguntas e você responde <strong>falando</strong>. Você pode pedir para ele <strong>repetir</strong> ou <strong>falar mais devagar</strong> a qualquer momento.</li>
+  <li>O ORATIA produz apenas o transcript da entrevista. <strong>A nota e a avaliação final são responsabilidade exclusiva do(a) professor(a)</strong> — não há decisão automatizada de aprovação.</li>
+</ul>
+
+<h4>Dados coletados</h4>
+<ul>
+  <li>O PDF do trabalho que você enviar.</li>
+  <li><strong>Sua voz</strong>, durante a conversa.</li>
+  <li><strong>Vídeo da sua câmera</strong> durante a entrevista, que será <strong>gravado e armazenado para avaliação posterior</strong> pelo(a) professor(a) (verificação da realização da entrevista e de autoria).</li>
+  <li>Metadados da sessão (data, duração, identificador do trabalho).</li>
+</ul>
+
+<h4>Processamento e transferência internacional</h4>
+<p>O PDF e a conversa por voz são processados pela <strong>OpenAI (EUA)</strong>. Pela política da OpenAI, dados enviados via API <strong>não são usados para treinar modelos</strong>. <strong>O vídeo da câmera NÃO é enviado à OpenAI</strong> — fica armazenado de forma controlada pelo ORATIA, com acesso restrito ao(à) professor(a) e administradores autorizados.</p>
+
+<h4>Retenção</h4>
+<p>O transcript em texto permanece no banco do ORATIA para o professor avaliar. O vídeo e as gravações de voz são <strong>retidos por até 6 meses</strong> após a entrevista, para auditoria, e depois apagados automaticamente. Você pode solicitar a exclusão antecipada ao(à) responsável pelo trabalho.</p>
+
+<h4>Revisão pós-entrevista (7 dias)</h4>
+<p>Por <strong>7 dias após o término da entrevista</strong>, você terá acesso ao texto completo da conversa e a um campo para deixar um <strong>comentário ao professor</strong> sobre qualquer problema, reclamação ou desconforto. <strong>O comentário é enviado uma única vez</strong> e não pode ser editado depois.</p>
+
+<h4>Seus direitos (LGPD)</h4>
+<p>Você pode solicitar acesso, correção ou exclusão dos seus dados — inclusive do vídeo — entrando em contato com o(a) responsável pelo trabalho. A gravação de vídeo é condição para realizar esta entrevista; se não concordar, fale com o(a) professor(a) sobre uma forma alternativa de avaliação.</p>
+`.trim();
+
 // Parágrafo extra mostrado SÓ quando a entrevista está em modo áudio.
 // Concatenado dentro do modal, antes do checkbox.
 export const CONSENT_AUDIO_ADDITION_HTML = `
