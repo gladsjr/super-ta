@@ -1571,9 +1571,10 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     }
 
     // Keep-alive do cache (opt-in): enquanto o aluno pensa na resposta desta
-    // pergunta, pinga o prefixo para não esfriar (lib/cacheKeepalive.js). O
-    // cancel correspondente está na entrada do /chat (o aluno respondeu).
-    if (parsed?._keepalivePrompt) scheduleKeepalive(sess, parsed._keepalivePrompt, sessionMeterCtx(sess));
+    // pergunta, pinga o MESMO prefixo (instructions+conversation+tools) para
+    // não esfriar (lib/cacheKeepalive.js, v2 "ping camaleão"). O cancel
+    // correspondente está na entrada do /chat (o aluno respondeu).
+    if (parsed?._keepalive) scheduleKeepalive(sess, parsed._keepalive, sessionMeterCtx(sess));
 
     // Teto duro (variante a): se o modelo insistiu ALÉM da cota da pergunta,
     // veta o follow_up e RE-CHAMA o orquestrador forçando `ask` — ele escreve a

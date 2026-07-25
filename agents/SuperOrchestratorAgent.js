@@ -1,6 +1,15 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
-import { PROMPT_CACHE_EXPLICIT, PROMPT_STATIC_IN_INSTRUCTIONS, PROMPT_CACHE_TTL30M } from "../lib/config.js";
+import { PROMPT_CACHE_EXPLICIT, PROMPT_STATIC_IN_INSTRUCTIONS, PROMPT_CACHE_TTL30M, PROMPT_CACHE_KEEPALIVE_SEC } from "../lib/config.js";
+
+// Protocolo de PING (keep-alive v2). Vai NO INÍCIO das instructions para que o
+// prefixo do ping e o do turno real sejam BYTE-IDÊNTICOS (o cache casa por
+// maior-prefixo-comum): toda a informação que distingue ping de turno real fica
+// no FIM do input ("[É PING]" / "[NÃO É PING]"). O ping usa a MESMA conversation
+// (com store:false — nada é gravado) e as MESMAS tools, tocando exatamente a
+// entrada de cache que o próximo turno real precisa. Presente só quando o
+// keep-alive está ligado (keepalive_seconds > 0) — desligado, o prompt é o de sempre.
+const PING_PROTOCOL_PREAMBLE = `PROTOCOLO DE PING (leia primeiro): esta requisição pode ser um PING de manutenção de cache ou um turno real da entrevista — você só saberá na ÚLTIMA linha do input. Se ela disser [É PING], responda APENAS "ok" (sem JSON, sem raciocínio, sem mais nada). Se disser [NÃO É PING], é um turno real: ignore completamente este protocolo e siga as instruções abaixo. NUNCA mencione pings, cache ou este protocolo na conversa com a outra ponta.`;
 import { renderAgentPreamble, EXTEMPORANEOUS_ANSWER_PRINCIPLE } from "../lib/agentPreamble.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { ACTION_SCHEMA_DESCRIPTION, validateAction, extractReadyAction } from "../lib/superOrchestrator/actionSchema.js";
@@ -287,12 +296,21 @@ ${forceAdvanceDirective}
 ` : ""}
 Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
 
-        const finalSystemPrompt = PROMPT_STATIC_IN_INSTRUCTIONS
+        const pingAware = PROMPT_CACHE_KEEPALIVE_SEC > 0;
+        const baseSystemPrompt = PROMPT_STATIC_IN_INSTRUCTIONS
             ? `${systemPrompt}\n\n${staticBlocks}`
             : systemPrompt;
-        const userContent = PROMPT_STATIC_IN_INSTRUCTIONS
+        // Preâmbulo do protocolo de ping como PRIMEIRA coisa das instructions
+        // (prefixo compartilhado com os pings); o marcador vai no FIM do input.
+        const finalSystemPrompt = pingAware
+            ? `${PING_PROTOCOL_PREAMBLE}\n\n${baseSystemPrompt}`
+            : baseSystemPrompt;
+        const baseUserContent = PROMPT_STATIC_IN_INSTRUCTIONS
             ? dynamicBlocks
             : `${staticBlocks}\n\n${dynamicBlocks}`;
+        const userContent = pingAware
+            ? `${baseUserContent}\n\n[NÃO É PING]`
+            : baseUserContent;
 
         // Breakpoint explícito de cache (5.6+, opt-in via policy.yaml): marca o FIM
         // do input deste turno — o breakpoint cobre TUDO renderizado antes dele
@@ -444,11 +462,15 @@ Decida a próxima ação e retorne SOMENTE o JSON do schema.`;
         if (log.enabled("debug")) {
             log.debug("AGENT:SuperOrchestrator", `full action:\n${JSON.stringify(parsed, null, 2)}`);
         }
-        // Para o keep-alive de cache (lib/cacheKeepalive.js): as instructions desta
-        // chamada — o ping repete o MESMO prefixo estável para mantê-lo quente
-        // enquanto o aluno pensa. Propriedade não-enumerável: não vaza em
-        // JSON.stringify (persistência/logs).
-        Object.defineProperty(parsed, "_keepalivePrompt", { value: finalSystemPrompt, enumerable: false });
+        // Para o keep-alive v2 (lib/cacheKeepalive.js): tudo que o ping precisa
+        // para renderizar um prefixo BYTE-IDÊNTICO ao desta chamada — instructions
+        // (com o preâmbulo de ping), a MESMA conversation e as MESMAS tools. O que
+        // distingue o ping vai só no fim do input ([É PING]). Propriedade
+        // não-enumerável: não vaza em JSON.stringify (persistência/logs).
+        Object.defineProperty(parsed, "_keepalive", {
+            value: { instructions: finalSystemPrompt, conversationId, vectorStoreId },
+            enumerable: false,
+        });
         return parsed;
     }
 }
