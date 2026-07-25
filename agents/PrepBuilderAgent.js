@@ -1,25 +1,29 @@
 // PrepBuilderAgent
 //
-// Substitui MapBuilderAgent + PlanBuilderAgent no /upload. Duas chamadas
-// serializadas:
+// Substitui MapBuilderAgent + PlanBuilderAgent no /upload. Ponto de entrada:
 //
-//   1. analyzeWork({ studentFileId, enunciadoFileId, interviewerYamlText })
-//      → JSON com `summary`, `assessment` (strengths/weaknesses/critical_points/
-//        authorship_doubts) e `evidence_index` (pontos do PDF que valem checar
-//        na entrevista, com âncoras a seções/figuras).
+//   buildPrep({ studentFileId, enunciadoFileId, interviewerYamlText, questionCount })
+//      → { analysis, plan }. Tenta produzir os dois numa ÚNICA chamada
+//        (_mergedPrep) — que NÃO reenvia os PDFs, cortando ~metade do
+//        custo/tempo da prep — e cai automaticamente para as duas chamadas
+//        serializadas abaixo se a chamada única vier incompleta/inválida.
 //
-//   2. buildPlan({ analysis, interviewerYamlText, questionCount, ... })
-//      → JSON com `questions: [...]` no MESMO shape do interview_plan atual,
-//        para frontend e conversation.html não precisarem mudar. A diferença
-//        chave em relação ao PlanBuilder antigo: este recebe `analysis` como
-//        input principal — as perguntas devem cobrir prioritariamente os
-//        critical_points e weaknesses identificados na análise, usando os
-//        evidence_index para citar partes específicas.
+// As duas etapas (também usadas como fallback e reutilizáveis à parte):
 //
-// Por que duas chamadas (e não uma):
-//   - Output combinado ficaria muito longo, com risco de truncamento.
-//   - O plano se beneficia de raciocinar SOBRE a análise (input já formado)
-//     em vez de produzir os dois do zero ao mesmo tempo.
+//   1. analyzeWork(...) → JSON com `summary`, `assessment` (strengths/weaknesses/
+//      critical_points/authorship_doubts/internal_contradictions) e
+//      `evidence_index` (pontos do PDF que valem checar, com âncoras).
+//
+//   2. buildPlan({ analysis, ... }) → JSON com `questions: [...]` no MESMO shape
+//      do interview_plan atual. Recebe `analysis` como input principal — as
+//      perguntas cobrem prioritariamente contradições/critical_points/weaknesses,
+//      usando o evidence_index para citar partes específicas.
+//
+// Por que a chamada única é segura (com a rede de proteção): o output combinado
+// (análise + plano) cabe folgado no teto de saída para questionCount ≤ 10
+// (validado empiricamente), e o `plan` continua raciocinando sobre a `analysis`
+// que o próprio modelo produz na sub-rotina 1. Em qualquer sinal de truncamento
+// ou shape inválido, buildPrep refaz pela via de duas chamadas.
 //
 // Audience: orchestrator_only (saída alimenta o super-orquestrador e o
 // professor; nunca vai direto pro aluno).
@@ -144,23 +148,8 @@ Analise a entrega (PDF anexo) à luz do documento motivador (PDF também anexo) 
         }
 
         // Validação estrutural mínima — falha rápida se o modelo errar o shape.
-        if (typeof parsed.summary !== "string" || !parsed.summary.trim()) {
-            throw new Error("PrepBuilder.analyzeWork: summary ausente ou vazio");
-        }
+        this._validateAnalysis(parsed);
         const a = parsed.assessment;
-        if (!a || !Array.isArray(a.strengths) || !Array.isArray(a.weaknesses) || !Array.isArray(a.critical_points) || !Array.isArray(a.authorship_doubts)) {
-            throw new Error("PrepBuilder.analyzeWork: assessment incompleto (strengths/weaknesses/critical_points/authorship_doubts)");
-        }
-        // internal_contradictions é novo (introduzido depois) — tolera ausência
-        // pra não quebrar análises de versões antigas regravadas; normaliza
-        // para array vazio. Novas análises sempre vêm com o campo.
-        if (a.internal_contradictions !== undefined && !Array.isArray(a.internal_contradictions)) {
-            throw new Error("PrepBuilder.analyzeWork: internal_contradictions deve ser array");
-        }
-        if (!Array.isArray(a.internal_contradictions)) a.internal_contradictions = [];
-        if (!Array.isArray(parsed.evidence_index)) {
-            throw new Error("PrepBuilder.analyzeWork: evidence_index não é array");
-        }
 
         log.info("AGENT:PrepBuilder", `analyzeWork ok summary=${log.preview(parsed.summary, 80)} strengths=${a.strengths.length} weaknesses=${a.weaknesses.length} critical=${a.critical_points.length} doubts=${a.authorship_doubts.length} contradictions=${a.internal_contradictions.length} evidence=${parsed.evidence_index.length}`);
         if (log.enabled("debug")) {
@@ -225,18 +214,122 @@ ${renderedWithAnalysis}`;
             log.error("AGENT:PrepBuilder", `raw output: ${response.output_text}`);
             throw new Error(`PrepBuilder.buildPlan: invalid JSON (${err.message})`);
         }
-        if (!Array.isArray(plan.questions) || plan.questions.length === 0) {
-            throw new Error("PrepBuilder.buildPlan: plan.questions empty or not array");
-        }
-        const firstQuestion = plan.questions[0]?.question;
-        if (!firstQuestion || typeof firstQuestion !== "string") {
-            throw new Error("PrepBuilder.buildPlan: plan has no valid first question");
-        }
+        this._validatePlan(plan);
 
         log.info("AGENT:PrepBuilder", `buildPlan ok questions=${plan.questions.length}`);
         if (log.enabled("debug")) {
             log.debug("AGENT:PrepBuilder", `buildPlan full plan:\n${JSON.stringify(plan, null, 2)}`);
         }
         return plan;
+    }
+
+    // Validação estrutural da análise (compartilhada por analyzeWork e mergedPrep).
+    // Normaliza internal_contradictions para array vazio. Lança em shape inválido.
+    _validateAnalysis(parsed) {
+        if (typeof parsed?.summary !== "string" || !parsed.summary.trim()) {
+            throw new Error("PrepBuilder: analysis.summary ausente ou vazio");
+        }
+        const a = parsed.assessment;
+        if (!a || !Array.isArray(a.strengths) || !Array.isArray(a.weaknesses) || !Array.isArray(a.critical_points) || !Array.isArray(a.authorship_doubts)) {
+            throw new Error("PrepBuilder: assessment incompleto (strengths/weaknesses/critical_points/authorship_doubts)");
+        }
+        // internal_contradictions é novo (introduzido depois) — tolera ausência e
+        // normaliza para array vazio. Novas análises sempre vêm com o campo.
+        if (a.internal_contradictions !== undefined && !Array.isArray(a.internal_contradictions)) {
+            throw new Error("PrepBuilder: internal_contradictions deve ser array");
+        }
+        if (!Array.isArray(a.internal_contradictions)) a.internal_contradictions = [];
+        if (!Array.isArray(parsed.evidence_index)) {
+            throw new Error("PrepBuilder: evidence_index não é array");
+        }
+        return parsed;
+    }
+
+    // Validação estrutural do plano (compartilhada por buildPlan e mergedPrep).
+    _validatePlan(plan) {
+        if (!plan || !Array.isArray(plan.questions) || plan.questions.length === 0) {
+            throw new Error("PrepBuilder: plan.questions vazio ou não é array");
+        }
+        const first = plan.questions[0]?.question;
+        if (!first || typeof first !== "string") {
+            throw new Error("PrepBuilder: plan sem primeira pergunta válida");
+        }
+        return plan;
+    }
+
+    // Prep consolidada numa ÚNICA chamada: analisa a entrega E gera o plano de uma
+    // vez, devolvendo { analysis, plan }. Não reenvia os PDFs (o buildPlan clássico
+    // os relia), então corta ~metade do custo/tempo da prep. Lança em qualquer
+    // sinal de saída incompleta / parse / validação — buildPrep cai no caminho de
+    // duas chamadas. O prompt reutiliza os mesmos blocos de analyzeWork e buildPlan.
+    async _mergedPrep({ studentFileId, enunciadoFileId, interviewerYamlText, questionCount, meterCtx = null }) {
+        if (!studentFileId)   throw new Error("PrepBuilder.mergedPrep: missing studentFileId");
+        if (!enunciadoFileId) throw new Error("PrepBuilder.mergedPrep: missing enunciadoFileId");
+        if (!interviewerYamlText) throw new Error("PrepBuilder.mergedPrep: missing interviewerYamlText");
+        if (!Number.isInteger(questionCount) || questionCount <= 0) {
+            throw new Error(`PrepBuilder.mergedPrep: invalid questionCount ${questionCount}`);
+        }
+
+        const renderedBase = renderInterviewPrompt(loadInterviewPromptTemplate(), interviewerYamlText, questionCount);
+        const systemPrompt = `${renderAgentPreamble({ audience: "orchestrator_only" })}
+
+Você vai executar, em UM único passo, DUAS sub-rotinas encadeadas sobre os PDFs anexos (documento motivador + entrega): (1) ANÁLISE da entrega; (2) PLANO de perguntas baseado nessa análise.
+
+===== SUB-ROTINA 1 (ANÁLISE) =====
+${this.analyzeSystemBody}
+
+===== SUB-ROTINA 2 (PLANO) =====
+${renderedBase}${this.buildPlanExtraInstructions}(o input principal do plano é o JSON de análise que VOCÊ produz na sub-rotina 1, não um anexo separado.)
+
+===== SAÍDA =====
+Retorne SOMENTE um JSON: {"analysis": <JSON exato da sub-rotina 1>, "plan": <JSON exato da sub-rotina 2, com o array "questions">}. Sem markdown, sem texto fora do JSON.`;
+
+        const payload = {
+            model: this.model,
+            instructions: systemPrompt,
+            input: [{
+                role: "user",
+                content: [
+                    { type: "input_text", text: "Documento motivador e entrega em anexo (PDFs). Faça a análise e o plano e devolva o JSON único {analysis, plan}." },
+                    { type: "input_file", file_id: enunciadoFileId },
+                    { type: "input_file", file_id: studentFileId },
+                ],
+            }],
+        };
+
+        log.prompt("AGENT:PrepBuilder", `[mergedPrep] systemPrompt (${systemPrompt.length} chars)`);
+        const response = await log.span("AGENT:PrepBuilder", "mergedPrep.create", () =>
+            meteredResponses(
+                { ...meterCtx, agentLabel: "AGENT:PrepBuilder:mergedPrep", model: this.model },
+                () => (meterCtx?.openai ?? this.client).responses.create(payload)
+            )
+        );
+
+        if (response.status === "incomplete") {
+            throw new Error(`mergedPrep: resposta incompleta (${response.incomplete_details?.reason ?? "desconhecido"})`);
+        }
+        const text = response.output_text || "";
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) throw new Error("mergedPrep: no JSON in response");
+        const parsed = JSON.parse(match[0]);
+        const analysis = this._validateAnalysis(parsed.analysis);
+        const plan = this._validatePlan(parsed.plan);
+        log.info("AGENT:PrepBuilder", `mergedPrep ok contradictions=${analysis.assessment.internal_contradictions.length} questions=${plan.questions.length}`);
+        return { analysis, plan };
+    }
+
+    // Prep com rede de segurança: tenta a chamada única (mergedPrep); em QUALQUER
+    // falha (incompleta/parse/validação/API), cai para o caminho clássico de duas
+    // chamadas serializadas (analyze → plan). Captura o ganho de custo/tempo no
+    // caminho feliz sem abrir mão da robustez. Devolve { analysis, plan }.
+    async buildPrep({ studentFileId, enunciadoFileId, interviewerYamlText, questionCount, meterCtx = null }) {
+        try {
+            return await this._mergedPrep({ studentFileId, enunciadoFileId, interviewerYamlText, questionCount, meterCtx });
+        } catch (err) {
+            log.warn("AGENT:PrepBuilder", `mergedPrep falhou (${err.message}); fallback para 2 chamadas`);
+            const analysis = await this.analyzeWork({ studentFileId, enunciadoFileId, interviewerYamlText, meterCtx });
+            const plan = await this.buildPlan({ analysis, studentFileId, enunciadoFileId, interviewerYamlText, questionCount, meterCtx });
+            return { analysis, plan };
+        }
     }
 }
