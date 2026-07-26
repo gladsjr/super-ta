@@ -3,6 +3,7 @@
 // frontend, e CRUD básico de usuários.
 
 import express from "express";
+import crypto from "crypto";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
 import * as db from "../lib/db.js";
@@ -178,6 +179,47 @@ router.delete("/admin/users/:id", requireAdmin, async (req, res) => {
         if (err.status) return res.status(err.status).json({ error: err.message });
         log.error("ADMIN", `delete user failed: ${err.message}`);
         res.status(500).json({ error: "failed to delete user" });
+    }
+});
+
+// --- Tokens do endpoint de análise (/api/analytics/query) ---
+// Gerados AQUI, pelo admin logado (que já tem direito de acesso aos dados). O
+// texto puro do token é devolvido UMA vez (na geração); o banco guarda só o
+// hash. Validade fixa de 30 dias (migration 053). Ver routes/analytics.js.
+router.post("/admin/analytics-tokens", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+    try {
+        const label = (typeof req.body?.label === "string" ? req.body.label.trim() : "").slice(0, 120) || null;
+        const plaintext = "oratia_analytics_" + crypto.randomBytes(32).toString("hex");
+        const tokenHash = crypto.createHash("sha256").update(plaintext).digest("hex");
+        const tokenPrefix = plaintext.slice(0, 24); // "oratia_analytics_" + 7 chars
+        const info = await db.createAnalyticsToken({ tokenHash, tokenPrefix, label, createdBy: req.session.user.username });
+        log.info("ADMIN", `analytics token created id=${info.id} by=${req.session.user.username} expires=${info.expires_at}`);
+        // token (texto puro) só aqui, uma única vez.
+        res.json({ token: plaintext, info });
+    } catch (err) {
+        log.error("ADMIN", `create analytics token failed: ${err.message}`);
+        res.status(500).json({ error: "failed to create analytics token" });
+    }
+});
+
+router.get("/admin/analytics-tokens", requireAdmin, async (_req, res) => {
+    try {
+        res.json({ tokens: await db.listAnalyticsTokens() });
+    } catch (err) {
+        log.error("ADMIN", `list analytics tokens failed: ${err.message}`);
+        res.status(500).json({ error: "failed to list analytics tokens" });
+    }
+});
+
+router.post("/admin/analytics-tokens/:id/revoke", requireAdmin, async (req, res) => {
+    try {
+        const ok = await db.revokeAnalyticsToken(Number(req.params.id));
+        if (!ok) return res.status(404).json({ error: "token não encontrado ou já revogado" });
+        log.info("ADMIN", `analytics token revoked id=${req.params.id} by=${req.session.user.username}`);
+        res.json({ ok: true });
+    } catch (err) {
+        log.error("ADMIN", `revoke analytics token failed: ${err.message}`);
+        res.status(500).json({ error: "failed to revoke analytics token" });
     }
 });
 

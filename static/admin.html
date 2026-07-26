@@ -149,6 +149,31 @@
       <div id="users-empty" class="table-empty hidden">Nenhum usuário ainda.</div>
     </div>
 
+    <h3 style="margin-top: var(--sp-6)">Análise (benchmark)</h3>
+    <div class="card">
+      <h3 class="card-title">Tokens de análise</h3>
+      <p class="card-sub">Geram acesso somente-leitura ao endpoint de consulta de dados (<code>POST /api/analytics/query</code>) para benchmark. Como você já tem direito aos dados, o token apenas estende esse acesso a um canal programático — <strong>expira em 30 dias</strong> e fica registrado no seu nome. O texto do token aparece <strong>uma única vez</strong>, na geração: copie e guarde.</p>
+      <div class="row">
+        <input id="tok-label" class="input" placeholder="descrição (opcional, ex.: benchmark custo jul/26)" style="flex:1; min-width:240px"/>
+        <button id="tok-generate" class="btn btn-primary">Gerar token</button>
+      </div>
+      <div id="tok-fresh" class="hidden" style="margin-top: var(--sp-3); padding: var(--sp-3); border:1px solid var(--accent-300,#9ed8cc); background: var(--accent-50,#eef8f4); border-radius: var(--r-sm,6px)">
+        <div class="hint" style="margin-bottom:6px">⚠️ Copie agora — não será mostrado de novo.</div>
+        <div class="row" style="align-items:center">
+          <code id="tok-fresh-value" class="token-chip" style="flex:1; word-break:break-all"></code>
+          <button id="tok-copy" class="btn btn-sm">Copiar</button>
+        </div>
+      </div>
+      <div id="tok-msg" class="hint"></div>
+    </div>
+    <div class="card">
+      <table id="tokens-table" class="table">
+        <thead><tr><th>Prefixo</th><th>Descrição</th><th>Criado por</th><th>Expira em</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="tokens-empty" class="table-empty hidden">Nenhum token ainda.</div>
+    </div>
+
     <h3 style="margin-top: var(--sp-6)">Manutenção</h3>
     <div class="card">
       <h3 class="card-title">Backfill de custo Realtime (voz)</h3>
@@ -177,7 +202,7 @@ let DEFAULT_BUDGET_USD = null;
 async function checkAuth() {
   try {
     const r = await fetch('/me');
-    if (r.ok) { const j = await r.json(); showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); }
+    if (r.ok) { const j = await r.json(); showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); }
     else showLogin();
   } catch { showLogin(); }
 }
@@ -215,7 +240,7 @@ document.getElementById('login-btn').onclick = async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); }
+    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); }
     else errEl.textContent = 'Usuário ou senha inválidos';
   } catch { errEl.textContent = 'Falha na comunicação'; }
 };
@@ -603,6 +628,71 @@ document.getElementById('change-pwd').onclick = async () => {
 document.getElementById('pwd-new').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('change-pwd').click();
 });
+
+// ---- Tokens de análise (benchmark) ----
+async function loadAnalyticsTokens() {
+  const r = await fetch('/admin/analytics-tokens');
+  if (r.status === 401) return showLogin();
+  const j = await r.json().catch(() => ({}));
+  const tbody = document.querySelector('#tokens-table tbody');
+  const table = document.getElementById('tokens-table');
+  const empty = document.getElementById('tokens-empty');
+  const toks = j.tokens || [];
+  if (!toks.length) { table.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+  table.classList.remove('hidden'); empty.classList.add('hidden');
+  tbody.innerHTML = toks.map(t => {
+    const status = t.revoked_at ? '<span class="muted">revogado</span>'
+      : (t.active ? '<span class="badge badge-completed">ativo</span>' : '<span class="muted">expirado</span>');
+    const action = (t.revoked_at || !t.active)
+      ? '<span class="muted">—</span>'
+      : `<button class="btn btn-danger-ghost btn-sm" onclick="revokeToken(${t.id})">Revogar</button>`;
+    return `<tr>
+      <td><code class="token-chip">${escapeHtml(t.token_prefix)}…</code></td>
+      <td>${t.label ? escapeHtml(t.label) : '<span class="muted">—</span>'}</td>
+      <td class="muted">${escapeHtml(t.created_by || '—')}</td>
+      <td class="muted">${fmtDateShort(t.expires_at)}</td>
+      <td>${status}</td>
+      <td style="text-align:right">${action}</td>
+    </tr>`;
+  }).join('');
+}
+document.getElementById('tok-generate').onclick = async () => {
+  const label = document.getElementById('tok-label').value.trim();
+  const msg = document.getElementById('tok-msg');
+  msg.textContent = '';
+  try {
+    const r = await fetch('/admin/analytics-tokens', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label })
+    });
+    if (r.status === 401) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
+    document.getElementById('tok-label').value = '';
+    const box = document.getElementById('tok-fresh');
+    document.getElementById('tok-fresh-value').textContent = j.token;
+    box.classList.remove('hidden');
+    msg.textContent = 'Token gerado. Expira em ' + fmtDateShort(j.info?.expires_at) + '.';
+    loadAnalyticsTokens();
+  } catch { msg.textContent = 'Falha na comunicação'; }
+};
+document.getElementById('tok-copy').onclick = async () => {
+  const v = document.getElementById('tok-fresh-value').textContent;
+  try { await navigator.clipboard.writeText(v); document.getElementById('tok-copy').textContent = 'Copiado ✓'; }
+  catch { /* fallback: seleção manual */ }
+};
+async function revokeToken(id) {
+  if (!confirm('Revogar este token? O acesso é cortado imediatamente e não pode ser desfeito.')) return;
+  const msg = document.getElementById('tok-msg');
+  try {
+    const r = await fetch('/admin/analytics-tokens/' + encodeURIComponent(id) + '/revoke', { method: 'POST' });
+    if (r.status === 401) return showLogin();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao revogar'); return; }
+    msg.textContent = 'Token revogado.';
+    loadAnalyticsTokens();
+  } catch { msg.textContent = 'Falha na comunicação'; }
+}
 
 // ---- Backfill de custo Realtime (voz) ----
 const usd = (n) => 'US$ ' + Number(n || 0).toFixed(2);
