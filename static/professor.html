@@ -174,6 +174,22 @@
     </div>
 
     <div class="card">
+      <h3 class="card-title" data-help="Vale para novas submissões. A profunda é a entrevista por mensagens: o entrevistador raciocina a cada resposta, com follow-ups e sondagem. A simplificada é uma conversa por VOZ em tempo real (como a prova oral): faz apenas as perguntas planejadas na análise do trabalho, com câmera ligada e vídeo gravado.">Tipo de entrevista</h3>
+      <p class="card-sub">Como o aluno será arguido sobre o trabalho enviado.</p>
+      <div class="row" style="gap: var(--sp-4); margin-bottom: var(--sp-2); align-items:flex-start; flex-direction:column">
+        <label style="display:flex; align-items:flex-start; gap: var(--sp-2)">
+          <input type="radio" name="interview-variant" value="messages" id="variant-messages" checked style="margin-top:3px"/>
+          <span><strong>Profunda</strong> (por mensagens) — o entrevistador analisa cada resposta com raciocínio profundo e aprofunda com follow-ups.</span>
+        </label>
+        <label style="display:flex; align-items:flex-start; gap: var(--sp-2)">
+          <input type="radio" name="interview-variant" value="realtime" id="variant-realtime" style="margin-top:3px"/>
+          <span><strong>Simplificada</strong> (tempo real) — conversa por <strong>voz</strong> ao vivo, fluida e de menor custo; faz apenas as perguntas planejadas, sem raciocínio profundo por resposta. Câmera ligada, vídeo gravado.</span>
+        </label>
+      </div>
+      <div id="variant-realtime-note" class="hint hidden">Na entrevista em tempo real a interação é sempre por <strong>voz</strong> — escolha a voz do entrevistador no card abaixo. A câmera fica ligada e o vídeo é gravado e analisado, como na prova oral.</div>
+    </div>
+
+    <div class="card">
       <h3 class="card-title" data-help="Vale para novas submissões — entrevistas já em andamento mantêm o modo com que começaram.">Modo de interação com o aluno</h3>
       <p class="card-sub">Define como o aluno conversa com o entrevistador.</p>
       <div class="row" style="gap: var(--sp-4); margin-bottom: var(--sp-3)">
@@ -573,6 +589,7 @@ async function load() {
     : 'Envie o enunciado antes de avaliar';
 
   applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
+  applyVariantStateToUI(j.work.interview_variant || 'messages');
   applyProctoringStateToUI(j.work.proctoring_enabled === true);
   CALIB = j.work.oral_calibration || null;
   renderCalib();
@@ -1089,6 +1106,24 @@ document.querySelectorAll('input[name="interaction-mode"]').forEach(el => {
     checkIdentityVoiceCoherence();
   });
 });
+
+// ---- Tipo de entrevista (profunda por mensagens vs simplificada em tempo real) ----
+// A simplificada é sempre por VOZ: força o modo áudio (para a voz persistir no
+// mesmo lugar da entrevista/oral) e trava o rádio de texto enquanto ativa.
+function applyVariantStateToUI(variant) {
+  const rt = variant === 'realtime';
+  document.getElementById(rt ? 'variant-realtime' : 'variant-messages').checked = true;
+  document.getElementById('variant-realtime-note').classList.toggle('hidden', !rt);
+  document.getElementById('mode-text').disabled = rt;
+  if (rt) {
+    document.getElementById('mode-audio').checked = true;
+    document.getElementById('voice-row').classList.remove('hidden');
+  }
+  checkIdentityVoiceCoherence();
+}
+document.querySelectorAll('input[name="interview-variant"]').forEach(el => {
+  el.addEventListener('change', (e) => applyVariantStateToUI(e.target.value));
+});
 document.getElementById('voice-select').addEventListener('change', checkIdentityVoiceCoherence);
 document.querySelectorAll('input[name="interviewer-gender"]').forEach(el => {
   el.addEventListener('change', () => { identityExplicit = true; checkIdentityVoiceCoherence(); });
@@ -1204,10 +1239,11 @@ document.getElementById('save-cenario').onclick = async () => {
   const msg = document.getElementById('cenario-save-msg');
   msg.textContent = '';
   const proctoringOn = document.getElementById('proctoring-enabled').checked;
+  const variant = document.querySelector('input[name="interview-variant"]:checked')?.value || 'messages';
   let mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
-  if (proctoringOn) mode = 'audio'; // proctoring exige áudio
+  if (proctoringOn || variant === 'realtime') mode = 'audio'; // proctoring e tempo real exigem voz
   const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
-  if (mode === 'audio' && !voice) { msg.textContent = proctoringOn ? 'A fiscalização por vídeo exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'; return; }
+  if (mode === 'audio' && !voice) { msg.textContent = variant === 'realtime' ? 'A entrevista em tempo real é por voz — escolha uma voz.' : (proctoringOn ? 'A fiscalização por vídeo exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'); return; }
   const name = document.getElementById('interviewer-name').value.trim();
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
   // Identidade só persiste se foi DEFINIDA pelo professor; o rascunho sugerido
@@ -1228,6 +1264,7 @@ document.getElementById('save-cenario').onclick = async () => {
   btn.disabled = true; btn.textContent = 'Salvando…';
   try {
     const reqs = await Promise.all([
+      fetch(`/w/${encodeURIComponent(workToken)}/interview-variant`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ variant }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/interaction`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, voice }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(setIdentity ? { name, gender } : { name: null, gender: null }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/question-count`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_count: count }) }),

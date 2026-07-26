@@ -10,6 +10,7 @@ import {
     CONSENT_TEXT_HTML,
     CONSENT_AUDIO_ADDITION_HTML,
     CONSENT_ORAL_HTML,
+    CONSENT_LIVE_HTML,
 } from "../config/consent.js";
 
 const router = express.Router();
@@ -31,12 +32,16 @@ router.get("/w/:workToken/oral", (_req, res) => res.sendFile(path.join(STATIC_DI
 router.get("/w/:workToken/oral/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "oral-conversation.html")));
 router.get("/w/:workToken/s/:subToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "conversation.html")));
 // Entrada do aluno: a MESMA URL serve a página certa pelo tipo do trabalho —
-// prova oral (Realtime) → oral-student.html; cenário → scenario-student.html;
-// senão → student.html (entrevista). Decisão no servidor — sem flash.
+// prova oral (Realtime) → oral-student.html; entrevista SIMPLIFICADA (tempo
+// real) → live-student.html; cenário → scenario-student.html; senão →
+// student.html (entrevista profunda). Decisão no servidor — sem flash.
 router.get("/s/:submissionToken", async (req, res) => {
     try {
         const found = await db.findSubmissionByToken(String(req.params.submissionToken || "").toLowerCase());
         if (found && found.work_kind === "oral_realtime") return res.sendFile(path.join(STATIC_DIR, "oral-student.html"));
+        if (found && found.work_kind === "interview" && found.work_interview_variant === "realtime") {
+            return res.sendFile(path.join(STATIC_DIR, "live-student.html"));
+        }
         if (found && await scenarioStore.getScenarioByWork(found.work_id)) return res.sendFile(path.join(STATIC_DIR, "scenario-student.html"));
     } catch { /* na dúvida → entrevista padrão */ }
     res.sendFile(path.join(STATIC_DIR, "student.html"));
@@ -53,6 +58,7 @@ router.get("/api/consent", (_req, res) => {
         textHtml: CONSENT_TEXT_HTML,
         audioAdditionHtml: CONSENT_AUDIO_ADDITION_HTML,
         oralHtml: CONSENT_ORAL_HTML,
+        liveHtml: CONSENT_LIVE_HTML,
     });
 });
 

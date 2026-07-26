@@ -34,7 +34,9 @@ import scenarioRoutes from "./routes/scenarios.js";
 import scenarioStudentRoutes from "./routes/scenarioStudent.js";
 import scenarioCockpitRoutes from "./routes/scenarioCockpit.js";
 import oralExamRoutes from "./routes/oralExam.js";
+import interviewLiveRoutes from "./routes/interviewLive.js";
 import { attachOralRelay } from "./lib/oralRealtime.js";
+import { attachLiveInterviewRelay } from "./lib/liveInterview.js";
 import diagRoutes from "./routes/diag.js";
 import benchmarkRoutes from "./routes/benchmark.js";
 import costAuditRoutes from "./routes/costAudit.js";
@@ -106,6 +108,7 @@ app.use("/scenarios/api", requireAdmin); // gate de sessão SÓ na API de config
 app.use(scenarioRoutes); // /scenarios/api/* (gateado acima). O dev server scenarios-dev.mjs monta sem gate (local).
 app.use(scenarioStudentRoutes); // /s/:submissionToken/scenario/* — fluxo do aluno (auth por token de submissão).
 app.use(oralExamRoutes); // /w/:t/oral/* e /s/:t/oral/* — prova oral (Realtime)
+app.use(interviewLiveRoutes); // /s/:t/live/* — entrevista SIMPLIFICADA (tempo real, por voz)
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 app.use(benchmarkRoutes); // /api/benchmark/* — benchmark interno (requireAdmin por rota)
 app.use(costAuditRoutes); // /api/cost-audit/* — auditoria de custo (Usage/Costs API; requireAdmin por rota)
@@ -138,3 +141,4 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
 
 // Relay WebSocket da prova oral (Realtime) — navegador ↔ servidor ↔ OpenAI.
 attachOralRelay(httpServer);
+attachLiveInterviewRelay(httpServer);

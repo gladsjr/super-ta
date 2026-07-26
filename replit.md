@@ -3,6 +3,8 @@
 ## Overview
 ORATIA is an assignment evaluation system that conducts a structured, stateful interview with students about their submitted work, assessing authorship, understanding, and conceptual coherence (not just textual correctness). A second work kind (`oral_realtime`) conducts a spoken, camera-on **oral exam** over the Realtime API against a professor-supplied gabarito.
 
+The interview kind has two variants (`works.interview_variant`, migration 050): **`messages`** (deep — the per-turn reasoning orchestrator below) and **`realtime`** (simplified — a live-voice, camera-on Realtime session that asks ONLY the prepped plan questions; student screens mirror the oral exam; professor config and the evaluation pipeline are the SAME as the message interview — the transcript is converted to `conversation_json` at session close). Realtime-variant pieces: `routes/interviewLive.js`, `lib/liveInterview.js`, `lib/liveConversation.js`, `static/live-student.html`; the generic relay engine shared with the oral exam lives in `lib/realtimeBridge.js`.
+
 Per-turn orchestration is **delegated to a single reasoning-model call** (`SuperOrchestratorAgent`) that receives full context and returns a JSON action; the code is a dispatcher around that decision with hard guardrails (turn cap, early-finalize block). This replaced an earlier triage×3 + sufficiency + relevance fleet.
 
 **Keep this file lean.** Subsystem detail lives in `docs/` — update THERE when a subsystem changes:
