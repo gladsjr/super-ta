@@ -104,9 +104,14 @@ tts:
 # Reconferir ao trocar de snapshot.
 # ---------------------------------------------------------------------------
 realtime:
-  gpt-realtime:
+  gpt-realtime: &realtime_gpt_rates
     text_input_per_mtok: 4.00
     text_output_per_mtok: 24.00
     audio_input_per_mtok: 32.00
     audio_output_per_mtok: 64.00
     cached_per_mtok: 0.40         # input cacheado (áudio e texto ambos a 0,40)
+  # gpt-realtime-2.1 (atual em policy.yaml) e o snapshot datado têm a MESMA
+  # tabela do gpt-realtime — conferido na pricing page da OpenAI (jul/2026).
+  # Alias YAML aponta para o mesmo bloco: um preço só, sem risco de divergir.
+  gpt-realtime-2.1: *realtime_gpt_rates
+  gpt-realtime-2025-08-28: *realtime_gpt_rates
