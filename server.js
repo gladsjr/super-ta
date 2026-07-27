@@ -40,6 +40,7 @@ import { attachLiveInterviewRelay } from "./lib/liveInterview.js";
 import diagRoutes from "./routes/diag.js";
 import benchmarkRoutes from "./routes/benchmark.js";
 import costAuditRoutes from "./routes/costAudit.js";
+import analyticsRoutes from "./routes/analytics.js";
 import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
@@ -112,6 +113,7 @@ app.use(interviewLiveRoutes); // /s/:t/live/* — entrevista SIMPLIFICADA (tempo
 app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 em prod)
 app.use(benchmarkRoutes); // /api/benchmark/* — benchmark interno (requireAdmin por rota)
 app.use(costAuditRoutes); // /api/cost-audit/* — auditoria de custo (Usage/Costs API; requireAdmin por rota)
+app.use(analyticsRoutes); // /api/analytics/query — consulta somente-leitura p/ benchmark (auth por API key; NÃO sessão; ver migration 052)
 
 const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {
