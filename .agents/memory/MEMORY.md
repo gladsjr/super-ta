@@ -15,4 +15,5 @@
 - [Proctoring: mãos viram "celular"](proctor-fp-zoom-verify.md) — yolov8n: gesto no rosto = "cell phone", braço na borda = "2ª pessoa"; zoom-verify corta 85% dos FP; conf não separa mão de celular.
 - [pg pool sem 'error' derruba o processo](pg-pool-error-handler-crash.md) — erro HTTP intermitente que "funciona no retry" = servidor caiu; conexão ociosa do node-postgres que cai vira exit status 1 sem pool.on('error') (pior em ops longas, ex.: avaliação ~72s).
 - [Cache miss no terra: diagnóstico esgotado](terra-cache-miss-diagnosis.md) — probes todos limpos, miss real não-reproduzível; breakpoints explícitos e keepalive REPROVADOS em A/B; mitigação adotada: dedup via instructions (prefixo menor).
-- [Ledger: atribuição de custos por aluno](ledger-eval-attribution.md) — InterviewEvaluator vem com submission_id NULL (case via evaluation_at); voz realtime pré-26/07/26 vive em linhas BACKFILL (originais = 0).
+- [Ledger: atribuição de custos por aluno](ledger-eval-attribution.md) — InterviewEvaluator vem com submission_id NULL (case via evaluation_at); voz realtime pré-26/07/26 vive em linhas BACKFILL (originais = 0)
+- [Publish falha no push final (HTTP 500)](publish-referrer-manifest-500.md) — "failed to push referrer manifest" = registry do Replit, não é o código; retry minutos depois passa; site no ar não é afetado..
