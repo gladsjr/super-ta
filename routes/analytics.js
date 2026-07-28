@@ -2,15 +2,19 @@
 //
 // Dá acesso consultável, seguro e auditável aos dados de PRODUÇÃO para
 // benchmark — o gargalo que fazia os testes rodarem só sobre o banco local.
-// Ver migration 052 (schema `analytics` de views + opt-out + log).
+// Consulta as TABELAS-BASE (schema `public`) diretamente. A camada de views
+// `analytics.*` foi removida (migration 054): era defesa contra nós mesmos
+// (esconder PII, conter alcance), redundante frente ao modelo de acesso —
+// token gerado no admin por um usuário que já tem direito a TODOS esses dados.
+// Bônus: sem views/schema/função, nada depende de objeto que o Publish do
+// Replit não propaga, então funciona em prod sem pegadinha de propagação.
 //
-// SEGURANÇA (o backstop é o Postgres, não este código):
+// SEGURANÇA (o backstop é o Postgres, não este código — nunca dependeu de view):
 //   - Toda consulta roda numa transação `READ ONLY` → o próprio Postgres recusa
 //     qualquer escrita/DDL (garantia dura, não checagem furável de string).
-//   - `search_path = analytics` → nomes sem qualificação resolvem para as VIEWS
-//     seguras (sem PII), nunca para as tabelas-base. Referência explícita a
-//     outros schemas (public/pg_catalog/…) é rejeitada antes de executar.
 //   - `statement_timeout` curto + LIMIT forçado protegem o banco de produção.
+//   - Guarda: só um SELECT/WITH, sem ';', e bloqueio de catálogo do sistema
+//     (pg_*, information_schema) — barra pg_read_file/pg_sleep etc.
 //   - Autenticação por TOKEN gerado pelo admin (migration 053): bearer → hash
 //     sha256 → busca em analytics_tokens (vivo = não revogado + não expirado).
 //     Sem token válido, 401 — se nenhum token foi gerado, tudo é 401 (fechado
@@ -51,8 +55,12 @@ async function requireAnalyticsToken(req, res, next) {
 
 // ---- Consultas NOMEADAS (allowlist versionada) ---------------------------
 // Cada uma é uma função (params) -> { text, values } com SQL parametrizado
-// sobre as views `analytics.*`. Cobrem os recortes recorrentes de benchmark.
+// sobre as TABELAS-BASE (works, work_cost_events, submissions). Cobrem os
+// recortes recorrentes de benchmark. `conversation_json` é TEXT com JSON válido
+// (do JSON.stringify) ou NULL; `::jsonb` é seguro (NULL segue NULL).
 const SINCE = (p) => (p && p.since ? p.since : "1970-01-01");
+// turnos de uma submissão a partir do conversation_json (objeto com .turns).
+const TURN_COUNT = `jsonb_array_length(COALESCE(s.conversation_json::jsonb -> 'turns', '[]'::jsonb))`;
 const NAMED = {
     // Custo/tokens agregado por tipo de trabalho e variante de entrevista.
     cost_by_kind: (p) => ({
@@ -62,8 +70,8 @@ const NAMED = {
                       sum(e.cached_tokens) AS cached_tokens,
                       sum(e.output_tokens) AS output_tokens,
                       round(sum(e.cost_usd), 4) AS cost_usd
-               FROM analytics.cost_events e
-               JOIN analytics.works w ON w.id = e.work_id
+               FROM work_cost_events e
+               JOIN works w ON w.id = e.work_id
                WHERE e.created_at >= $1
                GROUP BY 1, 2 ORDER BY cost_usd DESC NULLS LAST`,
         values: [SINCE(p)],
@@ -76,7 +84,7 @@ const NAMED = {
                       sum(cached_tokens) AS cached_tokens,
                       sum(output_tokens) AS output_tokens,
                       round(sum(cost_usd), 4) AS cost_usd
-               FROM analytics.cost_events
+               FROM work_cost_events
                WHERE created_at >= $1
                GROUP BY 1, 2 ORDER BY cost_usd DESC NULLS LAST`,
         values: [SINCE(p)],
@@ -85,8 +93,8 @@ const NAMED = {
     cost_per_submission: (p) => ({
         text: `WITH per_sub AS (
                    SELECT e.submission_id, w.kind, sum(e.cost_usd) AS cost
-                   FROM analytics.cost_events e
-                   JOIN analytics.works w ON w.id = e.work_id
+                   FROM work_cost_events e
+                   JOIN works w ON w.id = e.work_id
                    WHERE e.created_at >= $1 AND e.submission_id IS NOT NULL
                    GROUP BY 1, 2)
                SELECT kind, count(*) AS submissions,
@@ -98,22 +106,23 @@ const NAMED = {
     }),
     // Estatística de turnos por entrevista (p50/p95), por tipo e variante.
     interview_turn_stats: (p) => ({
-        text: `SELECT w.kind, w.interview_variant,
+        text: `WITH sub AS (
+                   SELECT s.work_id, ${TURN_COUNT} AS turn_count
+                   FROM submissions s WHERE s.created_at >= $1 AND NOT s.is_test)
+               SELECT w.kind, w.interview_variant,
                       count(*) AS submissions,
-                      round(avg(s.turn_count), 1) AS avg_turns,
-                      percentile_cont(0.5) WITHIN GROUP (ORDER BY s.turn_count) AS p50_turns,
-                      percentile_cont(0.95) WITHIN GROUP (ORDER BY s.turn_count) AS p95_turns
-               FROM analytics.submissions s
-               JOIN analytics.works w ON w.id = s.work_id
-               WHERE s.created_at >= $1 AND NOT s.is_test
+                      round(avg(sub.turn_count), 1) AS avg_turns,
+                      percentile_cont(0.5) WITHIN GROUP (ORDER BY sub.turn_count) AS p50_turns,
+                      percentile_cont(0.95) WITHIN GROUP (ORDER BY sub.turn_count) AS p95_turns
+               FROM sub JOIN works w ON w.id = sub.work_id
                GROUP BY 1, 2 ORDER BY submissions DESC`,
         values: [SINCE(p)],
     }),
     // Distribuição de notas finais.
     grade_distribution: (p) => ({
         text: `SELECT w.kind, floor(s.grade_final)::int AS grade_bucket, count(*) AS n
-               FROM analytics.submissions s
-               JOIN analytics.works w ON w.id = s.work_id
+               FROM submissions s
+               JOIN works w ON w.id = s.work_id
                WHERE s.grade_final IS NOT NULL AND s.created_at >= $1
                GROUP BY 1, 2 ORDER BY 1, 2`,
         values: [SINCE(p)],
@@ -121,7 +130,7 @@ const NAMED = {
     // Motivos de encerramento.
     completion_reasons: (p) => ({
         text: `SELECT completion_reason, count(*) AS n
-               FROM analytics.submissions
+               FROM submissions
                WHERE created_at >= $1
                GROUP BY 1 ORDER BY n DESC`,
         values: [SINCE(p)],
@@ -130,7 +139,7 @@ const NAMED = {
     recent_works: (p) => ({
         text: `SELECT work_token, name, kind, interview_variant, question_count,
                       budget_usd, spent_usd, created_at
-               FROM analytics.works
+               FROM works
                WHERE NOT is_benchmark AND created_at >= $1
                ORDER BY created_at DESC`,
         values: [SINCE(p)],
@@ -140,32 +149,39 @@ const NAMED = {
         text: `SELECT e.submission_id, w.kind, w.work_token,
                       round(sum(e.cost_usd), 4) AS cost_usd,
                       sum(e.output_tokens) AS output_tokens
-               FROM analytics.cost_events e
-               JOIN analytics.works w ON w.id = e.work_id
+               FROM work_cost_events e
+               JOIN works w ON w.id = e.work_id
                WHERE e.created_at >= $1 AND e.submission_id IS NOT NULL
                GROUP BY 1, 2, 3 ORDER BY cost_usd DESC NULLS LAST`,
         values: [SINCE(p)],
     }),
-    // (Nível 2) Turnos de uma submissão — passe { submission_id }.
+    // Turnos de uma submissão (texto do entrevistador/aluno) — { submission_id }.
     conversation_sample: (p) => ({
-        text: `SELECT turn_index, interviewer_text, student_text, asked_at, answered_at, spontaneous
-               FROM analytics.conversation_turns
-               WHERE submission_id = $1
+        text: `SELECT (t.turn ->> 'index')::int AS turn_index,
+                      t.turn ->> 'question' AS interviewer_text,
+                      t.turn ->> 'answer' AS student_text,
+                      t.turn ->> 'asked_at' AS asked_at,
+                      t.turn ->> 'answered_at' AS answered_at,
+                      (t.turn -> 'question_metadata' ->> 'spontaneous')::boolean AS spontaneous
+               FROM submissions s,
+                    LATERAL jsonb_array_elements(COALESCE(s.conversation_json::jsonb -> 'turns', '[]'::jsonb)) AS t(turn)
+               WHERE s.id = $1
                ORDER BY turn_index`,
         values: [Number(p && p.submission_id)],
     }),
 };
 
 // ---- Guarda do SQL ad-hoc -------------------------------------------------
-// Aceita SÓ um único SELECT/WITH sobre as views analytics.*; rejeita referência
-// explícita a outros schemas e a catálogos do sistema. É a 1ª barreira; a
-// transação READ ONLY + search_path são a garantia dura por trás.
+// Aceita SÓ um único SELECT/WITH sobre as tabelas de `public`; rejeita catálogo
+// do sistema (pg_*, information_schema) para barrar pg_read_file/pg_sleep etc.
+// É a 1ª barreira; a transação READ ONLY é a garantia dura por trás (nenhuma
+// escrita/DDL passa, referenciando o que for).
 function sanitizeAdhoc(sql) {
     let s = String(sql || "").trim().replace(/;+\s*$/, "");
     if (!s) throw new Error("sql vazio");
     if (s.includes(";")) throw new Error("apenas um comando (sem ';')");
     if (!/^(select|with)\b/i.test(s)) throw new Error("apenas SELECT/WITH");
-    if (/\b(public|pg_catalog|information_schema|pg_temp|pg_toast)\b/i.test(s)) throw new Error("referência a schema não permitido");
+    if (/\b(pg_catalog|information_schema|pg_temp|pg_toast)\b/i.test(s)) throw new Error("acesso a catálogo do sistema não permitido");
     if (/\bpg_[a-z_]+/i.test(s)) throw new Error("acesso a objeto de sistema (pg_*) não permitido");
     return s;
 }
@@ -178,7 +194,7 @@ async function runReadOnly(text, values, cap) {
         await client.query("BEGIN");
         await client.query("SET TRANSACTION READ ONLY");
         await client.query(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`);
-        await client.query("SET LOCAL search_path = analytics");
+        await client.query("SET LOCAL search_path = public");
         const wrapped = `SELECT * FROM ( ${text} ) AS _analytics_q LIMIT ${cap + 1}`;
         const r = await client.query({ text: wrapped, values: values || [] });
         await client.query("COMMIT");
