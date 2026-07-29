@@ -1,7 +1,7 @@
 import log from "../lib/logger.js";
 import { meteredResponses } from "../lib/billing.js";
 import { renderAgentPreamble } from "../lib/agentPreamble.js";
-import { personaFilenamesQuoted } from "../config/personas.js";
+import { personaFilenames, personaFilenamesQuoted } from "../config/personas.js";
 
 /**
  * EnunciadoCoherenceAgent
@@ -143,14 +143,13 @@ ${this.systemPromptBody}`;
         const VALID_CRITERIA = new Set(["business_context", "deliverable", "concept_density", "interviewer_profile_detail", "explicit_criteria", "constraints"]);
         const VALID_STATUS = new Set(["ok", "weak", "missing"]);
         const VALID_FIT = new Set(["high", "medium", "low"]);
-        const VALID_PERSONAS = new Set([
-            "Teacher Assistant.yaml",
-            "Business Owner.yaml",
-            "Hiring Manager.yaml",
-            "Investor.yaml",
-            "Executive Sponsor.yaml",
-            "Journalist.yaml",
-        ]);
+        // Filenames válidos vêm da FONTE ÚNICA (config/personas.js, que lê os
+        // YAMLs do disco) — nunca de lista fixa. Uma lista fixa aqui desincroniza
+        // ao renomear/editar persona: o prompt (linha ~71) já oferece os nomes
+        // dinâmicos ao modelo e uma whitelist fixa passaria a rejeitar respostas
+        // válidas (bug de prod: "Startup Investor.yaml" recusado por causa do
+        // antigo "Investor.yaml"). Espelha o ConfigAssistantAgent.
+        const VALID_PERSONAS = new Set(personaFilenames());
 
         if (!VALID_OVERALL.has(r.overall)) {
             throw new Error(`EnunciadoCoherenceAgent: invalid overall "${r.overall}"`);
