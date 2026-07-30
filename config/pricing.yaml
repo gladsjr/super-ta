@@ -83,6 +83,11 @@ text:
 # - duration: cost = seconds × per_second_usd  (fallback estimado)
 # ---------------------------------------------------------------------------
 stt:
+  # gpt-transcribe (jul/2026): preço oficial é POR MINUTO de áudio ($0.0045/min),
+  # sem preço por token publicado — a API cobra por duração. Se algum dia o
+  # usage vier como 'tokens', computeSttCost falha explícito (sem preço/mtok).
+  gpt-transcribe:
+    per_second_usd: 0.000075   # $0.0045/min ÷ 60
   gpt-4o-transcribe:
     input_per_mtok: 2.50
     output_per_mtok: 10.00
