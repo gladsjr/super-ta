@@ -48,11 +48,15 @@ text:
     input_cached_per_mtok: 0.50
     cache_write_per_mtok: 6.25
     output_per_mtok: 30.00
+  # 30/07/2026: OpenAI cortou o preço do terra em 20% (anúncio "advancing the
+  # price-performance frontier"): input 2,50→2,00, output 15→12. Cached (10% do
+  # input) e cache write (1,25× input) seguem as mesmas razões de sempre.
+  # Conferir na reconciliação com a Costs API (fecha ~24h após o uso).
   gpt-5.6-terra:
-    input_per_mtok: 2.50
-    input_cached_per_mtok: 0.25
-    cache_write_per_mtok: 3.125
-    output_per_mtok: 15.00
+    input_per_mtok: 2.00
+    input_cached_per_mtok: 0.20
+    cache_write_per_mtok: 2.50
+    output_per_mtok: 12.00
   gpt-5.6-luna:
     input_per_mtok: 1.00
     input_cached_per_mtok: 0.10
