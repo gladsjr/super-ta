@@ -5,7 +5,7 @@ name: "Autoral simples"
 items:
   - key: entrevista_simples
     kind: interview
-    variant: messages
+    variant: realtime          # simplificada = voz em tempo real (só as perguntas do plano)
     quantity: 2
     locks: { question_count: 5, interaction_mode: audio, max_follow_ups: 0, evaluation_mode: automatic_only }
     prep:  { enunciado_evaluations: 1, assistant_interactions: 0 }

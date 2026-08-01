@@ -72,7 +72,10 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
 
         const work = await db.createWork(name, budget, kind, { unitId, ownerUserId });
         if (lockedCounter) {
-            await db.applyWorkPackageBinding(work.id, templateKey, itemKey, lockedCounter.locks_json);
+            // Variante vem do ITEM do pacote (interview: messages|realtime) —
+            // é ela que distingue a entrevista simplificada (realtime) da profunda.
+            const item = getPackageSpec(templateKey)?.items?.find((i) => i.key === itemKey);
+            await db.applyWorkPackageBinding(work.id, templateKey, itemKey, lockedCounter.locks_json, item?.variant || null);
         }
         // Trabalho multi-interação nasce com um cenário vazio vinculado (work_id).
         if (kind === "scenario") {

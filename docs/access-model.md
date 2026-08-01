@@ -80,8 +80,14 @@ validada+expandida em `lib/packages.js` (fail-fast no boot) e sincronizada em
 `seedInterviewerTemplates`). Cada item `{key, kind, quantity, locks, prep}`; a
 expansão gera 1 contador por item + contadores de prep derivados
 (`<key>__prep_*`). `prep.assistant_interactions: 0` vira o lock
-`allow_assistant:false` no contador principal (não é contador). Três pacotes
-iniciais: `padrao`, `autoral_simples`, `profunda`.
+`allow_assistant:false` no contador principal (não é contador). Dois pacotes
+iniciais: `padrao` (1 prova oral + 1 entrevista simplificada realtime + 1
+profunda com aprofundamento único) e `autoral_simples` (2 simplificadas + 1
+profunda). Nos itens `interview`, `variant` é obrigatório e propagado ao
+trabalho no binding: `realtime` = entrevista simplificada (voz ao vivo, só as
+perguntas do plano); `messages` = profunda. Um pacote com 2 aprofundamentos
+(8 perguntas) fica para quando o teto de aprofundamentos for aplicado no motor
+— decisão de 01/08/2026.
 
 **Config travada:** ao criar um trabalho sob um item, `applyWorkPackageBinding`
 grava o binding (`entitlement_template_key`/`item_key`) + a config do `locks`
@@ -93,7 +99,10 @@ student-version/grades/publish/grade-publish). `grade: true` (oral) mantém a no
 ## Pendências conhecidas
 - **`max_follow_ups`**: o valor é gravado no work na criação, mas o teto ainda
   não é aplicado no dispatcher do `/chat` (a checagem toca a lógica de veto em
-  streaming do super-orquestrador — a ligar com teste ao vivo).
+  streaming do super-orquestrador — a ligar com teste ao vivo). Mitigação
+  comercial: os pacotes iniciais só vendem 0 (simplificada realtime, sem
+  follow-up por construção) e 1 (profunda, que é o comportamento cravado no
+  prompt hoje) — nenhuma configuração vendida depende do teto no motor.
 - **Microsoft/Apple SSO, OneRoster/LTI, SCIM**: schema pronto (`external_id_map`),
   faltam adaptadores.
 
