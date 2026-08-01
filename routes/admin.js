@@ -8,7 +8,6 @@ import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
 import * as db from "../lib/db.js";
 import * as scenarioStore from "../lib/scenarios/store.js";
-import { previewRealtimeBackfill, applyRealtimeBackfill } from "../lib/realtimeBackfill.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
 import log from "../lib/logger.js";
 
@@ -220,36 +219,6 @@ router.post("/admin/analytics-tokens/:id/revoke", requireAdmin, async (req, res)
     } catch (err) {
         log.error("ADMIN", `revoke analytics token failed: ${err.message}`);
         res.status(500).json({ error: "failed to revoke analytics token" });
-    }
-});
-
-// --- Backfill de custo Realtime (voz) — ferramenta pontual, escopo 1 work ---
-// Corrige o custo das sessões de voz gravadas como US$ 0 (bug de preço 07/07–).
-// GET faz preview (não escreve); POST aplica (idempotente, não-destrutivo).
-// Ver lib/realtimeBackfill.js. Removível sem migration.
-router.get("/admin/realtime-backfill/preview", requireAdmin, async (req, res) => {
-    try {
-        const workToken = String(req.query.work || "").trim();
-        if (!workToken) return res.status(400).json({ error: "informe ?work=<work_token>" });
-        const out = await previewRealtimeBackfill(workToken);
-        if (!out.ok) return res.status(404).json(out);
-        res.json(out);
-    } catch (err) {
-        log.error("ADMIN", `realtime-backfill preview: ${err.message}`);
-        res.status(500).json({ error: "erro interno" });
-    }
-});
-
-router.post("/admin/realtime-backfill/apply", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
-    try {
-        const workToken = String(req.body?.work || "").trim();
-        if (!workToken) return res.status(400).json({ error: "informe work" });
-        const out = await applyRealtimeBackfill(workToken);
-        if (!out.ok) return res.status(out.already_backfilled ? 409 : 400).json(out);
-        res.json(out);
-    } catch (err) {
-        log.error("ADMIN", `realtime-backfill apply: ${err.message}`);
-        res.status(500).json({ error: "erro interno" });
     }
 });
 
