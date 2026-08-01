@@ -69,7 +69,14 @@ models:
   principal_reasoning_effort: "medium"
   fast_model: "gpt-5.4-mini"
   # Audio (modo de interação áudio com o aluno; ver replit.md)
-  stt_model: "gpt-4o-transcribe"
+  # gpt-transcribe (28/jul/2026): substituiu o gpt-4o-transcribe como STT
+  # recomendado — metade do WER do whisper e $0.0045/min (−25% vs 4o-transcribe),
+  # cobrado por DURAÇÃO (não por token). Trade conhecido: NÃO devolve logprobs,
+  # então o pré-gate de inteligibilidade (audio_intelligibility abaixo) vira
+  # no-op e o backstop passa a ser só a camada ACÚSTICA client-side. Ganhos
+  # novos: hints de idioma (languages) e keywords (lib/audio.js).
+  # Voltar ao anterior (logprobs de volta) = "gpt-4o-transcribe".
+  stt_model: "gpt-transcribe"
   tts_model: "gpt-4o-mini-tts"
   # Realtime (fala-a-fala) — usado só pelo tipo de trabalho "prova oral".
   # gpt-realtime-2.1: geração 2.x (contexto 128k, melhor raciocínio e reconhecimento
