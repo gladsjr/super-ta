@@ -6,6 +6,8 @@ import express from "express";
 import crypto from "crypto";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
+import { isGlobalAdmin, resolveEffectiveRoles } from "../lib/rbac.js";
+import { getPackageSpec } from "../lib/packages.js";
 import * as db from "../lib/db.js";
 import * as scenarioStore from "../lib/scenarios/store.js";
 import { previewRealtimeBackfill, applyRealtimeBackfill } from "../lib/realtimeBackfill.js";
@@ -40,14 +42,43 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
     // Tipo do trabalho: scenario (multi-interação, default dos novos), interview
     // (entrevista legada) ou oral_realtime (prova oral). Coexistência.
     const valid = ["interview", "oral_realtime", "scenario"];
-    const kind = valid.includes(req.body?.kind) ? req.body.kind : "scenario";
+    let kind = valid.includes(req.body?.kind) ? req.body.kind : "scenario";
+
+    // Linkagem institucional OPCIONAL. Ausente = trabalho token-only (hoje).
+    const unitId = req.body?.unit_id != null ? Number(req.body.unit_id) : null;
+    const ownerUserId = req.body?.owner_user_id != null ? Number(req.body.owner_user_id) : null;
+    // Binding de pacote OPCIONAL (Portão B): template_key + item_key (item principal).
+    const templateKey = req.body?.template_key || null;
+    const itemKey = req.body?.item_key || null;
+
     try {
-        const work = await db.createWork(name, budget, kind);
+        // Se veio unidade, o criador precisa ter algum papel nela (ou ser global).
+        if (unitId != null) {
+            if (!(await isGlobalAdmin(req.session.user.id))) {
+                const roles = await resolveEffectiveRoles(req.session.user.id, unitId);
+                if (roles.size === 0) return res.status(403).json({ error: "forbidden_unit" });
+            }
+        }
+        // Resolve o item do pacote (se houver) e alinha o kind ao item.
+        let lockedCounter = null;
+        if (templateKey && itemKey) {
+            const spec = getPackageSpec(templateKey);
+            const item = spec?.items?.find((i) => i.key === itemKey);
+            if (!item) return res.status(400).json({ error: "invalid_package_item" });
+            if (unitId == null) return res.status(400).json({ error: "package_requires_unit" });
+            kind = item.kind;
+            lockedCounter = spec.counters.find((c) => c.item_key === itemKey) || null;
+        }
+
+        const work = await db.createWork(name, budget, kind, { unitId, ownerUserId });
+        if (lockedCounter) {
+            await db.applyWorkPackageBinding(work.id, templateKey, itemKey, lockedCounter.locks_json);
+        }
         // Trabalho multi-interação nasce com um cenário vazio vinculado (work_id).
         if (kind === "scenario") {
             await scenarioStore.saveScenario({ name: work.name, description: "", personas: [], interactions: [], work_id: work.id });
         }
-        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" kind=${kind} budget=$${Number(work.budget_usd).toFixed(2)} by=${req.session.user.username}`);
+        log.info("ADMIN", `work created token=${work.work_token} name="${work.name}" kind=${kind} budget=$${Number(work.budget_usd).toFixed(2)} unit=${unitId ?? "-"} pkg=${templateKey ? `${templateKey}/${itemKey}` : "-"} by=${req.session.user.username}`);
         res.json({ work });
     } catch (err) {
         log.error("ADMIN", `create work failed: ${err.message}`);

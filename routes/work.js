@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import multer from "multer";
 import yaml from "js-yaml";
-import { requireWorkToken, requireProfessorSubmission, requireWithinBudget, sanitizeLabel } from "../lib/middleware.js";
+import { requireWorkToken, requireProfessorSubmission, requireWithinBudget, requireEvaluationOutputsAllowed, sanitizeLabel } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
 import { pickRandomName } from "../lib/personas.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
@@ -633,7 +633,7 @@ router.patch("/w/:workToken/grading-rubric", requireWorkToken, express.json({ li
 // Gera a versão automática (prévia, sem publicar). ?force=true regenera.
 // Body opcional { guidelines }: diretriz AD-HOC desta geração (experimento
 // num aluno) — NÃO altera o padrão do trabalho. Ausente = usa o padrão.
-router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireProfessorSubmission, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
@@ -722,7 +722,7 @@ router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireW
 // Calcula as notas DESTE aluno. ?force=true recalcula. Body opcional
 // { rubricOverride: [...] }: rubrica AD-HOC só deste aluno (não muta o padrão
 // do trabalho) — espelha o override de diretrizes da devolutiva.
-router.post("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkToken, requireProfessorSubmission, requireWithinBudget, express.json({ limit: "64kb" }), async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, requireWithinBudget, express.json({ limit: "64kb" }), async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
@@ -782,7 +782,7 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkT
 });
 
 // Publica a NOTA ao aluno (independente da devolutiva). Exige nota calculada.
-router.post("/w/:workToken/submissions/:subToken/evaluation/grade-publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/grade-publish", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     try {
@@ -813,7 +813,7 @@ router.delete("/w/:workToken/submissions/:subToken/evaluation/grade-publish", re
     }
 });
 
-router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     try {

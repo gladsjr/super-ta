@@ -29,6 +29,7 @@ import {
 import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
 import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
+import unitsRoutes from "./routes/units.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
@@ -103,6 +104,7 @@ app.get("/me", meHandler);
 // montamos sem prefixo para preservar exatamente as URLs anteriores.
 app.use(staticRoutes);
 app.use(adminRoutes);
+app.use(unitsRoutes); // /admin/units/* — camada institucional (sessão + RBAC por unidade)
 app.use(scenarioCockpitRoutes); // /w/:t/scenario-runs|scenario-evaluations/* — cockpit do professor p/ cenários (requireAdmin por rota). Antes de workRoutes (paths específicos).
 app.use(workRoutes);
 app.use(interviewRoutes);

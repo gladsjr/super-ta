@@ -246,9 +246,22 @@ const MIN_PASSWORD_LEN = 6;
 
 export async function listUsers() {
   const r = await pool.query(
-    "SELECT id, username, created_at FROM users ORDER BY created_at ASC, id ASC"
+    "SELECT id, username, email, display_name, created_at FROM users ORDER BY created_at ASC, id ASC"
   );
   return r.rows;
+}
+
+// Resolve um usuário por e-mail (case-insensitive) OU username. Usado para
+// vincular papéis (memberships) por identificador amigável.
+export async function getUserByLogin(login) {
+  const l = String(login ?? "").trim();
+  if (!l) return null;
+  const r = await pool.query(
+    `SELECT id, username, email, display_name FROM users
+      WHERE lower(email) = lower($1) OR username = $1 LIMIT 1`,
+    [l]
+  );
+  return r.rows[0] || null;
 }
 
 export async function createUser(username, password) {
