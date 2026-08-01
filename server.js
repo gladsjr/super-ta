@@ -18,6 +18,7 @@ import rateLimit from "express-rate-limit";
 import {
     sessionMiddleware,
     seedInitialUsers,
+    seedBootstrapAdmin,
     seedInterviewerTemplates,
     seedPackageTemplates,
     loginHandler,
@@ -30,6 +31,7 @@ import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
 import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import unitsRoutes from "./routes/units.js";
+import authFederatedRoutes from "./routes/authFederated.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
@@ -99,6 +101,7 @@ const loginLimiter = rateLimit({
 app.post("/login", loginLimiter, loginHandler);
 app.post("/logout", logoutHandler);
 app.get("/me", meHandler);
+app.use(authFederatedRoutes); // /auth/google[/callback] — SSO opcional (501 se não configurado)
 
 // Routers por audiência. Cada arquivo declara seus paths completos —
 // montamos sem prefixo para preservar exatamente as URLs anteriores.
@@ -126,6 +129,11 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedInitialUsers();
     } catch (err) {
         log.error("BOOT", `seedInitialUsers failed: ${err.message}`);
+    }
+    try {
+        await seedBootstrapAdmin();
+    } catch (err) {
+        log.error("BOOT", `seedBootstrapAdmin failed: ${err.message}`);
     }
     try {
         await seedInterviewerTemplates();

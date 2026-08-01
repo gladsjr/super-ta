@@ -87,6 +87,41 @@ export async function seedInitialUsers() {
   }
 }
 
+// Garante ao menos um admin_global (unit_id NULL) para o sistema não ficar sem
+// administrador da camada institucional. Idempotente. Alvo: BOOTSTRAP_ADMIN
+// (username/email) ou, na falta, o primeiro usuário. Requer a migration 056
+// aplicada; se ainda não estiver, sai quieto (dev antes do db:migrate).
+export async function seedBootstrapAdmin() {
+  try {
+    const has = await pool.query(
+      `SELECT 1 FROM memberships WHERE role = 'admin_global' AND unit_id IS NULL LIMIT 1`
+    );
+    if (has.rowCount > 0) return;
+    const wanted = process.env.BOOTSTRAP_ADMIN;
+    let target = null;
+    if (wanted) {
+      target = await pool.query(
+        `SELECT id, username FROM users WHERE username = $1 OR lower(email) = lower($1) LIMIT 1`,
+        [wanted]
+      );
+    }
+    if (!target || target.rowCount === 0) {
+      target = await pool.query(`SELECT id, username FROM users ORDER BY id ASC LIMIT 1`);
+    }
+    if (target.rowCount === 0) return; // sem usuários ainda
+    const u = target.rows[0];
+    await pool.query(
+      `INSERT INTO memberships (user_id, unit_id, role, source)
+       VALUES ($1, NULL, 'admin_global', 'manual') ON CONFLICT DO NOTHING`,
+      [u.id]
+    );
+    console.log(`✓ admin_global bootstrap: ${u.username}`);
+  } catch (err) {
+    if (/relation .*memberships.* does not exist/i.test(err.message)) return;
+    console.warn(`⚠️  seedBootstrapAdmin: ${err.message}`);
+  }
+}
+
 // ---------------------------------------------------------------------
 // Bootstrap interviewer templates from config/interviewers/*.yaml.
 // Filesystem is the source of truth — cada boot ressincroniza o banco:
@@ -187,19 +222,24 @@ export function requireAuth(req, res, next) {
 }
 
 export async function loginHandler(req, res) {
-  const { username, password } = req.body || {};
-  if (!username || !password) {
+  const body = req.body || {};
+  // Aceita `login` (novo), `username` (legado) ou `email` como identificador.
+  const login = body.login ?? body.username ?? body.email;
+  const password = body.password;
+  if (!login || !password) {
     return res.status(400).json({ error: "missing credentials" });
   }
   try {
     const r = await pool.query(
-      "SELECT id, username, password_hash FROM users WHERE username = $1",
-      [username]
+      "SELECT id, username, email, password_hash FROM users WHERE lower(email) = lower($1) OR username = $1 LIMIT 1",
+      [login]
     );
     if (r.rowCount === 0) {
       return res.status(401).json({ error: "invalid credentials" });
     }
     const user = r.rows[0];
+    // Conta SSO-only (sem senha local) não faz login por senha.
+    if (!user.password_hash) return res.status(401).json({ error: "invalid credentials" });
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: "invalid credentials" });
 
@@ -209,7 +249,7 @@ export async function loginHandler(req, res) {
         console.error("Erro ao regenerar sessão:", err);
         return res.status(500).json({ error: "login failed" });
       }
-      req.session.user = { id: user.id, username: user.username };
+      req.session.user = { id: user.id, username: user.username, email: user.email || null };
       req.session.save((saveErr) => {
         if (saveErr) {
           console.error("Erro ao salvar sessão:", saveErr);
@@ -264,7 +304,7 @@ export async function getUserByLogin(login) {
   return r.rows[0] || null;
 }
 
-export async function createUser(username, password) {
+export async function createUser(username, password, opts = {}) {
   const u = String(username ?? "").trim();
   const p = String(password ?? "");
   if (!USERNAME_RE.test(u)) {
@@ -273,16 +313,92 @@ export async function createUser(username, password) {
   if (p.length < MIN_PASSWORD_LEN) {
     throw Object.assign(new Error("password_too_short"), { status: 400 });
   }
+  const email = opts.email ? String(opts.email).trim() : null;
+  const displayName = opts.displayName ? String(opts.displayName).trim() : null;
   const exists = await pool.query("SELECT id FROM users WHERE username = $1", [u]);
   if (exists.rowCount > 0) {
     throw Object.assign(new Error("username_taken"), { status: 409 });
   }
+  if (email) {
+    const eExists = await pool.query("SELECT id FROM users WHERE lower(email) = lower($1)", [email]);
+    if (eExists.rowCount > 0) throw Object.assign(new Error("email_taken"), { status: 409 });
+  }
   const hash = await bcrypt.hash(p, 12);
   const r = await pool.query(
-    "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, created_at",
-    [u, hash]
+    "INSERT INTO users (username, password_hash, email, display_name, source) VALUES ($1, $2, $3, $4, 'manual') RETURNING id, username, email, display_name, created_at",
+    [u, hash, email, displayName]
   );
   return r.rows[0];
+}
+
+// Provisiona/associa um usuário a partir de um login FEDERADO (ex.: Google).
+// Ordem de resolução: (1) external_id_map(provider, sub) → (2) coluna
+// google_sub → (3) e-mail verificado → (4) cria conta SSO-only (sem senha).
+// Sempre registra o mapeamento externo. Retorna a row do usuário.
+export async function provisionFederatedUser({ provider = "google", sub, email = null, displayName = null }) {
+  if (!sub) throw Object.assign(new Error("federated_sub_required"), { status: 400 });
+  const subColumn = provider === "google" ? "google_sub" : null;
+
+  // (1) mapeamento externo
+  const mapped = await pool.query(
+    `SELECT u.* FROM external_id_map m JOIN users u ON u.id = m.subject_id
+      WHERE m.provider = $1 AND m.subject_type = 'user' AND m.external_id = $2 LIMIT 1`,
+    [provider, sub]
+  );
+  if (mapped.rowCount > 0) return mapped.rows[0];
+
+  // (2) coluna específica do provedor
+  if (subColumn) {
+    const bySub = await pool.query(`SELECT * FROM users WHERE ${subColumn} = $1 LIMIT 1`, [sub]);
+    if (bySub.rowCount > 0) {
+      await pool.query(
+        `INSERT INTO external_id_map (subject_type, subject_id, provider, external_id)
+         VALUES ('user', $1, $2, $3) ON CONFLICT DO NOTHING`,
+        [bySub.rows[0].id, provider, sub]
+      );
+      return bySub.rows[0];
+    }
+  }
+
+  // (3) e-mail
+  let user = null;
+  if (email) {
+    const byEmail = await pool.query("SELECT * FROM users WHERE lower(email) = lower($1) LIMIT 1", [email]);
+    if (byEmail.rowCount > 0) {
+      user = byEmail.rows[0];
+      if (subColumn && !user[subColumn]) {
+        await pool.query(`UPDATE users SET ${subColumn} = $1 WHERE id = $2`, [sub, user.id]);
+      }
+    }
+  }
+
+  // (4) cria SSO-only
+  if (!user) {
+    // username único derivado do e-mail/sub; sem senha (source='synced').
+    const base = (email ? email.split("@")[0] : `google_${sub}`).replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 24) || "user";
+    let candidate = base, n = 1;
+    // colisão rara: sufixa até achar livre
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const clash = await pool.query("SELECT 1 FROM users WHERE username = $1", [candidate]);
+      if (clash.rowCount === 0) break;
+      candidate = `${base}_${n++}`;
+    }
+    const ins = await pool.query(
+      `INSERT INTO users (username, email, display_name, ${subColumn ? subColumn + ", " : ""}source)
+       VALUES ($1, $2, $3, ${subColumn ? "$4, " : ""}'synced')
+       RETURNING *`,
+      subColumn ? [candidate, email, displayName, sub] : [candidate, email, displayName]
+    );
+    user = ins.rows[0];
+  }
+
+  await pool.query(
+    `INSERT INTO external_id_map (subject_type, subject_id, provider, external_id)
+     VALUES ('user', $1, $2, $3) ON CONFLICT DO NOTHING`,
+    [user.id, provider, sub]
+  );
+  return user;
 }
 
 // Lets a logged-in user change their own password. Verifies the current
