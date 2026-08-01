@@ -66,7 +66,8 @@ Regras duras (Claude deve respeitar e avisar o usuário se ele propor o contrár
 - **Para corrigir bug em migration JÁ aplicada**: criar uma migration corretiva (NNN+1). Nunca editar a anterior.
 - **Para corrigir bug em migration que falhou (rollback, não registrada)**: editar é OK — não foi aplicada em lugar nenhum ainda.
 - **Migrations só rodam em dev.** Em prod, quem aplica schema é o Publish do Replit (o boot não roda DDL). Logo, uma migration precisa estar aplicada e testada no dev ANTES do Publish, pra que o diff a leve pro prod. Migration que falha no dev = bug bloqueante: corrigir antes de publicar.
-- **Seeds são separados de migrations.** `seedInitialUsers()` e `seedInterviewerTemplates()` continuam em `auth.js` e rodam DEPOIS das migrations. Migrations cuidam de schema; seeds cuidam de dados de bootstrap. Não misturar.
+- **Seeds são separados de migrations.** `seedInitialUsers()`, `seedBootstrapAdmin()` (garante 1 admin_global), `seedInterviewerTemplates()` e `seedPackageTemplates()` (sincroniza `config/packages/*.yaml` → `package_templates`, mesmo padrão dos interviewers) continuam em `auth.js` e rodam DEPOIS das migrations. Migrations cuidam de schema; seeds cuidam de dados de bootstrap. Não misturar.
+- **Camada institucional** (migrations 055–065): unidades (árvore recursiva), RBAC por unidade, identidade/SSO, e os dois portões de uso (US$ com rollup + pacotes). Aditiva e opcional — não quebra o modelo por token. Detalhe em `docs/access-model.md`. A DSL de pacotes (`config/packages/*.yaml`) é config pura (nunca vai ao LLM) — segue o princípio single-source-of-truth + fail-fast, não a regra de template do `renderInterviewerAgenda`.
 - **`001_init.sql` é o snapshot bootstrap** — escrito com `IF NOT EXISTS` em tudo, justamente porque pode rodar contra um banco legado que veio do antigo `schema.sql`. Migrations a partir da 002 são deltas puros.
 
 Operações que migrations habilitam (que o esquema antigo não suportava):
