@@ -139,6 +139,46 @@ export async function seedInterviewerTemplates() {
   }
 }
 
+// ---------------------------------------------------------------------
+// Bootstrap package templates from config/packages/*.yaml. Mesmo padrão de
+// seedInterviewerTemplates(): filesystem é a fonte da verdade; cada boot
+// ressincroniza. loadPackageTemplates() valida+expande (fail-fast se um YAML
+// for inválido). Import dinâmico evita ciclo com lib/packages.js (que importa
+// `pool` daqui).
+// ---------------------------------------------------------------------
+export async function seedPackageTemplates() {
+  const { loadPackageTemplates } = await import("./lib/packages.js");
+  const templates = loadPackageTemplates(); // lança se inválido
+  if (templates.length === 0) {
+    console.warn("⚠️  Nenhum pacote encontrado em config/packages/");
+    return;
+  }
+  for (const t of templates) {
+    const r = await pool.query(
+      `INSERT INTO package_templates (key, version, name, yaml_text, spec_json)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (key) DO UPDATE
+         SET version = EXCLUDED.version, name = EXCLUDED.name,
+             yaml_text = EXCLUDED.yaml_text, spec_json = EXCLUDED.spec_json,
+             updated_at = now()
+         WHERE package_templates.yaml_text IS DISTINCT FROM EXCLUDED.yaml_text
+         RETURNING (xmax = 0) AS inserted`,
+      [t.key, t.version, t.name, t.yamlText, JSON.stringify(t.spec)]
+    );
+    if (r.rowCount === 0) console.log(`• Pacote inalterado: ${t.key}`);
+    else if (r.rows[0].inserted) console.log(`✓ Pacote criado: ${t.key}`);
+    else console.log(`↻ Pacote sincronizado a partir do filesystem: ${t.key}`);
+  }
+  const keys = templates.map((t) => t.key);
+  const deleted = await pool.query(
+    `DELETE FROM package_templates WHERE key <> ALL($1::text[]) RETURNING key`,
+    [keys]
+  );
+  for (const row of deleted.rows) {
+    console.log(`✗ Pacote removido do banco (não existe mais no filesystem): ${row.key}`);
+  }
+}
+
 export function requireAuth(req, res, next) {
   if (!req.session?.user) {
     return res.status(401).json({ error: "unauthorized" });

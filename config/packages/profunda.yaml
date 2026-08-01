@@ -1,0 +1,23 @@
+# Pacote Profunda — igual ao Padrão, mas 8 perguntas em todos e até 2 follow-ups
+# na entrevista profunda.
+key: profunda
+version: 1
+name: "Profunda"
+items:
+  - key: prova_oral
+    kind: oral_realtime
+    quantity: 1
+    locks: { question_count: 8, interaction_mode: audio, grade: true }
+    prep:  { executions: 2 }
+  - key: entrevista_simples
+    kind: interview
+    variant: messages
+    quantity: 1
+    locks: { question_count: 8, interaction_mode: audio, max_follow_ups: 0, evaluation_mode: automatic_only }
+    prep:  { enunciado_evaluations: 1, assistant_interactions: 0 }
+  - key: entrevista_profunda
+    kind: interview
+    variant: messages
+    quantity: 1
+    locks: { question_count: 8, interaction_mode: audio, max_follow_ups: 2, evaluation_mode: automatic_only }
+    prep:  { enunciado_evaluations: 1, assistant_interactions: 0 }

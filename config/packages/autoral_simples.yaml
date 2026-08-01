@@ -1,0 +1,17 @@
+# Pacote Autoral simples — sem prova oral; DUAS entrevistas simples + 1 profunda.
+key: autoral_simples
+version: 1
+name: "Autoral simples"
+items:
+  - key: entrevista_simples
+    kind: interview
+    variant: messages
+    quantity: 2
+    locks: { question_count: 5, interaction_mode: audio, max_follow_ups: 0, evaluation_mode: automatic_only }
+    prep:  { enunciado_evaluations: 1, assistant_interactions: 0 }
+  - key: entrevista_profunda
+    kind: interview
+    variant: messages
+    quantity: 1
+    locks: { question_count: 5, interaction_mode: audio, max_follow_ups: 1, evaluation_mode: automatic_only }
+    prep:  { enunciado_evaluations: 1, assistant_interactions: 0 }

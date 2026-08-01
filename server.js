@@ -19,6 +19,7 @@ import {
     sessionMiddleware,
     seedInitialUsers,
     seedInterviewerTemplates,
+    seedPackageTemplates,
     loginHandler,
     logoutHandler,
     meHandler,
@@ -128,6 +129,11 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedInterviewerTemplates();
     } catch (err) {
         log.error("BOOT", `seedInterviewerTemplates failed: ${err.message}`);
+    }
+    try {
+        await seedPackageTemplates();
+    } catch (err) {
+        log.error("BOOT", `seedPackageTemplates failed: ${err.message}`);
     }
     // Inicializa o store de áudio cedo pra que o backend ativo (e eventual
     // indisponibilidade) apareça no boot, não como no-op silencioso no meio
