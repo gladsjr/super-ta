@@ -96,7 +96,15 @@
         <input id="new-work-budget" class="input" type="number" min="0" step="0.5" placeholder="Orçamento USD" style="width: 160px" title="Orçamento total deste trabalho em dólares — limite de gasto com o modelo, somando criação + interações dos alunos."/>
         <button id="create-work" class="btn btn-primary">Criar</button>
       </div>
-      <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho.</div>
+      <div class="row" style="margin-top: var(--sp-2)">
+        <select id="new-work-unit" class="select" style="flex:1; min-width: 200px" title="Vincula o trabalho a uma unidade (instituição/curso/turma). O gasto passa a contar no teto da unidade.">
+          <option value="">— sem unidade (modo token, como hoje) —</option>
+        </select>
+        <select id="new-work-package" class="select" style="flex:1; min-width: 220px" disabled title="Cria o trabalho sob um item de pacote: o tipo, o número de perguntas e as travas vêm do item, e cada envio consome 1 do pool da unidade.">
+          <option value="">— sem pacote —</option>
+        </select>
+      </div>
+      <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho. Unidades e pacotes são geridos em <a href="/instituicoes">Instituições</a>.</div>
       <div id="create-msg" class="hint"></div>
     </div>
 
@@ -191,7 +199,9 @@
 </main>
 
 <footer class="page" style="padding-top:0;padding-bottom:24px">
-  <a class="muted" href="/diag/audio" style="font-size:.78rem;text-decoration:none" title="Ferramenta de teste do gate de áudio (gravar e ver o desfecho)">· diagnóstico de áudio</a>
+  <a class="muted" href="/instituicoes" style="font-size:.78rem;text-decoration:none" title="Unidades, papéis, tetos e pacotes de avaliação">· instituições</a>
+  <span class="muted" style="font-size:.78rem"> · </span>
+  <a class="muted" href="/diag/audio" style="font-size:.78rem;text-decoration:none" title="Ferramenta de teste do gate de áudio (gravar e ver o desfecho)">diagnóstico de áudio</a>
   <span class="muted" style="font-size:.78rem"> · </span>
   <a class="muted" href="/benchmark" style="font-size:.78rem;text-decoration:none" title="Benchmark de modelos do ORATIA">benchmark de modelos</a>
 </footer>
@@ -202,7 +212,7 @@ let DEFAULT_BUDGET_USD = null;
 async function checkAuth() {
   try {
     const r = await fetch('/me');
-    if (r.ok) { const j = await r.json(); showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); }
+    if (r.ok) { const j = await r.json(); showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); loadUnitsAndPackages(); }
     else showLogin();
   } catch { showLogin(); }
 }
@@ -220,6 +230,49 @@ function showLogin() {
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('app-screen').classList.add('hidden');
   document.getElementById('user-area').classList.add('hidden');
+}
+// Unidades + catálogo de pacotes para o vínculo institucional do novo trabalho.
+// O select de pacote lista template/item e só habilita com unidade escolhida;
+// ao escolher um item, o TIPO do trabalho vem do item (select de kind trava).
+async function loadUnitsAndPackages() {
+  try {
+    const [ru, rp] = await Promise.all([fetch('/admin/units'), fetch('/admin/packages')]);
+    if (!ru.ok || !rp.ok) return;
+    const units = (await ru.json()).units || [];
+    const templates = (await rp.json()).templates || [];
+    const uSel = document.getElementById('new-work-unit');
+    const byParent = new Map();
+    for (const u of units) { const k = u.parent_id ?? 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(u); }
+    const walk = (pid, depth) => {
+      for (const u of (byParent.get(pid) || [])) {
+        if (!u.is_active) continue;
+        const o = document.createElement('option');
+        o.value = u.id; o.textContent = `${'— '.repeat(depth)}${u.name}`;
+        uSel.appendChild(o);
+        walk(u.id, depth + 1);
+      }
+    };
+    walk(0, 0);
+    const pSel = document.getElementById('new-work-package');
+    const KIND_PT = { oral_realtime: 'prova oral', interview: 'entrevista' };
+    for (const t of templates) for (const it of (t.items || [])) {
+      const o = document.createElement('option');
+      o.value = `${t.key}/${it.key}`;
+      o.dataset.kind = it.kind;
+      o.textContent = `${t.name || t.key} · ${it.key} (${KIND_PT[it.kind] || it.kind}${it.variant === 'realtime' ? ' realtime' : ''})`;
+      pSel.appendChild(o);
+    }
+    uSel.onchange = () => {
+      pSel.disabled = !uSel.value;
+      if (!uSel.value) { pSel.value = ''; pSel.onchange(); }
+    };
+    pSel.onchange = () => {
+      const kindSel = document.getElementById('new-work-kind');
+      const opt = pSel.selectedOptions[0];
+      if (pSel.value && opt?.dataset.kind) { kindSel.value = opt.dataset.kind; kindSel.disabled = true; }
+      else kindSel.disabled = false;
+    };
+  } catch { /* silencioso — camada opcional */ }
 }
 function showApp(user) {
   currentUser = user;
@@ -264,6 +317,15 @@ document.getElementById('create-work').onclick = async () => {
     const n = Number(budgetRaw);
     if (!Number.isFinite(n) || n < 0) { msg.textContent = 'Orçamento inválido'; return; }
     body.budget_usd = n;
+  }
+  // Vínculo institucional opcional: unidade e/ou item de pacote (o kind vem do item).
+  const unitVal = document.getElementById('new-work-unit').value;
+  if (unitVal) body.unit_id = Number(unitVal);
+  const pkgVal = document.getElementById('new-work-package').value;
+  if (pkgVal) {
+    if (!unitVal) { msg.textContent = 'Item de pacote exige uma unidade.'; return; }
+    const [tk, ik] = pkgVal.split('/');
+    body.template_key = tk; body.item_key = ik;
   }
   try {
     const r = await fetch('/admin/works', {
