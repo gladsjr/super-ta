@@ -182,18 +182,6 @@
       <div id="tokens-empty" class="table-empty hidden">Nenhum token ainda.</div>
     </div>
 
-    <h3 style="margin-top: var(--sp-6)">Manutenção</h3>
-    <div class="card">
-      <h3 class="card-title">Backfill de custo Realtime (voz)</h3>
-      <p class="card-sub">Recalcula o custo da voz das provas orais / entrevistas por voz que foram gravadas como <strong>US$ 0</strong> (bug de preço, 07/07 em diante). É <strong>estimativa</strong> a partir dos tokens — não a fatura. Não-destrutivo e idempotente: só adiciona linhas de ajuste ao histórico. Informe o work-token, veja o preview e aplique.</p>
-      <div class="row">
-        <input id="bf-work" class="input" placeholder="work_token (ex.: feea21ae1cec)" style="flex:1; min-width:220px"/>
-        <button id="bf-preview" class="btn">Prever</button>
-        <button id="bf-apply" class="btn btn-primary hidden">Aplicar</button>
-      </div>
-      <div id="bf-msg" class="hint"></div>
-      <div id="bf-result"></div>
-    </div>
   </div>
 
 </main>
@@ -755,52 +743,6 @@ async function revokeToken(id) {
     loadAnalyticsTokens();
   } catch { msg.textContent = 'Falha na comunicação'; }
 }
-
-// ---- Backfill de custo Realtime (voz) ----
-const usd = (n) => 'US$ ' + Number(n || 0).toFixed(2);
-let bfLastToken = null;
-document.getElementById('bf-preview').onclick = async () => {
-  const work = document.getElementById('bf-work').value.trim();
-  const msg = document.getElementById('bf-msg');
-  const result = document.getElementById('bf-result');
-  const applyBtn = document.getElementById('bf-apply');
-  applyBtn.classList.add('hidden'); result.innerHTML = ''; msg.textContent = '';
-  if (!work) { msg.textContent = 'Informe o work-token.'; return; }
-  try {
-    const r = await fetch('/admin/realtime-backfill/preview?work=' + encodeURIComponent(work));
-    if (r.status === 401) return showLogin();
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'work não encontrada'); return; }
-    bfLastToken = work;
-    const rows = (j.per_submission || []).map(s =>
-      `<tr><td>${s.submission_id ?? '—'}</td><td style="text-align:right">${s.events}</td><td style="text-align:right">${usd(s.central)}</td></tr>`).join('');
-    const band = `${usd(j.estimate.low)} – ${usd(j.estimate.high)}`;
-    result.innerHTML =
-      `<p class="card-sub" style="margin-top:var(--sp-3)"><strong>${j.work.name}</strong> · spent atual ${usd(j.work.spent_usd)}</p>` +
-      (j.already_backfilled
-        ? `<p class="hint">⚠️ Já existe backfill nesta work (${j.prior_backfill.events} ajustes, ${usd(j.prior_backfill.usd)}). O apply é idempotente e não fará nada.</p>` : '') +
-      `<table class="table" style="margin-top:var(--sp-2)"><thead><tr><th>Submissão</th><th style="text-align:right">Eventos de voz</th><th style="text-align:right">Estimativa</th></tr></thead><tbody>${rows || '<tr><td colspan="3">Nenhum evento contaminado.</td></tr>'}</tbody></table>` +
-      `<p class="card-sub" style="margin-top:var(--sp-2)">Total estimado a somar: <strong>${usd(j.estimate.central)}</strong> (faixa ${band}) em ${j.priced_events} evento(s)` +
-      (j.unpriced_events ? ` · ${j.unpriced_events} sem preço (ignorados)` : '') +
-      `. spent estimado após aplicar: <strong>${usd(j.new_spent_usd_estimate)}</strong>. Frações de áudio assumidas: in ${j.assumptions.input}, out ${j.assumptions.output}.</p>`;
-    if (j.priced_events > 0 && !j.already_backfilled) applyBtn.classList.remove('hidden');
-  } catch { msg.textContent = 'Falha na comunicação'; }
-};
-document.getElementById('bf-apply').onclick = async () => {
-  const msg = document.getElementById('bf-msg');
-  if (!bfLastToken) { msg.textContent = 'Rode o preview primeiro.'; return; }
-  if (!confirm('Aplicar o backfill em ' + bfLastToken + '? Some ajustes ao spent_usd (estimativa). É idempotente.')) return;
-  try {
-    const r = await fetch('/admin/realtime-backfill/apply', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ work: bfLastToken })
-    });
-    if (r.status === 401) return showLogin();
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { msg.textContent = j.already_backfilled ? 'Já estava aplicado — nada feito.' : ('Falha: ' + (j.error || 'ao aplicar')); return; }
-    msg.textContent = `✓ Aplicado: ${j.events} evento(s), somados ${usd(j.added_usd)}. Novo spent ${usd(j.new_spent_usd)}.`;
-    document.getElementById('bf-apply').classList.add('hidden');
-  } catch { msg.textContent = 'Falha na comunicação'; }
-};
 
 checkAuth();
 </script>
