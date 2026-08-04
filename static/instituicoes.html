@@ -74,16 +74,18 @@
             </div>
             <div class="row" style="margin-top: var(--sp-2)">
               <select id="nu-parent" class="select" style="flex:1; min-width:180px"><option value="">— raiz (sem pai) —</option></select>
+              <label class="row" style="gap:4px; white-space:nowrap"><input id="nu-class" type="checkbox"/> turma</label>
               <button id="nu-create" class="btn btn-primary">Criar unidade</button>
             </div>
+            <p class="hint">Turma é onde os trabalhos nascem; turma não pode ter unidades filhas.</p>
             <div id="nu-msg" class="hint"></div>
           </div>
         </div>
 
         <div class="card section-gap">
           <h3 class="card-title">Importar CSV</h3>
-          <p class="hint">Cabeçalho <code>name,parent_name,label,budget_usd</code>; uma unidade por linha; o pai deve existir ou vir numa linha anterior.</p>
-          <textarea id="csv-text" class="input" rows="4" style="width:100%; font-family:monospace" placeholder="name,parent_name,label,budget_usd&#10;FGV,,instituição,&#10;MBA Finanças,FGV,curso,100"></textarea>
+          <p class="hint">Cabeçalho <code>name,parent_name,label,budget_usd,is_class</code>; uma unidade por linha; o pai deve existir ou vir numa linha anterior; <code>is_class</code> = true marca turma.</p>
+          <textarea id="csv-text" class="input" rows="4" style="width:100%; font-family:monospace" placeholder="name,parent_name,label,budget_usd,is_class&#10;FGV,,instituição,,&#10;MBA Finanças,FGV,curso,100,&#10;Turma 2026.2,MBA Finanças,turma,20,true"></textarea>
           <div class="row" style="margin-top: var(--sp-2)">
             <button id="csv-import" class="btn">Importar</button>
             <span id="csv-msg" class="hint"></span>
@@ -99,6 +101,7 @@
             <h3 class="card-title" style="margin:0"><span id="d-name"></span> <span class="u-label muted" id="d-label"></span></h3>
             <div class="row">
               <button id="d-rename" class="btn btn-sm">Renomear</button>
+              <button id="d-class" class="btn btn-sm"></button>
               <button id="d-toggle" class="btn btn-sm"></button>
             </div>
           </div>
@@ -116,7 +119,7 @@
             <button id="d-budget-clear" class="btn btn-sm">Remover teto</button>
             <span id="d-budget-msg" class="hint"></span>
           </div>
-          <p class="hint">O gasto é o consolidado da sub-árvore; unidade sem teto próprio obedece ao ancestral mais próximo com teto.</p>
+          <p class="hint">O teto é uma RESERVA descontada do saldo do pai no ato; reduzir devolve ao pai. O comprometido soma gasto direto, reservas das filhas e gasto das filhas sem teto. Unidade sem teto consome do ancestral mais próximo com teto.</p>
         </div>
 
         <div class="card section-gap">
@@ -128,7 +131,11 @@
             <button id="m-add" class="btn btn-primary btn-sm">Vincular</button>
             <span id="m-msg" class="hint"></span>
           </div>
-          <p class="hint">O papel vale nesta unidade e em toda a sub-árvore. <code>admin_global</code> é concedido fora daqui (vale na árvore inteira).</p>
+          <div id="m-avail-row" class="row hidden" style="margin-top: var(--sp-2)">
+            <select id="m-avail" class="select" style="flex:1; min-width:200px"></select>
+            <span id="m-avail-hint" class="hint"></span>
+          </div>
+          <p class="hint">Só o papel de administrador herda para a sub-árvore. Professor e aluno valem SÓ nesta unidade: vínculo em unidade acima torna a pessoa <i>disponível</i> aqui (lista acima), e vincular aqui é a inscrição/atribuição. <code>admin_global</code> é concedido fora daqui.</p>
         </div>
 
         <div class="card section-gap">
@@ -191,12 +198,16 @@ async function loadUnits(keepSelection = true) {
       div.className = 'tree-node' + (u.is_active ? '' : ' inactive') + (SELECTED?.id === u.id ? ' selected' : '');
       div.style.paddingLeft = (8 + depth * 18) + 'px';
       div.innerHTML = `<span>${depth ? '└ ' : ''}${esc(u.name)}</span><span class="u-label muted">${esc(u.label || '')}</span>` +
-        (u.budget_usd != null ? `<span class="u-label muted" title="teto próprio">· teto ${usd(u.budget_usd)}</span>` : '');
+        (u.is_class ? `<span class="u-label muted" title="turma — recebe trabalhos">· 🎓 turma</span>` : '') +
+        (u.budget_usd != null ? `<span class="u-label muted" title="teto próprio (reserva)">· teto ${usd(u.budget_usd)}</span>` : '');
       div.onclick = () => selectUnit(u.id);
       tree.appendChild(div);
-      const opt = document.createElement('option');
-      opt.value = u.id; opt.textContent = `${'— '.repeat(depth)}${u.name}`;
-      parentSel.appendChild(opt);
+      // Turma não pode ter filhos — fora do seletor de pai.
+      if (!u.is_class) {
+        const opt = document.createElement('option');
+        opt.value = u.id; opt.textContent = `${'— '.repeat(depth)}${u.name}`;
+        parentSel.appendChild(opt);
+      }
       walk(u.id, depth + 1);
     }
   };
@@ -210,11 +221,11 @@ async function loadUnits(keepSelection = true) {
 $('nu-create').onclick = async () => {
   const name = $('nu-name').value.trim();
   if (!name) { $('nu-msg').textContent = 'Nome obrigatório'; return; }
-  const body = { name, label: $('nu-label').value.trim() || null };
+  const body = { name, label: $('nu-label').value.trim() || null, is_class: $('nu-class').checked };
   if ($('nu-parent').value) body.parent_id = Number($('nu-parent').value);
   const { ok, j } = await api('POST', '/admin/units', body);
   $('nu-msg').textContent = ok ? 'Unidade criada.' : 'Falha: ' + (j.error || '');
-  if (ok) { $('nu-name').value = ''; loadUnits(); }
+  if (ok) { $('nu-name').value = ''; $('nu-class').checked = false; loadUnits(); }
 };
 $('csv-import').onclick = async () => {
   const text = $('csv-text').value.trim();
@@ -236,11 +247,17 @@ async function selectUnit(id) {
   await Promise.all([loadBudget(), loadMembers(), loadEntitlements()]);
 }
 function renderDetailHeader() {
-  $('d-name').textContent = SELECTED.name;
+  $('d-name').textContent = (SELECTED.is_class ? '🎓 ' : '') + SELECTED.name;
   $('d-label').textContent = SELECTED.label ? `(${SELECTED.label})` : '';
+  $('d-class').textContent = SELECTED.is_class ? 'Desmarcar turma' : 'Marcar como turma';
   $('d-toggle').textContent = SELECTED.is_active ? 'Desativar' : 'Reativar';
   $('d-budget').value = SELECTED.budget_usd ?? '';
 }
+$('d-class').onclick = async () => {
+  const { ok, j } = await api('PATCH', `/admin/units/${SELECTED.id}`, { is_class: !SELECTED.is_class });
+  if (!ok) { $('m-msg').textContent = 'Falha: ' + (j.error === 'has_children' ? 'turma não pode ter filhos — remova/mova as unidades filhas antes' : j.error === 'has_works' ? 'há trabalhos vinculados a esta turma' : j.error || ''); return; }
+  await loadUnits(); renderDetailHeader();
+};
 $('d-rename').onclick = () => { $('d-rename-row').classList.toggle('hidden'); $('d-rename-name').value = SELECTED.name; $('d-rename-label').value = SELECTED.label || ''; };
 $('d-rename-save').onclick = async () => {
   const { ok } = await api('PATCH', `/admin/units/${SELECTED.id}`, { name: $('d-rename-name').value.trim(), label: $('d-rename-label').value.trim() || null });
@@ -256,13 +273,18 @@ async function loadBudget() {
   const b = j.balance || {};
   $('d-budget-kv').innerHTML =
     `<span>Teto próprio: <b>${b.budget_usd == null ? 'sem teto' : usd(b.budget_usd)}</b></span>` +
-    `<span>Gasto da sub-árvore: <b>${usd(b.spent_usd)}</b></span>` +
-    (b.remaining_usd != null ? `<span>Restante: <b>${usd(b.remaining_usd)}</b></span>` : '');
+    `<span title="gasto direto + reservas das filhas + gasto das filhas sem teto">Comprometido: <b>${usd(b.committed_usd)}</b></span>` +
+    `<span title="gasto real consolidado da sub-árvore">Gasto real: <b>${usd(b.spent_usd)}</b></span>` +
+    (b.remaining_usd != null ? `<span>Saldo: <b>${usd(b.remaining_usd)}</b></span>` : '');
 }
+const BUDGET_ERRORS = {
+  insufficient_parent_balance: 'não cabe no saldo do pai — reduza o valor ou libere reservas de irmãs',
+  budget_below_committed: 'novo teto ficaria abaixo do já comprometido desta unidade (gasto + reservas das filhas)',
+};
 $('d-budget-save').onclick = async () => {
   const v = $('d-budget').value.trim();
   const { ok, j } = await api('PUT', `/admin/units/${SELECTED.id}/budget`, { budget_usd: v === '' ? null : Number(v) });
-  $('d-budget-msg').textContent = ok ? 'Teto atualizado.' : 'Falha: ' + (j.error || '');
+  $('d-budget-msg').textContent = ok ? 'Teto atualizado.' : 'Falha: ' + (BUDGET_ERRORS[j.error] || j.error || '');
   if (ok) { await loadUnits(); loadBudget(); }
 };
 $('d-budget-clear').onclick = async () => {
@@ -274,20 +296,43 @@ $('d-budget-clear').onclick = async () => {
 async function loadMembers() {
   const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/members`);
   if (!ok) return;
-  ROLES = j.roles || ROLES;
+  ROLES = j.roles || ROLES; // [{id, key, name}]
   const sel = $('m-role');
-  sel.innerHTML = ROLES.filter(r => r !== 'admin_global').map(r => `<option value="${r}">${r}</option>`).join('');
+  const keep = sel.value;
+  sel.innerHTML = ROLES.filter(r => r.key !== 'admin_global').map(r => `<option value="${esc(r.key)}">${esc(r.name)}</option>`).join('');
+  if (keep) sel.value = keep;
+  const roleName = (key) => (ROLES.find(r => r.key === key)?.name) || key;
   const box = $('d-members');
   box.innerHTML = (j.members || []).map(m =>
-    `<div class="member-row"><span class="badge-role ${esc(m.role)}">${esc(m.role)}</span>` +
+    `<div class="member-row"><span class="badge-role ${esc(m.role)}">${esc(roleName(m.role))}</span>` +
     `<span>${esc(m.display_name || m.username)}</span><span class="muted">${esc(m.email || '')}</span>` +
     `<button class="btn btn-sm" data-mid="${m.id}" style="margin-left:auto">Remover</button></div>`
   ).join('') || '<p class="hint">Ninguém vinculado ainda.</p>';
   box.querySelectorAll('button[data-mid]').forEach(b => b.onclick = async () => {
     await api('DELETE', `/admin/units/${SELECTED.id}/members/${b.dataset.mid}`);
-    loadMembers();
+    loadMembers(); loadAvailable();
   });
+  loadAvailable();
 }
+// Candidatos DISPONÍVEIS (do ancestral mais próximo que tiver gente no papel).
+// Escolher preenche o campo de vínculo — a inscrição continua sendo o clique
+// explícito em "Vincular".
+async function loadAvailable() {
+  const role = $('m-role').value;
+  const row = $('m-avail-row');
+  if (!role || role === 'admin_global' || !SELECTED.parent_id) { row.classList.add('hidden'); return; }
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/available-people?role=${encodeURIComponent(role)}`);
+  if (!ok) { row.classList.add('hidden'); return; }
+  const people = j.people || [];
+  if (!people.length) { row.classList.add('hidden'); return; }
+  row.classList.remove('hidden');
+  const srcName = UNITS.find(u => u.id === j.source_unit_id)?.name || '';
+  $('m-avail-hint').textContent = `disponíveis em “${srcName}”`;
+  $('m-avail').innerHTML = `<option value="">— escolher disponível (${people.length}) —</option>` +
+    people.map(p => `<option value="${esc(p.email || p.username)}">${esc(p.display_name || p.username)}${p.email ? ' · ' + esc(p.email) : ''}</option>`).join('');
+}
+$('m-role').onchange = loadAvailable;
+$('m-avail').onchange = () => { if ($('m-avail').value) $('m-login').value = $('m-avail').value; };
 $('m-add').onclick = async () => {
   const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/members`, { login: $('m-login').value.trim(), role: $('m-role').value });
   $('m-msg').textContent = ok ? 'Vinculado.' : 'Falha: ' + (j.error === 'user_not_found' ? 'usuário não encontrado' : j.error === 'membership_exists' ? 'já vinculado com esse papel' : j.error || '');
@@ -321,11 +366,15 @@ async function loadEntitlements() {
         `<input class="input del-qty" type="number" min="1" value="1" style="width:80px"/>` +
         `<button class="btn btn-sm del-go" data-alloc="${a.allocation_id}">Delegar p/ filho</button></div>`
       : '<p class="hint" style="margin-top:var(--sp-2)">Sem unidades filhas para delegar.</p>';
+    const ret = a.parent_allocation_id != null
+      ? `<div class="row" style="margin-top:var(--sp-2)"><input class="input ret-qty" type="number" min="1" value="1" style="width:80px"/>` +
+        `<button class="btn btn-sm ret-go" data-alloc="${a.allocation_id}">Devolver ao pai</button></div>`
+      : '';
     return `<div class="alloc-card"><div class="row" style="justify-content:space-between">` +
       `<b>${esc(a.template_name || a.template_key)}</b>` +
       `<span class="muted">concedidos ${a.granted_packages} · delegados ${a.delegated_packages} · retidos <b>${a.retained_packages}</b></span></div>` +
       `<div class="ent-item ent-head"><span>item</span><span>cap.</span><span>cons.</span><span>disp.</span></div>` +
-      rows(main, '') + rows(derived, 'derived') + delegate + `</div>`;
+      rows(main, '') + rows(derived, 'derived') + delegate + ret + `</div>`;
   }).join('') || '<p class="hint">Nenhum pacote alocado nesta unidade.</p>';
   box.querySelectorAll('.del-go').forEach(btn => btn.onclick = async () => {
     const card = btn.closest('.alloc-card');
@@ -333,6 +382,13 @@ async function loadEntitlements() {
     const qty = Number(card.querySelector('.del-qty').value);
     const { ok, j: r } = await api('POST', `/admin/units/${childId}/packages/delegate`, { parent_allocation_id: Number(btn.dataset.alloc), packages: qty });
     $('p-msg').textContent = ok ? 'Delegado.' : 'Falha: ' + (r.error || '');
+    if (ok) loadEntitlements();
+  });
+  box.querySelectorAll('.ret-go').forEach(btn => btn.onclick = async () => {
+    const card = btn.closest('.alloc-card');
+    const qty = Number(card.querySelector('.ret-qty').value);
+    const { ok, j: r } = await api('POST', `/admin/units/${SELECTED.id}/packages/return`, { allocation_id: Number(btn.dataset.alloc), packages: qty });
+    $('p-msg').textContent = ok ? 'Devolvido ao pai.' : 'Falha: ' + (r.error === 'insufficient_packages' ? 'sem pacotes livres para devolver (delegados ou já consumidos)' : r.error || '');
     if (ok) loadEntitlements();
   });
 }

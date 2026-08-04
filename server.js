@@ -18,6 +18,8 @@ import rateLimit from "express-rate-limit";
 import {
     sessionMiddleware,
     seedInitialUsers,
+    seedRoles,
+    seedAuthProviders,
     seedBootstrapAdmin,
     seedInterviewerTemplates,
     seedPackageTemplates,
@@ -129,6 +131,18 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedInitialUsers();
     } catch (err) {
         log.error("BOOT", `seedInitialUsers failed: ${err.message}`);
+    }
+    // seedRoles/seedAuthProviders antes do bootstrap admin (que precisa da
+    // linha 'admin_global' na tabela roles).
+    try {
+        await seedRoles();
+    } catch (err) {
+        log.error("BOOT", `seedRoles failed: ${err.message}`);
+    }
+    try {
+        await seedAuthProviders();
+    } catch (err) {
+        log.error("BOOT", `seedAuthProviders failed: ${err.message}`);
     }
     try {
         await seedBootstrapAdmin();

@@ -110,7 +110,7 @@
         <button id="create-work" class="btn btn-primary">Criar</button>
       </div>
       <div class="row" style="margin-top: var(--sp-2)">
-        <select id="new-work-unit" class="select" style="flex:1; min-width: 200px" title="Vincula o trabalho a uma unidade (instituição/curso/turma). O gasto passa a contar no teto da unidade.">
+        <select id="new-work-unit" class="select" style="flex:1; min-width: 200px" title="Vincula o trabalho a uma TURMA (🎓). Só turmas recebem trabalhos; o gasto passa a contar no teto da unidade.">
           <option value="">— sem unidade (modo token, como hoje) —</option>
         </select>
         <select id="new-work-package" class="select" style="flex:1; min-width: 220px" disabled title="Cria o trabalho sob um item de pacote: o tipo, o número de perguntas e as travas vêm do item, e cada envio consome 1 do pool da unidade.">
@@ -270,8 +270,11 @@ async function loadUnitsAndPackages() {
     const walk = (pid, depth) => {
       for (const u of (byParent.get(pid) || [])) {
         if (!u.is_active) continue;
+        // Trabalho é da TURMA: só unidades is_class entram no seletor; as
+        // demais aparecem desabilitadas, como contexto da hierarquia.
         const o = document.createElement('option');
-        o.value = u.id; o.textContent = `${'— '.repeat(depth)}${u.name}`;
+        o.value = u.id; o.textContent = `${'— '.repeat(depth)}${u.is_class ? '🎓 ' : ''}${u.name}`;
+        if (!u.is_class) { o.disabled = true; o.value = ''; }
         uSel.appendChild(o);
         walk(u.id, depth + 1);
       }

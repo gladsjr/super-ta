@@ -87,14 +87,57 @@ export async function seedInitialUsers() {
   }
 }
 
+// Sincroniza a tabela `roles` a partir de ROLE_DEFS (lib/rbac.js) — padrão de
+// enumeração por tabela+FK: o código referencia a `key`, o banco o role_id.
+// Idempotente; roda ANTES de seedBootstrapAdmin (que precisa das linhas).
+// Papéis removidos de ROLE_DEFS não são apagados às cegas: o FK RESTRICT de
+// memberships acusa se houver vínculo pendurado.
+export async function seedRoles() {
+  const { ROLE_DEFS } = await import("./lib/rbac.js");
+  for (const def of ROLE_DEFS) {
+    await pool.query(
+      `INSERT INTO roles (key, name) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name
+       WHERE roles.name IS DISTINCT FROM EXCLUDED.name`,
+      [def.key, def.name]
+    );
+  }
+  const keys = ROLE_DEFS.map((d) => d.key);
+  const stale = await pool.query(
+    `DELETE FROM roles WHERE key <> ALL($1::text[]) RETURNING key`,
+    [keys]
+  );
+  for (const row of stale.rows) console.log(`✗ Papel removido: ${row.key}`);
+}
+
+// Provedores de autenticação BASE (instâncias configuradas — migration 066).
+// 'local' sempre existe; 'google' existe para ancorar identidades e política
+// por unidade (segredos ficam no env: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET —
+// a linha só registra a instância). Provedores institucionais (oidc/saml de um
+// cliente) serão criados por admin, não por seed.
+export async function seedAuthProviders() {
+  const base = [
+    { key: "local", kind: "local", name: "E-mail e senha" },
+    { key: "google", kind: "google", name: "Google" },
+  ];
+  for (const p of base) {
+    await pool.query(
+      `INSERT INTO auth_providers (key, kind, name) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO NOTHING`,
+      [p.key, p.kind, p.name]
+    );
+  }
+}
+
 // Garante ao menos um admin_global (unit_id NULL) para o sistema não ficar sem
 // administrador da camada institucional. Idempotente. Alvo: BOOTSTRAP_ADMIN
-// (username/email) ou, na falta, o primeiro usuário. Requer a migration 056
-// aplicada; se ainda não estiver, sai quieto (dev antes do db:migrate).
+// (username/email) ou, na falta, o primeiro usuário. Requer as migrations
+// 055–066 aplicadas; se ainda não estiverem, sai quieto (dev antes do db:migrate).
 export async function seedBootstrapAdmin() {
   try {
     const has = await pool.query(
-      `SELECT 1 FROM memberships WHERE role = 'admin_global' AND unit_id IS NULL LIMIT 1`
+      `SELECT 1 FROM memberships m JOIN roles r ON r.id = m.role_id
+        WHERE r.key = 'admin_global' AND m.unit_id IS NULL LIMIT 1`
     );
     if (has.rowCount > 0) return;
     const wanted = process.env.BOOTSTRAP_ADMIN;
@@ -111,13 +154,14 @@ export async function seedBootstrapAdmin() {
     if (target.rowCount === 0) return; // sem usuários ainda
     const u = target.rows[0];
     await pool.query(
-      `INSERT INTO memberships (user_id, unit_id, role, source)
-       VALUES ($1, NULL, 'admin_global', 'manual') ON CONFLICT DO NOTHING`,
+      `INSERT INTO memberships (user_id, unit_id, role_id, source)
+       SELECT $1, NULL, r.id, 'manual' FROM roles r WHERE r.key = 'admin_global'
+       ON CONFLICT DO NOTHING`,
       [u.id]
     );
     console.log(`✓ admin_global bootstrap: ${u.username}`);
   } catch (err) {
-    if (/relation .*memberships.* does not exist/i.test(err.message)) return;
+    if (/relation .*(memberships|roles).* does not exist/i.test(err.message)) return;
     console.warn(`⚠️  seedBootstrapAdmin: ${err.message}`);
   }
 }
@@ -331,51 +375,40 @@ export async function createUser(username, password, opts = {}) {
   return r.rows[0];
 }
 
-// Provisiona/associa um usuário a partir de um login FEDERADO (ex.: Google).
-// Ordem de resolução: (1) external_id_map(provider, sub) → (2) coluna
-// google_sub → (3) e-mail verificado → (4) cria conta SSO-only (sem senha).
-// Sempre registra o mapeamento externo. Retorna a row do usuário.
+// Provisiona/associa um usuário a partir de um login FEDERADO. `provider` é a
+// KEY de uma instância em auth_providers ('google' hoje; um 'saml_campusX'
+// amanhã). Ordem de resolução: (1) identidade já vinculada (user_identities)
+// → (2) e-mail verificado (vincula a identidade à conta existente) → (3) cria
+// conta SSO-only (sem senha). Nenhum provedor é cravado no schema de users;
+// external_id_map fica para identificadores ACADÊMICOS (RA), não de login.
 export async function provisionFederatedUser({ provider = "google", sub, email = null, displayName = null }) {
   if (!sub) throw Object.assign(new Error("federated_sub_required"), { status: 400 });
-  const subColumn = provider === "google" ? "google_sub" : null;
-
-  // (1) mapeamento externo
-  const mapped = await pool.query(
-    `SELECT u.* FROM external_id_map m JOIN users u ON u.id = m.subject_id
-      WHERE m.provider = $1 AND m.subject_type = 'user' AND m.external_id = $2 LIMIT 1`,
-    [provider, sub]
+  const prov = await pool.query(
+    `SELECT id FROM auth_providers WHERE key = $1 AND is_active LIMIT 1`,
+    [provider]
   );
-  if (mapped.rowCount > 0) return mapped.rows[0];
+  if (prov.rowCount === 0) throw Object.assign(new Error(`unknown_auth_provider: ${provider}`), { status: 400 });
+  const providerId = prov.rows[0].id;
 
-  // (2) coluna específica do provedor
-  if (subColumn) {
-    const bySub = await pool.query(`SELECT * FROM users WHERE ${subColumn} = $1 LIMIT 1`, [sub]);
-    if (bySub.rowCount > 0) {
-      await pool.query(
-        `INSERT INTO external_id_map (subject_type, subject_id, provider, external_id)
-         VALUES ('user', $1, $2, $3) ON CONFLICT DO NOTHING`,
-        [bySub.rows[0].id, provider, sub]
-      );
-      return bySub.rows[0];
-    }
-  }
+  // (1) identidade já vinculada
+  const known = await pool.query(
+    `SELECT u.* FROM user_identities i JOIN users u ON u.id = i.user_id
+      WHERE i.provider_id = $1 AND i.subject = $2 LIMIT 1`,
+    [providerId, sub]
+  );
+  if (known.rowCount > 0) return known.rows[0];
 
-  // (3) e-mail
+  // (2) e-mail verificado → vincula identidade à conta existente
   let user = null;
   if (email) {
     const byEmail = await pool.query("SELECT * FROM users WHERE lower(email) = lower($1) LIMIT 1", [email]);
-    if (byEmail.rowCount > 0) {
-      user = byEmail.rows[0];
-      if (subColumn && !user[subColumn]) {
-        await pool.query(`UPDATE users SET ${subColumn} = $1 WHERE id = $2`, [sub, user.id]);
-      }
-    }
+    if (byEmail.rowCount > 0) user = byEmail.rows[0];
   }
 
-  // (4) cria SSO-only
+  // (3) cria SSO-only
   if (!user) {
     // username único derivado do e-mail/sub; sem senha (source='synced').
-    const base = (email ? email.split("@")[0] : `google_${sub}`).replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 24) || "user";
+    const base = (email ? email.split("@")[0] : `${provider}_${sub}`).replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 24) || "user";
     let candidate = base, n = 1;
     // colisão rara: sufixa até achar livre
     // eslint-disable-next-line no-constant-condition
@@ -385,18 +418,17 @@ export async function provisionFederatedUser({ provider = "google", sub, email =
       candidate = `${base}_${n++}`;
     }
     const ins = await pool.query(
-      `INSERT INTO users (username, email, display_name, ${subColumn ? subColumn + ", " : ""}source)
-       VALUES ($1, $2, $3, ${subColumn ? "$4, " : ""}'synced')
-       RETURNING *`,
-      subColumn ? [candidate, email, displayName, sub] : [candidate, email, displayName]
+      `INSERT INTO users (username, email, display_name, source)
+       VALUES ($1, $2, $3, 'synced') RETURNING *`,
+      [candidate, email, displayName]
     );
     user = ins.rows[0];
   }
 
   await pool.query(
-    `INSERT INTO external_id_map (subject_type, subject_id, provider, external_id)
-     VALUES ('user', $1, $2, $3) ON CONFLICT DO NOTHING`,
-    [user.id, provider, sub]
+    `INSERT INTO user_identities (user_id, provider_id, subject)
+     VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+    [user.id, providerId, sub]
   );
   return user;
 }

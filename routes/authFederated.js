@@ -44,8 +44,8 @@ router.get("/auth/google", (req, res) => {
 });
 
 // Callback: valida state, troca code por tokens, lê o perfil, provisiona/associa
-// o usuário (external_id_map + google_sub) e abre sessão (mesma regeneração do
-// login local — anti session-fixation).
+// o usuário (user_identities, provedor 'google') e abre sessão (mesma
+// regeneração do login local — anti session-fixation).
 router.get("/auth/google/callback", async (req, res) => {
     const cfg = googleConfig(req);
     if (!cfg) return res.status(501).json({ error: "google_sso_not_configured" });

@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
 import { isGlobalAdmin, resolveEffectiveRoles } from "../lib/rbac.js";
+import { getUnit } from "../lib/units.js";
 import { getPackageSpec } from "../lib/packages.js";
 import * as db from "../lib/db.js";
 import * as scenarioStore from "../lib/scenarios/store.js";
@@ -51,11 +52,18 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
     const itemKey = req.body?.item_key || null;
 
     try {
-        // Se veio unidade, o criador precisa ter algum papel nela (ou ser global).
+        // Trabalho é da TURMA: só unidades is_class recebem trabalho, e o
+        // criador precisa ser professor ATRIBUÍDO à turma (papel local — sem
+        // herança) ou admin dela/de um ancestral (decisão de 04/08/2026).
         if (unitId != null) {
+            const unit = await getUnit(unitId);
+            if (!unit) return res.status(404).json({ error: "unit_not_found" });
+            if (!unit.is_class) return res.status(400).json({ error: "unit_not_class" });
             if (!(await isGlobalAdmin(req.session.user.id))) {
                 const roles = await resolveEffectiveRoles(req.session.user.id, unitId);
-                if (roles.size === 0) return res.status(403).json({ error: "forbidden_unit" });
+                if (!roles.has("professor") && !roles.has("admin_unidade")) {
+                    return res.status(403).json({ error: "forbidden_unit" });
+                }
             }
         }
         // Resolve o item do pacote (se houver) e alinha o kind ao item.

@@ -12,17 +12,18 @@ import express from "express";
 import { requireAdmin } from "../lib/middleware.js";
 import { getUserByLogin } from "../auth.js";
 import {
-    listUnits, getUnit, createUnit, updateUnitBudget, renameUnit, setUnitActive,
+    listUnits, getUnit, createUnit, renameUnit, setUnitActive, setUnitClass,
 } from "../lib/units.js";
 import {
     isGlobalAdmin, canAdminUnit, resolveEffectiveRoles,
-    listUnitMembers, addMembership, removeMembership, ROLES,
+    listUnitMembers, addMembership, removeMembership, listRoles, listAvailablePeople,
 } from "../lib/rbac.js";
-import { getUnitBalance } from "../lib/billing.js";
+import { getUnitBalance, setUnitBudgetReserved } from "../lib/billing.js";
 import {
-    allocateRoot, allocateToChild, listUnitEntitlements, unitEntitlementRollup,
-    listPackageSpecs,
+    allocateRoot, allocateToChild, returnToParent, listUnitEntitlements,
+    unitEntitlementRollup, listPackageSpecs,
 } from "../lib/packages.js";
+import { pool } from "../auth.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -67,9 +68,20 @@ router.post("/admin/units", requireAdmin, json, async (req, res) => {
             name: req.body?.name,
             parentId: parentId == null ? null : Number(parentId),
             label: req.body?.label ?? null,
-            budgetUsd: req.body?.budget_usd ?? null,
+            isClass: req.body?.is_class === true,
         });
-        log.info("UNITS", `unit created id=${unit.id} name="${unit.name}" parent=${parentId ?? "root"} by=${req.session.user.username}`);
+        // Teto na criação = reserva contra o saldo do pai (Gate A). Se não
+        // couber, desfaz a criação — sem unidade-fantasma sem teto.
+        if (req.body?.budget_usd != null && req.body.budget_usd !== "") {
+            try {
+                await setUnitBudgetReserved(unit.id, Number(req.body.budget_usd));
+                unit.budget_usd = Number(req.body.budget_usd);
+            } catch (err) {
+                await pool.query(`DELETE FROM units WHERE id = $1`, [unit.id]).catch(() => {});
+                throw err;
+            }
+        }
+        log.info("UNITS", `unit created id=${unit.id} name="${unit.name}" parent=${parentId ?? "root"} class=${unit.is_class} by=${req.session.user.username}`);
         res.json({ unit });
     } catch (err) { return httpErr(res, err); }
 });
@@ -86,18 +98,28 @@ router.patch("/admin/units/:unitId", requireAdmin, json, async (req, res) => {
             const u = await setUnitActive(unitId, req.body.is_active);
             return res.json({ unit: u });
         }
+        if (typeof req.body?.is_class === "boolean") {
+            const u = await setUnitClass(unitId, req.body.is_class);
+            return res.json({ unit: u });
+        }
         return res.status(400).json({ error: "nothing to update" });
     } catch (err) { return httpErr(res, err); }
 });
 
-// Teto de US$ desta unidade (Gate A). budget_usd null = remove o teto próprio.
+// Teto de US$ desta unidade (Gate A — RESERVA contra o saldo do pai; reduzir
+// devolve; null remove o teto e a unidade volta a consumir do ancestral).
+// A permissão é no PAI (é o saldo dele que a reserva mexe); para unidade raiz,
+// admin da própria.
 router.put("/admin/units/:unitId/budget", requireAdmin, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     const raw = req.body?.budget_usd;
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const unit = await getUnit(unitId);
+        if (!unit) return res.status(404).json({ error: "unit not found" });
+        const permUnit = unit.parent_id ?? unitId;
+        if (!(await canAdminUnit(uid(req), permUnit))) return res.status(403).json({ error: "forbidden" });
         const budget = raw === null || raw === "" || raw === undefined ? null : Number(raw);
-        const u = await updateUnitBudget(unitId, budget);
+        const u = await setUnitBudgetReserved(unitId, budget);
         res.json({ unit: u });
     } catch (err) { return httpErr(res, err); }
 });
@@ -121,7 +143,19 @@ router.get("/admin/units/:unitId/members", requireAdmin, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canViewUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
-        res.json({ members: await listUnitMembers(unitId), roles: ROLES });
+        res.json({ members: await listUnitMembers(unitId), roles: await listRoles() });
+    } catch (err) { return httpErr(res, err); }
+});
+
+// DISPONIBILIDADE (não é acesso): candidatos ao papel `role` nesta unidade,
+// vindos do ancestral mais próximo que tiver gente nesse papel (mãe esconde
+// avó). Serve o fluxo de inscrição de aluno / atribuição de professor.
+router.get("/admin/units/:unitId/available-people", requireAdmin, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    try {
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const role = String(req.query.role || "aluno");
+        res.json(await listAvailablePeople(unitId, role));
     } catch (err) { return httpErr(res, err); }
 });
 
@@ -205,6 +239,24 @@ router.post("/admin/units/:unitId/packages/delegate", requireAdmin, json, async 
     } catch (err) { return httpErr(res, err); }
 });
 
+// DEVOLVE pacotes não usados de uma allocation desta unidade para a
+// allocation-pai (libera saldo na unidade de cima — espelho da delegação).
+router.post("/admin/units/:unitId/packages/return", requireAdmin, json, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    try {
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const allocationId = Number(req.body?.allocation_id);
+        const owns = await pool.query(
+            `SELECT 1 FROM package_allocations WHERE id = $1 AND unit_id = $2`,
+            [allocationId, unitId]
+        );
+        if (owns.rowCount === 0) return res.status(404).json({ error: "allocation_not_found_in_unit" });
+        const r = await returnToParent({ childAllocationId: allocationId, packages: req.body?.packages });
+        log.info("UNITS", `pkg return alloc=${allocationId} n=${req.body?.packages} unit=${unitId} by=${req.session.user.username}`);
+        res.json({ returned: r.returned, parent_allocation_id: r.parentAllocationId });
+    } catch (err) { return httpErr(res, err); }
+});
+
 // ---------------------------------------------------------------------------
 // Import CSV (integração gradual — degrau 1). Formato mínimo, sem dependência:
 // cabeçalho name,parent_name,label,budget_usd — uma unidade por linha. parent_name
@@ -221,6 +273,7 @@ router.post("/admin/units/import-csv", requireAdmin, express.text({ type: "*/*",
         const iParent = header.indexOf("parent_name");
         const iLabel = header.indexOf("label");
         const iBudget = header.indexOf("budget_usd");
+        const iClass = header.indexOf("is_class");
         if (iName < 0) return res.status(400).json({ error: "csv_missing_name_column" });
 
         const byName = new Map((await listUnits()).map((u) => [u.name, u.id]));
@@ -235,10 +288,21 @@ router.post("/admin/units/import-csv", requireAdmin, express.text({ type: "*/*",
                 return res.status(400).json({ error: `parent_not_found: "${parentName}" (linha "${name}")` });
             }
             const budget = iBudget >= 0 && cols[iBudget] ? Number(cols[iBudget]) : null;
+            const isClass = iClass >= 0 && /^(true|1|sim|x)$/i.test(cols[iClass] || "");
             const unit = await createUnit({
                 name, parentId, label: iLabel >= 0 ? cols[iLabel] || null : null,
-                budgetUsd: budget, source: "imported",
+                isClass, source: "imported",
             });
+            // Teto do CSV = reserva contra o saldo do pai (mesma regra da criação).
+            if (budget != null) {
+                try {
+                    await setUnitBudgetReserved(unit.id, budget);
+                } catch (err) {
+                    await pool.query(`DELETE FROM units WHERE id = $1`, [unit.id]).catch(() => {});
+                    err.message = `${err.message} (linha "${name}")`;
+                    throw err;
+                }
+            }
             byName.set(name, unit.id);
             created.push({ id: unit.id, name: unit.name });
         }
