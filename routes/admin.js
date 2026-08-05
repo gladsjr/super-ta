@@ -6,7 +6,7 @@ import express from "express";
 import crypto from "crypto";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
-import { isGlobalAdmin, resolveEffectiveRoles } from "../lib/rbac.js";
+import { isGlobalAdmin, resolveEffectiveRoles, addMembership } from "../lib/rbac.js";
 import { getUnit } from "../lib/units.js";
 import { getPackageSpec } from "../lib/packages.js";
 import * as db from "../lib/db.js";
@@ -183,10 +183,14 @@ router.get("/admin/users", requireAdmin, async (_req, res) => {
     }
 });
 
+// A tela "Usuários e senha" é a gestão da EQUIPE ORATIA: usuário criado aqui
+// nasce admin_global (vínculo unit_id NULL — decisão de 04/08/2026). Contas de
+// professor/aluno de instituição virão por convite/importação, não por aqui.
 router.post("/admin/users", requireAdmin, async (req, res) => {
     try {
         const user = await createUser(req.body?.username, req.body?.password);
-        log.info("ADMIN", `user created username="${user.username}" by=${req.session.user.username}`);
+        await addMembership({ userId: user.id, unitId: null, role: "admin_global" });
+        log.info("ADMIN", `user created username="${user.username}" (admin_global) by=${req.session.user.username}`);
         res.json({ user });
     } catch (err) {
         if (err.status) return res.status(err.status).json({ error: err.message });
