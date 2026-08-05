@@ -33,6 +33,7 @@ import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
 import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import unitsRoutes from "./routes/units.js";
+import activationRoutes from "./routes/activation.js";
 import authFederatedRoutes from "./routes/authFederated.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
@@ -110,6 +111,7 @@ app.use(authFederatedRoutes); // /auth/google[/callback] — SSO opcional (501 s
 app.use(staticRoutes);
 app.use(adminRoutes);
 app.use(unitsRoutes); // /admin/units/* — camada institucional (sessão + RBAC por unidade)
+app.use(activationRoutes); // /ativar + /api/ativar — ativação de conta por convite (público, token de uso único)
 app.use(scenarioCockpitRoutes); // /w/:t/scenario-runs|scenario-evaluations/* — cockpit do professor p/ cenários (requireAdmin por rota). Antes de workRoutes (paths específicos).
 app.use(workRoutes);
 app.use(interviewRoutes);

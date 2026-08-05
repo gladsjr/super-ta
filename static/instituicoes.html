@@ -136,6 +136,22 @@
             <span id="m-avail-hint" class="hint"></span>
           </div>
           <p class="hint">Só o papel de administrador herda para a sub-árvore. Professor e aluno valem SÓ nesta unidade: vínculo em unidade acima torna a pessoa <i>disponível</i> aqui (lista acima), e vincular aqui é a inscrição/atribuição. <code>admin_global</code> é concedido fora daqui.</p>
+
+          <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Nova pessoa (cadastro + convite)</h4>
+          <div class="row">
+            <input id="np-name" class="input" placeholder="nome completo" style="flex:1; min-width:150px"/>
+            <input id="np-email" class="input" placeholder="e-mail" style="flex:1; min-width:170px"/>
+            <select id="np-role" class="select" style="width:150px"></select>
+            <button id="np-create" class="btn btn-primary btn-sm">Criar + convidar</button>
+          </div>
+          <div id="np-msg" class="hint"></div>
+          <p class="hint">Cria a conta (sem senha), vincula no papel escolhido e gera um convite de ativação. Nada é enviado sozinho: baixe o TXT dos convites e envie você mesmo (v1 sem servidor de e-mail).</p>
+
+          <div class="row" style="justify-content: space-between; margin-top: var(--sp-2)">
+            <h4 style="margin: 0">Convites</h4>
+            <a id="inv-txt" class="btn btn-sm" href="#" download>Baixar e-mails (TXT)</a>
+          </div>
+          <div id="d-invites"></div>
         </div>
 
         <div class="card section-gap">
@@ -244,7 +260,7 @@ async function selectUnit(id) {
   $('detail-none').classList.add('hidden'); $('detail').classList.remove('hidden');
   renderDetailHeader();
   loadUnits();
-  await Promise.all([loadBudget(), loadMembers(), loadEntitlements()]);
+  await Promise.all([loadBudget(), loadMembers(), loadEntitlements(), loadInvites()]);
 }
 function renderDetailHeader() {
   $('d-name').textContent = (SELECTED.is_class ? '🎓 ' : '') + SELECTED.name;
@@ -301,6 +317,7 @@ async function loadMembers() {
   const keep = sel.value;
   sel.innerHTML = ROLES.filter(r => r.key !== 'admin_global').map(r => `<option value="${esc(r.key)}">${esc(r.name)}</option>`).join('');
   if (keep) sel.value = keep;
+  syncRoleSelects();
   const roleName = (key) => (ROLES.find(r => r.key === key)?.name) || key;
   const box = $('d-members');
   box.innerHTML = (j.members || []).map(m =>
@@ -335,9 +352,46 @@ $('m-role').onchange = loadAvailable;
 $('m-avail').onchange = () => { if ($('m-avail').value) $('m-login').value = $('m-avail').value; };
 $('m-add').onclick = async () => {
   const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/members`, { login: $('m-login').value.trim(), role: $('m-role').value });
-  $('m-msg').textContent = ok ? 'Vinculado.' : 'Falha: ' + (j.error === 'user_not_found' ? 'usuário não encontrado' : j.error === 'membership_exists' ? 'já vinculado com esse papel' : j.error || '');
+  $('m-msg').textContent = ok ? 'Vinculado.' : 'Falha: ' + (j.error === 'user_not_found' ? 'usuário não encontrado — cadastre em "Nova pessoa" abaixo' : j.error === 'membership_exists' ? 'já vinculado com esse papel' : j.error || '');
   if (ok) { $('m-login').value = ''; loadMembers(); }
 };
+
+// ---- nova pessoa + convites ----
+function syncRoleSelects() {
+  $('np-role').innerHTML = ROLES.filter(r => r.key !== 'admin_global').map(r => `<option value="${esc(r.key)}">${esc(r.name)}</option>`).join('');
+}
+$('np-create').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/people`, {
+    name: $('np-name').value.trim(), email: $('np-email').value.trim(), role: $('np-role').value,
+  });
+  $('np-msg').textContent = ok
+    ? (j.invite ? 'Pessoa criada e convite gerado — baixe o TXT para enviar.' : 'Pessoa vinculada (a conta já tinha acesso; sem convite novo).')
+    : 'Falha: ' + (j.error === 'invalid_email' ? 'e-mail inválido' : j.error === 'name_required' ? 'nome obrigatório' : j.error || '');
+  if (ok) { $('np-name').value = ''; $('np-email').value = ''; loadMembers(); loadInvites(); }
+};
+async function loadInvites() {
+  $('inv-txt').href = `/admin/units/${SELECTED.id}/invites.txt`;
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/invites`);
+  if (!ok) return;
+  const STATE = { pendente: '⏳ pendente', ativado: '✅ ativado', expirado: '⌛ expirado', cancelado: '✖ cancelado' };
+  $('d-invites').innerHTML = (j.invites || []).map(i =>
+    `<div class="member-row"><span>${STATE[i.state] || esc(i.state)}</span>` +
+    `<span>${esc(i.display_name || i.username)}</span><span class="muted">${esc(i.email)}</span>` +
+    `<span class="muted">expira ${new Date(i.expires_at).toLocaleDateString('pt-BR')}</span>` +
+    (i.state !== 'ativado' ? `<button class="btn btn-sm" data-reuser="${i.user_id}" style="margin-left:auto">Reenviar</button>` : '') +
+    (i.state === 'pendente' ? `<button class="btn btn-sm" data-cancel="${i.id}">Cancelar</button>` : '') +
+    `</div>`
+  ).join('') || '<p class="hint">Nenhum convite nesta unidade.</p>';
+  $('d-invites').querySelectorAll('button[data-reuser]').forEach(b => b.onclick = async () => {
+    const { ok: o2, j: r } = await api('POST', `/admin/units/${SELECTED.id}/people/${b.dataset.reuser}/invite`, {});
+    $('np-msg').textContent = o2 ? 'Convite reemitido (o link anterior foi invalidado).' : 'Falha: ' + (r.error || '');
+    if (o2) loadInvites();
+  });
+  $('d-invites').querySelectorAll('button[data-cancel]').forEach(b => b.onclick = async () => {
+    await api('POST', `/admin/units/${SELECTED.id}/invites/${b.dataset.cancel}/cancel`, {});
+    loadInvites();
+  });
+}
 
 // ---- pacotes ----
 async function loadTemplates() {

@@ -24,6 +24,10 @@ import {
     unitEntitlementRollup, listPackageSpecs,
 } from "../lib/packages.js";
 import { pool } from "../auth.js";
+import {
+    createPersonWithInvite, issueInvite, cancelInvite, listUnitInvites,
+    buildInviteEmailsText,
+} from "../lib/invites.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -182,6 +186,83 @@ router.delete("/admin/units/:unitId/members/:membershipId", requireAdmin, async 
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
         await removeMembership(Number(req.params.membershipId));
+        res.json({ ok: true });
+    } catch (err) { return httpErr(res, err); }
+});
+
+// ---------------------------------------------------------------------------
+// Pessoas & convites — o cadastro de professor/aluno/admin de unidade.
+// Cria a PESSOA (sem senha), o VÍNCULO no papel e o CONVITE de ativação.
+// v1 sem servidor de e-mail: o admin baixa o TXT dos e-mails que seriam
+// enviados (envio é ação explícita, nunca consequência escondida).
+// ---------------------------------------------------------------------------
+
+router.post("/admin/units/:unitId/people", requireAdmin, json, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    try {
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const { user, membership, invite } = await createPersonWithInvite({
+            name: req.body?.name,
+            email: req.body?.email,
+            role: req.body?.role,
+            unitId,
+            civilIdValue: req.body?.civil_id || null,
+            createdByUserId: uid(req),
+        });
+        log.info("UNITS", `person ${user.username} (${user.email}) role=${req.body?.role} unit=${unitId} invite=${invite ? "yes" : "no"} by=${req.session.user.username}`);
+        res.json({
+            user: { id: user.id, username: user.username, email: user.email, display_name: user.display_name },
+            membership_created: !!membership,
+            invite: invite ? { id: invite.id, state: invite.state, expires_at: invite.expires_at } : null,
+        });
+    } catch (err) { return httpErr(res, err); }
+});
+
+router.get("/admin/units/:unitId/invites", requireAdmin, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    try {
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const invites = await listUnitInvites(unitId);
+        res.json({ invites: invites.map(({ token, ...rest }) => rest) });
+    } catch (err) { return httpErr(res, err); }
+});
+
+// TXT dos e-mails que seriam enviados (convites pendentes da unidade).
+router.get("/admin/units/:unitId/invites.txt", requireAdmin, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    try {
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const invites = await listUnitInvites(unitId);
+        const base = `${req.protocol}://${req.get("host")}`;
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="convites-unidade-${unitId}.txt"`);
+        res.send(buildInviteEmailsText(invites, base));
+    } catch (err) { return httpErr(res, err); }
+});
+
+// (Re)emitir convite para uma pessoa da unidade: invalida o link anterior e
+// gera um novo (regra da spec).
+router.post("/admin/units/:unitId/people/:userId/invite", requireAdmin, json, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    const userId = Number(req.params.userId);
+    try {
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const member = await pool.query(
+            `SELECT 1 FROM memberships WHERE user_id = $1 AND unit_id = $2 LIMIT 1`,
+            [userId, unitId]
+        );
+        if (member.rowCount === 0) return res.status(404).json({ error: "person_not_in_unit" });
+        const invite = await issueInvite({ userId, createdByUserId: uid(req) });
+        log.info("UNITS", `invite resent user=${userId} unit=${unitId} by=${req.session.user.username}`);
+        res.json({ invite: { id: invite.id, state: invite.state, expires_at: invite.expires_at } });
+    } catch (err) { return httpErr(res, err); }
+});
+
+router.post("/admin/units/:unitId/invites/:inviteId/cancel", requireAdmin, json, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    try {
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        await cancelInvite(Number(req.params.inviteId));
         res.json({ ok: true });
     } catch (err) { return httpErr(res, err); }
 });

@@ -73,6 +73,17 @@ Criar trabalho numa unidade exige a unidade ser turma E o criador ser professor
 - Login local aceita e-mail OU username; Google SSO em `routes/authFederated.js`
   (OIDC via fetch, 501 se não configurado; provisionamento em
   `auth.js#provisionFederatedUser` → `user_identities`).
+- **Cadastro + convites** (migration 067, `lib/invites.js`): o admin cria a
+  PESSOA (nome + e-mail, sem senha) já vinculada a uma unidade num papel
+  (`POST /admin/units/:id/people`); nasce um convite com token de uso único e
+  expiração (14 dias). A pessoa ativa em `/ativar?token=...` escolhendo a
+  senha. Reenviar invalida o link anterior; estados derivados (pendente/
+  ativado/expirado/cancelado). **v1 SEM servidor de e-mail** (decisão de
+  04/08/2026): o painel gera um TXT com os e-mails que seriam enviados
+  (`GET .../invites.txt`) — o envio é ação explícita do admin. Pessoa é única
+  por e-mail (reaproveita conta existente; convite só se a conta não tem
+  porta de entrada). A tela "Usuários e senha" do /admin é da EQUIPE ORATIA:
+  usuário criado lá nasce `admin_global`.
 
 ## Controle de uso — dois portões independentes
 
@@ -149,9 +160,12 @@ student-version/grades/publish/grade-publish). `grade: true` (oral) mantém a no
   comercial: os pacotes iniciais só vendem 0 (simplificada realtime, sem
   follow-up por construção) e 1 (profunda, que é o comportamento cravado no
   prompt hoje) — nenhuma configuração vendida depende do teto no motor.
-- **Convites por e-mail**: fluxo definido (spec do piloto, 04/08/2026) mas não
-  implementado. v1 SEM servidor de e-mail: gerar um TXT com os e-mails que
-  seriam enviados, para download; envio sempre comandado pelo admin.
+- **Envio real de e-mail dos convites**: o fluxo existe (TXT manual); falta
+  escolher provedor e plugar o envio (mantendo o comando explícito do admin).
+- **`requireAdmin` = "está logado"**: funciona enquanto só a equipe tem conta,
+  mas com convites criando contas de professor/aluno de instituição, as rotas
+  administrativas (`/admin/works` etc.) precisarão de checagem real de papel
+  ANTES do portal do aluno — senão um aluno logado enxerga o painel.
 - **Importação cognitiva de PESSOAS**: o import atual é de UNIDADES (CSV formato
   fixo). O fluxo agente-propõe → prévia → confirmação → auditoria fica para a
   próxima onda (usar `runStructured`).
