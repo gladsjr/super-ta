@@ -110,6 +110,19 @@ export async function seedRoles() {
   for (const row of stale.rows) console.log(`✗ Papel removido: ${row.key}`);
 }
 
+// Tipos de identificador civil (migration 068) — padrão enum-por-tabela. Piloto
+// só tem 'cpf'; estrangeiro entra depois como novo tipo. Idempotente.
+export async function seedCivilIdTypes() {
+  const base = [{ key: "cpf", name: "CPF" }];
+  for (const t of base) {
+    await pool.query(
+      `INSERT INTO civil_id_types (key, name) VALUES ($1, $2)
+       ON CONFLICT (key) DO NOTHING`,
+      [t.key, t.name]
+    );
+  }
+}
+
 // Provedores de autenticação BASE (instâncias configuradas — migration 066).
 // 'local' sempre existe; 'google' existe para ancorar identidades e política
 // por unidade (segredos ficam no env: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET —

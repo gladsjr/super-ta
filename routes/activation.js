@@ -29,7 +29,7 @@ router.get("/api/ativar", async (req, res) => {
 
 router.post("/api/ativar", json, async (req, res) => {
     try {
-        const { username } = await activateInvite(req.body?.token, req.body?.password, bcrypt);
+        const { username } = await activateInvite(req.body?.token, req.body?.password, req.body?.cpf, bcrypt);
         log.info("INVITE", `conta ativada: ${username}`);
         res.json({ ok: true, username });
     } catch (err) {

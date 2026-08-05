@@ -19,6 +19,7 @@ import {
     sessionMiddleware,
     seedInitialUsers,
     seedRoles,
+    seedCivilIdTypes,
     seedAuthProviders,
     seedBootstrapAdmin,
     seedInterviewerTemplates,
@@ -140,6 +141,11 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedRoles();
     } catch (err) {
         log.error("BOOT", `seedRoles failed: ${err.message}`);
+    }
+    try {
+        await seedCivilIdTypes();
+    } catch (err) {
+        log.error("BOOT", `seedCivilIdTypes failed: ${err.message}`);
     }
     try {
         await seedAuthProviders();

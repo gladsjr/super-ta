@@ -444,10 +444,15 @@ async function loadInvites() {
     `<div class="member-row"><span>${STATE[i.state] || esc(i.state)}</span>` +
     `<span>${esc(i.display_name || i.username)}</span><span class="muted">${esc(i.email)}</span>` +
     `<span class="muted">expira ${new Date(i.expires_at).toLocaleDateString('pt-BR')}</span>` +
-    (i.state !== 'ativado' ? `<button class="btn btn-sm" data-reuser="${i.user_id}" style="margin-left:auto">Reenviar</button>` : '') +
+    (i.activation_link ? `<button class="btn btn-sm" data-link="${esc(i.activation_link)}" style="margin-left:auto">Copiar link</button>` : '') +
+    (i.state !== 'ativado' ? `<button class="btn btn-sm" data-reuser="${i.user_id}"${i.activation_link ? '' : ' style="margin-left:auto"'}>Reenviar</button>` : '') +
     (i.state === 'pendente' ? `<button class="btn btn-sm" data-cancel="${i.id}">Cancelar</button>` : '') +
     `</div>`
   ).join('') || '<p class="hint">Nenhum convite nesta unidade.</p>';
+  $('d-invites').querySelectorAll('button[data-link]').forEach(b => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.link); b.textContent = 'Copiado!'; setTimeout(() => b.textContent = 'Copiar link', 1500); }
+    catch { prompt('Link de ativação:', b.dataset.link); }
+  });
   $('d-invites').querySelectorAll('button[data-reuser]').forEach(b => b.onclick = async () => {
     const { ok: o2, j: r } = await api('POST', `/admin/units/${SELECTED.id}/people/${b.dataset.reuser}/invite`, {});
     $('np-msg').textContent = o2 ? 'Convite reemitido (o link anterior foi invalidado).' : 'Falha: ' + (r.error || '');

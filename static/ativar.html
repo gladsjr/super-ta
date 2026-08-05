@@ -24,6 +24,7 @@
       <h3 class="card-title">Ativar sua conta</h3>
       <p id="who" class="hint">Verificando convite…</p>
       <div id="form" class="row hidden">
+        <input id="cpf" class="input" inputmode="numeric" placeholder="seu CPF" autocomplete="off"/>
         <input id="pass1" class="input" type="password" placeholder="escolha uma senha (mín. 6)" autocomplete="new-password"/>
         <input id="pass2" class="input" type="password" placeholder="repita a senha" autocomplete="new-password"/>
         <button id="go" class="btn btn-primary">Ativar conta</button>
@@ -47,7 +48,14 @@ const ERR = {
   invite_ativado: 'Este convite já foi usado. Se foi você, é só entrar com sua senha.',
   invite_already_used: 'Este convite já foi usado.',
   password_too_short: 'A senha precisa de pelo menos 6 caracteres.',
+  invalid_cpf: 'CPF inválido — confira os 11 dígitos.',
 };
+// Validação leve de CPF no cliente (a autoridade é o servidor).
+function cpfOk(raw){
+  const c = String(raw||'').replace(/\D/g,''); if (c.length!==11 || /^(\d)\1{10}$/.test(c)) return false;
+  const dv=(n)=>{let s=0;for(let i=0;i<n;i++)s+=Number(c[i])*(n+1-i);const r=(s*10)%11;return r===10?0:r;};
+  return dv(9)===Number(c[9]) && dv(10)===Number(c[10]);
+}
 async function boot() {
   if (!token) { $('who').textContent = 'Link inválido (sem token).'; return; }
   const r = await fetch('/api/ativar?token=' + encodeURIComponent(token));
@@ -57,9 +65,10 @@ async function boot() {
   $('form').classList.remove('hidden');
 }
 $('go').onclick = async () => {
-  const p1 = $('pass1').value, p2 = $('pass2').value;
+  const p1 = $('pass1').value, p2 = $('pass2').value, cpf = $('cpf').value;
+  if (!cpfOk(cpf)) { $('msg').textContent = 'CPF inválido — confira os 11 dígitos.'; return; }
   if (p1 !== p2) { $('msg').textContent = 'As senhas não conferem.'; return; }
-  const r = await fetch('/api/ativar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password: p1 }) });
+  const r = await fetch('/api/ativar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password: p1, cpf }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $('msg').textContent = ERR[j.error] || 'Falha ao ativar.'; return; }
   $('form').classList.add('hidden'); $('msg').textContent = ''; $('who').textContent = '';

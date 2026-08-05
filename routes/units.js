@@ -390,7 +390,15 @@ router.get("/admin/units/:unitId/invites", requireAuth, async (req, res) => {
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
         const invites = await listUnitInvites(unitId);
-        res.json({ invites: invites.map(({ token, ...rest }) => rest) });
+        const base = `${req.protocol}://${req.get("host")}`;
+        // Sem servidor de e-mail, o admin precisa do LINK para enviar à mão — só
+        // dos convites pendentes (os já usados/cancelados não têm link ativo).
+        res.json({
+            invites: invites.map(({ token, ...rest }) => ({
+                ...rest,
+                activation_link: rest.state === "pendente" ? `${base}/ativar?token=${token}` : null,
+            })),
+        });
     } catch (err) { return httpErr(res, err); }
 });
 
