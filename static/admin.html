@@ -66,23 +66,6 @@
 
 <main class="page">
 
-  <div id="login-screen" class="login-wrap hidden">
-    <div class="card">
-      <h2>Entrar</h2>
-      <p class="muted">Use suas credenciais para acessar o painel.</p>
-      <div class="field">
-        <label class="label" for="login-user">Usuário</label>
-        <input id="login-user" class="input" placeholder="usuário" autocomplete="username"/>
-      </div>
-      <div class="field">
-        <label class="label" for="login-pass">Senha</label>
-        <input id="login-pass" class="input" type="password" autocomplete="current-password"/>
-      </div>
-      <button id="login-btn" class="btn btn-primary" style="width:100%">Entrar</button>
-      <div id="login-error" class="error-text"></div>
-    </div>
-  </div>
-
   <div id="app-screen" class="hidden">
     <div class="page-header">
       <h1>Administração</h1>
@@ -256,11 +239,7 @@ async function loadDefaults() {
     if (el && !el.value && Number.isFinite(DEFAULT_BUDGET_USD)) el.placeholder = `Orçamento USD (default ${DEFAULT_BUDGET_USD.toFixed(2)})`;
   } catch { /* silencioso */ }
 }
-function showLogin() {
-  document.getElementById('login-screen').classList.remove('hidden');
-  document.getElementById('app-screen').classList.add('hidden');
-  document.getElementById('user-area').classList.add('hidden');
-}
+function showLogin() { location.replace('/login'); } // login único, roteia por papel
 // Unidades + catálogo de pacotes para o vínculo institucional do novo trabalho.
 // O select de pacote lista template/item e só habilita com unidade escolhida;
 // ao escolher um item, o TIPO do trabalho vem do item (select de kind trava).
@@ -309,32 +288,11 @@ async function loadUnitsAndPackages() {
 }
 function showApp(user) {
   currentUser = user;
-  document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
   document.getElementById('user-area').classList.remove('hidden');
   document.getElementById('user-info').textContent = user.username;
 }
 
-document.getElementById('login-btn').onclick = async () => {
-  const username = document.getElementById('login-user').value.trim();
-  const password = document.getElementById('login-pass').value;
-  const errEl = document.getElementById('login-error');
-  errEl.textContent = '';
-  if (!username || !password) return errEl.textContent = 'Informe usuário e senha';
-  try {
-    const r = await fetch('/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    // Recarrega e deixa o checkAuth rotear: não-global vai para /unidades
-    // (logar direto no shell global era o bug de 04/08).
-    if (r.ok) { location.reload(); }
-    else errEl.textContent = 'Usuário ou senha inválidos';
-  } catch { errEl.textContent = 'Falha na comunicação'; }
-};
-document.getElementById('login-pass').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('login-btn').click();
-});
 document.getElementById('logout-btn').onclick = async () => {
   await fetch('/logout', { method: 'POST' });
   document.getElementById('works').innerHTML = '';

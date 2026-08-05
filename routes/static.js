@@ -18,6 +18,10 @@ const STATIC_DIR = path.join(PROJECT_ROOT, "static");
 
 router.get("/", (_req, res) => res.sendFile(path.join(STATIC_DIR, "index.html")));
 router.get("/admin", (_req, res) => res.sendFile(path.join(STATIC_DIR, "admin.html")));
+// Login ÚNICO (04/08/2026): /admin e /unidades mandam deslogados para cá; após
+// entrar, roteia por papel (equipe → /admin; demais → /unidades). O POST /login
+// (API) continua em server.js.
+router.get("/login", (_req, res) => res.sendFile(path.join(STATIC_DIR, "login.html")));
 router.get("/benchmark", (_req, res) => res.sendFile(path.join(STATIC_DIR, "benchmark.html")));
 router.get("/cost-audit", (_req, res) => res.sendFile(path.join(STATIC_DIR, "cost-audit.html")));
 // Camada institucional: unidades, papéis, tetos e pacotes (docs/access-model.md).

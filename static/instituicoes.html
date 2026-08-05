@@ -45,18 +45,6 @@
 </header>
 
 <main class="page">
-  <div id="login-screen" class="login-wrap hidden">
-    <div class="card">
-      <h3 class="card-title">Entrar</h3>
-      <div class="row" style="flex-direction:column; align-items:stretch">
-        <input id="login-user" class="input" placeholder="usuário ou e-mail" autocomplete="username"/>
-        <input id="login-pass" class="input" type="password" placeholder="senha" autocomplete="current-password"/>
-        <button id="login-btn" class="btn btn-primary">Entrar</button>
-        <div id="login-msg" class="hint"></div>
-      </div>
-    </div>
-  </div>
-
   <div id="app-screen" class="hidden">
     <div class="page-header">
       <h1>Unidades</h1>
@@ -210,15 +198,11 @@ async function checkAuth() {
     else showLogin();
   } catch { showLogin(); }
 }
-function showLogin() { $('login-screen').classList.remove('hidden'); $('app-screen').classList.add('hidden'); $('user-area').classList.add('hidden'); }
-function showApp(u) { $('login-screen').classList.add('hidden'); $('app-screen').classList.remove('hidden'); $('user-area').classList.remove('hidden'); $('user-info').textContent = u.username; }
+function showLogin() { location.replace('/login'); } // login único, roteia por papel
+function showApp(u) { $('app-screen').classList.remove('hidden'); $('user-area').classList.remove('hidden'); $('user-info').textContent = u.username; }
 $('logout-btn').onclick = async () => {
   await fetch('/logout', { method: 'POST' });
-  location.reload();
-};
-$('login-btn').onclick = async () => {
-  const r = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: $('login-user').value.trim(), password: $('login-pass').value }) });
-  if (r.ok) location.reload(); else $('login-msg').textContent = 'Falha no login';
+  location.replace('/login');
 };
 
 // ---- árvore (escopada pelo vínculo e pelo CONTEXTO: /api/my-units) ----
