@@ -38,6 +38,7 @@
   <div id="user-area" class="hidden" style="display:flex; align-items:center; gap: var(--sp-3)">
     <span id="user-info" class="muted"></span>
     <a id="admin-link" class="btn btn-sm hidden" href="/admin">← Admin</a>
+    <button id="logout-btn" class="btn btn-sm">Sair</button>
   </div>
 </header>
 
@@ -209,6 +210,10 @@ async function checkAuth() {
 }
 function showLogin() { $('login-screen').classList.remove('hidden'); $('app-screen').classList.add('hidden'); $('user-area').classList.add('hidden'); }
 function showApp(u) { $('login-screen').classList.add('hidden'); $('app-screen').classList.remove('hidden'); $('user-area').classList.remove('hidden'); $('user-info').textContent = u.username; }
+$('logout-btn').onclick = async () => {
+  await fetch('/logout', { method: 'POST' });
+  location.reload();
+};
 $('login-btn').onclick = async () => {
   const r = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: $('login-user').value.trim(), password: $('login-pass').value }) });
   if (r.ok) location.reload(); else $('login-msg').textContent = 'Falha no login';
