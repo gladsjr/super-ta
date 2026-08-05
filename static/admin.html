@@ -91,7 +91,7 @@
 
     <nav class="admin-tabs" id="admin-tabs">
       <button class="admin-tab" data-sec="trabalhos">Trabalhos</button>
-      <a class="admin-tab" href="/instituicoes" title="Unidades em árvore, papéis, tetos e pacotes de avaliação">Instituições ↗</a>
+      <a class="admin-tab" href="/unidades" title="Unidades em árvore, papéis, tetos e pacotes de avaliação">Unidades ↗</a>
       <button class="admin-tab" data-sec="usuarios">Usuários e senha</button>
       <button class="admin-tab" data-sec="tokens">Tokens de análise</button>
     </nav>
@@ -117,7 +117,7 @@
           <option value="">— sem pacote —</option>
         </select>
       </div>
-      <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho. Unidades e pacotes são geridos em <a href="/instituicoes">Instituições</a>.</div>
+      <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho. Unidades e pacotes são geridos em <a href="/unidades">Unidades</a>.</div>
       <div id="create-msg" class="hint"></div>
     </div>
 
@@ -157,7 +157,7 @@
     <h3 style="margin-top: var(--sp-6)">Administradores globais (equipe ORATIA)</h3>
     <div class="card">
       <h3 class="card-title">Novo administrador</h3>
-      <p class="card-sub">Usuário criado aqui nasce <b>admin global</b>: age em toda a árvore de unidades e é o único que cria unidades raiz. Administradores <i>de unidade</i>, professores e alunos são vinculados na tela de Instituições. Use nomes curtos (2 a 32 caracteres, letras/números/<code>_.-</code>) e senha de pelo menos 6 caracteres.</p>
+      <p class="card-sub">Usuário criado aqui nasce <b>admin global</b>: age em toda a árvore de unidades e é o único que cria unidades raiz. Administradores <i>de unidade</i>, professores e alunos são vinculados na tela de Unidades. Use nomes curtos (2 a 32 caracteres, letras/números/<code>_.-</code>) e senha de pelo menos 6 caracteres.</p>
       <div class="row">
         <input id="new-user-name" class="input" placeholder="usuário" autocomplete="off" style="flex:1; min-width:160px"/>
         <input id="new-user-pass" class="input" type="password" placeholder="senha" autocomplete="new-password" style="flex:1; min-width:160px"/>
@@ -236,7 +236,13 @@ window.addEventListener('hashchange', () => showSec(location.hash.slice(1)));
 async function checkAuth() {
   try {
     const r = await fetch('/me');
-    if (r.ok) { const j = await r.json(); showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); loadUnitsAndPackages(); }
+    if (r.ok) {
+      const j = await r.json();
+      // Painel global é da equipe ORATIA: admin de unidade, professor e aluno
+      // aterrissam na visão escopada de /unidades.
+      if (j.is_global_admin === false) { location.replace('/unidades'); return; }
+      showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); loadUnitsAndPackages();
+    }
     else showLogin();
   } catch { showLogin(); }
 }

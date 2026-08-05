@@ -315,9 +315,24 @@ export function logoutHandler(req, res) {
   });
 }
 
-export function meHandler(req, res) {
+// Além do usuário da sessão, informa se é admin_global — o frontend decide a
+// aterrissagem (/admin p/ equipe; /unidades p/ admin de unidade, professor e
+// aluno). Tolerante a schema antigo (sem as tabelas da camada institucional).
+export async function meHandler(req, res) {
   if (!req.session?.user) return res.status(401).json({ error: "unauthorized" });
-  res.json({ user: req.session.user });
+  let isGlobal = false;
+  try {
+    const r = await pool.query(
+      `SELECT 1 FROM memberships m JOIN roles ro ON ro.id = m.role_id
+        WHERE m.user_id = $1 AND m.unit_id IS NULL AND ro.key = 'admin_global' LIMIT 1`,
+      [req.session.user.id]
+    );
+    isGlobal = r.rowCount > 0;
+  } catch (err) {
+    if (/relation .*(memberships|roles).* does not exist/i.test(err.message)) isGlobal = true; // legado
+    else console.error("meHandler:", err.message);
+  }
+  res.json({ user: req.session.user, is_global_admin: isGlobal });
 }
 
 // ---------------------------------------------------------------------

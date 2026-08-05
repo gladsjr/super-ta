@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>ORATIA — Instituições</title>
+<title>ORATIA — Unidades</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
 <script src="/static/js/theme.js"></script>
 <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
@@ -37,7 +37,7 @@
   <a class="brand" href="/admin"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
   <div id="user-area" class="hidden" style="display:flex; align-items:center; gap: var(--sp-3)">
     <span id="user-info" class="muted"></span>
-    <a class="btn btn-sm" href="/admin">← Admin</a>
+    <a id="admin-link" class="btn btn-sm hidden" href="/admin">← Admin</a>
   </div>
 </header>
 
@@ -56,8 +56,8 @@
 
   <div id="app-screen" class="hidden">
     <div class="page-header">
-      <h1>Instituições</h1>
-      <div class="subtitle">Unidades em árvore, papéis, tetos de orçamento e pacotes de avaliação.</div>
+      <h1>Unidades</h1>
+      <div class="subtitle" id="page-subtitle">Unidades em árvore, papéis, tetos de orçamento e pacotes de avaliação.</div>
     </div>
 
     <div class="layout">
@@ -66,8 +66,8 @@
         <div class="card">
           <h3 class="card-title">Unidades</h3>
           <div id="tree"></div>
-          <div id="tree-empty" class="hint hidden">Nenhuma unidade ainda — crie a primeira abaixo.</div>
-          <div class="section-gap">
+          <div id="tree-empty" class="hint hidden">Nenhuma unidade visível para o seu usuário.</div>
+          <div id="unit-create" class="section-gap hidden">
             <div class="row">
               <input id="nu-name" class="input" placeholder="Nome (ex.: FGV)" style="flex:1; min-width:140px"/>
               <input id="nu-label" class="input" placeholder="Rótulo (ex.: instituição, curso, turma)" style="flex:1; min-width:140px"/>
@@ -82,7 +82,7 @@
           </div>
         </div>
 
-        <div class="card section-gap">
+        <div class="card section-gap hidden" id="card-csv">
           <h3 class="card-title">Importar CSV</h3>
           <p class="hint">Cabeçalho <code>name,parent_name,label,budget_usd,is_class</code>; uma unidade por linha; o pai deve existir ou vir numa linha anterior; <code>is_class</code> = true marca turma.</p>
           <textarea id="csv-text" class="input" rows="4" style="width:100%; font-family:monospace" placeholder="name,parent_name,label,budget_usd,is_class&#10;FGV,,instituição,,&#10;MBA Finanças,FGV,curso,100,&#10;Turma 2026.2,MBA Finanças,turma,20,true"></textarea>
@@ -99,7 +99,7 @@
         <div class="card">
           <div class="row" style="justify-content: space-between">
             <h3 class="card-title" style="margin:0"><span id="d-name"></span> <span class="u-label muted" id="d-label"></span></h3>
-            <div class="row">
+            <div class="row" id="d-header-actions">
               <button id="d-rename" class="btn btn-sm">Renomear</button>
               <button id="d-class" class="btn btn-sm"></button>
               <button id="d-toggle" class="btn btn-sm"></button>
@@ -111,20 +111,28 @@
             <button id="d-rename-save" class="btn btn-primary btn-sm">Salvar</button>
           </div>
 
-          <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Teto de orçamento (US$)</h4>
-          <div class="kv" id="d-budget-kv"></div>
-          <div class="row">
-            <input id="d-budget" class="input" type="number" min="0" step="1" placeholder="teto US$ (vazio = sem teto próprio)" style="width:220px"/>
-            <button id="d-budget-save" class="btn btn-sm">Definir teto</button>
-            <button id="d-budget-clear" class="btn btn-sm">Remover teto</button>
-            <span id="d-budget-msg" class="hint"></span>
+          <div id="budget-block">
+            <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Teto de orçamento (US$)</h4>
+            <div class="kv" id="d-budget-kv"></div>
+            <div class="row" id="budget-admin">
+              <input id="d-budget" class="input" type="number" min="0" step="1" placeholder="teto US$ (vazio = sem teto próprio)" style="width:220px"/>
+              <button id="d-budget-save" class="btn btn-sm">Definir teto</button>
+              <button id="d-budget-clear" class="btn btn-sm">Remover teto</button>
+              <span id="d-budget-msg" class="hint"></span>
+            </div>
+            <p class="hint">O teto é uma RESERVA descontada do saldo do pai no ato; reduzir devolve ao pai. O comprometido soma gasto direto, reservas das filhas e gasto das filhas sem teto. Unidade sem teto consome do ancestral mais próximo com teto.</p>
           </div>
-          <p class="hint">O teto é uma RESERVA descontada do saldo do pai no ato; reduzir devolve ao pai. O comprometido soma gasto direto, reservas das filhas e gasto das filhas sem teto. Unidade sem teto consome do ancestral mais próximo com teto.</p>
+        </div>
+
+        <div class="card section-gap hidden" id="card-works">
+          <h3 class="card-title">Trabalhos da turma</h3>
+          <div id="d-works"></div>
         </div>
 
         <div class="card section-gap">
           <h3 class="card-title">Membros e papéis</h3>
           <div id="d-members"></div>
+          <div id="members-admin">
           <div class="row section-gap">
             <input id="m-login" class="input" placeholder="usuário ou e-mail" style="flex:1; min-width:160px"/>
             <select id="m-role" class="select" style="width:170px"></select>
@@ -152,9 +160,10 @@
             <a id="inv-txt" class="btn btn-sm" href="#" download>Baixar e-mails (TXT)</a>
           </div>
           <div id="d-invites"></div>
+          </div>
         </div>
 
-        <div class="card section-gap">
+        <div class="card section-gap" id="card-packages">
           <h3 class="card-title">Pacotes de avaliação</h3>
           <div class="row">
             <select id="p-template" class="select" style="flex:1; min-width:180px"></select>
@@ -171,7 +180,7 @@
 </main>
 
 <script>
-let UNITS = [], SELECTED = null, ROLES = [], TEMPLATES = [];
+let UNITS = [], SELECTED = null, ROLES = [], TEMPLATES = [], IS_GLOBAL = false;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const usd = (n) => n == null ? '—' : 'US$ ' + Number(n).toFixed(2);
@@ -189,7 +198,12 @@ async function api(method, path, body) {
 async function checkAuth() {
   try {
     const r = await fetch('/me');
-    if (r.ok) { const j = await r.json(); showApp(j.user); boot(); }
+    if (r.ok) {
+      const j = await r.json();
+      IS_GLOBAL = j.is_global_admin !== false;
+      $('admin-link').classList.toggle('hidden', !IS_GLOBAL);
+      showApp(j.user); boot();
+    }
     else showLogin();
   } catch { showLogin(); }
 }
@@ -200,14 +214,20 @@ $('login-btn').onclick = async () => {
   if (r.ok) location.reload(); else $('login-msg').textContent = 'Falha no login';
 };
 
-// ---- árvore ----
+// ---- árvore (escopada pelo vínculo: /api/my-units) ----
 async function loadUnits(keepSelection = true) {
-  const { j } = await api('GET', '/admin/units');
+  const { j } = await api('GET', '/api/my-units');
   UNITS = j.units || [];
+  const idSet = new Set(UNITS.map(u => u.id));
   const byParent = new Map();
-  for (const u of UNITS) { const k = u.parent_id ?? 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(u); }
+  // Nó cujo pai não é visível vira raiz da MINHA visão (ex.: admin de um
+  // departamento enxerga o departamento como topo).
+  for (const u of UNITS) { const k = (u.parent_id != null && idSet.has(u.parent_id)) ? u.parent_id : 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(u); }
   const tree = $('tree'); tree.innerHTML = '';
-  const parentSel = $('nu-parent'); parentSel.innerHTML = '<option value="">— raiz (sem pai) —</option>';
+  const parentSel = $('nu-parent'); parentSel.innerHTML = IS_GLOBAL ? '<option value="">— raiz (sem pai) —</option>' : '';
+  const canCreateSomewhere = IS_GLOBAL || UNITS.some(u => u.access === 'admin');
+  $('unit-create').classList.toggle('hidden', !canCreateSomewhere);
+  $('card-csv').classList.toggle('hidden', !IS_GLOBAL);
   const walk = (parentId, depth) => {
     for (const u of (byParent.get(parentId) || [])) {
       const div = document.createElement('div');
@@ -215,11 +235,12 @@ async function loadUnits(keepSelection = true) {
       div.style.paddingLeft = (8 + depth * 18) + 'px';
       div.innerHTML = `<span>${depth ? '└ ' : ''}${esc(u.name)}</span><span class="u-label muted">${esc(u.label || '')}</span>` +
         (u.is_class ? `<span class="u-label muted" title="turma — recebe trabalhos">· 🎓 turma</span>` : '') +
-        (u.budget_usd != null ? `<span class="u-label muted" title="teto próprio (reserva)">· teto ${usd(u.budget_usd)}</span>` : '');
+        (u.access === 'view' ? `<span class="u-label muted" title="acesso de consulta">· consulta</span>` : '') +
+        (u.access === 'admin' && u.budget_usd != null ? `<span class="u-label muted" title="teto próprio (reserva)">· teto ${usd(u.budget_usd)}</span>` : '');
       div.onclick = () => selectUnit(u.id);
       tree.appendChild(div);
-      // Turma não pode ter filhos — fora do seletor de pai.
-      if (!u.is_class) {
+      // Pai possível: unidade que ADMINISTRO e que não é turma.
+      if (!u.is_class && u.access === 'admin') {
         const opt = document.createElement('option');
         opt.value = u.id; opt.textContent = `${'— '.repeat(depth)}${u.name}`;
         parentSel.appendChild(opt);
@@ -258,9 +279,21 @@ async function selectUnit(id) {
   SELECTED = UNITS.find(u => u.id === id) || null;
   if (!SELECTED) return;
   $('detail-none').classList.add('hidden'); $('detail').classList.remove('hidden');
+  const isAdmin = SELECTED.access === 'admin';
+  // Consulta vs gestão: quem só consulta não vê orçamento, pacotes nem os
+  // controles de membros/convites — vê o cabeçalho, os membros e (na turma)
+  // os trabalhos.
+  $('d-header-actions').classList.toggle('hidden', !isAdmin);
+  $('budget-block').classList.toggle('hidden', !isAdmin);
+  $('members-admin').classList.toggle('hidden', !isAdmin);
+  $('card-packages').classList.toggle('hidden', !isAdmin);
+  $('card-works').classList.toggle('hidden', !SELECTED.is_class);
   renderDetailHeader();
   loadUnits();
-  await Promise.all([loadBudget(), loadMembers(), loadEntitlements(), loadInvites()]);
+  const jobs = [loadMembers()];
+  if (isAdmin) jobs.push(loadBudget(), loadEntitlements(), loadInvites());
+  if (SELECTED.is_class) jobs.push(loadWorks());
+  await Promise.all(jobs);
 }
 function renderDetailHeader() {
   $('d-name').textContent = (SELECTED.is_class ? '🎓 ' : '') + SELECTED.name;
@@ -325,11 +358,29 @@ async function loadMembers() {
     `<span>${esc(m.display_name || m.username)}</span><span class="muted">${esc(m.email || '')}</span>` +
     `<button class="btn btn-sm" data-mid="${m.id}" style="margin-left:auto">Remover</button></div>`
   ).join('') || '<p class="hint">Ninguém vinculado ainda.</p>';
+  if (SELECTED.access !== 'admin') box.querySelectorAll('button[data-mid]').forEach(b => b.remove());
   box.querySelectorAll('button[data-mid]').forEach(b => b.onclick = async () => {
     await api('DELETE', `/admin/units/${SELECTED.id}/members/${b.dataset.mid}`);
     loadMembers(); loadAvailable();
   });
-  loadAvailable();
+  if (SELECTED.access === 'admin') loadAvailable();
+}
+
+// ---- trabalhos da turma (reusa as telas existentes) ----
+async function loadWorks() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/works`);
+  if (!ok) { $('d-works').innerHTML = '<p class="hint">Sem acesso aos trabalhos desta turma.</p>'; return; }
+  const KIND_PT = { oral_realtime: 'prova oral', interview: 'entrevista', scenario: 'cenário' };
+  const kindOf = (w) => (KIND_PT[w.kind] || w.kind) + (w.interview_variant === 'realtime' ? ' (tempo real)' : '');
+  $('d-works').innerHTML = (j.works || []).map(w => {
+    const open = j.can_manage
+      ? `<a class="btn btn-sm" href="/w/${esc(w.work_token)}" style="margin-left:auto">Abrir (professor)</a>`
+      : (w.my_submission_token
+          ? `<a class="btn btn-sm" href="/s/${esc(w.my_submission_token)}" style="margin-left:auto">Meu envio</a>`
+          : `<span class="muted" style="margin-left:auto">sem envio</span>`);
+    return `<div class="member-row"><span>${esc(w.name)}</span>` +
+      `<span class="muted">${esc(kindOf(w))}${w.is_active ? '' : ' · inativo'}</span>` + open + `</div>`;
+  }).join('') || '<p class="hint">Nenhum trabalho nesta turma ainda.</p>';
 }
 // Candidatos DISPONÍVEIS (do ancestral mais próximo que tiver gente no papel).
 // Escolher preenche o campo de vínculo — a inscrição continua sendo o clique

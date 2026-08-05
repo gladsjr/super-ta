@@ -21,6 +21,8 @@ router.get("/admin", (_req, res) => res.sendFile(path.join(STATIC_DIR, "admin.ht
 router.get("/benchmark", (_req, res) => res.sendFile(path.join(STATIC_DIR, "benchmark.html")));
 router.get("/cost-audit", (_req, res) => res.sendFile(path.join(STATIC_DIR, "cost-audit.html")));
 // Camada institucional: unidades, papéis, tetos e pacotes (docs/access-model.md).
+// /unidades é o nome oficial (04/08/2026); /instituicoes fica como alias.
+router.get("/unidades", (_req, res) => res.sendFile(path.join(STATIC_DIR, "instituicoes.html")));
 router.get("/instituicoes", (_req, res) => res.sendFile(path.join(STATIC_DIR, "instituicoes.html")));
 router.get("/trabalho", (_req, res) => res.sendFile(path.join(STATIC_DIR, "trabalho.html")));
 router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.html")));

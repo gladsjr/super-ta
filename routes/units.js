@@ -4,13 +4,13 @@
 //
 // Coexistência: NÃO toca nos gates de token. Tudo aqui é aditivo e por sessão.
 // Autorização em camadas:
-//  - requireAdmin: precisa estar logado.
+//  - requireAuth: precisa estar logado.
 //  - canAdminUnit(user, unit): admin_global OU admin_unidade num ancestral →
 //    é assim que a delegação desce a sub-árvore (nunca para um irmão).
 
 import express from "express";
 import { requireAdmin } from "../lib/middleware.js";
-import { getUserByLogin } from "../auth.js";
+import { getUserByLogin, requireAuth } from "../auth.js";
 import {
     listUnits, getUnit, createUnit, renameUnit, setUnitActive, setUnitClass,
 } from "../lib/units.js";
@@ -52,7 +52,8 @@ async function canViewUnit(userId, unitId) {
 // Unidades (árvore)
 // ---------------------------------------------------------------------------
 
-// Lista plana da árvore (o frontend monta a hierarquia por parent_id).
+// Lista plana da árvore COMPLETA — só admin global (o seletor do /admin usa).
+// A visão escopada por vínculo é /api/my-units, abaixo.
 router.get("/admin/units", requireAdmin, async (_req, res) => {
     try {
         res.json({ units: await listUnits() });
@@ -60,7 +61,7 @@ router.get("/admin/units", requireAdmin, async (_req, res) => {
 });
 
 // Cria unidade. Raiz (sem parent) exige admin_global; filha exige admin na unidade-pai.
-router.post("/admin/units", requireAdmin, json, async (req, res) => {
+router.post("/admin/units", requireAuth, json, async (req, res) => {
     const parentId = req.body?.parent_id ?? null;
     try {
         if (parentId == null) {
@@ -90,7 +91,7 @@ router.post("/admin/units", requireAdmin, json, async (req, res) => {
     } catch (err) { return httpErr(res, err); }
 });
 
-router.patch("/admin/units/:unitId", requireAdmin, json, async (req, res) => {
+router.patch("/admin/units/:unitId", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -114,7 +115,7 @@ router.patch("/admin/units/:unitId", requireAdmin, json, async (req, res) => {
 // devolve; null remove o teto e a unidade volta a consumir do ancestral).
 // A permissão é no PAI (é o saldo dele que a reserva mexe); para unidade raiz,
 // admin da própria.
-router.put("/admin/units/:unitId/budget", requireAdmin, json, async (req, res) => {
+router.put("/admin/units/:unitId/budget", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     const raw = req.body?.budget_usd;
     try {
@@ -128,11 +129,14 @@ router.put("/admin/units/:unitId/budget", requireAdmin, json, async (req, res) =
     } catch (err) { return httpErr(res, err); }
 });
 
-// Saldo/rollup em US$ (teto próprio vs gasto consolidado da sub-árvore).
-router.get("/admin/units/:unitId/budget", requireAdmin, async (req, res) => {
+// Saldo em US$ (reserva/comprometido). Assunto de GESTÃO: admin da unidade ou
+// professor dela — aluno não consulta orçamento.
+router.get("/admin/units/:unitId/budget", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canViewUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        const roles = await resolveEffectiveRoles(uid(req), unitId);
+        const allowed = (await canAdminUnit(uid(req), unitId)) || roles.has("professor");
+        if (!allowed) return res.status(403).json({ error: "forbidden" });
         const balance = await getUnitBalance(unitId);
         if (!balance) return res.status(404).json({ error: "unit not found" });
         res.json({ balance });
@@ -143,7 +147,7 @@ router.get("/admin/units/:unitId/budget", requireAdmin, async (req, res) => {
 // Membros & papéis (RBAC)
 // ---------------------------------------------------------------------------
 
-router.get("/admin/units/:unitId/members", requireAdmin, async (req, res) => {
+router.get("/admin/units/:unitId/members", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canViewUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -154,7 +158,7 @@ router.get("/admin/units/:unitId/members", requireAdmin, async (req, res) => {
 // DISPONIBILIDADE (não é acesso): candidatos ao papel `role` nesta unidade,
 // vindos do ancestral mais próximo que tiver gente nesse papel (mãe esconde
 // avó). Serve o fluxo de inscrição de aluno / atribuição de professor.
-router.get("/admin/units/:unitId/available-people", requireAdmin, async (req, res) => {
+router.get("/admin/units/:unitId/available-people", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -164,7 +168,7 @@ router.get("/admin/units/:unitId/available-people", requireAdmin, async (req, re
 });
 
 // Vincula papel a uma pessoa nesta unidade. Aceita user_id OU login (email/username).
-router.post("/admin/units/:unitId/members", requireAdmin, json, async (req, res) => {
+router.post("/admin/units/:unitId/members", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -181,12 +185,111 @@ router.post("/admin/units/:unitId/members", requireAdmin, json, async (req, res)
     } catch (err) { return httpErr(res, err); }
 });
 
-router.delete("/admin/units/:unitId/members/:membershipId", requireAdmin, async (req, res) => {
+router.delete("/admin/units/:unitId/members/:membershipId", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
         await removeMembership(Number(req.params.membershipId));
         res.json({ ok: true });
+    } catch (err) { return httpErr(res, err); }
+});
+
+// ---------------------------------------------------------------------------
+// Visão POR PAPEL (decisão de 04/08/2026): cada pessoa enxerga só o seu
+// recorte da árvore. admin_global vê tudo com gestão; admin_unidade vê a sua
+// sub-árvore com gestão; professor e aluno veem os nós onde têm vínculo, em
+// CONSULTA. access: 'admin' | 'view'.
+// ---------------------------------------------------------------------------
+
+router.get("/api/my-units", requireAuth, async (req, res) => {
+    try {
+        const userId = uid(req);
+        const all = await listUnits();
+        if (await isGlobalAdmin(userId)) {
+            return res.json({
+                is_global_admin: true,
+                units: all.map((u) => ({ ...u, access: "admin", my_roles: ["admin_global"] })),
+            });
+        }
+        const ms = await pool.query(
+            `SELECT m.unit_id, r.key FROM memberships m JOIN roles r ON r.id = m.role_id
+              WHERE m.user_id = $1 AND m.unit_id IS NOT NULL`,
+            [userId]
+        );
+        const kids = new Map();
+        for (const u of all) {
+            if (u.parent_id != null) {
+                if (!kids.has(u.parent_id)) kids.set(u.parent_id, []);
+                kids.get(u.parent_id).push(u.id);
+            }
+        }
+        const visible = new Map(); // id → { access, roles:Set }
+        const mark = (id, access, role = null) => {
+            const cur = visible.get(id) || { access: "view", roles: new Set() };
+            if (access === "admin") cur.access = "admin";
+            if (role) cur.roles.add(role);
+            visible.set(id, cur);
+        };
+        for (const m of ms.rows) {
+            if (m.key === "admin_unidade") {
+                // gestão em toda a sub-árvore (herança de admin)
+                const queue = [m.unit_id];
+                mark(m.unit_id, "admin", m.key);
+                while (queue.length) {
+                    const id = queue.shift();
+                    for (const kid of kids.get(id) || []) {
+                        mark(kid, "admin");
+                        queue.push(kid);
+                    }
+                }
+            } else {
+                mark(m.unit_id, "view", m.key); // professor/aluno: consulta no nó
+            }
+        }
+        const units = all
+            .filter((u) => visible.has(u.id))
+            .map((u) => ({
+                ...u,
+                access: visible.get(u.id).access,
+                my_roles: [...visible.get(u.id).roles],
+            }));
+        res.json({ is_global_admin: false, units });
+    } catch (err) { return httpErr(res, err); }
+});
+
+// Trabalhos de uma TURMA, com o link certo pelo papel: quem gerencia
+// (admin/professor da turma) recebe o work_token (abre /w/:token — a tela de
+// professor existente); aluno recebe SÓ o token do próprio envio, se houver
+// (abre /s/:token — a tela de envio existente). work_token é capacidade plena:
+// NUNCA vai para aluno.
+router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
+    const unitId = Number(req.params.unitId);
+    try {
+        const userId = uid(req);
+        const roles = await resolveEffectiveRoles(userId, unitId);
+        const manages = (await canAdminUnit(userId, unitId)) || roles.has("professor");
+        if (!manages && !roles.has("aluno")) return res.status(403).json({ error: "forbidden" });
+        const works = await pool.query(
+            `SELECT id, work_token, name, kind, interview_variant, is_active, created_at
+               FROM works WHERE unit_id = $1 ORDER BY created_at DESC`,
+            [unitId]
+        );
+        const out = [];
+        for (const w of works.rows) {
+            const item = { name: w.name, kind: w.kind, interview_variant: w.interview_variant, is_active: w.is_active };
+            if (manages) {
+                item.work_token = w.work_token;
+            } else {
+                const sub = await pool.query(
+                    `SELECT submission_token FROM submissions
+                      WHERE work_id = $1 AND student_user_id = $2 LIMIT 1`,
+                    [w.id, userId]
+                );
+                item.my_submission_token = sub.rows[0]?.submission_token || null;
+            }
+            out.push(item);
+        }
+        res.json({ can_manage: manages, works: out });
     } catch (err) { return httpErr(res, err); }
 });
 
@@ -197,7 +300,7 @@ router.delete("/admin/units/:unitId/members/:membershipId", requireAdmin, async 
 // enviados (envio é ação explícita, nunca consequência escondida).
 // ---------------------------------------------------------------------------
 
-router.post("/admin/units/:unitId/people", requireAdmin, json, async (req, res) => {
+router.post("/admin/units/:unitId/people", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -218,7 +321,7 @@ router.post("/admin/units/:unitId/people", requireAdmin, json, async (req, res) 
     } catch (err) { return httpErr(res, err); }
 });
 
-router.get("/admin/units/:unitId/invites", requireAdmin, async (req, res) => {
+router.get("/admin/units/:unitId/invites", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -228,7 +331,7 @@ router.get("/admin/units/:unitId/invites", requireAdmin, async (req, res) => {
 });
 
 // TXT dos e-mails que seriam enviados (convites pendentes da unidade).
-router.get("/admin/units/:unitId/invites.txt", requireAdmin, async (req, res) => {
+router.get("/admin/units/:unitId/invites.txt", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -242,7 +345,7 @@ router.get("/admin/units/:unitId/invites.txt", requireAdmin, async (req, res) =>
 
 // (Re)emitir convite para uma pessoa da unidade: invalida o link anterior e
 // gera um novo (regra da spec).
-router.post("/admin/units/:unitId/people/:userId/invite", requireAdmin, json, async (req, res) => {
+router.post("/admin/units/:unitId/people/:userId/invite", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     const userId = Number(req.params.userId);
     try {
@@ -258,7 +361,7 @@ router.post("/admin/units/:unitId/people/:userId/invite", requireAdmin, json, as
     } catch (err) { return httpErr(res, err); }
 });
 
-router.post("/admin/units/:unitId/invites/:inviteId/cancel", requireAdmin, json, async (req, res) => {
+router.post("/admin/units/:unitId/invites/:inviteId/cancel", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -276,7 +379,7 @@ router.get("/admin/packages", requireAdmin, (_req, res) => {
     res.json({ templates: listPackageSpecs() });
 });
 
-router.get("/admin/units/:unitId/entitlements", requireAdmin, async (req, res) => {
+router.get("/admin/units/:unitId/entitlements", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canViewUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
@@ -305,7 +408,7 @@ router.post("/admin/units/:unitId/packages/allocate", requireAdmin, json, async 
 
 // DELEGA pacotes de uma allocation-pai para uma unidade filha (cascata). Exige
 // poder de admin na unidade filha (que, por herança, cobre a sub-árvore do pai).
-router.post("/admin/units/:unitId/packages/delegate", requireAdmin, json, async (req, res) => {
+router.post("/admin/units/:unitId/packages/delegate", requireAuth, json, async (req, res) => {
     const childUnitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), childUnitId))) return res.status(403).json({ error: "forbidden" });
@@ -322,7 +425,7 @@ router.post("/admin/units/:unitId/packages/delegate", requireAdmin, json, async 
 
 // DEVOLVE pacotes não usados de uma allocation desta unidade para a
 // allocation-pai (libera saldo na unidade de cima — espelho da delegação).
-router.post("/admin/units/:unitId/packages/return", requireAdmin, json, async (req, res) => {
+router.post("/admin/units/:unitId/packages/return", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });

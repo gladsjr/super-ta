@@ -56,6 +56,20 @@ Criar trabalho numa unidade exige a unidade ser turma E o criador ser professor
 **atribuído àquela turma** (papel local) ou admin dela/de ancestral
 (routes/admin.js). Posse do trabalho também vem do work_token (coexistência).
 
+**Visão por papel** (04/08/2026): `requireAdmin` exige `admin_global` de
+verdade (lib/middleware.js; fallback "logado" só p/ schema legado) — o painel
+/admin, benchmark, cost-audit e config de cenários são da equipe. Os demais
+papéis aterrissam em **/unidades** (`/instituicoes` é alias): a árvore vem de
+`GET /api/my-units`, escopada pelo vínculo (`access: admin|view`) — admin de
+unidade vê e gere a SUA sub-árvore (o topo dela vira a raiz da visão);
+professor e aluno veem os nós onde têm vínculo, em consulta. Trabalhos de uma
+turma: `GET /admin/units/:id/works` — admin/professor da turma recebem o
+`work_token` (abre `/w/:token`, a tela de professor existente); aluno recebe
+SÓ `my_submission_token` quando o envio dele estiver associado (abre
+`/s/:token`) — work_token é capacidade plena e NUNCA vai a aluno. Orçamento é
+assunto de gestão (admin/professor; aluno não consulta). O frontend
+(`/admin` e `/unidades`) roteia pela flag `is_global_admin` do `/me`.
+
 ## Identidade (pessoa ≠ login)
 
 - `users` ganha `email`/`display_name`/`civil_id_type`+`civil_id_value`/`source`;
@@ -162,10 +176,13 @@ student-version/grades/publish/grade-publish). `grade: true` (oral) mantém a no
   prompt hoje) — nenhuma configuração vendida depende do teto no motor.
 - **Envio real de e-mail dos convites**: o fluxo existe (TXT manual); falta
   escolher provedor e plugar o envio (mantendo o comando explícito do admin).
-- **`requireAdmin` = "está logado"**: funciona enquanto só a equipe tem conta,
-  mas com convites criando contas de professor/aluno de instituição, as rotas
-  administrativas (`/admin/works` etc.) precisarão de checagem real de papel
-  ANTES do portal do aluno — senão um aluno logado enxerga o painel.
+- **Associação envio↔aluno**: o aluno logado só vê "Meu envio" quando
+  `submissions.student_user_id` estiver preenchido — e hoje nada preenche (o
+  fluxo `/s/:token` não pede login). Próximo passo do portal do aluno:
+  associar a submissão à conta quando o aluno entrar logado pelo link.
+- **Professor institucional criar trabalho pela UI**: a rota já permite
+  (professor atribuído à turma), mas a criação só existe na tela /admin
+  (global). Falta um "novo trabalho" no cartão da turma em /unidades.
 - **Importação cognitiva de PESSOAS**: o import atual é de UNIDADES (CSV formato
   fixo). O fluxo agente-propõe → prévia → confirmação → auditoria fica para a
   próxima onda (usar `runStructured`).

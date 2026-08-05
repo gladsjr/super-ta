@@ -5,7 +5,7 @@
 import express from "express";
 import crypto from "crypto";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
-import { listUsers, createUser, deleteUser, changeOwnPassword } from "../auth.js";
+import { listUsers, createUser, deleteUser, changeOwnPassword, requireAuth } from "../auth.js";
 import { isGlobalAdmin, resolveEffectiveRoles, addMembership } from "../lib/rbac.js";
 import { getUnit } from "../lib/units.js";
 import { getPackageSpec } from "../lib/packages.js";
@@ -26,7 +26,10 @@ router.get("/admin/works", requireAdmin, async (_req, res) => {
     }
 });
 
-router.post("/admin/works", requireAdmin, async (req, res) => {
+// requireAuth (não requireAdmin): professor institucional cria trabalho NA SUA
+// turma — a checagem fina (turma + papel local) está abaixo. Sem unidade
+// (modo token) continua exigindo admin_global.
+router.post("/admin/works", requireAuth, async (req, res) => {
     let name;
     try { name = sanitizeLabel(req.body?.name); }
     catch (err) { return res.status(400).json({ error: err.message }); }
@@ -65,6 +68,8 @@ router.post("/admin/works", requireAdmin, async (req, res) => {
                     return res.status(403).json({ error: "forbidden_unit" });
                 }
             }
+        } else if (!(await isGlobalAdmin(req.session.user.id))) {
+            return res.status(403).json({ error: "forbidden_tokenless_work" });
         }
         // Resolve o item do pacote (se houver) e alinha o kind ao item.
         let lockedCounter = null;
