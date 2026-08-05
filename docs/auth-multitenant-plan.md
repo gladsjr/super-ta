@@ -25,9 +25,12 @@ legados da equipe (`INITIAL_USERS`: username, `admin_global`) coexistem sem `per
 
 ## Decisões de requisito (rodada de 05/08/2026)
 
-- **Q1 — contingência num tenant SSO-only:** não há senha local permanente; o admin
-  emite um **token de emergência** (reusa a máquina de `invites`, migration 067) que
-  dá acesso local temporário àquela pessoa/unidade.
+- **Q1 — contingência num tenant SSO-only:** **nada novo** — é o **token de envio que
+  já existe** (`/s/:submissionToken`, acesso à submissão sem login). Se um aluno não
+  consegue entrar, o professor manda o token de envio daquele trabalho. É no nível do
+  TRABALHO (onde o professor opera), não do tenant. O único cuidado é de
+  não-regressão: o gating institucional não pode bloquear o caminho por token (ver
+  Riscos).
 - **Q2 — 3º provedor aberto (Microsoft pessoal / Apple):** entra depois como novas
   linhas em `auth_providers` + um adaptador; sem mudança de modelo. Piloto = local + Google.
 - **Q3 — estrangeiro sem CPF:** fora do piloto, mas as **pontes ficam**: o
@@ -41,7 +44,8 @@ legados da equipe (`INITIAL_USERS`: username, `admin_global`) coexistem sem `per
 
 Cada fase é entregável e testável isoladamente. Schema e telas vêm antes do runtime de
 protocolo; o IdP de mentira (Fase 2) destrava o teste ponta a ponta cedo. Migrations a
-partir da **068** (numeração exata atribuída na hora).
+partir da **068** (numeração exata atribuída na hora). Não há fase de "token de
+emergência": a contingência (Q1) é o token de envio que já existe — ver Riscos.
 
 ### Fase 0 — Fundação de schema (aditiva)
 - **Migrations:** `civil_id_types(id, key, name)` + seed `cpf`; `persons(id,
@@ -94,11 +98,6 @@ partir da **068** (numeração exata atribuída na hora).
   `/admin/tenants*` (requireAdmin = admin_global).
 - **Teste:** provisionar um tenant fim-a-fim pela UI, sem tocar em SQL.
 
-### Fase 6 — Token de emergência para tenant SSO-only (Q1)
-- Admin emite um token de uso único que concede acesso local temporário a uma
-  pessoa/unidade mesmo num tenant SSO-only. Reusa `invites` com um flag/escopo.
-- **Teste:** pessoa de um tenant SSO-only entra com o token e acessa a unidade.
-
 ### Depois do piloto (fora deste plano)
 - Adaptador **OIDC real** (generaliza o do Google) e **SAML via serviço** (WorkOS/
   Keycloak) por trás do broker.
@@ -116,5 +115,10 @@ partir da **068** (numeração exata atribuída na hora).
   consentimento do relacionamento — registrar isso na história de privacidade.
 - **`one open identity per email`:** no realm aberto, no máximo uma identidade por user
   (local XOR Google) — índice parcial em `user_identities` + guarda no broker.
-- **Ordem de execução:** Fase 0 → 1 → 2 → 3 → 4 → 5 → 6. A 2 (mock) precede a 3/4 para
+- **Coexistência com token de envio (contingência da Q1):** o caminho `/s/:token`
+  (`requireSubmissionToken`, sem sessão) NÃO pode ser bloqueado pelo gating
+  institucional — um trabalho num tenant SSO-only tem de continuar acessível pelo token
+  que o professor envia. Verificar isto ao fechar as Fases 3 e 4 (teste: trabalho em
+  unidade SSO-only abre por `/s/:token` sem login).
+- **Ordem de execução:** Fase 0 → 1 → 2 → 3 → 4 → 5. A 2 (mock) precede a 3/4 para
   permitir teste ponta a ponta antes de qualquer SSO real.
