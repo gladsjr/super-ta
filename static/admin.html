@@ -326,7 +326,9 @@ document.getElementById('login-btn').onclick = async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); }
+    // Recarrega e deixa o checkAuth rotear: não-global vai para /unidades
+    // (logar direto no shell global era o bug de 04/08).
+    if (r.ok) { location.reload(); }
     else errEl.textContent = 'Usuário ou senha inválidos';
   } catch { errEl.textContent = 'Falha na comunicação'; }
 };
