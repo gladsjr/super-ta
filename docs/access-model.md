@@ -60,9 +60,19 @@ Criar trabalho numa unidade exige a unidade ser turma E o criador ser professor
 verdade (lib/middleware.js; fallback "logado" só p/ schema legado) — o painel
 /admin, benchmark, cost-audit e config de cenários são da equipe. Os demais
 papéis aterrissam em **/unidades** (`/instituicoes` é alias): a árvore vem de
-`GET /api/my-units`, escopada pelo vínculo (`access: admin|view`) — admin de
-unidade vê e gere a SUA sub-árvore (o topo dela vira a raiz da visão);
-professor e aluno veem os nós onde têm vínculo, em consulta. Trabalhos de uma
+`GET /api/my-units`, escopada pelo vínculo (`access: admin|view|context`) —
+admin de unidade vê e gere a SUA sub-árvore; professor e aluno veem os nós
+onde têm vínculo, em consulta, com os ANCESTRAIS presentes como nós de
+contexto (nome visível, não clicáveis — "Mackenzie > Curso > Turma").
+
+**Contexto por instituição**: a pessoa atua numa instituição por vez — a raiz
+da árvore do vínculo. Papéis se SOMAM dentro do contexto (professor numa
+turma + aluno noutra convivem). Um contexto → entra direto; vários →
+`needs_context` e a UI oferece a escolha (`POST /api/my-context`, guardado na
+sessão até o logout — trocar de instituição é outro login, sem seletor no
+topo; decisão de 04/08/2026). Conta ativa sem vínculo ganha orientação, não
+árvore vazia. O contexto é filtro de VISÃO (UX), não fronteira de segurança —
+esta segue sendo o RBAC por unidade. Trabalhos de uma
 turma: `GET /admin/units/:id/works` — admin/professor da turma recebem o
 `work_token` (abre `/w/:token`, a tela de professor existente); aluno recebe
 SÓ `my_submission_token` quando o envio dele estiver associado (abre

@@ -201,21 +201,59 @@ router.delete("/admin/units/:unitId/members/:membershipId", requireAuth, async (
 // CONSULTA. access: 'admin' | 'view'.
 // ---------------------------------------------------------------------------
 
+// CONTEXTO (decisão de 04/08/2026): a pessoa atua dentro de UMA instituição
+// por vez — a raiz da árvore onde tem vínculo. Um contexto só → entra direto;
+// vários → escolhe no login (POST /api/my-context; fica na sessão até o
+// logout — trocar de instituição é outro login, sem seletor no topo). Papéis
+// se SOMAM dentro do contexto (professor numa turma + aluno noutra convivem).
+async function resolveContexts(userId) {
+    const all = await listUnits();
+    const byId = new Map(all.map((u) => [u.id, u]));
+    const rootOf = (id) => {
+        let cur = byId.get(id);
+        while (cur && cur.parent_id != null && byId.has(cur.parent_id)) cur = byId.get(cur.parent_id);
+        return cur?.id ?? id;
+    };
+    const ms = await pool.query(
+        `SELECT m.unit_id, r.key FROM memberships m JOIN roles r ON r.id = m.role_id
+          WHERE m.user_id = $1 AND m.unit_id IS NOT NULL`,
+        [userId]
+    );
+    const contexts = new Map(); // rootId → Set(roles em toda a árvore)
+    for (const m of ms.rows) {
+        const root = rootOf(m.unit_id);
+        if (!contexts.has(root)) contexts.set(root, new Set());
+        contexts.get(root).add(m.key);
+    }
+    return { all, byId, memberships: ms.rows, contexts, rootOf };
+}
+
 router.get("/api/my-units", requireAuth, async (req, res) => {
     try {
         const userId = uid(req);
-        const all = await listUnits();
         if (await isGlobalAdmin(userId)) {
+            const all = await listUnits();
             return res.json({
                 is_global_admin: true,
                 units: all.map((u) => ({ ...u, access: "admin", my_roles: ["admin_global"] })),
             });
         }
-        const ms = await pool.query(
-            `SELECT m.unit_id, r.key FROM memberships m JOIN roles r ON r.id = m.role_id
-              WHERE m.user_id = $1 AND m.unit_id IS NOT NULL`,
-            [userId]
-        );
+        const { all, byId, memberships, contexts, rootOf } = await resolveContexts(userId);
+        if (contexts.size === 0) {
+            return res.json({ is_global_admin: false, no_membership: true, units: [] });
+        }
+        let ctx = req.session.contextRootId;
+        if (!contexts.has(ctx)) ctx = null;
+        if (!ctx && contexts.size === 1) ctx = [...contexts.keys()][0];
+        if (!ctx) {
+            return res.json({
+                is_global_admin: false,
+                needs_context: true,
+                contexts: [...contexts.entries()].map(([rootId, roles]) => ({
+                    root_id: rootId, name: byId.get(rootId)?.name || `#${rootId}`, roles: [...roles],
+                })),
+            });
+        }
         const kids = new Map();
         for (const u of all) {
             if (u.parent_id != null) {
@@ -225,14 +263,15 @@ router.get("/api/my-units", requireAuth, async (req, res) => {
         }
         const visible = new Map(); // id → { access, roles:Set }
         const mark = (id, access, role = null) => {
-            const cur = visible.get(id) || { access: "view", roles: new Set() };
-            if (access === "admin") cur.access = "admin";
+            const cur = visible.get(id) || { access: "context", roles: new Set() };
+            // precedência: admin > view > context
+            if (access === "admin" || (access === "view" && cur.access !== "admin")) cur.access = access;
             if (role) cur.roles.add(role);
             visible.set(id, cur);
         };
-        for (const m of ms.rows) {
+        for (const m of memberships) {
+            if (rootOf(m.unit_id) !== ctx) continue; // só o contexto escolhido
             if (m.key === "admin_unidade") {
-                // gestão em toda a sub-árvore (herança de admin)
                 const queue = [m.unit_id];
                 mark(m.unit_id, "admin", m.key);
                 while (queue.length) {
@@ -246,6 +285,15 @@ router.get("/api/my-units", requireAuth, async (req, res) => {
                 mark(m.unit_id, "view", m.key); // professor/aluno: consulta no nó
             }
         }
+        // Caminho até a raiz: ancestrais viram nós de CONTEXTO (nome visível,
+        // sem acesso) — o professor da turma vê "Mackenzie > Curso > Turma".
+        for (const id of [...visible.keys()]) {
+            let cur = byId.get(id);
+            while (cur && cur.parent_id != null && byId.has(cur.parent_id)) {
+                cur = byId.get(cur.parent_id);
+                if (!visible.has(cur.id)) mark(cur.id, "context");
+            }
+        }
         const units = all
             .filter((u) => visible.has(u.id))
             .map((u) => ({
@@ -253,7 +301,23 @@ router.get("/api/my-units", requireAuth, async (req, res) => {
                 access: visible.get(u.id).access,
                 my_roles: [...visible.get(u.id).roles],
             }));
-        res.json({ is_global_admin: false, units });
+        res.json({
+            is_global_admin: false,
+            context_root_id: ctx,
+            context_name: byId.get(ctx)?.name || null,
+            units,
+        });
+    } catch (err) { return httpErr(res, err); }
+});
+
+// Escolhe o contexto (instituição) da sessão. Válido até o logout.
+router.post("/api/my-context", requireAuth, json, async (req, res) => {
+    try {
+        const rootId = Number(req.body?.root_id);
+        const { contexts, byId } = await resolveContexts(uid(req));
+        if (!contexts.has(rootId)) return res.status(403).json({ error: "not_your_context" });
+        req.session.contextRootId = rootId;
+        req.session.save(() => res.json({ ok: true, context_root_id: rootId, context_name: byId.get(rootId)?.name }));
     } catch (err) { return httpErr(res, err); }
 });
 

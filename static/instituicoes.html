@@ -18,6 +18,8 @@
   .tree-node.selected .muted { color: #dbe5ff; }
   .tree-node .u-label { font-size: .78rem; opacity: .75; }
   .tree-node.inactive { opacity: .5; text-decoration: line-through; }
+  .tree-node.context { opacity: .55; cursor: default; }
+  .ctx-choice { display: flex; flex-direction: column; gap: var(--sp-2); }
   .kv { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-size: .92em; margin: var(--sp-2) 0; }
   .kv b { font-variant-numeric: tabular-nums; }
   .ent-item { display: grid; grid-template-columns: 1fr auto auto auto; gap: var(--sp-2) var(--sp-4); font-size: .9em; padding: 3px 0; font-variant-numeric: tabular-nums; }
@@ -219,9 +221,32 @@ $('login-btn').onclick = async () => {
   if (r.ok) location.reload(); else $('login-msg').textContent = 'Falha no login';
 };
 
-// ---- árvore (escopada pelo vínculo: /api/my-units) ----
+// ---- árvore (escopada pelo vínculo e pelo CONTEXTO: /api/my-units) ----
 async function loadUnits(keepSelection = true) {
   const { j } = await api('GET', '/api/my-units');
+  // Vários chapéus → escolher a instituição da vez (vale até o logout).
+  if (j.needs_context) {
+    $('unit-create').classList.add('hidden'); $('card-csv').classList.add('hidden');
+    $('tree-empty').classList.add('hidden');
+    const ROLE_PT = { admin_unidade: 'administrador', professor: 'professor', aluno: 'aluno' };
+    $('tree').innerHTML = '<p class="hint">Em qual instituição você quer entrar?</p><div class="ctx-choice">' +
+      (j.contexts || []).map(c =>
+        `<button class="btn ctx-pick" data-root="${c.root_id}">${esc(c.name)} <span class="muted">(${(c.roles || []).map(r => ROLE_PT[r] || r).join(', ')})</span></button>`
+      ).join('') + '</div>';
+    $('tree').querySelectorAll('.ctx-pick').forEach(b => b.onclick = async () => {
+      await api('POST', '/api/my-context', { root_id: Number(b.dataset.root) });
+      loadUnits(false);
+    });
+    return;
+  }
+  if (j.no_membership) {
+    $('unit-create').classList.add('hidden'); $('card-csv').classList.add('hidden');
+    $('tree').innerHTML = '';
+    $('tree-empty').textContent = 'Sua conta está ativa, mas ainda não há vínculo com nenhuma unidade. Peça ao administrador da sua instituição (ou ao seu professor) para vincular você.';
+    $('tree-empty').classList.remove('hidden');
+    return;
+  }
+  if (j.context_name) $('page-subtitle').textContent = `Instituição: ${j.context_name}`;
   UNITS = j.units || [];
   const idSet = new Set(UNITS.map(u => u.id));
   const byParent = new Map();
@@ -236,13 +261,14 @@ async function loadUnits(keepSelection = true) {
   const walk = (parentId, depth) => {
     for (const u of (byParent.get(parentId) || [])) {
       const div = document.createElement('div');
-      div.className = 'tree-node' + (u.is_active ? '' : ' inactive') + (SELECTED?.id === u.id ? ' selected' : '');
+      div.className = 'tree-node' + (u.is_active ? '' : ' inactive') + (SELECTED?.id === u.id ? ' selected' : '') + (u.access === 'context' ? ' context' : '');
       div.style.paddingLeft = (8 + depth * 18) + 'px';
       div.innerHTML = `<span>${depth ? '└ ' : ''}${esc(u.name)}</span><span class="u-label muted">${esc(u.label || '')}</span>` +
         (u.is_class ? `<span class="u-label muted" title="turma — recebe trabalhos">· 🎓 turma</span>` : '') +
         (u.access === 'view' ? `<span class="u-label muted" title="acesso de consulta">· consulta</span>` : '') +
         (u.access === 'admin' && u.budget_usd != null ? `<span class="u-label muted" title="teto próprio (reserva)">· teto ${usd(u.budget_usd)}</span>` : '');
-      div.onclick = () => selectUnit(u.id);
+      // Nó de contexto: só situa na hierarquia — não abre detalhe.
+      if (u.access !== 'context') div.onclick = () => selectUnit(u.id);
       tree.appendChild(div);
       // Pai possível: unidade que ADMINISTRO e que não é turma.
       if (!u.is_class && u.access === 'admin') {
