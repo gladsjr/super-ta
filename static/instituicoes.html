@@ -120,6 +120,53 @@
           <div id="d-works"></div>
         </div>
 
+        <!-- Configuração de tenant — só admin global (equipe ORATIA) -->
+        <div class="card section-gap hidden" id="card-tenant">
+          <h3 class="card-title">Configuração da instituição <span class="muted" style="font-size:.8rem">· equipe ORATIA</span></h3>
+
+          <div id="tenant-root">
+            <h4 style="margin-bottom: var(--sp-1)">Porta da instituição (tenant)</h4>
+            <div class="row">
+              <input id="t-slug" class="input" placeholder="slug (ex.: mackenzie)" style="width:180px"/>
+              <input id="t-name" class="input" placeholder="nome de exibição" style="flex:1; min-width:160px"/>
+              <input id="t-accent" type="color" value="#7c3aed" title="cor de destaque" style="width:44px; height:38px; padding:2px"/>
+              <button id="t-save" class="btn btn-primary btn-sm">Salvar</button>
+              <button id="t-remove" class="btn btn-sm">Remover</button>
+            </div>
+            <p class="hint" id="t-url"></p>
+            <span id="t-msg" class="hint"></span>
+
+            <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Domínios (a pista)</h4>
+            <div id="t-domains"></div>
+            <div class="row" style="margin-top: var(--sp-2)">
+              <input id="dom-add" class="input" placeholder="ex.: mackenzie.br" style="flex:1; min-width:160px"/>
+              <button id="dom-btn" class="btn btn-sm">Adicionar domínio</button>
+            </div>
+            <p class="hint">Na falha do login pela porta genérica, um e-mail desse domínio sugere a porta da instituição. Não roteia automático.</p>
+
+            <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Provedores da instituição (SSO)</h4>
+            <div id="t-providers"></div>
+            <div class="row" style="margin-top: var(--sp-2)">
+              <input id="prov-name" class="input" placeholder="nome (ex.: SSO da Mackenzie)" style="flex:1; min-width:160px"/>
+              <select id="prov-kind" class="select" style="width:130px">
+                <option value="mock">mock (dev)</option>
+                <option value="oidc">OIDC</option>
+                <option value="saml">SAML</option>
+              </select>
+              <button id="prov-btn" class="btn btn-sm">Adicionar SSO</button>
+            </div>
+            <p class="hint">No piloto, use <b>mock</b> (SSO de mentira) para testar. OIDC/SAML têm schema, runtime pendente. Segredos ficam fora do sistema.</p>
+          </div>
+
+          <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Login aceito nesta unidade</h4>
+          <div id="t-accepted"></div>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="acc-save" class="btn btn-sm">Salvar login aceito</button>
+            <span id="acc-msg" class="hint"></span>
+          </div>
+          <p class="hint">Marque os provedores que abrem esta unidade. <b>Nenhum marcado = aceita o login aberto</b> (senha local / Google) — o caso avulso. Marque só o SSO para uma unidade SSO-only.</p>
+        </div>
+
         <div class="card section-gap">
           <h3 class="card-title">Membros e papéis</h3>
           <div id="d-members"></div>
@@ -303,11 +350,17 @@ async function selectUnit(id) {
   $('members-admin').classList.toggle('hidden', !isAdmin);
   $('card-packages').classList.toggle('hidden', !isAdmin);
   $('card-works').classList.toggle('hidden', !SELECTED.is_class);
+  // Config de tenant: só admin global. Bloco raiz (tenant/domínios/provedores)
+  // só em unidade-raiz; "login aceito" em qualquer unidade.
+  const isRoot = SELECTED.parent_id == null;
+  $('card-tenant').classList.toggle('hidden', !IS_GLOBAL);
+  $('tenant-root').classList.toggle('hidden', !isRoot);
   renderDetailHeader();
   loadUnits();
   const jobs = [loadMembers()];
   if (isAdmin) jobs.push(loadBudget(), loadEntitlements(), loadInvites());
   if (SELECTED.is_class) jobs.push(loadWorks());
+  if (IS_GLOBAL) { jobs.push(loadAccepted()); if (isRoot) jobs.push(loadTenant(), loadDomains(), loadProviders()); }
   await Promise.all(jobs);
 }
 function renderDetailHeader() {
@@ -517,6 +570,75 @@ async function loadEntitlements() {
     if (ok) loadEntitlements();
   });
 }
+
+// ---- configuração de tenant (admin global) ----
+let PROVIDERS = [];
+async function loadTenant() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/tenant`);
+  if (!ok) return;
+  const t = j.tenant;
+  $('t-slug').value = t?.slug || '';
+  $('t-name').value = t?.display_name || '';
+  $('t-accent').value = (t?.branding_json && t.branding_json.accent) || '#7c3aed';
+  $('t-url').innerHTML = t ? `Porta: <a href="/${esc(t.slug)}" target="_blank">/${esc(t.slug)}</a>` : '<span class="muted">sem porta própria ainda</span>';
+}
+$('t-save').onclick = async () => {
+  const { ok, j } = await api('PUT', `/admin/units/${SELECTED.id}/tenant`, {
+    slug: $('t-slug').value.trim(), display_name: $('t-name').value.trim() || null, accent: $('t-accent').value,
+  });
+  const ERR = { invalid_slug:'slug inválido (a-z, 0-9, hífen)', reserved_slug:'esse slug é reservado', slug_taken:'slug já usado', tenant_requires_root_unit:'só a unidade-raiz vira tenant' };
+  $('t-msg').textContent = ok ? 'Salvo.' : 'Falha: ' + (ERR[j.error] || j.error || '');
+  if (ok) loadTenant();
+};
+$('t-remove').onclick = async () => {
+  const { ok } = await api('DELETE', `/admin/units/${SELECTED.id}/tenant`);
+  if (ok) { $('t-msg').textContent = 'Removido.'; loadTenant(); }
+};
+async function loadDomains() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/domains`);
+  if (!ok) return;
+  $('t-domains').innerHTML = (j.domains || []).map(d =>
+    `<div class="member-row"><span class="k">${esc(d.domain)}</span><button class="btn btn-sm" data-dom="${d.id}" style="margin-left:auto">Remover</button></div>`
+  ).join('') || '<p class="hint">Nenhum domínio.</p>';
+  $('t-domains').querySelectorAll('button[data-dom]').forEach(b => b.onclick = async () => { await api('DELETE', `/admin/domains/${b.dataset.dom}`); loadDomains(); });
+}
+$('dom-btn').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/domains`, { domain: $('dom-add').value.trim() });
+  if (ok) { $('dom-add').value = ''; loadDomains(); } else $('t-msg').textContent = 'Falha: ' + (j.error === 'domain_taken' ? 'domínio já associado' : j.error === 'invalid_domain' ? 'domínio inválido' : j.error || '');
+};
+async function loadProviders() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/providers`);
+  if (!ok) return;
+  PROVIDERS = j.providers || [];
+  const owned = PROVIDERS.filter(p => p.owner_tenant_unit_id === SELECTED.id);
+  $('t-providers').innerHTML = owned.map(p =>
+    `<div class="member-row"><span>${esc(p.name)}</span><span class="muted">${esc(p.kind)} · ${esc(p.key)}</span><button class="btn btn-sm" data-prov="${p.id}" style="margin-left:auto">Remover</button></div>`
+  ).join('') || '<p class="hint">Nenhum SSO próprio (só os globais: senha, Google).</p>';
+  $('t-providers').querySelectorAll('button[data-prov]').forEach(b => b.onclick = async () => { await api('DELETE', `/admin/providers/${b.dataset.prov}`); loadProviders(); loadAccepted(); });
+}
+$('prov-btn').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/providers`, { name: $('prov-name').value.trim(), kind: $('prov-kind').value });
+  if (ok) { $('prov-name').value = ''; loadProviders(); loadAccepted(); } else $('t-msg').textContent = 'Falha: ' + (j.error || '');
+};
+async function loadAccepted() {
+  // catálogo de provedores visível a esta unidade + os já aceitos
+  const [pc, ac] = await Promise.all([
+    api('GET', `/admin/units/${SELECTED.id}/providers`),
+    api('GET', `/admin/units/${SELECTED.id}/accepted-providers`),
+  ]);
+  if (!pc.ok || !ac.ok) return;
+  const provs = pc.j.providers || [];
+  const set = new Set(ac.j.provider_ids || []);
+  $('t-accepted').innerHTML = provs.map(p =>
+    `<label class="member-row" style="cursor:pointer"><input type="checkbox" class="acc-chk" value="${p.id}" ${set.has(p.id) ? 'checked' : ''}/> ` +
+    `<span>${esc(p.name)}</span><span class="muted">${esc(p.kind)}${p.owner_tenant_unit_id ? '' : ' · global'}</span></label>`
+  ).join('') || '<p class="hint">Sem provedores.</p>';
+}
+$('acc-save').onclick = async () => {
+  const ids = [...document.querySelectorAll('.acc-chk:checked')].map(c => Number(c.value));
+  const { ok } = await api('PUT', `/admin/units/${SELECTED.id}/accepted-providers`, { provider_ids: ids });
+  $('acc-msg').textContent = ok ? (ids.length ? 'Salvo — unidade restrita aos provedores marcados.' : 'Salvo — aceita login aberto (nada marcado).') : 'Falha.';
+};
 
 async function boot() { await Promise.all([loadUnits(false), loadTemplates()]); }
 checkAuth();

@@ -38,6 +38,7 @@ import activationRoutes from "./routes/activation.js";
 import authFederatedRoutes from "./routes/authFederated.js";
 import authMockRoutes from "./routes/authMock.js";
 import tenantLoginRoutes from "./routes/tenantLogin.js";
+import tenantsAdminRoutes from "./routes/tenantsAdmin.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
@@ -117,6 +118,7 @@ app.use(unitsRoutes); // /admin/units/* — camada institucional (sessão + RBAC
 app.use(activationRoutes); // /ativar + /api/ativar — ativação de conta por convite (público, token de uso único)
 app.use(authMockRoutes); // /auth/mock/* — IdP de mentira (só dev; Fase 2 do multi-tenant)
 app.use(tenantLoginRoutes); // /api/tenant/:slug + /api/hint — config da porta do tenant + pista de domínio
+app.use(tenantsAdminRoutes); // /admin/units/:id/tenant|domains|providers|accepted-providers — config de tenant (admin global)
 app.use(scenarioCockpitRoutes); // /w/:t/scenario-runs|scenario-evaluations/* — cockpit do professor p/ cenários (requireAdmin por rota). Antes de workRoutes (paths específicos).
 app.use(workRoutes);
 app.use(interviewRoutes);
