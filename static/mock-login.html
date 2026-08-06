@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SSO de teste — ORATIA (dev)</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+<script src="/static/js/theme.js"></script>
+<style>
+  .wrap { max-width: 420px; margin: var(--sp-10) auto 0; }
+  .row { display:flex; flex-direction:column; gap: var(--sp-2); }
+  .devtag { font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color:#b45309; font-weight:700; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
+</header>
+<main class="page">
+  <div class="wrap">
+    <div class="card">
+      <p class="devtag">SSO de teste · ambiente de desenvolvimento</p>
+      <h3 class="card-title">Entrar pelo provedor da instituição</h3>
+      <p class="hint">Isto simula o login federado (SSO) da instituição. Em produção seria a tela do provedor real (Microsoft, OIDC, SAML…).</p>
+      <div class="row">
+        <input id="email" class="input" inputmode="email" placeholder="seu e-mail institucional" autocomplete="username"/>
+        <input id="name" class="input" placeholder="seu nome (opcional)"/>
+        <button id="go" class="btn btn-primary">Entrar</button>
+        <div id="msg" class="hint"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const providerKey = location.pathname.split('/').pop();
+const params = new URLSearchParams(location.search);
+const next = params.get('next') || '/unidades';
+const prefill = params.get('email'); if (prefill) $('email').value = prefill;
+async function go(){
+  const email = $('email').value.trim();
+  if (!email) { $('msg').textContent = 'Informe o e-mail.'; return; }
+  const r = await fetch('/auth/mock/' + encodeURIComponent(providerKey), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ email, name: $('name').value.trim() || null })
+  });
+  if (r.ok) location.replace(next);
+  else { const j = await r.json().catch(()=>({})); $('msg').textContent = 'Falha: ' + (j.error || ''); }
+}
+$('go').onclick = go;
+$('email').addEventListener('keydown', e => { if (e.key==='Enter') go(); });
+</script>
+</body>
+</html>

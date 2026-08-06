@@ -28,6 +28,7 @@ import {
     createPersonWithInvite, issueInvite, cancelInvite, listUnitInvites,
     buildInviteEmailsText,
 } from "../lib/invites.js";
+import { acceptedProviderMap, unitAcceptsProvider } from "../lib/tenants.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -206,7 +207,11 @@ router.delete("/admin/units/:unitId/members/:membershipId", requireAuth, async (
 // vários → escolhe no login (POST /api/my-context; fica na sessão até o
 // logout — trocar de instituição é outro login, sem seletor no topo). Papéis
 // se SOMAM dentro do contexto (professor numa turma + aluno noutra convivem).
-async function resolveContexts(userId) {
+// prov = { key, kind } do login (session.authProvider). Só entram os vínculos
+// cujas unidades ACEITAM esse provedor (unit_auth_policies; unidade sem política
+// aceita o realm aberto). É a trava da Q2: senha local no @fgv.br não revela as
+// unidades da FGV (que só aceitam o SSO da FGV).
+async function resolveContexts(userId, prov = { key: "local", kind: "local" }) {
     const all = await listUnits();
     const byId = new Map(all.map((u) => [u.id, u]));
     const rootOf = (id) => {
@@ -214,18 +219,22 @@ async function resolveContexts(userId) {
         while (cur && cur.parent_id != null && byId.has(cur.parent_id)) cur = byId.get(cur.parent_id);
         return cur?.id ?? id;
     };
-    const ms = await pool.query(
+    const acceptMap = await acceptedProviderMap();
+    const raw = await pool.query(
         `SELECT m.unit_id, r.key FROM memberships m JOIN roles r ON r.id = m.role_id
           WHERE m.user_id = $1 AND m.unit_id IS NOT NULL`,
         [userId]
     );
+    const memberships = raw.rows.filter((m) =>
+        unitAcceptsProvider(acceptMap, m.unit_id, prov.key, prov.kind)
+    );
     const contexts = new Map(); // rootId → Set(roles em toda a árvore)
-    for (const m of ms.rows) {
+    for (const m of memberships) {
         const root = rootOf(m.unit_id);
         if (!contexts.has(root)) contexts.set(root, new Set());
         contexts.get(root).add(m.key);
     }
-    return { all, byId, memberships: ms.rows, contexts, rootOf };
+    return { all, byId, memberships, contexts, rootOf };
 }
 
 router.get("/api/my-units", requireAuth, async (req, res) => {
@@ -238,7 +247,7 @@ router.get("/api/my-units", requireAuth, async (req, res) => {
                 units: all.map((u) => ({ ...u, access: "admin", my_roles: ["admin_global"] })),
             });
         }
-        const { all, byId, memberships, contexts, rootOf } = await resolveContexts(userId);
+        const { all, byId, memberships, contexts, rootOf } = await resolveContexts(userId, req.session.authProvider);
         if (contexts.size === 0) {
             return res.json({ is_global_admin: false, no_membership: true, units: [] });
         }
@@ -314,7 +323,7 @@ router.get("/api/my-units", requireAuth, async (req, res) => {
 router.post("/api/my-context", requireAuth, json, async (req, res) => {
     try {
         const rootId = Number(req.body?.root_id);
-        const { contexts, byId } = await resolveContexts(uid(req));
+        const { contexts, byId } = await resolveContexts(uid(req), req.session.authProvider);
         if (!contexts.has(rootId)) return res.status(403).json({ error: "not_your_context" });
         req.session.contextRootId = rootId;
         req.session.save(() => res.json({ ok: true, context_root_id: rootId, context_name: byId.get(rootId)?.name }));
@@ -330,6 +339,12 @@ router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         const userId = uid(req);
+        // A unidade tem de aceitar o provedor do login (mesma trava do my-units).
+        if (!(await isGlobalAdmin(userId))) {
+            const acceptMap = await acceptedProviderMap();
+            const p = req.session.authProvider || { key: "local", kind: "local" };
+            if (!unitAcceptsProvider(acceptMap, unitId, p.key, p.kind)) return res.status(403).json({ error: "forbidden" });
+        }
         const roles = await resolveEffectiveRoles(userId, unitId);
         const manages = (await canAdminUnit(userId, unitId)) || roles.has("professor");
         if (!manages && !roles.has("aluno")) return res.status(403).json({ error: "forbidden" });

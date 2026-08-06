@@ -87,6 +87,7 @@ router.get("/auth/google/callback", async (req, res) => {
         req.session.regenerate((err) => {
             if (err) { log.error("AUTH", `regenerate failed: ${err.message}`); return res.status(500).json({ error: "login failed" }); }
             req.session.user = { id: user.id, username: user.username, email: user.email || null };
+            req.session.authProvider = { key: "google", kind: "google" }; // realm aberto
             req.session.save((e2) => {
                 if (e2) { log.error("AUTH", `session save failed: ${e2.message}`); return res.status(500).json({ error: "login failed" }); }
                 log.info("AUTH", `google login user=${user.username} id=${user.id}`);

@@ -50,8 +50,19 @@ async function doLogin() {
   const login = $('login-user').value.trim(), password = $('login-pass').value;
   if (!login || !password) { $('login-msg').textContent = 'Informe usuário/e-mail e senha.'; return; }
   const r = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login, password }) });
-  if (r.ok) await routeByRole();
-  else $('login-msg').textContent = 'Usuário ou senha inválidos.';
+  if (r.ok) { await routeByRole(); return; }
+  // Falhou: se o domínio do e-mail tem uma instituição, sugere a porta dela
+  // (a "pista" — decisão de 05/08; não roteamos automático).
+  $('login-msg').innerHTML = 'Usuário ou senha inválidos.';
+  if (login.includes('@')) {
+    try {
+      const h = await (await fetch('/api/hint?email=' + encodeURIComponent(login))).json();
+      if (h.tenant) {
+        $('login-msg').innerHTML = 'Usuário ou senha inválidos. Sua instituição usa login próprio — ' +
+          '<a href="/' + encodeURIComponent(h.tenant.slug) + '">entrar por ' + (h.tenant.display_name || h.tenant.slug) + '</a>.';
+      }
+    } catch {}
+  }
 }
 $('login-btn').onclick = doLogin;
 $('login-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });

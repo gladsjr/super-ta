@@ -307,6 +307,9 @@ export async function loginHandler(req, res) {
         return res.status(500).json({ error: "login failed" });
       }
       req.session.user = { id: user.id, username: user.username, email: user.email || null };
+      // Provedor usado no login — o filtro provedor-aceito por unidade lê isto
+      // (docs/auth-multitenant-plan.md). Senha local = realm aberto.
+      req.session.authProvider = { key: "local", kind: "local" };
       req.session.save((saveErr) => {
         if (saveErr) {
           console.error("Erro ao salvar sessão:", saveErr);

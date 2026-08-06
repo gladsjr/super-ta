@@ -36,6 +36,8 @@ import adminRoutes from "./routes/admin.js";
 import unitsRoutes from "./routes/units.js";
 import activationRoutes from "./routes/activation.js";
 import authFederatedRoutes from "./routes/authFederated.js";
+import authMockRoutes from "./routes/authMock.js";
+import tenantLoginRoutes from "./routes/tenantLogin.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
@@ -113,6 +115,8 @@ app.use(staticRoutes);
 app.use(adminRoutes);
 app.use(unitsRoutes); // /admin/units/* — camada institucional (sessão + RBAC por unidade)
 app.use(activationRoutes); // /ativar + /api/ativar — ativação de conta por convite (público, token de uso único)
+app.use(authMockRoutes); // /auth/mock/* — IdP de mentira (só dev; Fase 2 do multi-tenant)
+app.use(tenantLoginRoutes); // /api/tenant/:slug + /api/hint — config da porta do tenant + pista de domínio
 app.use(scenarioCockpitRoutes); // /w/:t/scenario-runs|scenario-evaluations/* — cockpit do professor p/ cenários (requireAdmin por rota). Antes de workRoutes (paths específicos).
 app.use(workRoutes);
 app.use(interviewRoutes);
@@ -125,6 +129,23 @@ app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 
 app.use(benchmarkRoutes); // /api/benchmark/* — benchmark interno (requireAdmin por rota)
 app.use(costAuditRoutes); // /api/cost-audit/* — auditoria de custo (Usage/Costs API; requireAdmin por rota)
 app.use(analyticsRoutes); // /api/analytics/query — consulta somente-leitura p/ benchmark (auth por API key; NÃO sessão; ver migration 052)
+
+// PORTA DA INSTITUIÇÃO — rota CURINGA por slug (Fase 4). Fica por ÚLTIMO: só
+// captura caminhos de 1 segmento que nenhuma rota anterior atendeu. Serve a
+// página se o slug for um tenant existente; senão, 404. Slugs são controlados
+// pela equipe (não há auto-cadastro), então não sombreiam rotas reais.
+app.get("/:slug", async (req, res, next) => {
+    const slug = String(req.params.slug || "").toLowerCase();
+    if (!/^[a-z0-9-]{2,40}$/.test(slug)) return next();
+    try {
+        const { getTenantBySlug } = await import("./lib/tenants.js");
+        if (!(await getTenantBySlug(slug))) return next();
+        return res.sendFile(path.join(__dirname, "static", "tenant-login.html"));
+    } catch (err) {
+        log.error("TENANT", `slug route failed: ${err.message}`);
+        return next();
+    }
+});
 
 const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {
