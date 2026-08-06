@@ -2,7 +2,12 @@
 
 Plano de implementação do login multi-instituição. O **modelo conceitual** (por que
 cada peça existe) está no artefato de arquitetura da conversa de 05/08/2026; este doc
-é o **como construir**. Nada aqui foi implementado ainda.
+é o **como construir**.
+
+**STATUS (05/08/2026): Fases 0–5 IMPLEMENTADAS** na branch (commits 65283fe,
+c342fd3, 22293c1). Migrations 068 (persons) e 069 (tenants/domains/provider owner).
+O piloto multi-institucional está funcional com IdP mock; falta só o runtime de SSO
+real (OIDC/SAML), que é pós-piloto. Ver o histórico abaixo por fase.
 
 ## A decisão que torna isto viável sem reescrever tudo
 
