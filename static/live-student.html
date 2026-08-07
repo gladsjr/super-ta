@@ -36,6 +36,17 @@
     .filerow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin: 10px 0 14px; }
     .filerow input[type=file] { font: inherit; }
     video { width: 100%; max-width: 300px; border-radius: 10px; background:#000; transform: scaleX(-1); display:block; margin: 0 auto 10px; }
+    /* Palco dividido (câmera é o assunto): grande à esquerda, orientação/estado à
+       direita; nada rola. Empilha no mobile. (nota de design de largura, 06/08/2026.) */
+    .wrap.stage-mode { max-width: min(94vw, 1240px); }
+    .stage { display: grid; grid-template-columns: minmax(0, 1.5fr) 1fr; gap: 22px; align-items: start; }
+    @media (max-width: 760px) { .stage { grid-template-columns: 1fr; gap: 14px; } }
+    .stage-cam { min-width: 0; }
+    .stage-cam video { max-width: 100%; margin: 0; }
+    .cam-frame { position: relative; line-height: 0; }
+    .cam-guide { position: absolute; inset: 7% 15%; border: 2px dashed rgba(255,255,255,.5); border-radius: 14px; pointer-events: none; }
+    .poses { display: flex; gap: 10px; margin: 12px 0; }
+    .poses figure { margin: 0; flex: 1; }
     .qa-who { font-size:.72rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
   </style>
 </head>
@@ -82,30 +93,44 @@
         <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
       </div>
 
-      <!-- Tela 2: posicionamento na câmera (a entrevista começa sozinha quando ok) -->
+      <!-- Tela 2: posicionamento na câmera (começa sozinha quando ok).
+           PALCO DIVIDIDO: câmera grande à esquerda; orientação e estado à direita. -->
       <div id="setup" style="display:none">
-        <p style="margin:0"><strong>Posição:</strong> tronco à cabeça no quadro; ~1,5 m da câmera; mãos à mostra. A entrevista começa sozinha quando estiver tudo certo.</p>
-        <div style="display:flex; gap:10px; max-width:300px; margin:8px auto 10px">
-          <figure style="margin:0; flex:1"><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
-          <figure style="margin:0; flex:1"><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
+        <div class="stage">
+          <div class="stage-cam">
+            <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
+            <div class="cam-frame">
+              <video id="setup-cam" autoplay muted playsinline></video>
+              <div class="cam-guide"></div>
+            </div>
+            <div class="banner wait" id="pos-guidance" style="margin-top:10px; max-width:none">Iniciando a câmera…</div>
+          </div>
+          <div class="stage-side">
+            <p style="margin:0 0 4px"><strong>Posição:</strong> tronco à cabeça no quadro; ~1,5 m da câmera; mãos à mostra. A entrevista começa sozinha quando estiver tudo certo.</p>
+            <div class="poses">
+              <figure><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
+              <figure><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
+            </div>
+            <div class="note-warn"><strong>Importante:</strong> a entrevista não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
+            <button class="btn" id="pos-begin-btn" disabled>Começar a entrevista</button>
+            <div class="err" id="setup-err"></div>
+          </div>
         </div>
-        <div class="note-warn"><strong>Importante:</strong> a entrevista não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
-        <div class="hint" style="text-align:center; margin-bottom:4px">Sua câmera</div>
-        <video id="setup-cam" autoplay muted playsinline style="margin:0 auto"></video>
-        <div class="banner wait" id="pos-guidance" style="margin-top:10px">Iniciando a câmera…</div>
-        <div style="margin-top:14px; text-align:center">
-          <button class="btn" id="pos-begin-btn" disabled>Começar a entrevista</button>
-        </div>
-        <div class="err" id="setup-err"></div>
       </div>
 
       <!-- Tela 3: entrevista ao vivo -->
       <div id="live" style="display:none">
-        <video id="selfview" autoplay muted playsinline></video>
-        <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
-        <p class="hint" id="qinfo"></p>
-        <p class="hint">A entrevista <strong>encerra sozinha</strong> no fim das perguntas. Use <strong>"Encerrar agora"</strong> apenas para sair antes.</p>
-        <button class="btn danger" id="end-btn">Encerrar agora</button>
+        <div class="stage">
+          <div class="stage-cam">
+            <video id="selfview" autoplay muted playsinline></video>
+          </div>
+          <div class="stage-side">
+            <div class="status"><span class="dot" id="dot"></span> <span id="status-txt">Conectando…</span></div>
+            <p class="hint" id="qinfo"></p>
+            <p class="hint">A entrevista <strong>encerra sozinha</strong> no fim das perguntas. Use <strong>"Encerrar agora"</strong> apenas para sair antes.</p>
+            <button class="btn danger" id="end-btn">Encerrar agora</button>
+          </div>
+        </div>
       </div>
 
       <div id="done" style="display:none">
@@ -132,7 +157,10 @@
     let recorder = null, recChunks = [], playHead = 0, ended = false, activeSources = [];
 
     function setStatus(txt, cls) { $('status-txt').textContent = txt; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
-    function show(id) { for (const s of ['pre', 'instr', 'setup', 'live', 'done', 'blocked']) $(s).style.display = s === id ? '' : 'none'; }
+    function show(id) {
+      for (const s of ['pre', 'instr', 'setup', 'live', 'done', 'blocked']) $(s).style.display = s === id ? '' : 'none';
+      document.querySelector('.wrap').classList.toggle('stage-mode', id === 'setup' || id === 'live');
+    }
 
     const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
