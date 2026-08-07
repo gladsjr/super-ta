@@ -62,9 +62,11 @@ router.post("/admin/works", requireAuth, async (req, res) => {
             const unit = await getUnit(unitId);
             if (!unit) return res.status(404).json({ error: "unit_not_found" });
             if (!unit.is_class) return res.status(400).json({ error: "unit_not_class" });
+            // Criar trabalho na turma = professor ATRIBUÍDO à turma ou admin global
+            // (decisão de 06/08: trabalho é do professor; admin de unidade não cria).
             if (!(await isGlobalAdmin(req.session.user.id))) {
                 const roles = await resolveEffectiveRoles(req.session.user.id, unitId);
-                if (!roles.has("professor") && !roles.has("admin_unidade")) {
+                if (!roles.has("professor")) {
                     return res.status(403).json({ error: "forbidden_unit" });
                 }
             }

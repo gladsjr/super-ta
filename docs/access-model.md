@@ -65,6 +65,18 @@ admin de unidade vê e gere a SUA sub-árvore; professor e aluno veem os nós
 onde têm vínculo, em consulta, com os ANCESTRAIS presentes como nós de
 contexto (nome visível, não clicáveis — "Mackenzie > Curso > Turma").
 
+**Painel de unidade em abas + "configurar de cima"** (decisão de 06/08/2026):
+`/unidades` mostra a unidade selecionada com um **título-caminho** (breadcrumb
+raiz→unidade, sempre visível) e abas por audiência: **Membros** (todos veem;
+edita quem administra a unidade ou acima), **Trabalhos** (só se `is_class`;
+todos veem, edita professor DA turma ou global — trabalho é do professor,
+`unit_id`=turma), **Orçamento** (US$ + pacotes; admin global + admin da
+unidade), **Configuração** (tenant; só global, só raiz). Regra-chave: **nome e
+orçamento de X são "configurados de cima"** — pelo admin do PAI de X (na raiz,
+só a equipe ORATIA, pois é aquisição); o admin de X configura seus FILHOS, não
+a si mesmo. Já **operar a própria unidade** (membros, flag de turma, ativar) é
+do admin da própria. Admin global faz tudo.
+
 **Contexto por instituição**: a pessoa atua numa instituição por vez — a raiz
 da árvore do vínculo. Papéis se SOMAM dentro do contexto (professor numa
 turma + aluno noutra convivem). Um contexto → entra direto; vários →

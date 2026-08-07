@@ -31,6 +31,17 @@
   .badge-role.admin_global, .badge-role.admin_unidade { background: #1c3557; color: #fff; }
   .row { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
   .alloc-card { border: 1px solid var(--c-border, #d7dde5); border-radius: 8px; padding: var(--sp-3); margin-top: var(--sp-3); }
+  .crumb { font-size: .78rem; color: var(--c-text-muted, #5b6472); }
+  .crumb .seg { cursor: pointer; }
+  .crumb .seg:hover { text-decoration: underline; }
+  .crumb .seg.ctx { cursor: default; opacity: .7; }
+  .crumb .sep { opacity: .45; margin: 0 5px; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--c-border, #d7dde5); }
+  .tab { padding: 7px 14px; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; font-size: .9rem; color: var(--c-text-muted, #5b6472); }
+  .tab:hover { color: inherit; }
+  .tab.active { background: var(--c-bg-2, #eef1f5); color: inherit; font-weight: 600; border-color: var(--c-border, #d7dde5); margin-bottom: -1px; }
+  .badge-pill { font-size: .7rem; padding: 1px 8px; border-radius: 9px; background: var(--c-bg-2, #e5e7eb); vertical-align: middle; }
+</style>
 </style>
 </head>
 <body>
@@ -87,13 +98,17 @@
       <!-- ==== coluna direita: detalhe da unidade ==== -->
       <div id="detail-none" class="card"><p class="hint">Selecione uma unidade na árvore para gerenciar teto, membros e pacotes.</p></div>
       <div id="detail" class="hidden">
+        <!-- Cabeçalho persistente: caminho (breadcrumb) + ações estruturais -->
         <div class="card">
-          <div class="row" style="justify-content: space-between">
-            <h3 class="card-title" style="margin:0"><span id="d-name"></span> <span class="u-label muted" id="d-label"></span></h3>
+          <div class="row" style="justify-content: space-between; align-items: flex-start">
+            <div>
+              <div id="d-crumb" class="crumb"></div>
+              <h3 class="card-title" style="margin: 2px 0 0"><span id="d-name"></span> <span class="u-label muted" id="d-label"></span> <span id="d-badges"></span></h3>
+            </div>
             <div class="row" id="d-header-actions">
-              <button id="d-rename" class="btn btn-sm">Renomear</button>
-              <button id="d-class" class="btn btn-sm"></button>
-              <button id="d-toggle" class="btn btn-sm"></button>
+              <button id="d-rename" class="btn btn-sm hidden">Renomear</button>
+              <button id="d-class" class="btn btn-sm hidden"></button>
+              <button id="d-toggle" class="btn btn-sm hidden"></button>
             </div>
           </div>
           <div id="d-rename-row" class="row hidden" style="margin-top: var(--sp-2)">
@@ -101,29 +116,52 @@
             <input id="d-rename-label" class="input" placeholder="rótulo" style="width:140px"/>
             <button id="d-rename-save" class="btn btn-primary btn-sm">Salvar</button>
           </div>
-
-          <div id="budget-block">
-            <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Teto de orçamento (US$)</h4>
-            <div class="kv" id="d-budget-kv"></div>
-            <div class="row" id="budget-admin">
-              <input id="d-budget" class="input" type="number" min="0" step="1" placeholder="teto US$ (vazio = sem teto próprio)" style="width:220px"/>
-              <button id="d-budget-save" class="btn btn-sm">Definir teto</button>
-              <button id="d-budget-clear" class="btn btn-sm">Remover teto</button>
-              <span id="d-budget-msg" class="hint"></span>
-            </div>
-            <p class="hint">O teto é uma RESERVA descontada do saldo do pai no ato; reduzir devolve ao pai. O comprometido soma gasto direto, reservas das filhas e gasto das filhas sem teto. Unidade sem teto consome do ancestral mais próximo com teto.</p>
-          </div>
+          <div id="d-struct-msg" class="hint"></div>
+          <div id="d-tabs" class="tabs section-gap"></div>
         </div>
 
-        <div class="card section-gap hidden" id="card-works">
+        <!-- Painel: Trabalhos (só turma) -->
+        <div class="card section-gap tabpanel hidden" data-tab="trabalhos">
           <h3 class="card-title">Trabalhos da turma</h3>
+          <div id="works-create" class="row hidden" style="margin-bottom: var(--sp-3)">
+            <input id="nw-name" class="input" placeholder="nome do trabalho" style="flex:1; min-width:150px"/>
+            <select id="nw-kind" class="select" style="width:150px">
+              <option value="scenario">cenário</option>
+              <option value="interview">entrevista</option>
+              <option value="oral_realtime">prova oral</option>
+            </select>
+            <button id="nw-create" class="btn btn-primary btn-sm">Novo trabalho</button>
+            <span id="nw-msg" class="hint"></span>
+          </div>
           <div id="d-works"></div>
         </div>
 
-        <!-- Configuração de tenant — só admin global (equipe ORATIA) -->
-        <div class="card section-gap hidden" id="card-tenant">
-          <h3 class="card-title">Configuração da instituição <span class="muted" style="font-size:.8rem">· equipe ORATIA</span></h3>
+        <!-- Painel: Orçamento (US$ + pacotes) — admin global + admin da unidade -->
+        <div class="card section-gap tabpanel hidden" data-tab="orcamento">
+          <h4 style="margin: 0 0 var(--sp-1)">Teto de orçamento (US$)</h4>
+          <div class="kv" id="d-budget-kv"></div>
+          <div class="row" id="budget-admin">
+            <input id="d-budget" class="input" type="number" min="0" step="1" placeholder="teto US$ (vazio = sem teto próprio)" style="width:220px"/>
+            <button id="d-budget-save" class="btn btn-sm">Definir teto</button>
+            <button id="d-budget-clear" class="btn btn-sm">Remover teto</button>
+            <span id="d-budget-msg" class="hint"></span>
+          </div>
+          <p class="hint" id="budget-hint">O teto é uma RESERVA descontada do saldo do pai no ato; reduzir devolve ao pai. Só quem administra o nível acima define este teto (na raiz, a equipe ORATIA — é aquisição).</p>
 
+          <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Pacotes de avaliação</h4>
+          <div class="row" id="pkg-allocate-row">
+            <select id="p-template" class="select" style="flex:1; min-width:180px"></select>
+            <input id="p-qty" class="input" type="number" min="1" step="1" value="10" style="width:90px"/>
+            <button id="p-allocate" class="btn btn-primary btn-sm">Alocar aqui</button>
+            <span id="p-msg" class="hint"></span>
+          </div>
+          <p class="hint">Alocar concede N pacotes inteiros a esta unidade (só admin global). Delegar repassa pacotes de uma alocação daqui para uma unidade filha.</p>
+          <div id="d-allocs"></div>
+        </div>
+
+        <!-- Painel: Configuração da instituição — só admin global (equipe ORATIA) -->
+        <div class="card section-gap tabpanel hidden" data-tab="config">
+          <h3 class="card-title">Configuração da instituição <span class="muted" style="font-size:.8rem">· equipe ORATIA</span></h3>
           <div id="tenant-root">
             <h4 style="margin-bottom: var(--sp-1)">Porta da instituição (tenant)</h4>
             <div class="row">
@@ -167,7 +205,7 @@
           <p class="hint">Marque os provedores que abrem esta unidade. <b>Nenhum marcado = aceita o login aberto</b> (senha local / Google) — o caso avulso. Marque só o SSO para uma unidade SSO-only.</p>
         </div>
 
-        <div class="card section-gap">
+        <div class="card section-gap tabpanel hidden" data-tab="membros">
           <h3 class="card-title">Membros e papéis</h3>
           <div id="d-members"></div>
           <div id="members-admin">
@@ -201,17 +239,6 @@
           </div>
         </div>
 
-        <div class="card section-gap" id="card-packages">
-          <h3 class="card-title">Pacotes de avaliação</h3>
-          <div class="row">
-            <select id="p-template" class="select" style="flex:1; min-width:180px"></select>
-            <input id="p-qty" class="input" type="number" min="1" step="1" value="10" style="width:90px"/>
-            <button id="p-allocate" class="btn btn-primary btn-sm">Alocar aqui</button>
-            <span id="p-msg" class="hint"></span>
-          </div>
-          <p class="hint">Alocar concede N pacotes inteiros a esta unidade (só admin global). Delegar repassa pacotes de uma alocação daqui para uma unidade filha.</p>
-          <div id="d-allocs"></div>
-        </div>
       </div>
     </div>
   </div>
@@ -336,53 +363,107 @@ $('csv-import').onclick = async () => {
   if (r.ok) loadUnits();
 };
 
-// ---- detalhe ----
+// ---- detalhe (abas) ----
+const TAB_LABELS = { membros: 'Membros e papéis', trabalhos: 'Trabalhos', orcamento: 'Orçamento', config: 'Configuração' };
+const CLASS_ERRORS = { has_children: 'turma não pode ter filhos — mova/remova as unidades filhas antes', has_works: 'há trabalhos vinculados — remova antes de desmarcar', forbidden: 'sem permissão (só admin desta unidade)' };
+let ACTIVE_TAB = 'membros';
+
+// Permissões desta unidade para o usuário atual (o backend é a autoridade;
+// isto só decide o que mostrar). "de cima" (nome/orçamento) = admin do PAI
+// (raiz → global); "própria" (membros/turma) = admin da unidade; trabalhos =
+// professor da turma. Admin global faz tudo.
+function computePerms() {
+  const isRoot = SELECTED.parent_id == null;
+  const parentU = UNITS.find(u => u.id === SELECTED.parent_id);
+  return {
+    isRoot,
+    canAdminSelf: IS_GLOBAL || SELECTED.access === 'admin',
+    canConfigAbove: IS_GLOBAL || (!isRoot && !!parentU && parentU.access === 'admin'),
+    canEditWorks: IS_GLOBAL || (SELECTED.my_roles || []).includes('professor'),
+    hasChildren: UNITS.some(u => u.parent_id === SELECTED.id),
+  };
+}
+function showTab(tab) {
+  ACTIVE_TAB = tab;
+  document.querySelectorAll('#detail .tabpanel').forEach(p => p.classList.toggle('hidden', p.dataset.tab !== tab));
+  document.querySelectorAll('#d-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+}
+function buildTabs(p) {
+  const tabs = ['membros'];
+  if (SELECTED.is_class) tabs.push('trabalhos');
+  if (p.canAdminSelf) tabs.push('orcamento');
+  if (IS_GLOBAL) tabs.push('config');
+  const bar = $('d-tabs'); bar.innerHTML = '';
+  for (const t of tabs) {
+    const el = document.createElement('div');
+    el.className = 'tab'; el.dataset.tab = t; el.textContent = TAB_LABELS[t];
+    el.onclick = () => showTab(t);
+    bar.appendChild(el);
+  }
+  showTab(tabs.includes(ACTIVE_TAB) ? ACTIVE_TAB : 'membros');
+}
+async function refreshSelected() { const id = SELECTED.id; await loadUnits(false); if (UNITS.find(u => u.id === id)) selectUnit(id); }
+
 async function selectUnit(id) {
   SELECTED = UNITS.find(u => u.id === id) || null;
   if (!SELECTED) return;
   $('detail-none').classList.add('hidden'); $('detail').classList.remove('hidden');
-  const isAdmin = SELECTED.access === 'admin';
-  // Consulta vs gestão: quem só consulta não vê orçamento, pacotes nem os
-  // controles de membros/convites — vê o cabeçalho, os membros e (na turma)
-  // os trabalhos.
-  $('d-header-actions').classList.toggle('hidden', !isAdmin);
-  $('budget-block').classList.toggle('hidden', !isAdmin);
-  $('members-admin').classList.toggle('hidden', !isAdmin);
-  $('card-packages').classList.toggle('hidden', !isAdmin);
-  $('card-works').classList.toggle('hidden', !SELECTED.is_class);
-  // Config de tenant: só admin global. Bloco raiz (tenant/domínios/provedores)
-  // só em unidade-raiz; "login aceito" em qualquer unidade.
-  const isRoot = SELECTED.parent_id == null;
-  $('card-tenant').classList.toggle('hidden', !IS_GLOBAL);
-  $('tenant-root').classList.toggle('hidden', !isRoot);
-  renderDetailHeader();
+  const p = computePerms();
+  $('members-admin').classList.toggle('hidden', !p.canAdminSelf);
+  $('budget-admin').classList.toggle('hidden', !p.canConfigAbove);
+  $('pkg-allocate-row').classList.toggle('hidden', !IS_GLOBAL); // alocação-raiz = equipe ORATIA
+  $('works-create').classList.toggle('hidden', !p.canEditWorks);
+  $('tenant-root').classList.toggle('hidden', !p.isRoot);
+  renderDetailHeader(p);
+  buildTabs(p);
   loadUnits();
   const jobs = [loadMembers()];
-  if (isAdmin) jobs.push(loadBudget(), loadEntitlements(), loadInvites());
+  if (p.canAdminSelf) jobs.push(loadBudget(), loadEntitlements(), loadInvites());
   if (SELECTED.is_class) jobs.push(loadWorks());
-  if (IS_GLOBAL) { jobs.push(loadAccepted()); if (isRoot) jobs.push(loadTenant(), loadDomains(), loadProviders()); }
+  if (IS_GLOBAL) { jobs.push(loadAccepted()); if (p.isRoot) jobs.push(loadTenant(), loadDomains(), loadProviders()); }
   await Promise.all(jobs);
 }
-function renderDetailHeader() {
-  $('d-name').textContent = (SELECTED.is_class ? '🎓 ' : '') + SELECTED.name;
+function renderDetailHeader(p) {
+  p = p || computePerms();
+  // breadcrumb: caminho da raiz até esta unidade (clicável quando acessível)
+  const byId = new Map(UNITS.map(u => [u.id, u]));
+  const path = []; let cur = SELECTED;
+  while (cur) { path.unshift(cur); cur = cur.parent_id != null ? byId.get(cur.parent_id) : null; }
+  $('d-crumb').innerHTML = path.map((u, i) => {
+    const clickable = u.id !== SELECTED.id && u.access !== 'context';
+    return (i ? '<span class="sep">›</span>' : '') +
+      `<span class="seg${u.access === 'context' ? ' ctx' : ''}" ${clickable ? `data-uid="${u.id}"` : ''}>${esc(u.name)}</span>`;
+  }).join('');
+  $('d-crumb').querySelectorAll('.seg[data-uid]').forEach(s => s.onclick = () => selectUnit(Number(s.dataset.uid)));
+  $('d-name').textContent = SELECTED.name;
   $('d-label').textContent = SELECTED.label ? `(${SELECTED.label})` : '';
+  const badges = [];
+  if (SELECTED.is_class) badges.push('<span class="badge-pill">🎓 turma</span>');
+  if (!SELECTED.is_active) badges.push('<span class="badge-pill">inativa</span>');
+  if (SELECTED.access === 'view') badges.push('<span class="badge-pill">consulta</span>');
+  $('d-badges').innerHTML = badges.join(' ');
+  $('d-rename').classList.toggle('hidden', !p.canConfigAbove);
+  $('d-class').classList.toggle('hidden', !(p.canAdminSelf && (SELECTED.is_class || !p.hasChildren)));
   $('d-class').textContent = SELECTED.is_class ? 'Desmarcar turma' : 'Marcar como turma';
+  $('d-toggle').classList.toggle('hidden', !p.canAdminSelf);
   $('d-toggle').textContent = SELECTED.is_active ? 'Desativar' : 'Reativar';
   $('d-budget').value = SELECTED.budget_usd ?? '';
+  $('d-struct-msg').textContent = '';
 }
 $('d-class').onclick = async () => {
   const { ok, j } = await api('PATCH', `/admin/units/${SELECTED.id}`, { is_class: !SELECTED.is_class });
-  if (!ok) { $('m-msg').textContent = 'Falha: ' + (j.error === 'has_children' ? 'turma não pode ter filhos — remova/mova as unidades filhas antes' : j.error === 'has_works' ? 'há trabalhos vinculados a esta turma' : j.error || ''); return; }
-  await loadUnits(); renderDetailHeader();
+  if (!ok) { $('d-struct-msg').textContent = 'Falha: ' + (CLASS_ERRORS[j.error] || j.error || ''); return; }
+  refreshSelected();
 };
 $('d-rename').onclick = () => { $('d-rename-row').classList.toggle('hidden'); $('d-rename-name').value = SELECTED.name; $('d-rename-label').value = SELECTED.label || ''; };
 $('d-rename-save').onclick = async () => {
-  const { ok } = await api('PATCH', `/admin/units/${SELECTED.id}`, { name: $('d-rename-name').value.trim(), label: $('d-rename-label').value.trim() || null });
-  if (ok) { $('d-rename-row').classList.add('hidden'); await loadUnits(); renderDetailHeader(); }
+  const { ok, j } = await api('PATCH', `/admin/units/${SELECTED.id}`, { name: $('d-rename-name').value.trim(), label: $('d-rename-label').value.trim() || null });
+  if (!ok) { $('d-struct-msg').textContent = 'Falha: ' + (j.error || ''); return; }
+  $('d-rename-row').classList.add('hidden'); refreshSelected();
 };
 $('d-toggle').onclick = async () => {
   const { ok } = await api('PATCH', `/admin/units/${SELECTED.id}`, { is_active: !SELECTED.is_active });
-  if (ok) { await loadUnits(); renderDetailHeader(); }
+  if (ok) refreshSelected();
 };
 async function loadBudget() {
   const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/budget`);
@@ -441,14 +522,23 @@ async function loadWorks() {
   const KIND_PT = { oral_realtime: 'prova oral', interview: 'entrevista', scenario: 'cenário' };
   const kindOf = (w) => (KIND_PT[w.kind] || w.kind) + (w.interview_variant === 'realtime' ? ' (tempo real)' : '');
   $('d-works').innerHTML = (j.works || []).map(w => {
-    const open = j.can_manage
+    const open = j.can_edit
       ? `<a class="btn btn-sm" href="/w/${esc(w.work_token)}" style="margin-left:auto">Abrir (professor)</a>`
       : (w.my_submission_token
           ? `<a class="btn btn-sm" href="/s/${esc(w.my_submission_token)}" style="margin-left:auto">Meu envio</a>`
-          : `<span class="muted" style="margin-left:auto">sem envio</span>`);
+          : `<span class="muted" style="margin-left:auto">consulta</span>`);
     return `<div class="member-row"><span>${esc(w.name)}</span>` +
       `<span class="muted">${esc(kindOf(w))}${w.is_active ? '' : ' · inativo'}</span>` + open + `</div>`;
   }).join('') || '<p class="hint">Nenhum trabalho nesta turma ainda.</p>';
+}
+// Criar trabalho NA turma (professor da turma / admin global). Grava unit_id=turma;
+// o professor termina de configurar em /w/:token (a tela de professor existente).
+$('nw-create').onclick = async () => {
+  const name = $('nw-name').value.trim();
+  if (!name) { $('nw-msg').textContent = 'Informe o nome do trabalho.'; return; }
+  const { ok, j } = await api('POST', '/admin/works', { name, unit_id: SELECTED.id, kind: $('nw-kind').value });
+  $('nw-msg').textContent = ok ? 'Trabalho criado.' : 'Falha: ' + (j.error === 'forbidden_unit' ? 'só professor desta turma cria trabalho' : j.error || '');
+  if (ok) { $('nw-name').value = ''; loadWorks(); }
 }
 // Candidatos DISPONÍVEIS (do ancestral mais próximo que tiver gente no papel).
 // Escolher preenche o campo de vínculo — a inscrição continua sendo o clique

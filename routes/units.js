@@ -92,19 +92,35 @@ router.post("/admin/units", requireAuth, json, async (req, res) => {
     } catch (err) { return httpErr(res, err); }
 });
 
+// "Configurar de cima" (decisão de 06/08/2026): NOME e ORÇAMENTO de uma unidade
+// são definidos pelo admin do PAI dela — o admin de X não mexe no nome/teto de X,
+// e sim nos dos filhos de X. Na raiz isso vira "só admin global" (é aquisição,
+// envolve pagamento — equipe ORATIA). Já "operar a própria unidade" (membros,
+// flag de turma, ativar) é do admin da própria unidade. Admin global faz tudo.
+async function canConfigureFromAbove(userId, unitId) {
+    if (await isGlobalAdmin(userId)) return true;
+    const u = await getUnit(unitId);
+    if (!u || u.parent_id == null) return false; // raiz → só global
+    return canAdminUnit(userId, u.parent_id);
+}
+
 router.patch("/admin/units/:unitId", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        // nome/rótulo = configurar de cima
         if (typeof req.body?.name === "string") {
+            if (!(await canConfigureFromAbove(uid(req), unitId))) return res.status(403).json({ error: "forbidden_from_above" });
             const u = await renameUnit(unitId, req.body.name, req.body?.label ?? null);
             return res.json({ unit: u });
         }
+        // ativar/desativar e flag de turma = operar a própria unidade
         if (typeof req.body?.is_active === "boolean") {
+            if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
             const u = await setUnitActive(unitId, req.body.is_active);
             return res.json({ unit: u });
         }
         if (typeof req.body?.is_class === "boolean") {
+            if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
             const u = await setUnitClass(unitId, req.body.is_class);
             return res.json({ unit: u });
         }
@@ -113,17 +129,15 @@ router.patch("/admin/units/:unitId", requireAuth, json, async (req, res) => {
 });
 
 // Teto de US$ desta unidade (Gate A — RESERVA contra o saldo do pai; reduzir
-// devolve; null remove o teto e a unidade volta a consumir do ancestral).
-// A permissão é no PAI (é o saldo dele que a reserva mexe); para unidade raiz,
-// admin da própria.
+// devolve; null remove o teto). "Configurar de cima": editável pelo admin do PAI
+// (é o saldo dele que a reserva mexe); na RAIZ, só admin global (aquisição).
 router.put("/admin/units/:unitId/budget", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     const raw = req.body?.budget_usd;
     try {
         const unit = await getUnit(unitId);
         if (!unit) return res.status(404).json({ error: "unit not found" });
-        const permUnit = unit.parent_id ?? unitId;
-        if (!(await canAdminUnit(uid(req), permUnit))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canConfigureFromAbove(uid(req), unitId))) return res.status(403).json({ error: "forbidden_from_above" });
         const budget = raw === null || raw === "" || raw === undefined ? null : Number(raw);
         const u = await setUnitBudgetReserved(unitId, budget);
         res.json({ unit: u });
@@ -339,15 +353,20 @@ router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
         const userId = uid(req);
+        const isGlobal = await isGlobalAdmin(userId);
         // A unidade tem de aceitar o provedor do login (mesma trava do my-units).
-        if (!(await isGlobalAdmin(userId))) {
+        if (!isGlobal) {
             const acceptMap = await acceptedProviderMap();
             const p = req.session.authProvider || { key: "local", kind: "local" };
             if (!unitAcceptsProvider(acceptMap, unitId, p.key, p.kind)) return res.status(403).json({ error: "forbidden" });
         }
         const roles = await resolveEffectiveRoles(userId, unitId);
-        const manages = (await canAdminUnit(userId, unitId)) || roles.has("professor");
-        if (!manages && !roles.has("aluno")) return res.status(403).json({ error: "forbidden" });
+        // VER a lista: qualquer vínculo com a unidade (admin/professor/aluno) ou global.
+        const canView = isGlobal || roles.size > 0;
+        if (!canView) return res.status(403).json({ error: "forbidden" });
+        // EDITAR trabalhos (token + criar): só professor DA turma ou admin global.
+        // Admin de unidade (não-global) vê em consulta, não edita — decisão de 06/08.
+        const canEdit = isGlobal || roles.has("professor");
         const works = await pool.query(
             `SELECT id, work_token, name, kind, interview_variant, is_active, created_at
                FROM works WHERE unit_id = $1 ORDER BY created_at DESC`,
@@ -356,9 +375,9 @@ router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
         const out = [];
         for (const w of works.rows) {
             const item = { name: w.name, kind: w.kind, interview_variant: w.interview_variant, is_active: w.is_active };
-            if (manages) {
+            if (canEdit) {
                 item.work_token = w.work_token;
-            } else {
+            } else if (roles.has("aluno")) {
                 const sub = await pool.query(
                     `SELECT submission_token FROM submissions
                       WHERE work_id = $1 AND student_user_id = $2 LIMIT 1`,
@@ -368,7 +387,7 @@ router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
             }
             out.push(item);
         }
-        res.json({ can_manage: manages, works: out });
+        res.json({ can_edit: canEdit, works: out });
     } catch (err) { return httpErr(res, err); }
 });
 
