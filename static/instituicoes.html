@@ -27,6 +27,9 @@
   .ent-head { font-weight: 600; border-bottom: 1px solid var(--c-border, #d7dde5); }
   .section-gap { margin-top: var(--sp-5); }
   .member-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: 4px 0; }
+  /* Trilho "Operar" largo: listas fluem em 2+ colunas quando há espaço, em vez de
+     esticar linhas de coluna única (nota de design de largura, 06/08/2026). */
+  #d-members, #d-invites { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); column-gap: var(--sp-6); }
   .badge-role { font-size: .75rem; padding: 1px 7px; border-radius: 9px; background: var(--c-bg-2, #e5e7eb); }
   .badge-role.admin_global, .badge-role.admin_unidade { background: #1c3557; color: #fff; }
   .row { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
@@ -55,7 +58,7 @@
   </div>
 </header>
 
-<main class="page">
+<main class="page page-operar">
   <div id="app-screen" class="hidden">
     <div class="page-header">
       <h1>Unidades</h1>

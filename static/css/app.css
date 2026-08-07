@@ -236,6 +236,12 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
   margin: 0 auto;
   padding: var(--sp-6) var(--sp-5);
 }
+/* Trilho "Operar" (admin, painéis, master-detail): largura fluida com teto alto,
+   cresce com o monitor. Ver docs/design de largura de telas (nota de 06/08/2026).
+   Usar junto de .page: class="page page-operar" (sobrescreve só o max-width). */
+.page-operar {
+  max-width: min(94vw, 1600px);
+}
 
 .page-header { margin-bottom: var(--sp-5); }
 .page-header .subtitle { color: var(--ink-500); font-size: var(--fs-md); margin-top: var(--sp-1); }
