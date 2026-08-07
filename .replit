@@ -42,6 +42,7 @@ run = ["node", "server.js"]
 [userenv]
 
 [userenv.shared]
+PUBLIC_BASE_URL = "https://oratia.education"
 
 [postMerge]
 path = "scripts/post-merge.sh"
