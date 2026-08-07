@@ -12,6 +12,10 @@
   .login-wrap { max-width: 380px; margin: var(--sp-10) auto 0; }
   .layout { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: var(--sp-5); align-items: start; }
   @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  /* Workbench: a árvore vira barra lateral FIXA que rola sozinha, sempre visível
+     enquanto o detalhe rola (nota de design de largura, #3, 06/08/2026). */
+  .sidebar { position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px); overflow-y: auto; }
+  @media (max-width: 860px) { .sidebar { position: static; max-height: none; overflow: visible; } }
   .tree-node { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 8px; border-radius: 6px; cursor: pointer; }
   .tree-node:hover { background: var(--c-bg-2, #eef1f5); }
   .tree-node.selected { background: var(--c-accent, #2563eb); color: #fff; }
@@ -66,8 +70,8 @@
     </div>
 
     <div class="layout">
-      <!-- ==== coluna esquerda: árvore ==== -->
-      <div>
+      <!-- ==== coluna esquerda: árvore (barra lateral fixa) ==== -->
+      <div class="sidebar">
         <div class="card">
           <h3 class="card-title">Unidades</h3>
           <div id="tree"></div>
