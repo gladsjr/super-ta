@@ -43,6 +43,9 @@ run = ["node", "server.js"]
 
 [userenv.shared]
 
+[userenv.production]
+PUBLIC_BASE_URL = "https://oratia.education"
+
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 180000
