@@ -47,14 +47,23 @@
 
   function inject() {
     swapLogos(theme); // alinha as logos ao tema atual
-    var host = document.querySelector(".topbar-right") || document.querySelector(".topbar-inner");
-    if (!host) return; // páginas sem topbar ainda respeitam o tema; só não têm botão
     btn = document.createElement("button");
     btn.type = "button";
     btn.className = "theme-toggle";
-    if (!host.classList.contains("topbar-right")) btn.style.marginLeft = "auto";
     btn.addEventListener("click", function () { setTheme(theme === "dark" ? "light" : "dark"); });
-    host.appendChild(btn);
+    var host = document.querySelector(".topbar-right") || document.querySelector(".topbar-inner");
+    if (host) {
+      if (!host.classList.contains("topbar-right")) btn.style.marginLeft = "auto";
+      host.appendChild(btn);
+    } else {
+      // Sem slot no topbar (login, ativação, etc.): botão FLUTUANTE fixo, para o
+      // toggle existir em TODA tela que carrega este script.
+      btn.style.position = "fixed";
+      btn.style.top = "10px";
+      btn.style.right = "12px";
+      btn.style.zIndex = "50";
+      document.body.appendChild(btn);
+    }
     updateBtn();
   }
 
