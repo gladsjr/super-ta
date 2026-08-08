@@ -22,7 +22,6 @@ import { transcribeAudio, synthesizeSpeech, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
 import { meteredStt } from "../lib/billing.js";
 import { decideChatDedup, markChatDone, abortChatDedup } from "../lib/chatDedup.js";
-import { drawForWork } from "../lib/packages.js";
 import { scheduleKeepalive, cancelKeepalive } from "../lib/cacheKeepalive.js";
 import { STT_MODEL, TTS_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
@@ -646,29 +645,10 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         });
     }
 
-    // Gate B (pacotes): no início da tentativa, saca 1 item do pool da unidade.
-    // Trabalho fora de pacote → skipped (só vale o orçamento US$, já checado por
-    // requireWithinBudget acima). Esgotado → 402 (o primeiro portão que estoura
-    // bloqueia). Idempotente por submissão (não saca de novo num re-upload).
-    try {
-        const draw = await drawForWork({
-            workId: req.work.id,
-            submissionId: req.submission.id,
-            drawnByUserId: req.submission.student_user_id ?? null,
-        });
-        if (!draw.ok) {
-            return res.status(402).json({
-                error: "entitlement_exhausted",
-                gate: "package",
-                detail: draw.reason === "no_counter"
-                    ? "Este trabalho está vinculado a um pacote sem cota configurada na unidade. Procure o professor/administrador."
-                    : "A cota de pacote para este tipo de atividade foi esgotada na unidade. Procure o professor/administrador.",
-            });
-        }
-    } catch (err) {
-        log.error("ENTITLEMENT", `draw failed submission=${token}: ${err.message}`);
-        return res.status(500).json({ error: "internal error" });
-    }
+    // Gate B (pacotes): a cota já foi RESERVADA quando o professor gerou este
+    // token (ver routes/work.js#POST submissions + lib/packages.js#reserveSeats).
+    // A execução não saca de novo — o assento é deste token. Só o orçamento US$
+    // (requireWithinBudget, acima) é checado por tentativa.
 
     const studentBuffer = req.file.buffer;
     const studentFilename = req.file.originalname;

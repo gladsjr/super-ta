@@ -740,6 +740,10 @@ function renderSubmissionsTable() {
     const abrirLink = s.is_test
       ? `<a href="${url}" target="_blank" title="Abrir e simular o aluno (entrevista de teste)">abrir ↗</a> · `
       : '';
+    // Apagar só faz sentido em token NÃO iniciado: devolve a cota do pacote (se houver).
+    const deleteBtn = s.status === 'pending'
+      ? ` · <button class="btn btn-sm" onclick="deleteToken('${s.submission_token}')" title="Apagar este envio (o aluno ainda não começou). Devolve a cota do pacote, se houver.">apagar</button>`
+      : '';
     const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
     return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
@@ -751,9 +755,21 @@ function renderSubmissionsTable() {
       </td>
       <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge}</td>
       <td>${convCell}</td>
-      <td>${abrirLink}${actionBtn}</td>
+      <td>${abrirLink}${actionBtn}${deleteBtn}</td>
     </tr>`;
   }).join('');
+}
+
+// Apaga um token não iniciado e devolve a cota do pacote (se houver). O backend
+// recusa (409) se o aluno já começou.
+async function deleteToken(submissionToken) {
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(submissionToken)}`, { method: 'DELETE' });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    alert('Falha: ' + (j.detail || j.error || 'ao apagar'));
+    return;
+  }
+  load();
 }
 
 async function toggleBlock(submissionToken, isBlocked) {
@@ -1341,7 +1357,7 @@ async function createSingle() {
     body: JSON.stringify({ label, count, is_test })
   });
   const j = await r.json();
-  if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
+  if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || 'ao gerar'); return; }
   msg.textContent = `${j.submissions.length} token(s) gerados.`;
   document.getElementById('sub-label').value = '';
   load();
@@ -1360,7 +1376,7 @@ async function createBulk() {
     body: JSON.stringify({ labels, is_test: document.getElementById('sub-is-test').checked }),
   });
   const j = await r.json();
-  if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
+  if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || 'ao gerar'); return; }
   msg.textContent = `${j.submissions.length} entrevista(s) criada(s).`;
   ta.value = '';
   load();

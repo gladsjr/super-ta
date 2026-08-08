@@ -171,11 +171,21 @@ contadores de `ceil(consumed/item_quantity)`). **Devolução**:
 `returnToParent` devolve pacotes livres da filha ao pai (espelho da delegação;
 rota `/admin/units/:id/packages/return`).
 
-Saque (Gate B) no **início da execução** (`/upload` na entrevista):
-`drawForWork` → `drawEntitlement` faz `UPDATE ... consumed_qty+1 WHERE
-consumed_qty+1 <= (granted−delegated)×item_quantity RETURNING` (0 linhas ⇒
-esgotado ⇒ 402). Atômico e idempotente por submissão. Trabalho fora de pacote é
-no-op (só vale o Portão A).
+**Reserva na criação do TOKEN de envio** (decisão de 08/08/2026 — antes era saque
+na execução): 1 token de envio = 1 assento. A cota é reservada quando o professor
+GERA o token (`POST /w/:t/submissions`), não quando o aluno executa — é ali que
+ele "ameaça gastar", então o limite aparece na hora certa e vale para TODOS os
+tipos de uma vez (a criação de token é ponto único; antes só a entrevista por
+mensagem sacava). `lib/packages.js#reserveSeats` reserva N assentos na MESMA
+transação da criação dos tokens, **ALL-OR-NOTHING** (`UPDATE ... consumed_qty+N
+WHERE consumed_qty+N <= capacidade`; se não couber o lote inteiro, não cria nada
+⇒ 402). **Token de teste também conta** (é custo). `consumed_qty` passa a contar
+tokens (assentos reservados), não execuções; `entitlement_consumption` registra a
+reserva por submissão. Trabalho fora de pacote → reserva no-op (só o Portão A).
+**Devolução**: só ao APAGAR um token que o aluno NÃO iniciou (status pending):
+`releaseForSubmission` credita o assento de volta (`DELETE /w/:t/submissions/:sub`,
+409 se já começou — houve custo). Apagar o trabalho inteiro credita os assentos de
+seus tokens pending (`releaseForWork`, antes do delete).
 
 ### A "linguagem" de pacotes (DSL)
 `config/packages/*.yaml` é a fonte da verdade (config pura, **nunca vai ao LLM**),

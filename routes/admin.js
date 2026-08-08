@@ -8,7 +8,7 @@ import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword, requireAuth } from "../auth.js";
 import { isGlobalAdmin, resolveEffectiveRoles, addMembership } from "../lib/rbac.js";
 import { getUnit } from "../lib/units.js";
-import { getPackageSpec } from "../lib/packages.js";
+import { getPackageSpec, releaseForWork } from "../lib/packages.js";
 import * as db from "../lib/db.js";
 import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
@@ -127,6 +127,9 @@ router.delete("/admin/works/:workToken", requireAdmin, async (req, res) => {
     try {
         const work = await db.getWorkByToken(workToken);
         if (!work) return res.status(404).json({ error: "work not found" });
+        // Devolve ao pool os assentos dos tokens NÃO usados ANTES de apagar (o
+        // cascade removeria as reservas sem creditar de volta). Ver lib/packages.js.
+        await releaseForWork(work.id);
         const ok = await db.deleteWork(work.id);
         if (!ok) return res.status(404).json({ error: "work not found" });
         log.info("ADMIN", `work DELETED token=${workToken} name="${work.name}" by=${req.session.user.username}`);

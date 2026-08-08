@@ -505,12 +505,15 @@
       const blockBtn = s.is_blocked
         ? `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta prova">Liberar</button>`
         : `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', true)" title="Pausa a prova; o aluno perde acesso até você liberar">Bloquear</button>`;
+      const delBtn = s.status === 'pending'
+        ? ` · <button class="btn btn-sm" onclick="deleteToken('${s.submission_token}')" title="Apagar este envio (o aluno ainda não começou). Devolve a cota do pacote, se houver.">apagar</button>`
+        : '';
       return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
         <td>${esc(s.student_label || '')}${test}</td>
         <td><code class="tok">${s.submission_token}</code> <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button></td>
         <td>${STATUS_PILL[s.status] || esc(s.status)}${s.is_blocked ? ' <span class="badge-blocked">bloqueada</span>' : ''}</td>
         <td>${vid}</td>
-        <td>${abrir}${blockBtn}</td>
+        <td>${abrir}${blockBtn}${delBtn}</td>
       </tr>`;
     }).join('');
   }
@@ -523,6 +526,13 @@
   window.toggleBlockOral = async (token, block) => {
     const r = await fetch(`${API}/submissions/${token}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_blocked: block }) });
     if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao alterar bloqueio')); return; }
+    await refreshSubs();
+  };
+
+  // Apaga um token não iniciado e devolve a cota do pacote (se houver). 409 se já começou.
+  window.deleteToken = async (token) => {
+    const r = await fetch(`${API}/submissions/${token}`, { method: 'DELETE' });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.detail || j.error || 'ao apagar')); return; }
     await refreshSubs();
   };
 
@@ -843,7 +853,7 @@
     try {
       const r = await fetch(`${API}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
       msg.textContent = `${j.submissions.length} link(s) gerado(s).`;
       document.getElementById('lk-names').value = '';
       await load();
