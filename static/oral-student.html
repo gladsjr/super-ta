@@ -70,7 +70,13 @@
       <!-- Página 1: verificações que NÃO dependem da câmera — conexão, silêncio e
            captação da fala (agrupadas). As fotos de posição ficam na página 2. -->
       <div id="instr" style="display:none">
-        <p style="margin-top:0; background:#eef4ff; border:1px solid #cfe0f5; border-radius:8px; padding:8px 12px"><strong>🎧 Use fones de ouvido.</strong></p>
+        <!-- Fones: requisito em DESTAQUE + checkbox obrigatório. Sem fones, o
+             microfone capta a voz do avaliador (eco/feedback) e degrada a prova. -->
+        <div style="background:#eef4ff; border:2px solid #3b6fd4; border-radius:10px; padding:14px 16px; margin:0 0 14px">
+          <div style="font-size:18px; font-weight:700">🎧 Use fones de ouvido</div>
+          <p style="margin:6px 0 12px; font-size:14px; line-height:1.4">A prova é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do avaliador — isso causa eco, pode te cortar e atrapalha a sua nota.</p>
+          <label class="accept" style="font-size:15px"><input type="checkbox" id="hp-check"/> <span><strong>Estou usando fones de ouvido</strong></span></label>
+        </div>
         <!-- Conexão -->
         <div class="banner wait" id="conn-banner">Testando a conexão…</div>
         <!-- Silêncio: medidor de ruído CONTÍNUO -->
@@ -87,7 +93,7 @@
           <div style="text-align:center"><button class="btn" id="calib-rec-btn">🎤 Gravar e ler a frase</button></div>
           <div class="banner wait" id="calib-status" style="margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
         </div>
-        <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
+        <div style="margin-top:18px"><button class="btn" id="to-check-btn" disabled>Continuar</button></div>
       </div>
 
       <!-- Página 2: posicionamento na câmera (a prova começa sozinha quando ok).
@@ -709,6 +715,8 @@
       };
     }
     $('to-check-btn').onclick = continueToCheck;
+    // Fones obrigatórios: só libera o "Continuar" com o checkbox marcado.
+    $('hp-check').addEventListener('change', (e) => { $('to-check-btn').disabled = !e.target.checked; });
     $('pos-begin-btn').onclick = beginExam;
 
     async function uploadVideo() {
