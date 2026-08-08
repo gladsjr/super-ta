@@ -123,6 +123,20 @@ export async function seedCivilIdTypes() {
   }
 }
 
+// Rótulos de unidade (migration 070) — padrão enum-por-tabela. Fonte: UNIT_LABELS
+// em lib/units.js. Idempotente; sincroniza nome. 'turma' é o tipo especial.
+export async function seedUnitLabels() {
+  const { UNIT_LABELS } = await import("./lib/units.js");
+  for (const l of UNIT_LABELS) {
+    await pool.query(
+      `INSERT INTO unit_labels (key, name) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name
+       WHERE unit_labels.name IS DISTINCT FROM EXCLUDED.name`,
+      [l.key, l.name]
+    );
+  }
+}
+
 // Provedores de autenticação BASE (instâncias configuradas — migration 066).
 // 'local' sempre existe; 'google' existe para ancorar identidades e política
 // por unidade (segredos ficam no env: GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET —

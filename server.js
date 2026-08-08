@@ -20,6 +20,7 @@ import {
     seedInitialUsers,
     seedRoles,
     seedCivilIdTypes,
+    seedUnitLabels,
     seedAuthProviders,
     seedBootstrapAdmin,
     seedInterviewerTemplates,
@@ -169,6 +170,11 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedCivilIdTypes();
     } catch (err) {
         log.error("BOOT", `seedCivilIdTypes failed: ${err.message}`);
+    }
+    try {
+        await seedUnitLabels();
+    } catch (err) {
+        log.error("BOOT", `seedUnitLabels failed: ${err.message}`);
     }
     try {
         await seedAuthProviders();

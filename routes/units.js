@@ -12,7 +12,7 @@ import express from "express";
 import { requireAdmin } from "../lib/middleware.js";
 import { getUserByLogin, requireAuth } from "../auth.js";
 import {
-    listUnits, getUnit, createUnit, renameUnit, setUnitActive, setUnitClass,
+    listUnits, getUnit, createUnit, renameUnit, setUnitActive, setUnitLabel, listUnitLabels,
 } from "../lib/units.js";
 import {
     isGlobalAdmin, canAdminUnit, resolveEffectiveRoles,
@@ -29,6 +29,7 @@ import {
     buildInviteEmailsText,
 } from "../lib/invites.js";
 import { acceptedProviderMap, unitAcceptsProvider } from "../lib/tenants.js";
+import { publicBaseUrl } from "../lib/publicUrl.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -61,6 +62,14 @@ router.get("/admin/units", requireAdmin, async (_req, res) => {
     } catch (err) { return httpErr(res, err); }
 });
 
+// Tipos de unidade (rótulos). Lookup estático — qualquer admin pode ler p/ montar
+// o <select> de tipo. 'turma' é o especial (dispara is_class).
+router.get("/admin/unit-labels", requireAdmin, async (_req, res) => {
+    try {
+        res.json({ labels: await listUnitLabels() });
+    } catch (err) { return httpErr(res, err); }
+});
+
 // Cria unidade. Raiz (sem parent) exige admin_global; filha exige admin na unidade-pai.
 router.post("/admin/units", requireAuth, json, async (req, res) => {
     const parentId = req.body?.parent_id ?? null;
@@ -73,8 +82,7 @@ router.post("/admin/units", requireAuth, json, async (req, res) => {
         const unit = await createUnit({
             name: req.body?.name,
             parentId: parentId == null ? null : Number(parentId),
-            label: req.body?.label ?? null,
-            isClass: req.body?.is_class === true,
+            labelId: req.body?.label_id != null && req.body.label_id !== "" ? Number(req.body.label_id) : null,
         });
         // Teto na criação = reserva contra o saldo do pai (Gate A). Se não
         // couber, desfaz a criação — sem unidade-fantasma sem teto.
@@ -92,11 +100,13 @@ router.post("/admin/units", requireAuth, json, async (req, res) => {
     } catch (err) { return httpErr(res, err); }
 });
 
-// "Configurar de cima" (decisão de 06/08/2026): NOME e ORÇAMENTO de uma unidade
-// são definidos pelo admin do PAI dela — o admin de X não mexe no nome/teto de X,
-// e sim nos dos filhos de X. Na raiz isso vira "só admin global" (é aquisição,
-// envolve pagamento — equipe ORATIA). Já "operar a própria unidade" (membros,
-// flag de turma, ativar) é do admin da própria unidade. Admin global faz tudo.
+// "Configurar de cima" (decisão de 06/08/2026): NOME, TIPO (rótulo) e ORÇAMENTO de
+// uma unidade são definidos pelo admin do PAI dela — o admin de X não mexe no
+// nome/tipo/teto de X, e sim nos dos filhos de X. Na raiz isso vira "só admin
+// global" (é aquisição, envolve pagamento — equipe ORATIA). Já "operar a própria
+// unidade" (membros, ativar) é do admin da própria unidade. Admin global faz tudo.
+// Obs.: o TIPO virou "configurar de cima" com a migration 070 (turma deixou de ser
+// um flag operável na unidade e passou a ser um rótulo, como o nome).
 async function canConfigureFromAbove(userId, unitId) {
     if (await isGlobalAdmin(userId)) return true;
     const u = await getUnit(unitId);
@@ -107,21 +117,23 @@ async function canConfigureFromAbove(userId, unitId) {
 router.patch("/admin/units/:unitId", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        // nome/rótulo = configurar de cima
+        // nome = configurar de cima
         if (typeof req.body?.name === "string") {
             if (!(await canConfigureFromAbove(uid(req), unitId))) return res.status(403).json({ error: "forbidden_from_above" });
-            const u = await renameUnit(unitId, req.body.name, req.body?.label ?? null);
+            const u = await renameUnit(unitId, req.body.name);
             return res.json({ unit: u });
         }
-        // ativar/desativar e flag de turma = operar a própria unidade
+        // tipo (rótulo, inclui turma) = configurar de cima
+        if ("label_id" in (req.body || {})) {
+            if (!(await canConfigureFromAbove(uid(req), unitId))) return res.status(403).json({ error: "forbidden_from_above" });
+            const labelId = req.body.label_id != null && req.body.label_id !== "" ? Number(req.body.label_id) : null;
+            const u = await setUnitLabel(unitId, labelId);
+            return res.json({ unit: u });
+        }
+        // ativar/desativar = operar a própria unidade
         if (typeof req.body?.is_active === "boolean") {
             if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
             const u = await setUnitActive(unitId, req.body.is_active);
-            return res.json({ unit: u });
-        }
-        if (typeof req.body?.is_class === "boolean") {
-            if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
-            const u = await setUnitClass(unitId, req.body.is_class);
             return res.json({ unit: u });
         }
         return res.status(400).json({ error: "nothing to update" });
@@ -424,7 +436,7 @@ router.get("/admin/units/:unitId/invites", requireAuth, async (req, res) => {
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
         const invites = await listUnitInvites(unitId);
-        const base = `${req.protocol}://${req.get("host")}`;
+        const base = publicBaseUrl(req);
         // Sem servidor de e-mail, o admin precisa do LINK para enviar à mão — só
         // dos convites pendentes (os já usados/cancelados não têm link ativo).
         res.json({
@@ -442,7 +454,7 @@ router.get("/admin/units/:unitId/invites.txt", requireAuth, async (req, res) => 
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
         const invites = await listUnitInvites(unitId);
-        const base = `${req.protocol}://${req.get("host")}`;
+        const base = publicBaseUrl(req);
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="convites-unidade-${unitId}.txt"`);
         res.send(buildInviteEmailsText(invites, base));
@@ -551,7 +563,8 @@ router.post("/admin/units/:unitId/packages/return", requireAuth, json, async (re
 // Import CSV (integração gradual — degrau 1). Formato mínimo, sem dependência:
 // cabeçalho name,parent_name,label,budget_usd — uma unidade por linha. parent_name
 // deve referir uma unidade já existente OU criada numa linha anterior. Cria com
-// source='imported'. Só admin_global (cria raízes).
+// source='imported'. Só admin_global (cria raízes). A coluna `label` casa por
+// KEY ou NOME do rótulo (case-insensitive); `is_class=true` força tipo 'turma'.
 // ---------------------------------------------------------------------------
 router.post("/admin/units/import-csv", requireAdmin, express.text({ type: "*/*", limit: "256kb" }), async (req, res) => {
     try {
@@ -566,6 +579,18 @@ router.post("/admin/units/import-csv", requireAdmin, express.text({ type: "*/*",
         const iClass = header.indexOf("is_class");
         if (iName < 0) return res.status(400).json({ error: "csv_missing_name_column" });
 
+        // Resolve rótulo do CSV (key ou nome) → id. turma tem tratamento especial.
+        const labels = await listUnitLabels();
+        const labelByKey = new Map(labels.map((l) => [l.key, l.id]));
+        const labelByName = new Map(labels.map((l) => [l.name.toLowerCase(), l.id]));
+        const turmaId = labelByKey.get("turma") ?? null;
+        const resolveLabelId = (raw, isClass) => {
+            if (isClass) return turmaId;
+            const s = String(raw || "").trim().toLowerCase();
+            if (!s) return null;
+            return labelByKey.get(s) ?? labelByName.get(s) ?? null;
+        };
+
         const byName = new Map((await listUnits()).map((u) => [u.name, u.id]));
         const created = [];
         for (const line of lines.slice(1)) {
@@ -579,9 +604,9 @@ router.post("/admin/units/import-csv", requireAdmin, express.text({ type: "*/*",
             }
             const budget = iBudget >= 0 && cols[iBudget] ? Number(cols[iBudget]) : null;
             const isClass = iClass >= 0 && /^(true|1|sim|x)$/i.test(cols[iClass] || "");
+            const labelId = resolveLabelId(iLabel >= 0 ? cols[iLabel] : null, isClass);
             const unit = await createUnit({
-                name, parentId, label: iLabel >= 0 ? cols[iLabel] || null : null,
-                isClass, source: "imported",
+                name, parentId, labelId, source: "imported",
             });
             // Teto do CSV = reserva contra o saldo do pai (mesma regra da criação).
             if (budget != null) {

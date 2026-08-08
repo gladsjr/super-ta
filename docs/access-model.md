@@ -12,16 +12,26 @@ faltando só adaptadores.
 
 ## Unidades (árvore genérica e recursiva)
 
-`units(id, parent_id→units, name, label, source, budget_usd, is_class,
-is_active)` (migration 055). Não há tipos fixos: "instituição/campus/
-departamento/curso/turma" são só o `label` (exibição) + a profundidade. Qualquer
-nó contém qualquer nó — com UMA exceção estrutural:
+`units(id, parent_id→units, name, label_id→unit_labels, source, budget_usd,
+is_class, is_active)` (migration 055; `label` virou `label_id` na migration 070).
+O TIPO da unidade ("instituição/campus/departamento/curso/turma") é um RÓTULO de
+uma **tabela-lookup** `unit_labels(id, key, name)` — mesmo padrão-do-projeto de
+`roles`: id interno + `key` estável + nome traduzível, sincronizados no boot por
+`seedUnitLabels()` a partir de `UNIT_LABELS` (lib/units.js). Antes o tipo era
+string livre em `units.label`, o que redundava (o rótulo "turma" E o flag
+`is_class`) e divergia ("Curso" vs "curso"). Qualquer nó contém qualquer nó —
+com UMA exceção estrutural:
 
-**`is_class` marca a unidade como TURMA** (contexto de trabalho — decisão de
-04/08/2026). Trabalho é da turma, nunca do curso/campus/instituição: só unidades
-`is_class` recebem `works.unit_id`, e turma **não pode ter filhos**. O flag é
-ortogonal à posição: a raiz pode ser turma (professor independente = árvore de
-um nó). Validações em `lib/units.js` (`createUnit`/`setUnitClass`).
+**O tipo `turma` marca a unidade como TURMA** (contexto de trabalho — decisão de
+04/08/2026). `is_class` continua na tabela, mas agora é DERIVADO de
+`label.key == 'turma'` (mantido no código; ver `lib/units.js`). Trabalho é da
+turma, nunca do curso/campus/instituição: só unidades `is_class` recebem
+`works.unit_id`, e turma **não pode ter filhos**. O tipo é ortogonal à posição: a
+raiz pode ser turma (professor independente = árvore de um nó). Definir o tipo é
+**"configurar de cima"** (admin do pai, ou global na raiz), como o nome — deixou
+de ser um flag operável na própria unidade (migration 070). Validações em
+`lib/units.js` (`createUnit`/`setUnitLabel`): virar turma exige nó sem filhos;
+deixar de ser turma exige nó sem trabalhos.
 
 Helpers em `lib/units.js` (`ancestorUnitIds`/`descendantUnitIds` via CTE
 recursiva + CRUD). Rotas em `routes/units.js` (`/admin/units*`).
@@ -71,11 +81,12 @@ raiz→unidade, sempre visível) e abas por audiência: **Membros** (todos veem;
 edita quem administra a unidade ou acima), **Trabalhos** (só se `is_class`;
 todos veem, edita professor DA turma ou global — trabalho é do professor,
 `unit_id`=turma), **Orçamento** (US$ + pacotes; admin global + admin da
-unidade), **Configuração** (tenant; só global, só raiz). Regra-chave: **nome e
-orçamento de X são "configurados de cima"** — pelo admin do PAI de X (na raiz,
-só a equipe ORATIA, pois é aquisição); o admin de X configura seus FILHOS, não
-a si mesmo. Já **operar a própria unidade** (membros, flag de turma, ativar) é
-do admin da própria. Admin global faz tudo.
+unidade), **Configuração** (tenant; só global, só raiz). Regra-chave: **nome,
+tipo (rótulo) e orçamento de X são "configurados de cima"** — pelo admin do PAI
+de X (na raiz, só a equipe ORATIA, pois é aquisição); o admin de X configura seus
+FILHOS, não a si mesmo. Já **operar a própria unidade** (membros, ativar) é
+do admin da própria. Admin global faz tudo. (O tipo migrou para "de cima" na
+migration 070; antes turma era um flag operável na unidade.)
 
 **Contexto por instituição**: a pessoa atua numa instituição por vez — a raiz
 da árvore do vínculo. Papéis se SOMAM dentro do contexto (professor numa
