@@ -76,6 +76,13 @@ router.post("/admin/units", requireAuth, json, async (req, res) => {
     try {
         if (parentId == null) {
             if (!(await isGlobalAdmin(uid(req)))) return res.status(403).json({ error: "forbidden" });
+            // Raiz NUNCA sem limite: a raiz é a AQUISIÇÃO — nasce com teto US$, que
+            // desce por herança para toda a sub-árvore (filha sem teto puxa do saldo
+            // do ancestral). Assim sempre há um limite efetivo. Ver access-model.md.
+            const b = req.body?.budget_usd;
+            if (b == null || b === "" || !(Number(b) > 0)) {
+                return res.status(400).json({ error: "root_requires_budget" });
+            }
         } else {
             if (!(await canAdminUnit(uid(req), Number(parentId)))) return res.status(403).json({ error: "forbidden" });
         }

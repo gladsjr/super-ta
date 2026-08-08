@@ -87,9 +87,10 @@
             </div>
             <div class="row" style="margin-top: var(--sp-2)">
               <select id="nu-parent" class="select" style="flex:1; min-width:180px"><option value="">— raiz (sem pai) —</option></select>
+              <input id="nu-budget" class="input" type="number" min="0" step="0.01" placeholder="teto US$ (raiz: obrigatório)" style="width:180px"/>
               <button id="nu-create" class="btn btn-primary">Criar unidade</button>
             </div>
-            <p class="hint">O tipo <strong>Turma</strong> é onde os trabalhos nascem; turma não pode ter unidades filhas.</p>
+            <p class="hint">O tipo <strong>Turma</strong> é onde os trabalhos nascem; turma não pode ter unidades filhas. A <strong>raiz</strong> nasce com teto US$ (aquisição) — nunca sem limite; nas filhas o teto é opcional (herda do pai).</p>
             <div id="nu-msg" class="hint"></div>
           </div>
         </div>
@@ -395,11 +396,16 @@ function renderTree() {
 $('nu-create').onclick = async () => {
   const name = $('nu-name').value.trim();
   if (!name) { $('nu-msg').textContent = 'Nome obrigatório'; return; }
+  const isRoot = !$('nu-parent').value;
+  const budget = $('nu-budget').value.trim();
+  // Raiz nunca sem limite: teto US$ obrigatório na aquisição.
+  if (isRoot && !(Number(budget) > 0)) { $('nu-msg').textContent = 'A raiz precisa de teto US$ (aquisição) — nunca sem limite.'; return; }
   const body = { name, label_id: $('nu-label').value ? Number($('nu-label').value) : null };
   if ($('nu-parent').value) body.parent_id = Number($('nu-parent').value);
+  if (budget) body.budget_usd = Number(budget);
   const { ok, j } = await api('POST', '/admin/units', body);
-  $('nu-msg').textContent = ok ? 'Unidade criada.' : 'Falha: ' + (j.error || '');
-  if (ok) { $('nu-name').value = ''; $('nu-label').value = ''; loadUnits(); }
+  $('nu-msg').textContent = ok ? 'Unidade criada.' : 'Falha: ' + (j.error === 'root_requires_budget' ? 'a raiz precisa de teto US$ (aquisição)' : (j.error || ''));
+  if (ok) { $('nu-name').value = ''; $('nu-label').value = ''; $('nu-budget').value = ''; loadUnits(); }
 };
 $('csv-import').onclick = async () => {
   const text = $('csv-text').value.trim();
