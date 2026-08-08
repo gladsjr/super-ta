@@ -414,6 +414,14 @@ $('csv-import').onclick = async () => {
 // ---- detalhe (abas) ----
 const TAB_LABELS = { membros: 'Membros e papéis', trabalhos: 'Trabalhos', orcamento: 'Orçamento', config: 'Configuração' };
 const CLASS_ERRORS = { has_children: 'para virar turma a unidade não pode ter filhas — mova/remova as unidades filhas antes', has_works: 'há trabalhos vinculados — remova antes de deixar de ser turma', forbidden_from_above: 'sem permissão — o tipo é definido pelo admin do nível acima (ou admin global)', forbidden: 'sem permissão' };
+// Erros de pacote → mensagem acionável. type_overlap_on_class: numa TURMA não se
+// combinam pacotes com tipos sobrepostos (podem ter subsídio embutido).
+const PKG_ERR = (e) => ({
+  type_overlap_on_class: 'esta turma já tem um pacote que cobre esse tipo — na turma, pacotes com tipos sobrepostos não se combinam. Aloque mais do MESMO pacote, ou use outra turma.',
+  insufficient_packages: 'não há pacotes livres suficientes para alocar/delegar',
+  unknown_template: 'pacote desconhecido',
+  invalid_packages: 'quantidade inválida',
+}[e] || e || '');
 let ACTIVE_TAB = 'membros';
 
 // Permissões desta unidade para o usuário atual (o backend é a autoridade;
@@ -676,7 +684,7 @@ async function loadTemplates() {
 }
 $('p-allocate').onclick = async () => {
   const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/packages/allocate`, { template_key: $('p-template').value, packages: Number($('p-qty').value) });
-  $('p-msg').textContent = ok ? 'Alocado.' : 'Falha: ' + (j.error || '');
+  $('p-msg').textContent = ok ? 'Alocado.' : 'Falha: ' + PKG_ERR(j.error);
   if (ok) loadEntitlements();
 };
 async function loadEntitlements() {
@@ -709,7 +717,7 @@ async function loadEntitlements() {
     const childId = Number(card.querySelector('.del-child').value);
     const qty = Number(card.querySelector('.del-qty').value);
     const { ok, j: r } = await api('POST', `/admin/units/${childId}/packages/delegate`, { parent_allocation_id: Number(btn.dataset.alloc), packages: qty });
-    $('p-msg').textContent = ok ? 'Delegado.' : 'Falha: ' + (r.error || '');
+    $('p-msg').textContent = ok ? 'Delegado.' : 'Falha: ' + PKG_ERR(r.error);
     if (ok) loadEntitlements();
   });
   box.querySelectorAll('.ret-go').forEach(btn => btn.onclick = async () => {
