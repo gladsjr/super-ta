@@ -533,6 +533,7 @@ async function load() {
     return;
   }
   const j = await r.json();
+  if (j.public_base_url) window.ORATIA_BASE_URL = j.public_base_url;   // origem canônica dos links do aluno
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('work-name').textContent = j.work.name;
   document.getElementById('tb-context').textContent = j.work.name;
@@ -2003,7 +2004,8 @@ async function sendChat() {
 }
 
 async function copyStudentLink(btn, token) {
-  try { await navigator.clipboard.writeText(location.origin + '/s/' + token); }
+  const base = window.ORATIA_BASE_URL || location.origin;
+  try { await navigator.clipboard.writeText(base + '/s/' + token); }
   catch { return; }
   const prev = btn.textContent;
   btn.textContent = '✓';

@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import fs from "fs";
 import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
+import { publicBaseUrl } from "../lib/publicUrl.js";
 import * as db from "../lib/db.js";
 import { openai, clientForWork, apiKeyForWork } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
@@ -137,6 +138,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 grade_penalty: req.work.grade_penalty_json || null,
                 oral_calibration: calibration || null,
             },
+            public_base_url: publicBaseUrl(req),   // origem canônica p/ montar o link do aluno
             questions,
             submissions: (subs || []).map(s => ({
                 submission_token: s.submission_token,

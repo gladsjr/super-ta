@@ -87,7 +87,7 @@
     const tb = document.getElementById('sc-rows'); if (!tb) return;
     tb.innerHTML = RUNS.length ? RUNS.map(rowHtml).join('') : '<tr><td colspan="7" class="hint">Nenhum aluno ainda. Crie tokens acima.</td></tr>';
     tb.querySelectorAll('.sc-view').forEach(a => a.onclick = e => { e.preventDefault(); openDrawer(a.dataset.tok); });
-    tb.querySelectorAll('.sc-copy').forEach(a => a.onclick = async e => { e.preventDefault(); const url = location.origin + '/s/' + a.dataset.tok; try { await navigator.clipboard.writeText(url); const o = a.textContent; a.textContent = 'copiado ✓'; setTimeout(() => a.textContent = o, 1500); } catch { prompt('Copie o link do aluno:', url); } });
+    tb.querySelectorAll('.sc-copy').forEach(a => a.onclick = async e => { e.preventDefault(); const url = (window.ORATIA_BASE_URL || location.origin) + '/s/' + a.dataset.tok; try { await navigator.clipboard.writeText(url); const o = a.textContent; a.textContent = 'copiado ✓'; setTimeout(() => a.textContent = o, 1500); } catch { prompt('Copie o link do aluno:', url); } });
   }
   function renderRubric() {
     const el = document.getElementById('sc-rubric'); if (!el) return;

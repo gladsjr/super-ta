@@ -493,7 +493,7 @@
     if (!rows.length) { tableEl.classList.add('hidden'); fEmpty.classList.remove('hidden'); return; }
     fEmpty.classList.add('hidden'); tableEl.classList.remove('hidden');
     tbody.innerHTML = rows.map(s => {
-      const url = `${location.origin}/s/${s.submission_token}`;
+      const url = `${window.ORATIA_BASE_URL || location.origin}/s/${s.submission_token}`;
       const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
       // Acesso à prova COMPLETA (como na entrevista): transcrição + vídeo + alertas
       // + devolutiva + nota, na página de gerenciamento. Antes só linkava o vídeo cru.
@@ -515,7 +515,7 @@
     }).join('');
   }
   window.copyStudentLink = async (btn, token) => {
-    try { await navigator.clipboard.writeText(location.origin + '/s/' + token); } catch { return; }
+    try { await navigator.clipboard.writeText((window.ORATIA_BASE_URL || location.origin) + '/s/' + token); } catch { return; }
     const prev = btn.textContent; btn.textContent = '✓'; btn.disabled = true;
     setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
   };
@@ -529,7 +529,7 @@
   document.getElementById('sub-filter').onchange = renderSubsTable;
   document.getElementById('download-csv').onclick = () => {
     const lines = [['rotulo', 'token', 'url'].join(',')].concat(
-      SUBS.map(s => [`"${(s.student_label || '').replace(/"/g, '""')}"`, s.submission_token, `${location.origin}/s/${s.submission_token}`].join(','))
+      SUBS.map(s => [`"${(s.student_label || '').replace(/"/g, '""')}"`, s.submission_token, `${window.ORATIA_BASE_URL || location.origin}/s/${s.submission_token}`].join(','))
     );
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'provas-oral.csv'; a.click();
@@ -601,6 +601,7 @@
     const r = await fetch(`${API}/oral/info`);
     if (!r.ok) { document.getElementById('notfound').classList.remove('hidden'); return; }
     const j = await r.json();
+    if (j.public_base_url) window.ORATIA_BASE_URL = j.public_base_url;   // origem canônica dos links do aluno
     document.getElementById('main').classList.remove('hidden');
     document.getElementById('work-name').textContent = j.work.name;
     SUBS = j.submissions || [];

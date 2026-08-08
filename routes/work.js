@@ -9,6 +9,7 @@ import express from "express";
 import multer from "multer";
 import yaml from "js-yaml";
 import { requireWorkToken, requireProfessorSubmission, requireWithinBudget, requireEvaluationOutputsAllowed, sanitizeLabel } from "../lib/middleware.js";
+import { publicBaseUrl } from "../lib/publicUrl.js";
 import * as db from "../lib/db.js";
 import { pickRandomName } from "../lib/personas.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
@@ -96,6 +97,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 percent_used: balance?.percent_used ?? 100,
             },
             submissions,
+            public_base_url: publicBaseUrl(req),   // origem canônica p/ montar o link do aluno
         });
     } catch (err) {
         log.error("WORK", `info failed: ${err.message}`);
