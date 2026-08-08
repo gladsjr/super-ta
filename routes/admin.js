@@ -8,7 +8,7 @@ import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
 import { listUsers, createUser, deleteUser, changeOwnPassword, requireAuth } from "../auth.js";
 import { isGlobalAdmin, resolveEffectiveRoles, addMembership } from "../lib/rbac.js";
 import { getUnit } from "../lib/units.js";
-import { getPackageSpec, releaseForWork } from "../lib/packages.js";
+import { getPackageSpec, releaseForWork, templateForClassType } from "../lib/packages.js";
 import * as db from "../lib/db.js";
 import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
@@ -50,8 +50,10 @@ router.post("/admin/works", requireAuth, async (req, res) => {
     // Linkagem institucional OPCIONAL. Ausente = trabalho token-only (hoje).
     const unitId = req.body?.unit_id != null ? Number(req.body.unit_id) : null;
     const ownerUserId = req.body?.owner_user_id != null ? Number(req.body.owner_user_id) : null;
-    // Binding de pacote OPCIONAL (Portão B): template_key + item_key (item principal).
-    const templateKey = req.body?.template_key || null;
+    // Binding de pacote (Portão B): item_key (o TIPO) é o que o professor escolhe;
+    // o template é resolvido da turma (fluxo por tipo). template_key explícito ainda
+    // é aceito (fluxo admin). item principal.
+    let templateKey = req.body?.template_key || null;
     const itemKey = req.body?.item_key || null;
 
     try {
@@ -72,6 +74,12 @@ router.post("/admin/works", requireAuth, async (req, res) => {
             }
         } else if (!(await isGlobalAdmin(req.session.user.id))) {
             return res.status(403).json({ error: "forbidden_tokenless_work" });
+        }
+        // Fluxo por TIPO (professor): veio item_key sem template — resolve o pacote
+        // da turma que cobre esse tipo (único pela trava de sobreposição).
+        if (!templateKey && itemKey && unitId != null) {
+            templateKey = await templateForClassType(unitId, itemKey);
+            if (!templateKey) return res.status(400).json({ error: "type_not_in_package" });
         }
         // Resolve o item do pacote (se houver) e alinha o kind ao item.
         let lockedCounter = null;

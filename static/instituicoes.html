@@ -133,15 +133,14 @@
         <!-- Painel: Trabalhos (só turma) -->
         <div class="card section-gap tabpanel hidden" data-tab="trabalhos">
           <h3 class="card-title">Trabalhos da turma</h3>
-          <div id="works-create" class="row hidden" style="margin-bottom: var(--sp-3)">
-            <input id="nw-name" class="input" placeholder="nome do trabalho" style="flex:1; min-width:150px"/>
-            <select id="nw-kind" class="select" style="width:150px">
-              <option value="scenario">cenário</option>
-              <option value="interview">entrevista</option>
-              <option value="oral_realtime">prova oral</option>
-            </select>
-            <button id="nw-create" class="btn btn-primary btn-sm">Novo trabalho</button>
-            <span id="nw-msg" class="hint"></span>
+          <div id="works-create" class="hidden" style="margin-bottom: var(--sp-3)">
+            <div class="row">
+              <input id="nw-name" class="input" placeholder="nome do trabalho" style="flex:1; min-width:150px"/>
+              <select id="nw-kind" class="select" style="min-width:190px"></select>
+              <button id="nw-create" class="btn btn-primary btn-sm">Novo trabalho</button>
+              <span id="nw-msg" class="hint"></span>
+            </div>
+            <p class="hint" id="nw-type-hint" style="margin-top:4px"></p>
           </div>
           <div id="d-works"></div>
         </div>
@@ -590,11 +589,25 @@ async function loadMembers() {
 }
 
 // ---- trabalhos da turma (reusa as telas existentes) ----
+const TYPE_PT = { prova_oral: 'Prova oral', entrevista_profunda: 'Entrevista profunda', entrevista_simples: 'Entrevista simples' };
 async function loadWorks() {
   const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/works`);
   if (!ok) { $('d-works').innerHTML = '<p class="hint">Sem acesso aos trabalhos desta turma.</p>'; return; }
   const KIND_PT = { oral_realtime: 'prova oral', interview: 'entrevista', scenario: 'cenário' };
   const kindOf = (w) => (KIND_PT[w.kind] || w.kind) + (w.interview_variant === 'realtime' ? ' (tempo real)' : '');
+  // Seletor por TIPO (some o "pacote"): "Prova oral (3 disponíveis)". Sem pacote na
+  // turma → tipos crus, limitados só pelo teto US$.
+  if (j.can_edit) {
+    const types = j.available_types || [];
+    const sel = $('nw-kind');
+    if (types.length) {
+      sel.innerHTML = types.map(t => `<option value="type:${esc(t.item_key)}">${esc(TYPE_PT[t.item_key] || t.item_key)} (${t.available} ${t.available === 1 ? 'disponível' : 'disponíveis'})</option>`).join('');
+      $('nw-type-hint').textContent = 'A cota de cada tipo é reservada quando você gera os tokens de envio.';
+    } else {
+      sel.innerHTML = '<option value="kind:scenario">cenário</option><option value="kind:interview">entrevista</option><option value="kind:oral_realtime">prova oral</option>';
+      $('nw-type-hint').textContent = 'Esta turma não tem pacote — o trabalho fica limitado só pelo teto US$ (herdado).';
+    }
+  }
   $('d-works').innerHTML = (j.works || []).map(w => {
     const open = j.can_edit
       ? `<a class="btn btn-sm" href="/w/${esc(w.work_token)}" style="margin-left:auto">Abrir (professor)</a>`
@@ -610,8 +623,12 @@ async function loadWorks() {
 $('nw-create').onclick = async () => {
   const name = $('nw-name').value.trim();
   if (!name) { $('nw-msg').textContent = 'Informe o nome do trabalho.'; return; }
-  const { ok, j } = await api('POST', '/admin/works', { name, unit_id: SELECTED.id, kind: $('nw-kind').value });
-  $('nw-msg').textContent = ok ? 'Trabalho criado.' : 'Falha: ' + (j.error === 'forbidden_unit' ? 'só professor desta turma cria trabalho' : j.error || '');
+  const v = $('nw-kind').value || '';
+  const body = { name, unit_id: SELECTED.id };
+  if (v.startsWith('type:')) body.item_key = v.slice(5);   // vínculo pelo TIPO (auto)
+  else if (v.startsWith('kind:')) body.kind = v.slice(5);  // sem pacote: tipo cru
+  const { ok, j } = await api('POST', '/admin/works', body);
+  $('nw-msg').textContent = ok ? 'Trabalho criado.' : 'Falha: ' + (j.error === 'forbidden_unit' ? 'só professor desta turma cria trabalho' : j.error === 'type_not_in_package' ? 'esta turma não tem cota desse tipo' : j.error || '');
   if (ok) { $('nw-name').value = ''; loadWorks(); }
 }
 // Candidatos DISPONÍVEIS (do ancestral mais próximo que tiver gente no papel).

@@ -154,6 +154,12 @@ sem teto competem pelo saldo do pai. O gasto de um trabalho segue debitando
 cadeia e bloqueia se algum ancestral com teto tiver comprometido ≥ teto;
 `requireWithinBudget` bloqueia (402) por trabalho OU por unidade.
 
+**Raiz nunca sem limite** (decisão de 08/08/2026): criar unidade RAIZ exige
+`budget_usd > 0` (`POST /admin/units` → `root_requires_budget`). A raiz é a
+AQUISIÇÃO; o teto desce por herança (filha sem teto puxa do saldo do ancestral),
+então toda a sub-árvore tem sempre um limite efetivo. Nas filhas o teto é
+opcional. Assim o Portão A é o piso universal; o Portão B (pacotes) é opcional.
+
 ### Portão B — pacotes (cota)
 **Distribuição/delegação em PACOTES INTEIROS**, nunca em itens
 (`package_allocations.granted_packages`/`delegated_packages`, migration 063), em
@@ -186,6 +192,22 @@ reserva por submissão. Trabalho fora de pacote → reserva no-op (só o Portão
 `releaseForSubmission` credita o assento de volta (`DELETE /w/:t/submissions/:sub`,
 409 se já começou — houve custo). Apagar o trabalho inteiro credita os assentos de
 seus tokens pending (`releaseForWork`, antes do delete).
+
+**Sem sobreposição de tipos na TURMA** (decisão de 08/08/2026): uma turma
+(`is_class`) não pode receber dois pacotes cujos TIPOS (itens principais) se
+cruzem — `assertNoTypeOverlapOnClass` valida em `allocateRoot`/`allocateToChild`
+(`type_overlap_on_class`, 409). Nós intermediários PODEM sobrepor (só distribuem;
+o consumo é na turma). Motivo não é só técnico (contador único por tipo) — é
+COMERCIAL: pacotes podem embutir subsídio/desconto, então itens de pacotes
+distintos NÃO se somam complementarmente. Para ter mais de um tipo, aloca-se
+mais do MESMO pacote.
+
+**Professor vê cota por TIPO, não "pacote"**: `classAvailableTypes(unitId)`
+agrega por tipo (`prova_oral`/`entrevista_*`) → o front mostra "Prova oral: 3 ·
+Profunda: 5" (0 disponível se esgotado). Criar trabalho na turma manda só o
+`item_key` (o tipo); `templateForClassType` resolve o pacote (único pela trava) e
+`POST /admin/works` faz o binding automático (kind/variante vêm do item do
+pacote). Turma sem pacote → tipos crus, limitados só pelo teto US$ (Portão A).
 
 ### A "linguagem" de pacotes (DSL)
 `config/packages/*.yaml` é a fonte da verdade (config pura, **nunca vai ao LLM**),

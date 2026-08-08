@@ -21,7 +21,7 @@ import {
 import { getUnitBalance, setUnitBudgetReserved } from "../lib/billing.js";
 import {
     allocateRoot, allocateToChild, returnToParent, listUnitEntitlements,
-    unitEntitlementRollup, listPackageSpecs,
+    unitEntitlementRollup, listPackageSpecs, classAvailableTypes,
 } from "../lib/packages.js";
 import { pool } from "../auth.js";
 import {
@@ -406,7 +406,10 @@ router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
             }
             out.push(item);
         }
-        res.json({ can_edit: canEdit, works: out });
+        // Tipos disponíveis (por cota de pacote) para quem cria trabalho — some o
+        // conceito de "pacote"; o professor vê "prova oral: 3 · profunda: 5…".
+        const availableTypes = canEdit ? await classAvailableTypes(unitId) : [];
+        res.json({ can_edit: canEdit, works: out, available_types: availableTypes });
     } catch (err) { return httpErr(res, err); }
 });
 
