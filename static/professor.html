@@ -740,6 +740,14 @@ function renderSubmissionsTable() {
       ? `<a href="${url}" target="_blank" title="Abrir e simular o aluno (entrevista de teste)">abrir ↗</a> · `
       : '';
     const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
+    // #132: estado de AVALIAÇÃO visível já na aba Alunos & progresso (não só na de
+    // Notas) — o professor vê daqui o que ainda falta avaliar/publicar.
+    const evalBadge = s.grade_published_at ? '<span class="badge badge-accent" title="Nota publicada ao aluno">nota publicada</span>'
+      : s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva publicada ao aluno">devolutiva publicada</span>'
+      : s.has_grades ? '<span class="badge badge-completed">nota calculada</span>'
+      : s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>'
+      : (s.status === 'completed' || s.status === 'gave_up') ? '<span class="badge badge-pending">a avaliar</span>'
+      : '';
     return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td>
@@ -748,7 +756,7 @@ function renderSubmissionsTable() {
           <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button>
         </div>
       </td>
-      <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge}</td>
+      <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge} ${evalBadge}</td>
       <td>${convCell}</td>
       <td>${abrirLink}${actionBtn}</td>
     </tr>`;
