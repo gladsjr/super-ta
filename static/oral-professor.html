@@ -606,7 +606,9 @@
     document.getElementById('work-name').textContent = j.work.name;
     SUBS = j.submissions || [];
     setMeta(j.work);
-    document.getElementById('exam-status').textContent = j.work.has_exam ? 'Prova enviada. As perguntas abaixo podem ser editadas.' : 'Nenhuma prova enviada ainda — suba um PDF/TXT ou digite as perguntas abaixo.';
+    document.getElementById('exam-status').innerHTML = j.work.has_exam
+      ? `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(j.work.exam_filename || 'abrir arquivo')} ↗</a>. As perguntas abaixo podem ser editadas.`
+      : 'Nenhuma prova enviada ainda — suba um PDF/TXT ou digite as perguntas abaixo.';
     document.getElementById('cfg-n').value = j.work.question_count || 6;
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
@@ -673,7 +675,7 @@
       const j = await r.json();
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
       msg.textContent = `${j.count} pergunta(s) extraída(s).`;
-      document.getElementById('exam-status').textContent = 'Prova enviada. As perguntas abaixo podem ser editadas.';
+      document.getElementById('exam-status').innerHTML = `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(f.name || 'abrir arquivo')} ↗</a>. As perguntas abaixo podem ser editadas.`;
       adoptSaved(j.questions);
       renderQuestions();
       renderRubric();
