@@ -113,6 +113,7 @@
           <button class="btn" id="upload-btn" type="button">Enviar e extrair</button>
           <span class="hint" id="upload-msg"></span>
         </div>
+        <p class="hint" style="margin-top: var(--sp-1)">A extração monta o <strong>banco de perguntas</strong> a partir do material inteiro — pode vir mais perguntas do que cada aluno responde. Na prova, cada aluno recebe um <strong>sorteio</strong> com o nº definido em "nº de perguntas por aluno".</p>
         <!-- Ações da lista NO TOPO, para não obrigar a rolar até o fim só para salvar. -->
         <div class="row" style="margin-top: var(--sp-3); align-items: center">
           <button class="btn btn-ghost btn-sm" id="q-add" type="button">+ adicionar pergunta</button>
@@ -130,7 +131,7 @@
       <!-- 3. Calibração de fala: pré-teste de captação, depois das perguntas. -->
       <div class="card">
         <h3 class="card-title">Calibração de fala <span class="hint" style="font-weight: 400">(opcional)</span></h3>
-        <p class="card-sub" data-help="Antes da prova, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — usando o MESMO gpt-4o-transcribe que gera a transcrição da correção. Serve para orientar o aluno (volume/ritmo) e sinalizar, para você, provas cuja captação ficou ruim. Deixe em branco para desligar o teste.">Frase que o aluno repete num pré-teste de captação, antes da prova. <strong>Gere</strong> a partir das perguntas ou escreva à mão. Em branco = teste desligado.</p>
+        <p class="card-sub" data-help="Antes da prova, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — usando o MESMO gpt-4o-transcribe que gera a transcrição da correção. Serve para orientar o aluno (volume/ritmo) e sinalizar, para você, provas cuja captação ficou ruim. Deixe em branco para desligar o teste.">Frase que o aluno repete num pré-teste de captação, antes da prova. <strong>Gere a partir das perguntas</strong> — ela sai automaticamente do seu material, já com os termos técnicos que o aluno vai usar, para o teste conferir a captação justamente dessas palavras (é por isso que não é um texto fixo: cada prova tem seus termos). Ou escreva à mão. Em branco = teste desligado.</p>
         <textarea id="calib-sentence" class="input" rows="2" style="width: 100%" placeholder="Ex.: As questões desta prova falam de halving, hashrate e VPL do fluxo de caixa."></textarea>
         <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
         <div class="row" style="margin-top: var(--sp-2); align-items: center">
