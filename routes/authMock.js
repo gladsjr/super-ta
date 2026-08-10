@@ -18,7 +18,10 @@ const STATIC_DIR = path.join(__dirname, "..", "static");
 const router = express.Router();
 const json = express.json({ limit: "8kb" });
 
-const MOCK_ENABLED = process.env.NODE_ENV !== "production";
+// IdP de mentira: OFF por padrão em TODO lugar (issue #143). Só liga com a flag
+// EXPLÍCITA ENABLE_MOCK_IDP=true E fora de produção. Assim staging/preview/prod
+// (ou dev sem a flag) devolvem 404 — sem risco de personificação por e-mail.
+const MOCK_ENABLED = process.env.ENABLE_MOCK_IDP === "true" && process.env.NODE_ENV !== "production";
 
 async function mockProvider(key) {
     const r = await pool.query(

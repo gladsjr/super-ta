@@ -31,8 +31,20 @@ pool.on("error", (err) => {
 
 const PgSession = connectPgSimple(session);
 
-const SESSION_SECRET =
-  process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+// SESSION_SECRET (issue #146): em ambiente HOSPEDADO (Replit/produção) é
+// OBRIGATÓRIO e forte — sem ele, cada processo gera um segredo aleatório, então
+// reinícios derrubam todas as sessões e instâncias paralelas não compartilham
+// login. Falha-fechado no boot. Em dev local (sem REPL_ID) tolera efêmero, com aviso.
+const IS_HOSTED = !!process.env.REPL_ID || process.env.NODE_ENV === "production";
+const SESSION_SECRET = (() => {
+  const s = process.env.SESSION_SECRET;
+  if (s && s.length >= 32) return s;
+  if (IS_HOSTED) {
+    throw new Error("SESSION_SECRET ausente ou fraco (<32 chars) em ambiente hospedado (issue #146). Defina um segredo forte nos Secrets — sem ele, reinícios invalidam sessões e instâncias não compartilham login.");
+  }
+  console.warn("[AUTH] SESSION_SECRET ausente — usando segredo efêmero (só dev local; sessões caem a cada reinício).");
+  return crypto.randomBytes(32).toString("hex");
+})();
 
 export const sessionMiddleware = session({
   store: new PgSession({
