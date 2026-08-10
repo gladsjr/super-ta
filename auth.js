@@ -392,6 +392,22 @@ export async function listUsers() {
   return r.rows;
 }
 
+// Só os ADMINISTRADORES GLOBAIS (equipe ORATIA) — para a aba "Usuários e senha"
+// do /admin (issue #161). Antes ela listava TODOS os usuários (alunos, professores
+// de instituição) com botão Excluir, o que permitia apagar contas institucionais
+// por engano numa tela apresentada como "gestão da equipe ORATIA".
+export async function listGlobalAdmins() {
+  const r = await pool.query(
+    `SELECT DISTINCT u.id, u.username, u.email, u.display_name, u.created_at
+       FROM users u
+       JOIN memberships m ON m.user_id = u.id
+       JOIN roles r ON r.id = m.role_id
+      WHERE r.key = 'admin_global' AND m.unit_id IS NULL
+      ORDER BY u.created_at ASC, u.id ASC`
+  );
+  return r.rows;
+}
+
 // Resolve um usuário por e-mail (case-insensitive) OU username. Usado para
 // vincular papéis (memberships) por identificador amigável.
 export async function getUserByLogin(login) {
@@ -525,6 +541,22 @@ export async function deleteUser(targetId, requesterId) {
   const count = await pool.query("SELECT COUNT(*)::int AS n FROM users");
   if ((count.rows[0]?.n ?? 0) <= 1) {
     throw Object.assign(new Error("cannot_delete_last_user"), { status: 400 });
+  }
+  // Protege o ÚLTIMO admin_global (issue #161): ficar sem admin global tranca a
+  // gestão do sistema. Se o alvo é admin global e é o único, recusa.
+  const targetIsGlobal = await pool.query(
+    `SELECT 1 FROM memberships m JOIN roles r ON r.id = m.role_id
+      WHERE m.user_id = $1 AND m.unit_id IS NULL AND r.key = 'admin_global' LIMIT 1`,
+    [id]
+  );
+  if (targetIsGlobal.rowCount > 0) {
+    const globals = await pool.query(
+      `SELECT COUNT(DISTINCT m.user_id)::int AS n FROM memberships m JOIN roles r ON r.id = m.role_id
+        WHERE m.unit_id IS NULL AND r.key = 'admin_global'`
+    );
+    if ((globals.rows[0]?.n ?? 0) <= 1) {
+      throw Object.assign(new Error("cannot_delete_last_global_admin"), { status: 400 });
+    }
   }
   const r = await pool.query(
     "DELETE FROM users WHERE id = $1 RETURNING username",

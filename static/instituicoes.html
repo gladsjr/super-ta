@@ -450,7 +450,8 @@ function showTab(tab) {
   document.querySelectorAll('#d-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 }
 function buildTabs(p) {
-  const tabs = ['membros'];
+  const tabs = [];
+  if (p.canAdminSelf) tabs.push('membros');   // membros (com e-mails) só p/ admin da unidade (#162)
   if (SELECTED.is_class) tabs.push('trabalhos');
   if (p.canAdminSelf) tabs.push('orcamento');
   if (IS_GLOBAL) tabs.push('config');
@@ -461,7 +462,8 @@ function buildTabs(p) {
     el.onclick = () => showTab(t);
     bar.appendChild(el);
   }
-  showTab(tabs.includes(ACTIVE_TAB) ? ACTIVE_TAB : 'membros');
+  if (tabs.length) showTab(tabs.includes(ACTIVE_TAB) ? ACTIVE_TAB : tabs[0]);
+  else document.querySelectorAll('#detail .tabpanel').forEach(el => el.classList.add('hidden'));
 }
 async function refreshSelected() { const id = SELECTED.id; await loadUnits(false); if (UNITS.find(u => u.id === id)) selectUnit(id); }
 
@@ -478,8 +480,8 @@ async function selectUnit(id) {
   renderDetailHeader(p);
   buildTabs(p);
   loadUnits();
-  const jobs = [loadMembers()];
-  if (p.canAdminSelf) jobs.push(loadBudget(), loadEntitlements(), loadInvites());
+  const jobs = [];
+  if (p.canAdminSelf) jobs.push(loadMembers(), loadBudget(), loadEntitlements(), loadInvites());
   if (SELECTED.is_class) jobs.push(loadWorks());
   if (IS_GLOBAL) { jobs.push(loadAccepted()); if (p.isRoot) jobs.push(loadTenant(), loadDomains(), loadProviders()); }
   await Promise.all(jobs);

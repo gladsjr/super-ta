@@ -181,10 +181,14 @@ router.get("/admin/units/:unitId/budget", requireAuth, async (req, res) => {
 // Membros & papéis (RBAC)
 // ---------------------------------------------------------------------------
 
+// A lista de membros (nomes, papéis, E-MAILS) é dado pessoal — só quem ADMINISTRA
+// a unidade vê (issue #162). Antes bastava canViewUnit, então aluno/professor em
+// consulta recebiam o diretório inteiro com e-mails de terceiros (menor privilégio
+// violado). Roster por turma p/ professor, com e-mails ocultos, fica p/ depois.
 router.get("/admin/units/:unitId/members", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canViewUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
         res.json({ members: await listUnitMembers(unitId), roles: await listRoles() });
     } catch (err) { return httpErr(res, err); }
 });

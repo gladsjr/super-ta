@@ -5,7 +5,7 @@
 import express from "express";
 import crypto from "crypto";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
-import { listUsers, createUser, deleteUser, changeOwnPassword, requireAuth } from "../auth.js";
+import { listGlobalAdmins, createUser, deleteUser, changeOwnPassword, requireAuth } from "../auth.js";
 import { isGlobalAdmin, resolveEffectiveRoles, addMembership } from "../lib/rbac.js";
 import { getUnit } from "../lib/units.js";
 import { getPackageSpec, releaseForWork, templateForClassType } from "../lib/packages.js";
@@ -193,7 +193,8 @@ router.get("/admin/defaults", requireAdmin, (_req, res) => {
 // ---- User management (every authenticated user is an admin) ----
 router.get("/admin/users", requireAdmin, async (_req, res) => {
     try {
-        const users = await listUsers();
+        // Só admins GLOBAIS (equipe ORATIA) — não o diretório inteiro (issue #161).
+        const users = await listGlobalAdmins();
         res.json({ users });
     } catch (err) {
         log.error("ADMIN", `list users failed: ${err.message}`);
