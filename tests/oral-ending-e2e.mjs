@@ -1,13 +1,16 @@
 // E2E do ENCERRAMENTO da prova oral: um aluno-robô (TTS→PCM em ritmo real)
 // faz a prova inteira contra o relay local e verifica o requisito central:
 // a prova TERMINA COM FALA AUDÍVEL (despedida) antes do wrapup.
-// Uso: node -r dotenv/config tests/oral-ending-e2e.mjs  (servidor local no ar; usa um trabalho oral de teste)
+// Uso: node -r dotenv/config tests/oral-ending-e2e.mjs  (servidor local no ar).
+// Config por env (como os outros E2E orais): E2E_BASE_HTTP, E2E_BASE_WS e
+// E2E_WORK_TOKEN (um trabalho oral de teste) — permite rodar fora da porta 5000.
 import { WebSocket } from "ws";
 import OpenAI from "openai";
 import { synthesizeSpeech } from "../lib/audio.js";
 
-const BASE = "http://127.0.0.1:5000";
-const WT = "2be0f4312c89"; // Teste Prova Oral MBA (3 perguntas sorteadas de 27)
+const BASE = process.env.E2E_BASE_HTTP || "http://127.0.0.1:5000";
+const WS_BASE = process.env.E2E_BASE_WS || "ws://127.0.0.1:5000";
+const WT = process.env.E2E_WORK_TOKEN || "2be0f4312c89"; // trabalho oral de teste (override por env)
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const t0 = Date.now();
 const ts = () => ((Date.now() - t0) / 1000).toFixed(1).padStart(6) + "s";
@@ -37,7 +40,7 @@ for (const a of ANSWERS) pcms.push(await synthesizeSpeech(client, "gpt-4o-mini-t
 const EXTRA = await synthesizeSpeech(client, "gpt-4o-mini-tts", "Era só isso mesmo, não tenho mais nada a acrescentar, obrigado.", "ash", "pcm");
 
 // 3) sessão de voz
-const ws = new WebSocket(`ws://127.0.0.1:5000/s/${sub}/oral/relay`);
+const ws = new WebSocket(`${WS_BASE}/s/${sub}/oral/relay`);
 const FRAME = 4800; // 100ms @ PCM16 24kHz
 const SIL = Buffer.alloc(FRAME);
 let q = null, qp = 0, speaking = false, spoken = 0;
