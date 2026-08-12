@@ -357,24 +357,14 @@
     </div>
 
     <div id="sf-controls" class="hidden">
-      <div class="sf-prompt">
-        <label class="sf-label" for="fb-prompt">Prompt de ajuste da devolutiva — tom, formato, o que destacar</label>
-        <textarea id="fb-prompt" class="editor-textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários."></textarea>
-        <div class="eval-publish-row" style="margin-top: var(--sp-2);">
-          <button class="btn btn-primary btn-sm" id="fb-generate-btn">Gerar devolutiva (este aluno)</button>
-          <button class="btn btn-sm" id="fb-apply-all-btn" title="Salva este prompt como padrão do trabalho e regera a devolutiva de TODOS os alunos">Aplicar prompt a todos os alunos</button>
-        </div>
-        <div id="fb-batch-status" class="hint hidden"></div>
-      </div>
-
-      <div class="eval-publish-row" style="margin-top: var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3);">
+      <div class="eval-publish-row">
+        <button class="btn btn-primary btn-sm hidden" id="eval-edit-btn">Escrever devolutiva</button>
         <button class="btn btn-primary btn-sm hidden" id="eval-publish-btn" title="Torna a devolutiva abaixo visível na página do aluno">Publicar para o aluno</button>
         <button class="btn btn-sm hidden" id="eval-unpublish-btn">Despublicar</button>
-        <button class="btn btn-ghost btn-sm hidden" id="eval-edit-btn">Editar manualmente</button>
         <button class="btn btn-ghost btn-sm hidden" id="eval-discard-edit-btn" title="Descarta a edição manual — a versão automática volta a valer">Restaurar automática</button>
       </div>
       <p class="eval-publish-help">
-        O aluno só vê a devolutiva depois de <strong>Publicar</strong>. Ajuste o prompt e regere quantas vezes quiser antes disso.
+        Escreva a devolutiva à mão a partir da <strong>Avaliação do entrevistador</strong> (logo abaixo) e clique em <strong>Publicar</strong> — o aluno só a vê depois disso.
       </p>
 
       <div class="eval-sections hidden" id="eval-sections">
@@ -395,8 +385,7 @@
           <input type="checkbox" data-section="study_suggestions">
           <span><strong>Sugestões de estudo</strong></span>
         </label>
-        <p class="eval-publish-help" style="margin-top: var(--sp-2);">A opinião do entrevistador entra como bloco fiel. As demais: marcada = vira um bloco; <strong>desmarcada = o conteúdo é reinterpretado dentro do resumo</strong> pelo prompt. Mudou aqui? <strong>Regere a devolutiva</strong> para o resumo recalibrar.</p>
-        <div id="sections-regen-hint" class="notice hidden" style="background: var(--r-bg); border-color: var(--r-border); color: var(--warning-700); margin-top: var(--sp-2);">Você mudou as seções incluídas — clique em <strong>"Regerar devolutiva (este aluno)"</strong> para aplicar (o resumo é recalibrado conforme o que entra ou não como bloco).</div>
+        <p class="eval-publish-help" style="margin-top: var(--sp-2);">A opinião do entrevistador entra como bloco fiel. As demais: <strong>marcada = o bloco aparece</strong> na devolutiva do aluno; <strong>desmarcada = fica oculta</strong> (o conteúdo continua salvo).</p>
         <div class="eval-sections-apply">
           <button class="btn btn-ghost btn-sm" id="sections-apply-all-btn" title="Usa estas escolhas de seção como padrão do trabalho e aplica a todos os alunos">Aplicar estas seções a todos os alunos</button>
         </div>
@@ -1157,7 +1146,7 @@ function renderStudentPreview(ev) {
 // a perspectiva do que será produzido, com um marcador de "ainda não gerado".
 function renderStudentPreviewSkeleton() {
   const persona = window.__personaName;
-  const ph = '<div class="sf-text" style="color: var(--ink-400); font-style: italic;">(será preenchido quando você gerar a devolutiva)</div>';
+  const ph = '<div class="sf-text" style="color: var(--ink-400); font-style: italic;">(escreva a devolutiva e salve)</div>';
   return `
     <div class="sf-label">Opinião do entrevistador${persona ? ` (${escapeHtml(persona)})` : ''} — não editável</div>
     ${ph}
@@ -1168,7 +1157,7 @@ function renderStudentPreviewSkeleton() {
 // Último estado conhecido da devolutiva (payload do servidor).
 let pubState = null;
 
-const PUB_BTN_IDS = ['fb-generate-btn', 'fb-apply-all-btn', 'eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'sections-apply-all-btn'];
+const PUB_BTN_IDS = ['eval-publish-btn', 'eval-unpublish-btn', 'eval-edit-btn', 'eval-discard-edit-btn', 'eval-save-edit-btn', 'eval-cancel-edit-btn', 'sections-apply-all-btn'];
 const SECTION_KEYS = ['interviewer_opinion', 'strengths', 'improvement_areas', 'study_suggestions'];
 // Seção composta como bloco fiel (não passa pela geração do StudentFeedback):
 // a opinião do entrevistador. Toggle instantâneo, sem "regerar". A nota NÃO é
@@ -1179,8 +1168,6 @@ function setPubButtonsDisabled(disabled) {
   PUB_BTN_IDS.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = disabled; });
   document.querySelectorAll('#eval-sections input[type=checkbox]').forEach(c => { c.disabled = disabled; });
 }
-
-let promptInit = false;
 
 function renderFeedbackCard(j) {
   pubState = j;
@@ -1198,47 +1185,41 @@ function renderFeedbackCard(j) {
   needsEval.classList.add('hidden');
   controls.classList.remove('hidden');
 
-  // Prompt pré-preenchido com as diretrizes do trabalho UMA vez (não
-  // sobrescreve o que o professor digitar em re-renders, ex.: toggles).
-  if (!promptInit) {
-    document.getElementById('fb-prompt').value = j.feedback_guidelines ?? '';
-    promptInit = true;
-  }
-
   const statusEl = document.getElementById('eval-publish-status');
   const show = (id, visible) => document.getElementById(id).classList.toggle('hidden', !visible);
-  const hasVersion = !!j.student_evaluation;
+  const hasVersion = !!j.student_evaluation;      // já existe devolutiva (manual salva)
+  const hasAuto = !!j.student_evaluation_auto;    // há versão automática antiga a restaurar
   const isEdited = !!j.student_evaluation_edited;
   const published = !!j.published_at;
 
   let statusHtml;
   if (!hasVersion) {
-    statusHtml = 'devolutiva ainda não gerada';
+    statusHtml = 'devolutiva ainda não escrita';
   } else {
-    const versionNote = isEdited
+    const versionNote = (isEdited && hasAuto)
       ? `<span class="badge badge-accent" title="A versão automática fica preservada — Restaurar automática descarta a edição">editada pelo professor</span>`
-      : 'versão automática';
+      : 'escrita pelo professor';
     statusHtml = published
       ? `<span class="badge badge-completed">publicada para o aluno</span> em ${fmtTime(j.published_at)} · ${versionNote}`
       : `não publicada (o aluno não vê) · ${versionNote}`;
   }
   statusEl.innerHTML = statusHtml;
 
-  document.getElementById('fb-generate-btn').textContent =
-    hasVersion ? 'Regerar devolutiva (este aluno)' : 'Gerar devolutiva (este aluno)';
+  // Edição manual SEMPRE disponível (basta a avaliação interna existir, já
+  // garantida acima). "Escrever" quando ainda não há devolutiva; "Editar" quando há.
+  document.getElementById('eval-edit-btn').textContent = hasVersion ? 'Editar devolutiva' : 'Escrever devolutiva';
+  show('eval-edit-btn', true);
   show('eval-publish-btn', hasVersion && !published);
   show('eval-unpublish-btn', published);
-  show('eval-edit-btn', hasVersion);
-  show('eval-discard-edit-btn', isEdited);
+  // "Restaurar automática" só faz sentido se houver uma versão automática antiga.
+  show('eval-discard-edit-btn', isEdited && hasAuto);
 
-  // Toggles de seção. A OPINIÃO só faz sentido se houver impressão registrada
-  // (toggle instantâneo, bloco verbatim). As três seções de CONTEÚDO são
-  // config de GERAÇÃO (marcada = bloco; desmarcada = dobrada no resumo) — ficam
-  // sempre visíveis para o professor decidir + regerar.
+  // Toggles de seção: controlam só o que o aluno VÊ (marcada = bloco aparece;
+  // desmarcada = oculta, mas o conteúdo continua salvo). Só aparecem quando já
+  // existe devolutiva.
   const sections = j.sections || {};
   const sectionHas = j.section_has || {};
   show('eval-sections', hasVersion);
-  document.getElementById('sections-regen-hint').classList.add('hidden');
   for (const key of SECTION_KEYS) {
     const row = document.getElementById('sec-row-' + key);
     const cb = row.querySelector('input');
@@ -1255,11 +1236,11 @@ function renderFeedbackCard(j) {
 
   // A prévia aparece SEMPRE (controls visíveis = já há avaliação interna). Sem
   // devolutiva ainda, mostra o esqueleto vazio das subseções — assim o
-  // professor vê a estrutura do que será gerado antes de clicar em Gerar.
+  // professor vê a estrutura antes de escrever.
   const preview = document.getElementById('student-eval-preview');
   document.getElementById('student-eval-preview-summary').textContent = hasVersion
-    ? `Devolutiva (o que o aluno ${published ? 'vê' : 'verá quando publicada'})${isEdited ? ' — versão editada' : ''}`
-    : 'Devolutiva (o que o aluno verá) — ainda não gerada';
+    ? `Devolutiva (o que o aluno ${published ? 'vê' : 'verá quando publicada'})${isEdited ? ' — versão do professor' : ''}`
+    : 'Devolutiva (o que o aluno verá) — ainda não escrita';
   document.getElementById('student-eval-preview-body').innerHTML = hasVersion
     ? renderStudentPreview(j.student_evaluation)
     : renderStudentPreviewSkeleton();
@@ -1298,80 +1279,13 @@ async function pubRequest(method, path, body) {
   }
 }
 
-// Gera/regera a devolutiva SÓ deste aluno, com o prompt do campo como
-// override ad-hoc (não toca o padrão do trabalho).
-document.getElementById('fb-generate-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('fb-generate-btn');
-  const label = btn.textContent;
-  const guidelines = document.getElementById('fb-prompt').value.trim() || null;
-  const force = !!pubState?.student_evaluation;
-  btn.textContent = 'Gerando…';
-  await pubRequest('POST', `student-version${force ? '?force=true' : ''}`, { guidelines });
-  btn.textContent = label;
-});
-
-// Aplica o prompt a TODOS: salva como padrão do trabalho e regera a
-// devolutiva de todos os alunos com avaliação (lote em segundo plano).
-document.getElementById('fb-apply-all-btn').addEventListener('click', async () => {
-  const guidelines = document.getElementById('fb-prompt').value.trim() || null;
-  if (!confirm('Salvar este prompt como padrão do trabalho e regerar a devolutiva de TODOS os alunos com avaliação? Cada geração consome orçamento do trabalho.')) return;
-  const errEl = document.getElementById('eval-publish-error');
-  const statusEl = document.getElementById('fb-batch-status');
-  errEl.classList.add('hidden');
-  setPubButtonsDisabled(true);
-  try {
-    let r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback_guidelines: guidelines }),
-    });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
-    if (pubState) pubState.feedback_guidelines = guidelines;
-    r = await fetch(`/w/${encodeURIComponent(workToken)}/evaluations/student-versions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force: true }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    statusEl.classList.remove('hidden');
-    statusEl.textContent = '⏳ Regerando as devolutivas de todos os alunos…';
-    pollApplyAll();
-  } catch (err) {
-    errEl.textContent = `Falha ao aplicar a todos: ${err.message}`;
-    errEl.classList.remove('hidden');
-    setPubButtonsDisabled(false);
-  }
-});
-
-async function pollApplyAll() {
-  const statusEl = document.getElementById('fb-batch-status');
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/evaluations/status`);
-    const j = await r.json();
-    const b = j.derive;
-    if (b && b.running) {
-      statusEl.textContent = `⏳ Regerando devolutivas (${b.done}/${b.total})… ${b.ok} geradas${b.failed.length ? `, ${b.failed.length} falhas` : ''}.`;
-      setTimeout(pollApplyAll, 4000);
-    } else {
-      statusEl.textContent = b
-        ? `✔ Devolutivas regeradas: ${b.ok} ok${b.skipped ? `, ${b.skipped} puladas` : ''}${b.failed.length ? `, ${b.failed.length} falhas` : ''}. O prompt agora vale para todos.`
-        : '✔ Concluído.';
-      setPubButtonsDisabled(false);
-      loadEvaluation(); // recarrega a devolutiva deste aluno
-    }
-  } catch {
-    setTimeout(pollApplyAll, 4000);
-  }
-}
 document.getElementById('eval-publish-btn').addEventListener('click', () => pubRequest('POST', 'publish'));
 document.getElementById('eval-unpublish-btn').addEventListener('click', () => pubRequest('DELETE', 'publish'));
 document.querySelectorAll('#eval-sections input[data-section]').forEach(cb => {
   cb.addEventListener('change', async e => {
     const key = e.target.dataset.section;
-    const contentSection = !VERBATIM_SECTIONS.includes(key);
+    // Toggle instantâneo: controla só a visibilidade do bloco para o aluno.
     await pubRequest('PATCH', 'sections', { [key]: e.target.checked });
-    // Seções de conteúdo entram na geração: mudar exige regerar para o resumo
-    // recalibrar (dobrar/soltar a substância). A opinião é verbatim — não.
-    if (contentSection) document.getElementById('sections-regen-hint').classList.remove('hidden');
   });
 });
 document.getElementById('sections-apply-all-btn').addEventListener('click', async () => {
@@ -1405,14 +1319,25 @@ document.getElementById('eval-discard-edit-btn').addEventListener('click', () =>
 
 // ---- Editor da devolutiva ----
 
+// Lista de perguntas para o editor: da devolutiva já existente (base) ou, quando
+// ainda não há devolutiva, da própria Avaliação do entrevistador (per_question
+// interna) — é o que permite ESCREVER a devolutiva do zero, sem geração por IA.
+function editorQuestionSource() {
+  const base = pubState?.student_evaluation_base ?? pubState?.student_evaluation;
+  if (Array.isArray(base?.per_question) && base.per_question.length) return base.per_question;
+  const internal = pubState?.evaluation;
+  return Array.isArray(internal?.per_question) ? internal.per_question : [];
+}
+
 function openEditor() {
   // Edita a BASE sem filtro de visibilidade — uma seção desligada continua
-  // editável (o toggle só controla o que o aluno vê, não o conteúdo).
-  const ev = pubState?.student_evaluation_base ?? pubState?.student_evaluation;
-  if (!ev) return;
+  // editável (o toggle só controla o que o aluno vê, não o conteúdo). Sem
+  // devolutiva ainda, começa em branco (as perguntas vêm da avaliação interna).
+  const ev = pubState?.student_evaluation_base ?? pubState?.student_evaluation ?? {};
+  const questions = editorQuestionSource();
   document.getElementById('edit-summary').value = ev.summary ?? '';
   const pqEl = document.getElementById('edit-per-question');
-  pqEl.innerHTML = (Array.isArray(ev.per_question) ? ev.per_question : []).map((q, i) => `
+  pqEl.innerHTML = questions.map((q, i) => `
     <div class="editor-q-gist"><strong>Pergunta ${Number(q.turn_index) + 1}</strong> — ${escapeHtml(q.question_gist ?? '')}</div>
     <textarea class="editor-textarea edit-pq-feedback" data-i="${i}" rows="3">${escapeHtml(q.feedback ?? '')}</textarea>`).join('');
   const joinLines = arr => (Array.isArray(arr) ? arr : []).join('\n');
@@ -1424,13 +1349,14 @@ function openEditor() {
 }
 
 function collectEditor() {
-  const base = pubState?.student_evaluation_base ?? pubState?.student_evaluation;
+  const questions = editorQuestionSource();
   const splitLines = v => v.split('\n').map(x => x.trim()).filter(Boolean);
-  const perQuestion = (Array.isArray(base?.per_question) ? base.per_question : []).map((q, i) => ({
+  // Feedback por pergunta é OPCIONAL: guardamos só as que o professor preencheu.
+  const perQuestion = questions.map((q, i) => ({
     turn_index: q.turn_index,
     question_gist: q.question_gist ?? '',
     feedback: document.querySelector(`.edit-pq-feedback[data-i="${i}"]`)?.value?.trim() ?? '',
-  }));
+  })).filter(q => q.feedback);
   return {
     summary: document.getElementById('edit-summary').value.trim(),
     per_question: perQuestion,
@@ -1447,8 +1373,7 @@ document.getElementById('eval-cancel-edit-btn').addEventListener('click', () => 
 });
 document.getElementById('eval-save-edit-btn').addEventListener('click', async () => {
   const report = collectEditor();
-  if (!report.summary) { alert('O resumo não pode ficar vazio.'); return; }
-  if (report.per_question.some(q => !q.feedback)) { alert('O feedback de cada pergunta não pode ficar vazio.'); return; }
+  if (!report.summary) { alert('Escreva ao menos o resumo da devolutiva.'); return; }
   await pubRequest('PUT', 'student-version', { report });
 });
 
