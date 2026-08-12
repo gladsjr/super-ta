@@ -30,7 +30,20 @@ router.get("/unidades", (_req, res) => res.sendFile(path.join(STATIC_DIR, "insti
 router.get("/instituicoes", (_req, res) => res.sendFile(path.join(STATIC_DIR, "instituicoes.html")));
 router.get("/trabalho", (_req, res) => res.sendFile(path.join(STATIC_DIR, "trabalho.html")));
 router.get("/envio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "envio.html")));
-router.get("/w/:workToken", (_req, res) => res.sendFile(path.join(STATIC_DIR, "professor.html")));
+// Página do professor. Resolve por TIPO no servidor (espelha a rota do aluno em
+// /s/:submissionToken): prova oral (oral_realtime) → redireciona para /w/:token/oral.
+// Assim link copiado, favorito e telas futuras acertam a tela sem depender de cada
+// UI montar a URL certa (#172). Entrevista (mensagem/realtime) e cenário → professor.html.
+router.get("/w/:workToken", async (req, res) => {
+    const workToken = String(req.params.workToken || "").toLowerCase();
+    try {
+        const work = await db.getWorkByToken(workToken);
+        if (work && work.kind === "oral_realtime") {
+            return res.redirect(302, `/w/${workToken}/oral`);
+        }
+    } catch { /* na dúvida → tela de entrevista padrão */ }
+    res.sendFile(path.join(STATIC_DIR, "professor.html"));
+});
 // Estúdio de cenários escopado a um trabalho multi-interação (a página lê o
 // token da URL e usa as rotas /w/:token/scenario). Mesma página do estúdio global.
 router.get("/w/:workToken/studio", (_req, res) => res.sendFile(path.join(STATIC_DIR, "scenarios.html")));

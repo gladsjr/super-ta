@@ -612,7 +612,7 @@ async function loadWorks() {
   }
   $('d-works').innerHTML = (j.works || []).map(w => {
     const open = j.can_edit
-      ? `<a class="btn btn-sm" href="/w/${esc(w.work_token)}" style="margin-left:auto">Abrir (professor)</a>`
+      ? `<a class="btn btn-sm" href="/w/${esc(w.work_token)}${w.kind === 'oral_realtime' ? '/oral' : ''}" style="margin-left:auto">Abrir (professor)</a>`
       : (w.my_submission_token
           ? `<a class="btn btn-sm" href="/s/${esc(w.my_submission_token)}" style="margin-left:auto">Meu envio</a>`
           : `<span class="muted" style="margin-left:auto">consulta</span>`);

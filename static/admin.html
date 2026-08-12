@@ -314,6 +314,13 @@ document.getElementById('create-work').onclick = async () => {
   // Vínculo institucional opcional: unidade e/ou item de pacote (o kind vem do item).
   const unitVal = document.getElementById('new-work-unit').value;
   if (unitVal) body.unit_id = Number(unitVal);
+  else {
+    // Aviso ao criar SEM unidade quando HÁ turmas disponíveis (contexto institucional):
+    // o trabalho nasce em modo token e NÃO aparece na árvore de turmas (#173). No modo
+    // puro-token (sem turmas cadastradas) não há aviso.
+    const hasTurmas = Array.from(document.getElementById('new-work-unit').options).some(o => o.value);
+    if (hasTurmas && !confirm('Criar este trabalho SEM vincular a uma turma (modo token)?\n\nEle funciona pelo link do trabalho, mas NÃO aparece na árvore de turmas — só aqui na tela de administração.')) return;
+  }
   const pkgVal = document.getElementById('new-work-package').value;
   if (pkgVal) {
     if (!unitVal) { msg.textContent = 'Item de pacote exige uma unidade.'; return; }
