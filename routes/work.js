@@ -1253,19 +1253,34 @@ router.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single(
         await db.setEnunciadoBlob(req.work.id, req.file.buffer, req.file.originalname);
         await db.clearCoherenceCache(req.work.id);
         log.info("WORK", `enunciado uploaded work=${req.work.work_token} bytes=${req.file.size} name=${req.file.originalname}`);
-        // #133: checagem MÍNIMA de persona roda AUTOMÁTICA no upload (barata,
-        // fast_model). Assim some o botão "Avaliar"/"Reavaliar" e o bug de avaliar
-        // o enunciado ANTIGO por engano. Best-effort: se a checagem falhar, o
-        // upload NÃO falha (o professor sempre consegue subir o arquivo).
+        // No upload rodam DUAS tarefas automáticas, ambas best-effort (se falharem,
+        // o upload NÃO falha — o professor sempre consegue subir o arquivo). O PDF é
+        // subido ao OpenAI UMA vez e reusado pelas duas:
+        //   (a) #133: checagem MÍNIMA de persona (barata, fast_model). Some o botão
+        //       "Avaliar"/"Reavaliar" e o bug de avaliar o enunciado ANTIGO.
+        //   (b) frase de calibração de fala, gerada em SILÊNCIO (o professor não lida
+        //       com calibração nem vê/edita a frase — some o card de calibração).
         let personaCheck = null;
+        let calibrationGenerated = false;
         try {
             const fileUpload = await uploadPdf({ pdf: req.file.buffer, filename: req.file.originalname }, "enunciado.pdf");
-            personaCheck = await enunciadoCoherenceAgent.evaluate({ openaiFileId: fileUpload.id, meterCtx: { workId: req.work.id } });
-            await db.setCoherenceCache(req.work.id, personaCheck);
-        } catch (chkErr) {
-            log.error("WORK", `enunciado persona-check failed work=${req.work.work_token}: ${chkErr.message}`);
+            try {
+                personaCheck = await enunciadoCoherenceAgent.evaluate({ openaiFileId: fileUpload.id, meterCtx: { workId: req.work.id } });
+                await db.setCoherenceCache(req.work.id, personaCheck);
+            } catch (chkErr) {
+                log.error("WORK", `enunciado persona-check failed work=${req.work.work_token}: ${chkErr.message}`);
+            }
+            try {
+                const { sentence, key_terms } = await oralCalibrationAgent.build({ openaiFileId: fileUpload.id, meterCtx: { workId: req.work.id } });
+                await db.setOralCalibration(req.work.id, { sentence, key_terms });
+                calibrationGenerated = true;
+            } catch (calErr) {
+                log.error("WORK", `enunciado calibration auto-gen failed work=${req.work.work_token}: ${calErr.message}`);
+            }
+        } catch (upErr) {
+            log.error("WORK", `enunciado openai-upload failed work=${req.work.work_token}: ${upErr.message}`);
         }
-        res.json({ ok: true, filename: req.file.originalname, persona_check: personaCheck });
+        res.json({ ok: true, filename: req.file.originalname, persona_check: personaCheck, calibration_generated: calibrationGenerated });
     } catch (err) {
         log.error("WORK", `enunciado save failed: ${err.message}`);
         res.status(500).json({ error: "failed to save enunciado" });

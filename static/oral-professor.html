@@ -45,6 +45,11 @@
 
     code.tok { background: var(--bg-muted); padding: 1px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
 
+    /* Guarda de alterações não salvas (modal de 3 opções). */
+    .guard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.38); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: var(--sp-4); }
+    .guard-overlay.hidden { display: none; }
+    .guard-box { background: var(--bg-card, #fff); color: var(--ink-900); border-radius: var(--r-md, 10px); padding: var(--sp-5, 24px); max-width: 460px; width: 100%; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+
   </style>
 </head>
 <body>
@@ -83,7 +88,18 @@
 
     <!-- ABA: PROVA (config + PDF + perguntas) -->
     <div class="tab-panel" id="tab-prova" role="tabpanel" aria-labelledby="tab-btn-prova">
-      <!-- 1. Configuração: voz (com prévia) + nº de perguntas. O salvar fica no fim da aba. -->
+      <!-- Salvar ÚNICO da aba, no TOPO: persiste de uma vez a voz, o nº de perguntas
+           e as perguntas/gabarito. Trocar de aba com alterações pendentes pede
+           confirmação (Salvar / Continuar / Cancelar). -->
+      <div class="card cfg-savebar">
+        <div class="row" style="align-items: center; gap: var(--sp-3)">
+          <button class="btn btn-primary" id="cfg-save" type="button">Salvar configuração</button>
+          <span class="hint" id="cfg-msg"></span>
+        </div>
+        <p class="card-sub" style="margin-top: var(--sp-2)">Salva a <strong>voz do examinador</strong>, o <strong>nº de perguntas</strong> e as <strong>perguntas/gabarito</strong> de uma vez. A <strong>frase de calibração</strong> é gerada automaticamente quando você sobe o material.</p>
+      </div>
+
+      <!-- 1. Configuração: voz (com prévia) + nº de perguntas. -->
       <div class="card">
         <h3 class="card-title">Configuração</h3>
         <p class="card-sub">A voz do examinador e quantas perguntas cada aluno recebe (sorteadas do gabarito).</p>
@@ -96,7 +112,7 @@
           <audio id="cfg-voice-audio" preload="none" style="display:none"></audio>
           <div class="field" style="margin: 0">
             <label class="label" for="cfg-n">Nº de perguntas por aluno</label>
-            <input type="number" id="cfg-n" class="input" min="3" max="20" value="6" style="width: 110px"/>
+            <input type="number" id="cfg-n" class="input" min="3" max="20" value="5" style="width: 110px"/>
           </div>
         </div>
         <p class="hint" id="cfg-hint" style="margin-top: var(--sp-3)"></p>
@@ -114,12 +130,8 @@
           <span class="hint" id="upload-msg"></span>
         </div>
         <p class="hint" style="margin-top: var(--sp-1)">A extração monta o <strong>banco de perguntas</strong> a partir do material inteiro — pode vir mais perguntas do que cada aluno responde. Na prova, cada aluno recebe um <strong>sorteio</strong> com o nº definido em "nº de perguntas por aluno".</p>
-        <!-- Ações da lista NO TOPO, para não obrigar a rolar até o fim só para salvar. -->
         <div class="row" style="margin-top: var(--sp-3); align-items: center">
           <button class="btn btn-ghost btn-sm" id="q-add" type="button">+ adicionar pergunta</button>
-          <span class="spacer"></span>
-          <button class="btn btn-primary" id="q-save" type="button">Salvar perguntas</button>
-          <span class="hint" id="q-msg"></span>
         </div>
         <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas (ou edite o que veio do arquivo) — só o <strong>enunciado</strong>, que é falado ao aluno. O peso e o critério/gabarito de cada questão ficam na aba <strong>Avaliação &amp; notas</strong>. Clique numa linha para editar.</p>
         <div id="questions" class="q-list"></div>
@@ -128,28 +140,6 @@
         </div>
       </div>
 
-      <!-- 3. Calibração de fala: pré-teste de captação, depois das perguntas. -->
-      <div class="card">
-        <h3 class="card-title">Calibração de fala <span class="hint" style="font-weight: 400">(opcional)</span></h3>
-        <p class="card-sub" data-help="Antes da prova, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — usando o MESMO gpt-4o-transcribe que gera a transcrição da correção. Serve para orientar o aluno (volume/ritmo) e sinalizar, para você, provas cuja captação ficou ruim. Deixe em branco para desligar o teste.">Frase que o aluno repete num pré-teste de captação, antes da prova. <strong>Gere a partir das perguntas</strong> — ela sai automaticamente do seu material, já com os termos técnicos que o aluno vai usar, para o teste conferir a captação justamente dessas palavras (é por isso que não é um texto fixo: cada prova tem seus termos). Ou escreva à mão. Em branco = teste desligado.</p>
-        <textarea id="calib-sentence" class="input" rows="2" style="width: 100%" placeholder="Ex.: As questões desta prova falam de halving, hashrate e VPL do fluxo de caixa."></textarea>
-        <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
-        <div class="row" style="margin-top: var(--sp-2); align-items: center">
-          <button class="btn" id="calib-gen" type="button">Gerar a partir das perguntas</button>
-          <span class="spacer"></span>
-          <button class="btn btn-primary" id="calib-save" type="button">Salvar</button>
-          <span class="hint" id="calib-msg"></span>
-        </div>
-      </div>
-
-      <!-- 4. Salvar configurações: card à parte, no fim da aba (espelha a entrevista por mensagem). -->
-      <div class="card">
-        <div class="row" style="align-items: center; gap: var(--sp-3)">
-          <button class="btn btn-primary" id="cfg-save" type="button">Salvar configurações</button>
-          <span class="hint" id="cfg-msg"></span>
-        </div>
-        <p class="card-sub" style="margin-top: var(--sp-2)">Salva a <strong>voz do examinador</strong> e o <strong>nº de perguntas por aluno</strong>. As <strong>perguntas</strong> e a <strong>frase de calibração</strong> são salvas à parte, nos próprios cards.</p>
-      </div>
     </div>
 
     <!-- ABA: ALUNOS & PROGRESSO (gerar tokens + tabela) -->
@@ -207,53 +197,29 @@
       </div>
     </div>
 
-    <!-- ABA: AVALIAÇÃO & NOTAS (cards retráteis, na ordem: avaliações+devolutivas → rubrica → penalidade → proctoring → alunos) -->
+    <!-- ABA: AVALIAÇÃO & NOTAS — rubrica primeiro (todas as ações no topo), depois a lista de alunos -->
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
 
-      <!-- 1. Avaliações e devolutivas (pipeline em lote + diretrizes) -->
-      <details class="card card-collapsible" open>
-        <summary><span class="card-title" data-help="Três passos, todos em lote: (1) avaliar compara a transcrição de cada aluno ao gabarito; (2) gerar devolutivas escreve, com IA, a devolutiva formativa a partir da avaliação, seguindo suas diretrizes; (3) publicar torna as devolutivas visíveis ao aluno.">Avaliações e devolutivas</span></summary>
-        <div class="card-collapsible-body">
-          <p class="card-sub">Avalie as provas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
-          <div class="row" style="margin-bottom: var(--sp-3)">
-            <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
-          </div>
-          <label class="label" for="fb-guidelines-oral">Diretrizes para a devolutiva (opcional) — tom, formato, o que destacar</label>
-          <textarea id="fb-guidelines-oral" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; destaque o domínio dos conceitos e termine com um encorajamento."></textarea>
-          <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
-            <input type="checkbox" id="fb-include-opinion-oral" checked style="margin-top: 3px"/>
-            <span class="card-sub">Incluir a <strong>opinião do examinador</strong> nas devolutivas.</span>
-          </label>
-          <div class="row" style="margin-top: var(--sp-3)">
-            <button id="save-feedback-oral" class="btn" type="button">Salvar configurações</button>
-            <span class="hint" id="fb-settings-msg-oral"></span>
-          </div>
-          <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap">
-            <button id="eval-all-btn" class="btn btn-primary" type="button" title="Avalia as provas realizadas que ainda não têm relatório">1 · Avaliar provas</button>
-            <button id="derive-all-btn" class="btn btn-primary" type="button" title="Gera (com IA) a devolutiva das provas já avaliadas">2 · Gerar devolutivas</button>
-            <button id="pub-dev-btn" class="btn btn-primary" type="button" title="Torna visíveis as devolutivas já escritas">3 · Publicar devolutivas</button>
-            <span class="spacer"></span>
-            <button id="eval-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reavalia TODAS as provas realizadas">Reavaliar todas</button>
-            <button id="unpub-dev-btn" class="btn btn-ghost btn-sm" type="button">Despublicar</button>
-          </div>
-          <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
-        </div>
-      </details>
-
-      <!-- 2. Rubrica por questão — ações + penalidade no topo; itens da rubrica abaixo -->
+      <!-- 1. Rubrica por questão — TODAS as ações de avaliação/nota no topo do card. -->
       <details class="card card-collapsible" open>
         <summary><span class="card-title">Rubrica por questão</span></summary>
         <div class="card-collapsible-body">
-          <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
-          <!-- Ações no topo: não obriga a rolar a lista inteira só para salvar/publicar. -->
+          <!-- Ações no topo do card: salvar a rubrica, analisar os vídeos, calcular e
+               publicar as notas. (Sem devolutiva — a prova oral entrega só a nota.) -->
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
-            <button id="save-rubric-oral" class="btn btn-primary" type="button">Salvar rubrica</button>
+            <button id="save-rubric-oral" class="btn btn-primary" type="button" title="Salva as perguntas, respostas, pesos e rubricas">Salvar rubrica</button>
+            <button id="proctor-all-btn" class="btn" type="button" title="Analisa (visão computacional local) os vídeos ainda não analisados; alimenta a coluna Alertas">Analisar vídeos</button>
+            <button id="eval-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das provas realizadas que ainda não têm relatório (compara a transcrição ao gabarito)">Calcular Notas</button>
+            <button id="eval-all-force-btn" class="btn" type="button" title="Recalcula as notas de TODAS as provas realizadas">Reavaliar todas</button>
             <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
             <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
             <span class="spacer"></span>
             <span class="hint" id="rubric-msg-oral"></span>
           </div>
+          <div id="eval-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
           <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+          <div id="proctor-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+          <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
           <p class="card-sub" data-help="A rubrica é a instrução de como pontuar cada questão, em 5 níveis (0 / 2,5 / 5 / 7,5 / 10). Você pode escrevê-la à mão OU, se a questão tiver resposta esperada (aba Configuração), gerar automaticamente. O agente que calcula a nota usa sempre a rubrica.">Escreva a rubrica de cada questão ou <strong>gere</strong> a partir da resposta esperada. Ao mudar pergunta/resposta, a rubrica fica marcada para <strong>revisar</strong>.</p>
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
             <button id="gen-rubrics-stale-btn" class="btn" type="button" title="Gera a rubrica das questões pendentes/vazias que têm resposta esperada">Gerar rubricas (pendentes)</button>
@@ -282,18 +248,14 @@
         </div>
       </details>
 
-      <!-- 3. Alunos (inclui o proctoring por vídeo, que alimenta a coluna Alertas) -->
+      <!-- 2. Alunos — o botão de avaliações lado a lado fica logo acima da lista. -->
       <details class="card card-collapsible" open>
         <summary><span class="card-title">Alunos</span></summary>
         <div class="card-collapsible-body">
-          <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo), escrever a devolutiva e atribuir a nota.</p>
-          <!-- Proctoring por vídeo: análise anti-fraude do VÍDEO (distinta de "Avaliar
-               provas", que avalia a transcrição). Alimenta a coluna Alertas abaixo. -->
+          <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo) e atribuir a nota.</p>
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-3)">
-            <span class="label" style="margin:0" data-help="Análise local do vídeo (não vai a serviço externo): sinaliza ausência, mais de uma pessoa, celular à vista e mãos fora do quadro. É diferente de 'Avaliar provas' (que avalia a transcrição): aqui roda visão computacional sobre o vídeo. São indícios para revisão humana, nunca acusação.">Proctoring por vídeo:</span>
-            <button id="proctor-all-btn" class="btn btn-sm" type="button" title="Analisa os vídeos ainda não analisados">Analisar vídeos</button>
-            <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar todos</button>
-            <span id="proctor-batch-status" class="hint hidden"></span>
+            <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
+            <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar vídeos</button>
           </div>
           <table id="eval-table" class="table hidden">
             <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
@@ -307,6 +269,19 @@
 
 </main>
 
+<!-- Guarda de alterações não salvas ao trocar de aba (T2). -->
+<div id="save-guard-modal" class="guard-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="guard-title">
+  <div class="guard-box">
+    <h3 id="guard-title" style="margin: 0 0 var(--sp-2)">Alterações não salvas</h3>
+    <p class="card-sub" style="margin: 0">Você mudou a configuração e ainda não salvou. O que deseja fazer?</p>
+    <div class="row" style="justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-4)">
+      <button class="btn btn-ghost" id="guard-cancel" type="button">Cancelar</button>
+      <button class="btn" id="guard-continue" type="button">Continuar sem salvar</button>
+      <button class="btn btn-primary" id="guard-save" type="button">Salvar configuração</button>
+    </div>
+  </div>
+</div>
+
 <script>
   const WORK = (location.pathname.match(/\/w\/([0-9a-f]{12})\/oral/) || [])[1];
   const API = `/w/${WORK}`;
@@ -317,6 +292,11 @@
   // quando a URL vem com #avaliacao — se ela fosse declarada mais abaixo, cairia na
   // TDZ do `let` e o script inteiro quebraria no load (tela em branco).
   let QUESTIONS = [];
+  // Alterações não salvas na aba Configuração (voz, nº de perguntas, perguntas/gabarito).
+  // Usado pela guarda ao trocar de aba. markConfigDirty() é chamado só em edição do
+  // usuário — nunca em render/load — para não dar falso positivo.
+  let configDirty = false;
+  function markConfigDirty() { configDirty = true; }
 
   // ---------- Abas ----------
   const TAB_NAMES = ['prova', 'alunos', 'avaliacao'];
@@ -335,11 +315,46 @@
     if (name === 'prova' && typeof renderQuestions === 'function' && QUESTIONS.length) renderQuestions();
     if (history.replaceState) history.replaceState(null, '', '#' + name);
   }
-  TAB_NAMES.forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.onclick = () => setTab(t); });
+  // Guarda ao SAIR da aba Configuração com alterações pendentes: oferece Salvar /
+  // Continuar (sem salvar) / Cancelar (fica na aba). Fora da aba Configuração, troca direto.
+  async function requestTab(name) {
+    const current = document.querySelector('.tab-btn.is-active')?.dataset.tab;
+    if (current === 'prova' && name !== 'prova' && configDirty) {
+      const choice = await showSaveGuard();
+      if (choice === 'cancel') return;                    // fica onde está
+      if (choice === 'save') { const ok = await saveConfigTab(); if (!ok) return; }
+      // 'continue' → segue sem salvar (as edições ficam no formulário)
+    }
+    setTab(name);
+  }
+  TAB_NAMES.forEach(t => { const b = document.getElementById('tab-btn-' + t); if (b) b.onclick = () => requestTab(t); });
   (function initTab() {
     const h = (location.hash || '').replace('#', '');
     setTab(TAB_NAMES.includes(h) ? h : 'prova');
   })();
+  // Modal da guarda: resolve 'save' | 'continue' | 'cancel'.
+  function showSaveGuard() {
+    return new Promise(resolve => {
+      const modal = document.getElementById('save-guard-modal');
+      modal.classList.remove('hidden');
+      const finish = (v) => {
+        modal.classList.add('hidden');
+        bSave.removeEventListener('click', onSave);
+        bCont.removeEventListener('click', onCont);
+        bCancel.removeEventListener('click', onCancel);
+        resolve(v);
+      };
+      const bSave = document.getElementById('guard-save');
+      const bCont = document.getElementById('guard-continue');
+      const bCancel = document.getElementById('guard-cancel');
+      const onSave = () => finish('save');
+      const onCont = () => finish('continue');
+      const onCancel = () => finish('cancel');
+      bSave.addEventListener('click', onSave);
+      bCont.addEventListener('click', onCont);
+      bCancel.addEventListener('click', onCancel);
+    });
+  }
 
   // ---------- Editor de perguntas (lista recolhível) ----------
   function updateQCount() { document.getElementById('q-count').textContent = document.querySelectorAll('#questions .q-item').length; cfgWarn(); }
@@ -380,9 +395,9 @@
     div.querySelector('.q-q').value = q.question || '';
     div.querySelector('.q-a').value = q.answer || '';
     div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; q._open = !q._open; div.classList.toggle('open', q._open); };
-    div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderQuestions(); renderRubric(); };
-    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; syncHead(div, q); cfgWarn(); });
-    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; });
+    div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); markConfigDirty(); renderQuestions(); renderRubric(); };
+    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; markConfigDirty(); syncHead(div, q); cfgWarn(); });
+    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; markConfigDirty(); });
     syncHead(div, q);
     return div;
   }
@@ -620,30 +635,28 @@
     document.getElementById('exam-status').innerHTML = j.work.has_exam
       ? `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(j.work.exam_filename || 'abrir arquivo')} ↗</a>. As perguntas abaixo podem ser editadas.`
       : 'Nenhuma prova enviada ainda — suba um PDF/TXT ou digite as perguntas abaixo.';
-    document.getElementById('cfg-n').value = j.work.question_count || 6;
+    document.getElementById('cfg-n').value = j.work.question_count || 5;
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
     QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: false }));
     renderQuestions();
     renderRubric();
     fillSettings(j.work);
-    CALIB = j.work.oral_calibration || null;
-    renderCalib();
     renderSubsTable();
     renderEvalTable();
     cfgWarn();
+    configDirty = false;   // estado recém-carregado do banco = limpo
   }
   // Política default do critério de penalidade (espelha lib/gradePenalty.js /
   // agents/GradePenaltyAgent.js — mostrada quando o professor ainda não escreveu a sua).
   const DEFAULT_PENALTY_PROMPT = 'Aplique penalidade SOMENTE em caso de violação FRAGRANTE e inequívoca dos critérios de integridade (ex.: ausência prolongada do candidato, presença clara de outra pessoa, uso de celular durante boa parte da prova). Nesses casos, reduza a nota em até 50% (multiplicador 0,5). Se os alertas forem leves, pontuais ou ambíguos, NÃO penalize (multiplicador 1,0). Na dúvida, não penalize.';
   function fillSettings(work) {
-    document.getElementById('fb-guidelines-oral').value = work.feedback_guidelines || '';
-    document.getElementById('fb-include-opinion-oral').checked = work.include_interviewer_opinion !== false;
     const gp = work.grade_penalty || null;
     document.getElementById('penalty-enabled-oral').checked = !!(gp && gp.enabled);
     document.getElementById('penalty-prompt-oral').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
   }
-  document.getElementById('cfg-n').addEventListener('input', cfgWarn);
+  document.getElementById('cfg-n').addEventListener('input', () => { markConfigDirty(); cfgWarn(); });
+  document.getElementById('cfg-voice').addEventListener('change', markConfigDirty);
 
   // ---------- Renomear a prova (reusa PATCH /w/:token/name) ----------
   document.getElementById('edit-name-btn').onclick = () => {
@@ -685,7 +698,7 @@
       const r = await fetch(`${API}/oral/exam-pdf`, { method: 'POST', body: form });
       const j = await r.json();
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
-      msg.textContent = `${j.count} pergunta(s) extraída(s).`;
+      msg.textContent = `${j.count} pergunta(s) extraída(s).` + (j.calibration_generated ? ' ✓ Calibração de fala gerada.' : '');
       document.getElementById('exam-status').innerHTML = `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(f.name || 'abrir arquivo')} ↗</a>. As perguntas abaixo podem ser editadas.`;
       adoptSaved(j.questions);
       renderQuestions();
@@ -693,16 +706,29 @@
     } catch (e) { msg.textContent = 'Falha de comunicação.'; }
     finally { btn.disabled = false; }
   };
-  document.getElementById('cfg-save').onclick = async () => {
+  // Salvar ÚNICO da aba Configuração: persiste a config (voz + nº de perguntas) E as
+  // perguntas/gabarito de uma vez. Devolve true se tudo salvou (usado pela guarda de aba).
+  async function saveConfigTab() {
     const msg = document.getElementById('cfg-msg');
-    const body = { question_count: Number(document.getElementById('cfg-n').value), voice: document.getElementById('cfg-voice').value };
     msg.textContent = 'Salvando…';
+    const cfgBody = { question_count: Number(document.getElementById('cfg-n').value), voice: document.getElementById('cfg-voice').value };
     try {
-      const r = await fetch(`${API}/oral/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const j = await r.json();
-      msg.textContent = r.ok ? 'Configurações salvas.' : 'Falha: ' + (j.error || r.status);
-    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-  };
+      const rc = await fetch(`${API}/oral/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfgBody) });
+      const jc = await rc.json().catch(() => ({}));
+      if (!rc.ok) { msg.textContent = 'Falha ao salvar a configuração: ' + (jc.error || rc.status); return false; }
+    } catch (e) { msg.textContent = 'Falha de comunicação.'; return false; }
+    // Perguntas/gabarito — só se houver ao menos uma pergunta com enunciado.
+    if (questionsPayload().length) {
+      try {
+        const jq = await saveQuestions();
+        if (jq.error) { msg.textContent = 'Configuração salva, mas as perguntas falharam: ' + jq.error; return false; }
+      } catch (e) { msg.textContent = 'Configuração salva, mas houve falha nas perguntas (comunicação).'; return false; }
+    }
+    configDirty = false;
+    msg.textContent = 'Configuração salva.';
+    return true;
+  }
+  document.getElementById('cfg-save').onclick = () => saveConfigTab();
   // Prévia da voz do examinador — reusa o endpoint work-scoped da entrevista por
   // mensagem (mode-agnóstico: sintetiza uma frase de exemplo com o tts_model).
   document.getElementById('cfg-voice-preview').onclick = async () => {
@@ -720,39 +746,11 @@
       btn.textContent = prev; btn.disabled = false;
     } catch (e) { btn.textContent = 'Falha'; setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500); }
   };
-  // ---------- Calibração de fala ----------
-  let CALIB = null;
-  function renderCalib() {
-    document.getElementById('calib-sentence').value = CALIB?.sentence || '';
-    const terms = (CALIB?.key_terms || []);
-    document.getElementById('calib-terms').textContent = terms.length ? ('Termos-chave verificados na transcrição: ' + terms.join(', ')) : '';
-  }
-  document.getElementById('calib-gen').onclick = async () => {
-    const msg = document.getElementById('calib-msg'), btn = document.getElementById('calib-gen');
-    btn.disabled = true; msg.textContent = 'Gerando…';
-    try {
-      const r = await fetch(`${API}/oral/calibration/generate`, { method: 'POST' });
-      const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
-      CALIB = j.calibration; renderCalib(); msg.textContent = 'Frase gerada e salva.';
-    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-    finally { btn.disabled = false; }
-  };
-  document.getElementById('calib-save').onclick = async () => {
-    const msg = document.getElementById('calib-msg');
-    const sentence = document.getElementById('calib-sentence').value.trim();
-    // Se a frase foi editada à mão, mantém só os termos-chave que ainda aparecem nela.
-    const key_terms = (CALIB?.key_terms || []).filter(t => sentence.toLowerCase().includes(String(t).toLowerCase()));
-    msg.textContent = 'Salvando…';
-    try {
-      const r = await fetch(`${API}/oral/calibration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sentence, key_terms }) });
-      const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-      CALIB = j.calibration; renderCalib(); msg.textContent = sentence ? 'Salvo.' : 'Salvo (teste desligado).';
-    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-  };
+  // Calibração de fala: gerada AUTOMÁTICA (em silêncio) no upload do gabarito —
+  // sem card nem controles aqui (o professor não lida com calibração).
   document.getElementById('q-add').onclick = () => {
     QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
+    markConfigDirty();
     qCollapsed = false; // expande para a nova pergunta aparecer
     renderQuestions();
     const items = document.querySelectorAll('#questions .q-item');
@@ -777,15 +775,6 @@
     adoptSaved(j.questions); renderQuestions(); renderRubric();
     return j;
   }
-  document.getElementById('q-save').onclick = async () => {
-    const msg = document.getElementById('q-msg'); msg.textContent = 'Salvando…';
-    try {
-      const j = await saveQuestions();
-      if (j.error) { msg.textContent = 'Falha: ' + j.error; return; }
-      msg.textContent = `${j.count} pergunta(s) salva(s).`;
-      document.getElementById('exam-status').textContent = 'Perguntas definidas.';
-    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-  };
   document.getElementById('save-rubric-oral').onclick = async () => {
     const msg = document.getElementById('rubric-msg-oral'); msg.textContent = 'Salvando…';
     try {
@@ -989,48 +978,8 @@
       await load();
     } catch (e) { batchStatus(statusId, 'Falha de comunicação.'); }
   }
-  document.getElementById('pub-dev-btn').onclick = () => runPublishAll('devolutiva', true, 'eval-batch-status');
   document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true, 'pub-batch-status');
-  document.getElementById('unpub-dev-btn').onclick = () => { if (confirm('Despublicar TODAS as devolutivas?')) runPublishAll('devolutiva', false, 'eval-batch-status'); };
   document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false, 'pub-batch-status'); };
-
-  // 2 · Gerar devolutivas (LLM) em lote — NDJSON como o evaluate-all.
-  async function runDeriveAll(force) {
-    const btn = document.getElementById('derive-all-btn'); btn.disabled = true;
-    batchStatus('eval-batch-status', force ? 'Regerando todas as devolutivas…' : 'Gerando as devolutivas…');
-    await refreshSubs();
-    try {
-      const r = await fetch(`${API}/oral/evaluations/student-versions${force ? '?force=1' : ''}`, { method: 'POST' });
-      if (!r.ok || !r.body) {
-        let msg = r.status; try { msg = (await r.json()).error || r.status; } catch (e) {}
-        batchStatus('eval-batch-status', 'Falha: ' + msg); return;
-      }
-      let generated = 0;
-      await readNdjson(r, (m) => {
-        if (m.type === 'done') {
-          let t = m.candidates === 0
-            ? 'Nenhuma devolutiva nova a gerar (avalie as provas antes, ou todas já têm devolutiva).'
-            : `${m.generated} devolutiva(s) gerada(s) de ${m.candidates} candidata(s).`;
-          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
-          batchStatus('eval-batch-status', t);
-        }
-      });
-    } catch (e) { batchStatus('eval-batch-status', 'Falha de comunicação.'); }
-    finally { btn.disabled = false; }
-  }
-  document.getElementById('derive-all-btn').onclick = () => runDeriveAll(false);
-
-  // Configurações de devolutiva (diretrizes + opinião do examinador). Reusa a
-  // rota genérica /feedback-settings (vale para os dois kinds de trabalho).
-  document.getElementById('save-feedback-oral').onclick = async () => {
-    const msg = document.getElementById('fb-settings-msg-oral'); msg.textContent = 'Salvando…';
-    try {
-      const r = await fetch(`${API}/feedback-settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedback_guidelines: document.getElementById('fb-guidelines-oral').value, interviewer_opinion: document.getElementById('fb-include-opinion-oral').checked }) });
-      const j = await r.json();
-      msg.textContent = r.ok ? 'Configurações salvas.' : 'Falha: ' + (j.error || r.status);
-    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-  };
 
   // Critério de penalidade (opt-in). Rota genérica /grade-penalty.
   document.getElementById('save-penalty-oral').onclick = async () => {

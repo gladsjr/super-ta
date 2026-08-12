@@ -212,8 +212,24 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
         // (sem id) recebem ids frescos do contador.
         questions = questions.map(q => ({ ...q, rubric: "", weight: 1 }));
         const cleaned = await db.setOralQuestions(req.work.id, questions);
+        // Calibração de fala gerada AUTOMÁTICA no upload, em silêncio (o professor não
+        // lida com calibração nem vê/edita a frase — some o card de calibração).
+        // Best-effort: se falhar, o upload das perguntas NÃO falha.
+        let calibrationGenerated = false;
+        try {
+            const items = cleaned
+                .map(q => ({ question: q.question, answer: q.answer }))
+                .filter(it => String(it.question || "").trim() || String(it.answer || "").trim());
+            if (items.length) {
+                const { sentence, key_terms } = await oralCalibrationAgent.build({ items, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
+                await db.setOralCalibration(req.work.id, { sentence, key_terms });
+                calibrationGenerated = true;
+            }
+        } catch (calErr) {
+            log.error("ORAL", `exam calibration auto-gen failed work=${req.work.work_token}: ${calErr.message}`);
+        }
         log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} type=${isTxt ? "txt" : "pdf"} questions=${cleaned.length}`);
-        res.json({ ok: true, count: cleaned.length, questions: cleaned });
+        res.json({ ok: true, count: cleaned.length, questions: cleaned, calibration_generated: calibrationGenerated });
     } catch (err) {
         log.error("ORAL", `exam-pdf failed: ${err.message}`);
         res.status(500).json({ error: "falha ao processar a prova", detail: err.message });
