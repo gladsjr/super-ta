@@ -13,6 +13,7 @@ Per-turn orchestration is **delegated to a single reasoning-model call** (`Super
 - `docs/oral-exam.md` — oral exam (Realtime): relay, guaranteed ending, setup gate, calibration, proctoring, oral agents, schema
 - `docs/video-proctoring.md` — camera-on "fiscalização" for the message interview (command areas, penalty composition)
 - `docs/scenarios.md` — multi-agent scenarios subsystem (experimental)
+- `docs/access-model.md` — camada institucional: unidades (árvore recursiva + flag de turma), RBAC tenant-aware (herança só p/ admin; disponibilidade ≠ acesso), identidade/login (pessoa ≠ identidades; local + Google SSO), dois portões de uso como reserva (US$ + pacotes/DSL, com devolução), integração gradual
 
 ## User Preferences
 - Timezone: America/Sao_Paulo (GMT-3, Rio de Janeiro). Sempre converter horários de logs (UTC) para GMT-3 ao falar com o usuário.
@@ -32,9 +33,10 @@ Per-turn orchestration is **delegated to a single reasoning-model call** (`Super
 - `routes/interview.js` — student endpoints (`/start`, `/upload`, `/chat`, `/audio`, `/finalize`, `/intro/advance`); owns the state machine. Phase dispatch: `intro` → `IntroductionAgent`; `interviewing` → `SuperOrchestratorAgent`.
 - `routes/work.js` — professor endpoints (conversation, evaluation + student-version + publish, feedback settings, grades, batches, submission management).
 - `routes/admin.js` — admin (works, users). `routes/oralExam.js` — oral-exam professor + student endpoints.
+- `routes/units.js` — camada institucional: unidades (árvore + turma), papéis (memberships/roles), disponibilidade, teto US$ por unidade (reserva), pacotes (alocação/cascata/devolução + leitura). `routes/authFederated.js` — login federado (Google OIDC, opcional). Detalhe em `docs/access-model.md`.
 - `agents/` — all agent classes (Responses API, fail fast).
-- `lib/` — shared infra (db, session lifecycle/state, conversation utils, audio + audioStore, billing, middleware, deliverySignals, rubric, superOrchestrator/actionSchema; `oralRealtime` = Realtime relay, `proctor` = video proctoring).
-- `config/` — `policy.yaml`, `pricing.yaml`, `voices.js`, prompt/agenda templates, `interviewers/*.yaml`.
+- `lib/` — shared infra (db, session lifecycle/state, conversation utils, audio + audioStore, billing, middleware, deliverySignals, rubric, superOrchestrator/actionSchema; `oralRealtime` = Realtime relay, `proctor` = video proctoring; `units`/`rbac`/`packages` = camada institucional — árvore, RBAC tenant-aware, DSL+cotas de pacote).
+- `config/` — `policy.yaml`, `pricing.yaml`, `voices.js`, prompt/agenda templates, `interviewers/*.yaml`, `packages/*.yaml` (DSL de pacotes — controle de uso).
 - `static/` — frontend HTML per audience (`student/professor/admin/conversation/student_instructions` + `oral-*` variants; MediaPipe WASM self-hosted in `static/vision/`).
 - `migrations/` — SQL, file-per-change (conventions in CLAUDE.md).
 

@@ -164,7 +164,7 @@
           <div class="row" style="align-items: flex-end; gap: var(--sp-3)">
             <div class="field" style="margin: 0; flex: 1; min-width: 160px">
               <label class="label" for="lk-label">Rótulo (ex.: Turma A)</label>
-              <input type="text" id="lk-label" class="input" value="Aluno" style="width: 100%"/>
+              <input type="text" id="lk-label" class="input" value="Aluno" autocomplete="off" style="width: 100%"/>
             </div>
             <div class="field" style="margin: 0">
               <label class="label" for="lk-count">Quantos</label>
@@ -173,7 +173,7 @@
           </div>
           <div class="field" style="margin-top: var(--sp-3)">
             <label class="label" for="lk-names">…ou um nome por linha (cada nome vira um link próprio)</label>
-            <textarea id="lk-names" class="textarea" rows="3" placeholder="Maria Silva&#10;João Souza"></textarea>
+            <textarea id="lk-names" class="textarea" rows="3" autocomplete="off" placeholder="Maria Silva&#10;João Souza"></textarea>
           </div>
           <div class="create-actions">
             <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
@@ -494,7 +494,7 @@
     if (!rows.length) { tableEl.classList.add('hidden'); fEmpty.classList.remove('hidden'); return; }
     fEmpty.classList.add('hidden'); tableEl.classList.remove('hidden');
     tbody.innerHTML = rows.map(s => {
-      const url = `${location.origin}/s/${s.submission_token}`;
+      const url = `${window.ORATIA_BASE_URL || location.origin}/s/${s.submission_token}`;
       const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';
       // Acesso à prova COMPLETA (como na entrevista): transcrição + vídeo + alertas
       // + devolutiva + nota, na página de gerenciamento. Antes só linkava o vídeo cru.
@@ -506,17 +506,20 @@
       const blockBtn = s.is_blocked
         ? `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta prova">Liberar</button>`
         : `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', true)" title="Pausa a prova; o aluno perde acesso até você liberar">Bloquear</button>`;
+      const delBtn = s.status === 'pending'
+        ? ` · <button class="btn btn-sm" onclick="deleteToken('${s.submission_token}')" title="Apagar este envio (o aluno ainda não começou). Devolve a cota do pacote, se houver.">apagar</button>`
+        : '';
       return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
         <td>${esc(s.student_label || '')}${test}</td>
         <td><code class="tok">${s.submission_token}</code> <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button></td>
         <td>${STATUS_PILL[s.status] || esc(s.status)}${s.is_blocked ? ' <span class="badge-blocked">bloqueada</span>' : ''}</td>
         <td>${vid}</td>
-        <td>${abrir}${blockBtn}</td>
+        <td>${abrir}${blockBtn}${delBtn}</td>
       </tr>`;
     }).join('');
   }
   window.copyStudentLink = async (btn, token) => {
-    try { await navigator.clipboard.writeText(location.origin + '/s/' + token); } catch { return; }
+    try { await navigator.clipboard.writeText((window.ORATIA_BASE_URL || location.origin) + '/s/' + token); } catch { return; }
     const prev = btn.textContent; btn.textContent = '✓'; btn.disabled = true;
     setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
   };
@@ -527,10 +530,17 @@
     await refreshSubs();
   };
 
+  // Apaga um token não iniciado e devolve a cota do pacote (se houver). 409 se já começou.
+  window.deleteToken = async (token) => {
+    const r = await fetch(`${API}/submissions/${token}`, { method: 'DELETE' });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.detail || j.error || 'ao apagar')); return; }
+    await refreshSubs();
+  };
+
   document.getElementById('sub-filter').onchange = renderSubsTable;
   document.getElementById('download-csv').onclick = () => {
     const lines = [['rotulo', 'token', 'url'].join(',')].concat(
-      SUBS.map(s => [`"${(s.student_label || '').replace(/"/g, '""')}"`, s.submission_token, `${location.origin}/s/${s.submission_token}`].join(','))
+      SUBS.map(s => [`"${(s.student_label || '').replace(/"/g, '""')}"`, s.submission_token, `${window.ORATIA_BASE_URL || location.origin}/s/${s.submission_token}`].join(','))
     );
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'provas-oral.csv'; a.click();
@@ -602,6 +612,7 @@
     const r = await fetch(`${API}/oral/info`);
     if (!r.ok) { document.getElementById('notfound').classList.remove('hidden'); return; }
     const j = await r.json();
+    if (j.public_base_url) window.ORATIA_BASE_URL = j.public_base_url;   // origem canônica dos links do aluno
     document.getElementById('main').classList.remove('hidden');
     document.getElementById('work-name').textContent = j.work.name;
     SUBS = j.submissions || [];
@@ -845,7 +856,7 @@
     try {
       const r = await fetch(`${API}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
+      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
       msg.textContent = `${j.submissions.length} link(s) gerado(s).`;
       document.getElementById('lk-names').value = '';
       await load();

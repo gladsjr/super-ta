@@ -8,7 +8,8 @@ import { fileURLToPath } from "url";
 import express from "express";
 import multer from "multer";
 import yaml from "js-yaml";
-import { requireWorkToken, requireProfessorSubmission, requireWithinBudget, sanitizeLabel } from "../lib/middleware.js";
+import { requireWorkToken, requireProfessorSubmission, requireWithinBudget, requireEvaluationOutputsAllowed, sanitizeLabel } from "../lib/middleware.js";
+import { publicBaseUrl } from "../lib/publicUrl.js";
 import * as db from "../lib/db.js";
 import { pickRandomName } from "../lib/personas.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
@@ -46,6 +47,8 @@ import {
     MAX_QUESTION_COUNT,
 } from "../lib/config.js";
 import log from "../lib/logger.js";
+import { pool } from "../auth.js";
+import { reserveSeats, releaseForSubmission } from "../lib/packages.js";
 
 const router = express.Router();
 
@@ -102,6 +105,7 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 percent_used: balance?.percent_used ?? 100,
             },
             submissions,
+            public_base_url: publicBaseUrl(req),   // origem canônica p/ montar o link do aluno
         });
     } catch (err) {
         log.error("WORK", `info failed: ${err.message}`);
@@ -639,7 +643,7 @@ router.patch("/w/:workToken/grading-rubric", requireWorkToken, express.json({ li
 // Gera a versão automática (prévia, sem publicar). ?force=true regenera.
 // Body opcional { guidelines }: diretriz AD-HOC desta geração (experimento
 // num aluno) — NÃO altera o padrão do trabalho. Ausente = usa o padrão.
-router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireProfessorSubmission, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/student-version", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, requireWithinBudget, express.json({ limit: "32kb" }), async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
@@ -728,7 +732,7 @@ router.patch("/w/:workToken/submissions/:subToken/evaluation/sections", requireW
 // Calcula as notas DESTE aluno. ?force=true recalcula. Body opcional
 // { rubricOverride: [...] }: rubrica AD-HOC só deste aluno (não muta o padrão
 // do trabalho) — espelha o override de diretrizes da devolutiva.
-router.post("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkToken, requireProfessorSubmission, requireWithinBudget, express.json({ limit: "64kb" }), async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, requireWithinBudget, express.json({ limit: "64kb" }), async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     const force = String(req.query?.force ?? "").toLowerCase() === "true";
@@ -788,7 +792,7 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/grades", requireWorkT
 });
 
 // Publica a NOTA ao aluno (independente da devolutiva). Exige nota calculada.
-router.post("/w/:workToken/submissions/:subToken/evaluation/grade-publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/grade-publish", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     try {
@@ -819,7 +823,7 @@ router.delete("/w/:workToken/submissions/:subToken/evaluation/grade-publish", re
     }
 });
 
-router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+router.post("/w/:workToken/submissions/:subToken/evaluation/publish", requireWorkToken, requireProfessorSubmission, requireEvaluationOutputsAllowed, async (req, res) => {
     const found = req.submission;
     const subToken = found.submission_token;
     try {
@@ -1368,47 +1372,60 @@ const BULK_LABEL_CAP = 200;
 router.post("/w/:workToken/submissions", requireWorkToken, async (req, res) => {
     // Marcação de teste é definida na criação (decisão de produto: não muda depois).
     const isTest = req.body?.is_test === true;
+
+    // Monta a lista de rótulos — dois modos: lista de nomes OU rótulo-base + contagem.
+    let labels;
     const rawLabels = req.body?.labels;
     if (Array.isArray(rawLabels)) {
-        const sanitized = [];
+        labels = [];
         for (let i = 0; i < rawLabels.length; i++) {
             const raw = String(rawLabels[i] ?? "").trim();
             if (!raw) continue; // ignora linhas vazias silenciosamente
-            try { sanitized.push(sanitizeLabel(raw)); }
-            catch (err) {
-                return res.status(400).json({ error: `linha ${i + 1}: ${err.message}` });
-            }
+            try { labels.push(sanitizeLabel(raw)); }
+            catch (err) { return res.status(400).json({ error: `linha ${i + 1}: ${err.message}` }); }
         }
-        if (sanitized.length === 0) {
-            return res.status(400).json({ error: "lista vazia (nenhum nome válido)" });
-        }
-        if (sanitized.length > BULK_LABEL_CAP) {
-            return res.status(400).json({ error: `máximo de ${BULK_LABEL_CAP} nomes por envio` });
-        }
-        try {
-            const rows = await db.createSubmissionsFromLabels(req.work.id, sanitized, isTest);
-            log.info("SUBMISSION", `created ${rows.length} submission(s) from labels for work=${req.work.work_token} test=${isTest}`);
-            return res.json({ submissions: rows });
-        } catch (err) {
-            log.error("SUBMISSION", `create-from-labels failed: ${err.message}`);
-            return res.status(500).json({ error: "failed to create submissions" });
-        }
+        if (labels.length === 0) return res.status(400).json({ error: "lista vazia (nenhum nome válido)" });
+        if (labels.length > BULK_LABEL_CAP) return res.status(400).json({ error: `máximo de ${BULK_LABEL_CAP} nomes por envio` });
+    } else {
+        let baseLabel;
+        try { baseLabel = sanitizeLabel(req.body?.label); }
+        catch (err) { return res.status(400).json({ error: err.message }); }
+        const rawCount = Number(req.body?.count ?? 1);
+        const count = Number.isFinite(rawCount) && rawCount > 0 && rawCount <= 50 ? Math.floor(rawCount) : 1;
+        labels = [];
+        for (let i = 0; i < count; i++) labels.push(count > 1 ? `${baseLabel}-${i + 1}` : baseLabel);
     }
 
-    let baseLabel;
-    try { baseLabel = sanitizeLabel(req.body?.label); }
-    catch (err) { return res.status(400).json({ error: err.message }); }
-
-    const rawCount = Number(req.body?.count ?? 1);
-    const count = Number.isFinite(rawCount) && rawCount > 0 && rawCount <= 50 ? Math.floor(rawCount) : 1;
-
+    // Cria os tokens E reserva os assentos do pacote (Gate B) na MESMA transação:
+    // gerar token é onde o professor "ameaça gastar". ALL-OR-NOTHING — se o lote não
+    // couber na cota, não cria nada. Token de teste também conta (é custo). Trabalho
+    // fora de pacote → reserva é no-op (só vale o orçamento US$).
+    const client = await pool.connect();
     try {
-        const rows = await db.createSubmissions(req.work.id, baseLabel, count, isTest);
-        log.info("SUBMISSION", `created ${count} submission(s) for work=${req.work.work_token} test=${isTest}`);
-        res.json({ submissions: rows });
+        await client.query("BEGIN");
+        const rows = await db.createSubmissionsFromLabels(req.work.id, labels, isTest, client);
+        const reserve = await reserveSeats(client, {
+            workId: req.work.id,
+            submissionIds: rows.map((r) => r.id),
+            byUserId: req.session?.user?.id ?? null,
+        });
+        if (!reserve.ok) {
+            await client.query("ROLLBACK");
+            const detail = reserve.reason === "no_counter"
+                ? "Este trabalho está vinculado a um pacote sem cota configurada na unidade. Procure o administrador."
+                : `A cota de "${reserve.itemKey}" nesta turma não cobre ${labels.length} envio(s) — restam ${reserve.available}. Apague envios não usados ou peça mais pacotes.`;
+            return res.status(402).json({ error: "entitlement_exhausted", gate: "package", item: reserve.itemKey, available: reserve.available ?? 0, needed: labels.length, detail });
+        }
+        await client.query("COMMIT");
+        log.info("SUBMISSION", `created ${rows.length} submission(s) for work=${req.work.work_token} test=${isTest} reserved=${reserve.skipped ? "n/a" : reserve.count}`);
+        // Remove o id interno antes de responder (o frontend usa só o token).
+        return res.json({ submissions: rows.map(({ id, ...rest }) => rest) });
     } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
         log.error("SUBMISSION", `create failed: ${err.message}`);
-        res.status(500).json({ error: "failed to create submissions" });
+        return res.status(500).json({ error: "failed to create submissions" });
+    } finally {
+        client.release();
     }
 });
 
@@ -1428,6 +1445,25 @@ router.patch("/w/:workToken/submissions/:subToken", requireWorkToken, requirePro
     } catch (err) {
         log.error("SUBMISSION", `block toggle failed submission=${subToken}: ${err.message}`);
         res.status(500).json({ error: "failed to update submission" });
+    }
+});
+
+// Apagar um token de envio. Só quando o aluno NÃO iniciou (status pending): aí
+// devolve o assento do pacote ao pool (Gate B) e remove a submissão. Se já
+// começou, houve custo — não dá pra apagar nem devolver (bloqueie em vez disso).
+router.delete("/w/:workToken/submissions/:subToken", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const sub = req.submission;
+    if (sub.status !== "pending") {
+        return res.status(409).json({ error: "submission_in_use", detail: "só é possível apagar um envio que o aluno ainda não iniciou" });
+    }
+    try {
+        await releaseForSubmission(sub.id); // devolve o assento (no-op se não havia reserva)
+        await db.deleteSubmission(sub.id);
+        log.info("SUBMISSION", `deleted+refunded submission=${sub.submission_token} work=${req.work.work_token}`);
+        res.json({ ok: true, submission_token: sub.submission_token });
+    } catch (err) {
+        log.error("SUBMISSION", `delete failed submission=${sub.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "failed to delete submission" });
     }
 });
 

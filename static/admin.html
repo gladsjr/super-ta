@@ -10,6 +10,11 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
 <style>
   .login-wrap { max-width: 380px; margin: var(--sp-10) auto 0; }
+  .admin-tabs { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin: var(--sp-4) 0 var(--sp-5); position: sticky; top: 0; z-index: 5; background: var(--paper-50, var(--c-bg, #faf8f2)); padding: var(--sp-2) 0; }
+  .admin-tab { border: 1px solid var(--ink-300, #c4ccd6); background: transparent; border-radius: 999px; padding: 6px 16px; cursor: pointer; font: inherit; color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  .admin-tab:hover { background: var(--c-bg-2, #eef1f5); }
+  .admin-tab.active { background: var(--ink-900, #1c3557); color: #fff; border-color: var(--ink-900, #1c3557); }
+  .admin-sec.hidden-sec { display: none; }
   .work-card { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4) var(--sp-5); align-items: start; }
   .work-card h3 { margin: 0 0 var(--sp-2) 0; }
   .work-stats { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-1); }
@@ -61,29 +66,20 @@
 
 <main class="page page-operar">
 
-  <div id="login-screen" class="login-wrap hidden">
-    <div class="card">
-      <h2>Entrar</h2>
-      <p class="muted">Use suas credenciais para acessar o painel.</p>
-      <div class="field">
-        <label class="label" for="login-user">Usuário</label>
-        <input id="login-user" class="input" placeholder="usuário" autocomplete="username"/>
-      </div>
-      <div class="field">
-        <label class="label" for="login-pass">Senha</label>
-        <input id="login-pass" class="input" type="password" autocomplete="current-password"/>
-      </div>
-      <button id="login-btn" class="btn btn-primary" style="width:100%">Entrar</button>
-      <div id="login-error" class="error-text"></div>
-    </div>
-  </div>
-
   <div id="app-screen" class="hidden">
     <div class="page-header">
-      <h1>Trabalhos</h1>
-      <div class="subtitle">Crie trabalhos e distribua os tokens para os professores responsáveis.</div>
+      <h1>Administração</h1>
+      <div class="subtitle">Trabalhos, instituições, usuários e acesso a dados.</div>
     </div>
 
+    <nav class="admin-tabs" id="admin-tabs">
+      <button class="admin-tab" data-sec="trabalhos">Trabalhos</button>
+      <a class="admin-tab" href="/unidades" title="Unidades em árvore, papéis, tetos e pacotes de avaliação">Unidades ↗</a>
+      <button class="admin-tab" data-sec="usuarios">Usuários e senha</button>
+      <button class="admin-tab" data-sec="tokens">Tokens de análise</button>
+    </nav>
+
+    <section id="sec-trabalhos" class="admin-sec">
     <div class="card">
       <h3 class="card-title">Novo trabalho</h3>
       <div class="row">
@@ -96,7 +92,15 @@
         <input id="new-work-budget" class="input" type="number" min="0" step="0.5" placeholder="Orçamento USD" style="width: 160px" title="Orçamento total deste trabalho em dólares — limite de gasto com o modelo, somando criação + interações dos alunos."/>
         <button id="create-work" class="btn btn-primary">Criar</button>
       </div>
-      <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho.</div>
+      <div class="row" style="margin-top: var(--sp-2)">
+        <select id="new-work-unit" class="select" style="flex:1; min-width: 200px" title="Vincula o trabalho a uma TURMA (🎓). Só turmas recebem trabalhos; o gasto passa a contar no teto da unidade.">
+          <option value="">— sem unidade (modo token, como hoje) —</option>
+        </select>
+        <select id="new-work-package" class="select" style="flex:1; min-width: 220px" disabled title="Cria o trabalho sob um item de pacote: o tipo, o número de perguntas e as travas vêm do item, e cada envio consome 1 do pool da unidade.">
+          <option value="">— sem pacote —</option>
+        </select>
+      </div>
+      <div class="hint">Trabalhos novos nascem multi-interação por default. Orçamento default cobre ~3 entrevistas; ajustável depois pelo botão "Editar orçamento" do trabalho. Unidades e pacotes são geridos em <a href="/unidades">Unidades</a>.</div>
       <div id="create-msg" class="hint"></div>
     </div>
 
@@ -118,7 +122,10 @@
     <div id="works"></div>
     <div id="works-filtered-empty" class="table-empty hidden">Nenhum trabalho neste filtro.</div>
 
-    <h3 style="margin-top: var(--sp-6)">Sua senha</h3>
+    </section>
+
+    <section id="sec-usuarios" class="admin-sec hidden-sec">
+    <h3>Sua senha</h3>
     <div class="card">
       <h3 class="card-title">Alterar senha</h3>
       <p class="card-sub">Confirme sua senha atual e informe a nova. Mínimo de 6 caracteres.</p>
@@ -130,10 +137,10 @@
       <div id="pwd-msg" class="hint"></div>
     </div>
 
-    <h3 style="margin-top: var(--sp-6)">Administradores</h3>
+    <h3 style="margin-top: var(--sp-6)">Administradores globais (equipe ORATIA)</h3>
     <div class="card">
       <h3 class="card-title">Novo administrador</h3>
-      <p class="card-sub">Todo usuário cadastrado tem acesso ao painel administrativo. Use nomes curtos (2 a 32 caracteres, letras/números/<code>_.-</code>) e senha de pelo menos 6 caracteres.</p>
+      <p class="card-sub">Usuário criado aqui nasce <b>admin global</b>: age em toda a árvore de unidades e é o único que cria unidades raiz. Administradores <i>de unidade</i>, professores e alunos são vinculados na tela de Unidades. Use nomes curtos (2 a 32 caracteres, letras/números/<code>_.-</code>) e senha de pelo menos 6 caracteres.</p>
       <div class="row">
         <input id="new-user-name" class="input" placeholder="usuário" autocomplete="off" style="flex:1; min-width:160px"/>
         <input id="new-user-pass" class="input" type="password" placeholder="senha" autocomplete="new-password" style="flex:1; min-width:160px"/>
@@ -149,7 +156,10 @@
       <div id="users-empty" class="table-empty hidden">Nenhum usuário ainda.</div>
     </div>
 
-    <h3 style="margin-top: var(--sp-6)">Análise (benchmark)</h3>
+    </section>
+
+    <section id="sec-tokens" class="admin-sec hidden-sec">
+    <h3>Análise (benchmark)</h3>
     <div class="card">
       <h3 class="card-title">Tokens de análise</h3>
       <p class="card-sub">Geram acesso somente-leitura ao endpoint de consulta de dados (<code>POST /api/analytics/query</code>) para benchmark. Como você já tem direito aos dados, o token apenas estende esse acesso a um canal programático — <strong>expira em 30 dias</strong> e fica registrado no seu nome. O texto do token aparece <strong>uma única vez</strong>, na geração: copie e guarde.</p>
@@ -173,6 +183,7 @@
       </table>
       <div id="tokens-empty" class="table-empty hidden">Nenhum token ainda.</div>
     </div>
+    </section>
 
   </div>
 
@@ -187,10 +198,34 @@
 <script>
 let currentUser = null;
 let DEFAULT_BUDGET_USD = null;
+// Abas: mostra uma seção por vez; o hash (#trabalhos/#usuarios/#tokens) permite
+// link direto e sobrevive ao refresh. Default: trabalhos.
+const SECS = ['trabalhos', 'usuarios', 'tokens'];
+function showSec(name) {
+  if (!SECS.includes(name)) name = 'trabalhos';
+  for (const s of SECS) {
+    document.getElementById('sec-' + s).classList.toggle('hidden-sec', s !== name);
+  }
+  document.querySelectorAll('#admin-tabs .admin-tab[data-sec]').forEach(b =>
+    b.classList.toggle('active', b.dataset.sec === name));
+  if (('#' + name) !== location.hash) history.replaceState(null, '', '#' + name);
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('#admin-tabs .admin-tab[data-sec]').forEach(b =>
+    b.onclick = () => showSec(b.dataset.sec));
+  showSec((location.hash || '#trabalhos').slice(1));
+});
+window.addEventListener('hashchange', () => showSec(location.hash.slice(1)));
 async function checkAuth() {
   try {
     const r = await fetch('/me');
-    if (r.ok) { const j = await r.json(); showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); }
+    if (r.ok) {
+      const j = await r.json();
+      // Painel global é da equipe ORATIA: admin de unidade, professor e aluno
+      // aterrissam na visão escopada de /unidades.
+      if (j.is_global_admin === false) { location.replace('/unidades'); return; }
+      showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); loadUnitsAndPackages();
+    }
     else showLogin();
   } catch { showLogin(); }
 }
@@ -204,37 +239,60 @@ async function loadDefaults() {
     if (el && !el.value && Number.isFinite(DEFAULT_BUDGET_USD)) el.placeholder = `Orçamento USD (default ${DEFAULT_BUDGET_USD.toFixed(2)})`;
   } catch { /* silencioso */ }
 }
-function showLogin() {
-  document.getElementById('login-screen').classList.remove('hidden');
-  document.getElementById('app-screen').classList.add('hidden');
-  document.getElementById('user-area').classList.add('hidden');
+function showLogin() { location.replace('/login'); } // login único, roteia por papel
+// Unidades + catálogo de pacotes para o vínculo institucional do novo trabalho.
+// O select de pacote lista template/item e só habilita com unidade escolhida;
+// ao escolher um item, o TIPO do trabalho vem do item (select de kind trava).
+async function loadUnitsAndPackages() {
+  try {
+    const [ru, rp] = await Promise.all([fetch('/admin/units'), fetch('/admin/packages')]);
+    if (!ru.ok || !rp.ok) return;
+    const units = (await ru.json()).units || [];
+    const templates = (await rp.json()).templates || [];
+    const uSel = document.getElementById('new-work-unit');
+    const byParent = new Map();
+    for (const u of units) { const k = u.parent_id ?? 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(u); }
+    const walk = (pid, depth) => {
+      for (const u of (byParent.get(pid) || [])) {
+        if (!u.is_active) continue;
+        // Trabalho é da TURMA: só unidades is_class entram no seletor; as
+        // demais aparecem desabilitadas, como contexto da hierarquia.
+        const o = document.createElement('option');
+        o.value = u.id; o.textContent = `${'— '.repeat(depth)}${u.is_class ? '🎓 ' : ''}${u.name}`;
+        if (!u.is_class) { o.disabled = true; o.value = ''; }
+        uSel.appendChild(o);
+        walk(u.id, depth + 1);
+      }
+    };
+    walk(0, 0);
+    const pSel = document.getElementById('new-work-package');
+    const KIND_PT = { oral_realtime: 'prova oral', interview: 'entrevista' };
+    for (const t of templates) for (const it of (t.items || [])) {
+      const o = document.createElement('option');
+      o.value = `${t.key}/${it.key}`;
+      o.dataset.kind = it.kind;
+      o.textContent = `${t.name || t.key} · ${it.key} (${KIND_PT[it.kind] || it.kind}${it.variant === 'realtime' ? ' realtime' : ''})`;
+      pSel.appendChild(o);
+    }
+    uSel.onchange = () => {
+      pSel.disabled = !uSel.value;
+      if (!uSel.value) { pSel.value = ''; pSel.onchange(); }
+    };
+    pSel.onchange = () => {
+      const kindSel = document.getElementById('new-work-kind');
+      const opt = pSel.selectedOptions[0];
+      if (pSel.value && opt?.dataset.kind) { kindSel.value = opt.dataset.kind; kindSel.disabled = true; }
+      else kindSel.disabled = false;
+    };
+  } catch { /* silencioso — camada opcional */ }
 }
 function showApp(user) {
   currentUser = user;
-  document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
   document.getElementById('user-area').classList.remove('hidden');
   document.getElementById('user-info').textContent = user.username;
 }
 
-document.getElementById('login-btn').onclick = async () => {
-  const username = document.getElementById('login-user').value.trim();
-  const password = document.getElementById('login-pass').value;
-  const errEl = document.getElementById('login-error');
-  errEl.textContent = '';
-  if (!username || !password) return errEl.textContent = 'Informe usuário e senha';
-  try {
-    const r = await fetch('/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    if (r.ok) { const j = await r.json(); document.getElementById('login-pass').value = ''; showApp(j.user); loadDefaults(); loadWorks(); loadUsers(); loadAnalyticsTokens(); }
-    else errEl.textContent = 'Usuário ou senha inválidos';
-  } catch { errEl.textContent = 'Falha na comunicação'; }
-};
-document.getElementById('login-pass').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('login-btn').click();
-});
 document.getElementById('logout-btn').onclick = async () => {
   await fetch('/logout', { method: 'POST' });
   document.getElementById('works').innerHTML = '';
@@ -252,6 +310,15 @@ document.getElementById('create-work').onclick = async () => {
     const n = Number(budgetRaw);
     if (!Number.isFinite(n) || n < 0) { msg.textContent = 'Orçamento inválido'; return; }
     body.budget_usd = n;
+  }
+  // Vínculo institucional opcional: unidade e/ou item de pacote (o kind vem do item).
+  const unitVal = document.getElementById('new-work-unit').value;
+  if (unitVal) body.unit_id = Number(unitVal);
+  const pkgVal = document.getElementById('new-work-package').value;
+  if (pkgVal) {
+    if (!unitVal) { msg.textContent = 'Item de pacote exige uma unidade.'; return; }
+    const [tk, ik] = pkgVal.split('/');
+    body.template_key = tk; body.item_key = ik;
   }
   try {
     const r = await fetch('/admin/works', {

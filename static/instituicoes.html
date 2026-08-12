@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ORATIA — Unidades</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+<script src="/static/js/theme.js"></script>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
+<style>
+  .login-wrap { max-width: 380px; margin: var(--sp-10) auto 0; }
+  .layout { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: var(--sp-5); align-items: start; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  /* Workbench: a árvore vira barra lateral FIXA que rola sozinha, sempre visível
+     enquanto o detalhe rola (nota de design de largura, #3, 06/08/2026). */
+  .sidebar { position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px); overflow-y: auto; }
+  @media (max-width: 860px) { .sidebar { position: static; max-height: none; overflow: visible; } }
+  .tree-node { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  .tree-node:hover { background: var(--c-bg-2, #eef1f5); }
+  .tree-node.selected { background: var(--c-accent, #2563eb); color: #fff; }
+  .tree-node.selected .muted { color: #dbe5ff; }
+  .tree-node .u-label { font-size: .78rem; opacity: .75; }
+  .tree-node.inactive { opacity: .5; text-decoration: line-through; }
+  .tree-node.context { opacity: .55; cursor: default; }
+  .tree-caret { flex: 0 0 auto; width: 1em; text-align: center; color: var(--muted, #64748b); font-size: .8rem; cursor: pointer; user-select: none; line-height: 1; }
+  .tree-caret.leaf { visibility: hidden; cursor: default; }
+  .tree-caret:not(.leaf):hover { opacity: .65; }
+  .tree-node.selected .tree-caret { color: #fff; }
+  .ctx-choice { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .kv { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-size: .92em; margin: var(--sp-2) 0; }
+  .kv b { font-variant-numeric: tabular-nums; }
+  .ent-item { display: grid; grid-template-columns: 1fr auto auto auto; gap: var(--sp-2) var(--sp-4); font-size: .9em; padding: 3px 0; font-variant-numeric: tabular-nums; }
+  .ent-item.derived { opacity: .6; font-size: .82em; }
+  .ent-head { font-weight: 600; border-bottom: 1px solid var(--c-border, #d7dde5); }
+  .section-gap { margin-top: var(--sp-5); }
+  .member-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: 4px 0; }
+  /* Trilho "Operar" largo: listas fluem em 2+ colunas quando há espaço, em vez de
+     esticar linhas de coluna única (nota de design de largura, 06/08/2026). */
+  #d-members, #d-invites { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); column-gap: var(--sp-6); }
+  .badge-role { font-size: .75rem; padding: 1px 7px; border-radius: 9px; background: var(--c-bg-2, #e5e7eb); }
+  .badge-role.admin_global, .badge-role.admin_unidade { background: #1c3557; color: #fff; }
+  .row { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+  .alloc-card { border: 1px solid var(--c-border, #d7dde5); border-radius: 8px; padding: var(--sp-3); margin-top: var(--sp-3); }
+  .crumb { font-size: .78rem; color: var(--c-text-muted, #5b6472); }
+  .crumb .seg { cursor: pointer; }
+  .crumb .seg:hover { text-decoration: underline; }
+  .crumb .seg.ctx { cursor: default; opacity: .7; }
+  .crumb .sep { opacity: .45; margin: 0 5px; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--c-border, #d7dde5); }
+  .tab { padding: 7px 14px; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; font-size: .9rem; color: var(--c-text-muted, #5b6472); }
+  .tab:hover { color: inherit; }
+  .tab.active { background: var(--c-bg-2, #eef1f5); color: inherit; font-weight: 600; border-color: var(--c-border, #d7dde5); margin-bottom: -1px; }
+  .badge-pill { font-size: .7rem; padding: 1px 8px; border-radius: 9px; background: var(--c-bg-2, #e5e7eb); vertical-align: middle; }
+</style>
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/admin"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
+  <div id="user-area" class="topbar-right hidden" style="display:flex; align-items:center; gap: var(--sp-3)">
+    <span id="user-info" class="muted"></span>
+    <a id="admin-link" class="btn btn-sm hidden" href="/admin">← Admin</a>
+    <button id="logout-btn" class="btn btn-sm">Sair</button>
+  </div>
+</header>
+
+<main class="page page-operar">
+  <div id="app-screen" class="hidden">
+    <div class="page-header">
+      <h1>Unidades</h1>
+      <div class="subtitle" id="page-subtitle">Unidades em árvore, papéis, tetos de orçamento e pacotes de avaliação.</div>
+    </div>
+
+    <div class="layout">
+      <!-- ==== coluna esquerda: árvore (barra lateral fixa) ==== -->
+      <div class="sidebar">
+        <div class="card">
+          <h3 class="card-title">Unidades</h3>
+          <div id="tree"></div>
+          <div id="tree-empty" class="hint hidden">Nenhuma unidade visível para o seu usuário.</div>
+          <div id="unit-create" class="section-gap hidden">
+            <div class="row">
+              <input id="nu-name" class="input" placeholder="Nome (ex.: FGV)" style="flex:1; min-width:140px"/>
+              <select id="nu-label" class="select" style="flex:1; min-width:140px"><option value="">— tipo —</option></select>
+            </div>
+            <div class="row" style="margin-top: var(--sp-2)">
+              <select id="nu-parent" class="select" style="flex:1; min-width:180px"><option value="">— raiz (sem pai) —</option></select>
+              <input id="nu-budget" class="input" type="number" min="0" step="0.01" placeholder="teto US$ (raiz: obrigatório)" style="width:180px"/>
+              <button id="nu-create" class="btn btn-primary">Criar unidade</button>
+            </div>
+            <p class="hint">O tipo <strong>Turma</strong> é onde os trabalhos nascem; turma não pode ter unidades filhas. A <strong>raiz</strong> nasce com teto US$ (aquisição) — nunca sem limite; nas filhas o teto é opcional (herda do pai).</p>
+            <div id="nu-msg" class="hint"></div>
+          </div>
+        </div>
+
+        <div class="card section-gap hidden" id="card-csv">
+          <h3 class="card-title">Importar CSV</h3>
+          <p class="hint">Cabeçalho <code>name,parent_name,label,budget_usd,is_class</code>; uma unidade por linha; o pai deve existir ou vir numa linha anterior; <code>is_class</code> = true marca turma.</p>
+          <textarea id="csv-text" class="input" rows="4" style="width:100%; font-family:monospace" placeholder="name,parent_name,label,budget_usd,is_class&#10;FGV,,instituição,,&#10;MBA Finanças,FGV,curso,100,&#10;Turma 2026.2,MBA Finanças,turma,20,true"></textarea>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="csv-import" class="btn">Importar</button>
+            <span id="csv-msg" class="hint"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==== coluna direita: detalhe da unidade ==== -->
+      <div id="detail-none" class="card"><p class="hint">Selecione uma unidade na árvore para gerenciar teto, membros e pacotes.</p></div>
+      <div id="detail" class="hidden">
+        <!-- Cabeçalho persistente: caminho (breadcrumb) + ações estruturais -->
+        <div class="card">
+          <div class="row" style="justify-content: space-between; align-items: flex-start">
+            <div>
+              <div id="d-crumb" class="crumb"></div>
+              <h3 class="card-title" style="margin: 2px 0 0"><span id="d-name"></span> <span class="u-label muted" id="d-label"></span> <span id="d-badges"></span></h3>
+            </div>
+            <div class="row" id="d-header-actions">
+              <button id="d-rename" class="btn btn-sm hidden">Editar</button>
+              <button id="d-toggle" class="btn btn-sm hidden"></button>
+            </div>
+          </div>
+          <div id="d-rename-row" class="row hidden" style="margin-top: var(--sp-2)">
+            <input id="d-rename-name" class="input" style="flex:1; min-width:160px"/>
+            <select id="d-rename-label" class="select" style="width:150px"></select>
+            <button id="d-rename-save" class="btn btn-primary btn-sm">Salvar</button>
+          </div>
+          <div id="d-struct-msg" class="hint"></div>
+          <div id="d-tabs" class="tabs section-gap"></div>
+        </div>
+
+        <!-- Painel: Trabalhos (só turma) -->
+        <div class="card section-gap tabpanel hidden" data-tab="trabalhos">
+          <h3 class="card-title">Trabalhos da turma</h3>
+          <div id="works-create" class="hidden" style="margin-bottom: var(--sp-3)">
+            <div class="row">
+              <input id="nw-name" class="input" placeholder="nome do trabalho" style="flex:1; min-width:150px"/>
+              <select id="nw-kind" class="select" style="min-width:190px"></select>
+              <button id="nw-create" class="btn btn-primary btn-sm">Novo trabalho</button>
+              <span id="nw-msg" class="hint"></span>
+            </div>
+            <p class="hint" id="nw-type-hint" style="margin-top:4px"></p>
+          </div>
+          <div id="d-works"></div>
+        </div>
+
+        <!-- Painel: Orçamento (US$ + pacotes) — admin global + admin da unidade -->
+        <div class="card section-gap tabpanel hidden" data-tab="orcamento">
+          <h4 style="margin: 0 0 var(--sp-1)">Teto de orçamento (US$)</h4>
+          <div class="kv" id="d-budget-kv"></div>
+          <div class="row" id="budget-admin">
+            <input id="d-budget" class="input" type="number" min="0" step="1" placeholder="teto US$ (vazio = sem teto próprio)" style="width:220px"/>
+            <button id="d-budget-save" class="btn btn-sm">Definir teto</button>
+            <button id="d-budget-clear" class="btn btn-sm">Remover teto</button>
+            <span id="d-budget-msg" class="hint"></span>
+          </div>
+          <p class="hint" id="budget-hint">O teto é uma RESERVA descontada do saldo do pai no ato; reduzir devolve ao pai. Só quem administra o nível acima define este teto (na raiz, a equipe ORATIA — é aquisição).</p>
+
+          <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Pacotes de avaliação</h4>
+          <div class="row" id="pkg-allocate-row">
+            <select id="p-template" class="select" style="flex:1; min-width:180px"></select>
+            <input id="p-qty" class="input" type="number" min="1" step="1" value="10" style="width:90px"/>
+            <button id="p-allocate" class="btn btn-primary btn-sm">Alocar aqui</button>
+            <span id="p-msg" class="hint"></span>
+          </div>
+          <p class="hint">Alocar concede N pacotes inteiros a esta unidade (só admin global). Delegar repassa pacotes de uma alocação daqui para uma unidade filha.</p>
+          <div id="d-allocs"></div>
+        </div>
+
+        <!-- Painel: Configuração da instituição — só admin global (equipe ORATIA) -->
+        <div class="card section-gap tabpanel hidden" data-tab="config">
+          <h3 class="card-title">Configuração da instituição <span class="muted" style="font-size:.8rem">· equipe ORATIA</span></h3>
+          <div id="tenant-root">
+            <h4 style="margin-bottom: var(--sp-1)">Porta da instituição (tenant)</h4>
+            <div class="row">
+              <input id="t-slug" class="input" placeholder="slug (ex.: mackenzie)" style="width:180px"/>
+              <input id="t-name" class="input" placeholder="nome de exibição" style="flex:1; min-width:160px"/>
+              <input id="t-accent" type="color" value="#7c3aed" title="cor de destaque" style="width:44px; height:38px; padding:2px"/>
+              <button id="t-save" class="btn btn-primary btn-sm">Salvar</button>
+              <button id="t-remove" class="btn btn-sm">Remover</button>
+            </div>
+            <p class="hint" id="t-url"></p>
+            <span id="t-msg" class="hint"></span>
+
+            <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Domínios (a pista)</h4>
+            <div id="t-domains"></div>
+            <div class="row" style="margin-top: var(--sp-2)">
+              <input id="dom-add" class="input" placeholder="ex.: mackenzie.br" style="flex:1; min-width:160px"/>
+              <button id="dom-btn" class="btn btn-sm">Adicionar domínio</button>
+            </div>
+            <p class="hint">Na falha do login pela porta genérica, um e-mail desse domínio sugere a porta da instituição. Não roteia automático.</p>
+
+            <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Provedores da instituição (SSO)</h4>
+            <div id="t-providers"></div>
+            <div class="row" style="margin-top: var(--sp-2)">
+              <input id="prov-name" class="input" placeholder="nome (ex.: SSO da Mackenzie)" style="flex:1; min-width:160px"/>
+              <select id="prov-kind" class="select" style="width:130px">
+                <option value="mock">mock (dev)</option>
+                <option value="oidc">OIDC</option>
+                <option value="saml">SAML</option>
+              </select>
+              <button id="prov-btn" class="btn btn-sm">Adicionar SSO</button>
+            </div>
+            <p class="hint">No piloto, use <b>mock</b> (SSO de mentira) para testar. OIDC/SAML têm schema, runtime pendente. Segredos ficam fora do sistema.</p>
+          </div>
+
+          <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Login aceito nesta unidade</h4>
+          <div id="t-accepted"></div>
+          <div class="row" style="margin-top: var(--sp-2)">
+            <button id="acc-save" class="btn btn-sm">Salvar login aceito</button>
+            <span id="acc-msg" class="hint"></span>
+          </div>
+          <p class="hint">Marque os provedores que abrem esta unidade. <b>Nenhum marcado = aceita o login aberto</b> (senha local / Google) — o caso avulso. Marque só o SSO para uma unidade SSO-only.</p>
+        </div>
+
+        <div class="card section-gap tabpanel hidden" data-tab="membros">
+          <h3 class="card-title">Membros e papéis</h3>
+          <div id="d-members"></div>
+          <div id="members-admin">
+          <div class="row section-gap">
+            <input id="m-login" class="input" placeholder="usuário ou e-mail" style="flex:1; min-width:160px"/>
+            <select id="m-role" class="select" style="width:170px"></select>
+            <button id="m-add" class="btn btn-primary btn-sm">Vincular</button>
+            <span id="m-msg" class="hint"></span>
+          </div>
+          <div id="m-avail-row" class="row hidden" style="margin-top: var(--sp-2)">
+            <select id="m-avail" class="select" style="flex:1; min-width:200px"></select>
+            <span id="m-avail-hint" class="hint"></span>
+          </div>
+          <p class="hint">Só o papel de administrador herda para a sub-árvore. Professor e aluno valem SÓ nesta unidade: vínculo em unidade acima torna a pessoa <i>disponível</i> aqui (lista acima), e vincular aqui é a inscrição/atribuição. <code>admin_global</code> é concedido fora daqui.</p>
+
+          <h4 class="section-gap" style="margin-bottom: var(--sp-1)">Nova pessoa (cadastro + convite)</h4>
+          <div class="row">
+            <input id="np-name" class="input" placeholder="nome completo" style="flex:1; min-width:150px"/>
+            <input id="np-email" class="input" placeholder="e-mail" style="flex:1; min-width:170px"/>
+            <select id="np-role" class="select" style="width:150px"></select>
+            <button id="np-create" class="btn btn-primary btn-sm">Criar + convidar</button>
+          </div>
+          <div id="np-msg" class="hint"></div>
+          <p class="hint">Cria a conta (sem senha), vincula no papel escolhido e gera um convite de ativação. Nada é enviado sozinho: baixe o TXT dos convites e envie você mesmo (v1 sem servidor de e-mail).</p>
+
+          <div class="row" style="justify-content: space-between; margin-top: var(--sp-2)">
+            <h4 style="margin: 0">Convites</h4>
+            <a id="inv-txt" class="btn btn-sm" href="#" download>Baixar e-mails (TXT)</a>
+          </div>
+          <div id="d-invites"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+let UNITS = [], SELECTED = null, ROLES = [], TEMPLATES = [], LABELS = [], IS_GLOBAL = false;
+const COLLAPSED = new Set(); // ids de unidades recolhidas na árvore (só UI, dura a sessão)
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const usd = (n) => n == null ? '—' : 'US$ ' + Number(n).toFixed(2);
+
+// ---- rótulos (tipos de unidade) — lookup carregado uma vez ----
+async function loadLabels() {
+  const { ok, j } = await api('GET', '/admin/unit-labels');
+  if (ok) { LABELS = j.labels || []; fillLabelSelect($('nu-label'), null, true); }
+}
+// Popula um <select> de tipo. includeEmpty adiciona a opção "— tipo —" (null).
+function fillLabelSelect(sel, selectedId, includeEmpty) {
+  const opts = (includeEmpty ? '<option value="">— tipo —</option>' : '') +
+    LABELS.map(l => `<option value="${l.id}"${l.id === selectedId ? ' selected' : ''}>${esc(l.name)}</option>`).join('');
+  sel.innerHTML = opts;
+  if (!includeEmpty && selectedId != null) sel.value = String(selectedId);
+}
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { showLogin(); throw new Error('401'); }
+  const j = await r.json().catch(() => ({}));
+  // Traduz os erros de permissão do RBAC para mensagens acionáveis.
+  if (r.status === 403) j.error = 'sem permissão — criar raiz, alocar pacotes e importar CSV exigem papel admin_global; o resto exige admin na unidade (ou num ancestral)';
+  return { ok: r.ok, status: r.status, j };
+}
+
+// ---- auth (mesmo padrão do /admin) ----
+async function checkAuth() {
+  try {
+    const r = await fetch('/me');
+    if (r.ok) {
+      const j = await r.json();
+      IS_GLOBAL = j.is_global_admin !== false;
+      $('admin-link').classList.toggle('hidden', !IS_GLOBAL);
+      showApp(j.user); boot();
+    }
+    else showLogin();
+  } catch { showLogin(); }
+}
+function showLogin() { location.replace('/login'); } // login único, roteia por papel
+function showApp(u) { $('app-screen').classList.remove('hidden'); $('user-area').classList.remove('hidden'); $('user-info').textContent = u.username; }
+$('logout-btn').onclick = async () => {
+  await fetch('/logout', { method: 'POST' });
+  location.replace('/login');
+};
+
+// ---- árvore (escopada pelo vínculo e pelo CONTEXTO: /api/my-units) ----
+async function loadUnits(keepSelection = true) {
+  const { j } = await api('GET', '/api/my-units');
+  // Vários chapéus → escolher a instituição da vez (vale até o logout).
+  if (j.needs_context) {
+    $('unit-create').classList.add('hidden'); $('card-csv').classList.add('hidden');
+    $('tree-empty').classList.add('hidden');
+    const ROLE_PT = { admin_unidade: 'administrador', professor: 'professor', aluno: 'aluno' };
+    $('tree').innerHTML = '<p class="hint">Em qual instituição você quer entrar?</p><div class="ctx-choice">' +
+      (j.contexts || []).map(c =>
+        `<button class="btn ctx-pick" data-root="${c.root_id}">${esc(c.name)} <span class="muted">(${(c.roles || []).map(r => ROLE_PT[r] || r).join(', ')})</span></button>`
+      ).join('') + '</div>';
+    $('tree').querySelectorAll('.ctx-pick').forEach(b => b.onclick = async () => {
+      await api('POST', '/api/my-context', { root_id: Number(b.dataset.root) });
+      loadUnits(false);
+    });
+    return;
+  }
+  if (j.no_membership) {
+    $('unit-create').classList.add('hidden'); $('card-csv').classList.add('hidden');
+    $('tree').innerHTML = '';
+    $('tree-empty').textContent = 'Sua conta está ativa, mas ainda não há vínculo com nenhuma unidade. Peça ao administrador da sua instituição (ou ao seu professor) para vincular você.';
+    $('tree-empty').classList.remove('hidden');
+    return;
+  }
+  if (j.context_name) $('page-subtitle').textContent = `Instituição: ${j.context_name}`;
+  UNITS = j.units || [];
+  renderTree();
+  if (keepSelection && SELECTED) {
+    const still = UNITS.find(u => u.id === SELECTED.id);
+    if (still) { SELECTED = still; renderDetailHeader(); } else { SELECTED = null; $('detail').classList.add('hidden'); $('detail-none').classList.remove('hidden'); }
+  }
+}
+
+// Desenha a árvore a partir de UNITS (sem refetch) — reusado no carregamento e
+// ao recolher/expandir um nó. O teto de orçamento NÃO aparece aqui (poluía a
+// visão geral); vê-se na aba Orçamento do detalhe.
+function renderTree() {
+  const idSet = new Set(UNITS.map(u => u.id));
+  const byParent = new Map();
+  // Nó cujo pai não é visível vira raiz da MINHA visão (ex.: admin de um
+  // departamento enxerga o departamento como topo).
+  for (const u of UNITS) { const k = (u.parent_id != null && idSet.has(u.parent_id)) ? u.parent_id : 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(u); }
+  const tree = $('tree'); tree.innerHTML = '';
+  const parentSel = $('nu-parent'); parentSel.innerHTML = IS_GLOBAL ? '<option value="">— raiz (sem pai) —</option>' : '';
+  const canCreateSomewhere = IS_GLOBAL || UNITS.some(u => u.access === 'admin');
+  $('unit-create').classList.toggle('hidden', !canCreateSomewhere);
+  $('card-csv').classList.toggle('hidden', !IS_GLOBAL);
+  // visible=false → o nó está sob um ancestral recolhido: não desenha, mas ainda
+  // alimenta o <select> de pai (recolher não pode sumir com opções de criação).
+  const walk = (parentId, depth, visible) => {
+    for (const u of (byParent.get(parentId) || [])) {
+      const hasKids = (byParent.get(u.id) || []).length > 0;
+      const collapsed = COLLAPSED.has(u.id);
+      if (visible) {
+        const div = document.createElement('div');
+        div.className = 'tree-node' + (u.is_active ? '' : ' inactive') + (SELECTED?.id === u.id ? ' selected' : '') + (u.access === 'context' ? ' context' : '');
+        div.style.paddingLeft = (8 + depth * 18) + 'px';
+        // Turma = só o ícone 🎓 (evita "turma" triplicado que quebrava o nome);
+        // demais tipos = nome do rótulo, discreto.
+        const typeChip = u.is_class
+          ? `<span class="u-label muted" title="Turma — recebe trabalhos">🎓</span>`
+          : (u.label_name ? `<span class="u-label muted">${esc(u.label_name)}</span>` : '');
+        const caret = hasKids
+          ? `<span class="tree-caret" title="${collapsed ? 'expandir' : 'recolher'}">${collapsed ? '▸' : '▾'}</span>`
+          : `<span class="tree-caret leaf">•</span>`;
+        div.innerHTML = caret + `<span>${esc(u.name)}</span>${typeChip}` +
+          (u.access === 'view' ? `<span class="u-label muted" title="acesso de consulta">· consulta</span>` : '');
+        // Nó de contexto: só situa na hierarquia — não abre detalhe. Clique no
+        // caret só recolhe/expande (não seleciona).
+        if (u.access !== 'context') div.onclick = (e) => { if (e.target.classList.contains('tree-caret')) return; selectUnit(u.id); };
+        if (hasKids) div.querySelector('.tree-caret').onclick = (e) => {
+          e.stopPropagation();
+          if (COLLAPSED.has(u.id)) COLLAPSED.delete(u.id); else COLLAPSED.add(u.id);
+          renderTree();
+        };
+        tree.appendChild(div);
+      }
+      // Pai possível: unidade que ADMINISTRO e que não é turma.
+      if (!u.is_class && u.access === 'admin') {
+        const opt = document.createElement('option');
+        opt.value = u.id; opt.textContent = `${'— '.repeat(depth)}${u.name}`;
+        parentSel.appendChild(opt);
+      }
+      walk(u.id, depth + 1, visible && !collapsed);
+    }
+  };
+  walk(0, 0, true);
+  $('tree-empty').classList.toggle('hidden', UNITS.length > 0);
+}
+$('nu-create').onclick = async () => {
+  const name = $('nu-name').value.trim();
+  if (!name) { $('nu-msg').textContent = 'Nome obrigatório'; return; }
+  const isRoot = !$('nu-parent').value;
+  const budget = $('nu-budget').value.trim();
+  // Raiz nunca sem limite: teto US$ obrigatório na aquisição.
+  if (isRoot && !(Number(budget) > 0)) { $('nu-msg').textContent = 'A raiz precisa de teto US$ (aquisição) — nunca sem limite.'; return; }
+  const body = { name, label_id: $('nu-label').value ? Number($('nu-label').value) : null };
+  if ($('nu-parent').value) body.parent_id = Number($('nu-parent').value);
+  if (budget) body.budget_usd = Number(budget);
+  const { ok, j } = await api('POST', '/admin/units', body);
+  $('nu-msg').textContent = ok ? 'Unidade criada.' : 'Falha: ' + (j.error === 'root_requires_budget' ? 'a raiz precisa de teto US$ (aquisição)' : (j.error || ''));
+  if (ok) { $('nu-name').value = ''; $('nu-label').value = ''; $('nu-budget').value = ''; loadUnits(); }
+};
+$('csv-import').onclick = async () => {
+  const text = $('csv-text').value.trim();
+  if (!text) return;
+  const r = await fetch('/admin/units/import-csv', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: text });
+  if (r.status === 401) return showLogin();
+  const j = await r.json().catch(() => ({}));
+  $('csv-msg').textContent = r.ok ? `Importadas: ${(j.created || []).length}` : 'Falha: ' + (j.error || '');
+  if (r.ok) loadUnits();
+};
+
+// ---- detalhe (abas) ----
+const TAB_LABELS = { membros: 'Membros e papéis', trabalhos: 'Trabalhos', orcamento: 'Orçamento', config: 'Configuração' };
+const CLASS_ERRORS = { has_children: 'para virar turma a unidade não pode ter filhas — mova/remova as unidades filhas antes', has_works: 'há trabalhos vinculados — remova antes de deixar de ser turma', forbidden_from_above: 'sem permissão — o tipo é definido pelo admin do nível acima (ou admin global)', forbidden: 'sem permissão' };
+// Erros de pacote → mensagem acionável. type_overlap_on_class: numa TURMA não se
+// combinam pacotes com tipos sobrepostos (podem ter subsídio embutido).
+const PKG_ERR = (e) => ({
+  type_overlap_on_class: 'esta turma já tem um pacote que cobre esse tipo — na turma, pacotes com tipos sobrepostos não se combinam. Aloque mais do MESMO pacote, ou use outra turma.',
+  insufficient_packages: 'não há pacotes livres suficientes para alocar/delegar',
+  unknown_template: 'pacote desconhecido',
+  invalid_packages: 'quantidade inválida',
+}[e] || e || '');
+let ACTIVE_TAB = 'membros';
+
+// Permissões desta unidade para o usuário atual (o backend é a autoridade;
+// isto só decide o que mostrar). "de cima" (nome/orçamento) = admin do PAI
+// (raiz → global); "própria" (membros/turma) = admin da unidade; trabalhos =
+// professor da turma. Admin global faz tudo.
+function computePerms() {
+  const isRoot = SELECTED.parent_id == null;
+  const parentU = UNITS.find(u => u.id === SELECTED.parent_id);
+  return {
+    isRoot,
+    canAdminSelf: IS_GLOBAL || SELECTED.access === 'admin',
+    canConfigAbove: IS_GLOBAL || (!isRoot && !!parentU && parentU.access === 'admin'),
+    canEditWorks: IS_GLOBAL || (SELECTED.my_roles || []).includes('professor'),
+    hasChildren: UNITS.some(u => u.parent_id === SELECTED.id),
+  };
+}
+function showTab(tab) {
+  ACTIVE_TAB = tab;
+  document.querySelectorAll('#detail .tabpanel').forEach(p => p.classList.toggle('hidden', p.dataset.tab !== tab));
+  document.querySelectorAll('#d-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+}
+function buildTabs(p) {
+  const tabs = [];
+  if (p.canAdminSelf) tabs.push('membros');   // membros (com e-mails) só p/ admin da unidade (#162)
+  if (SELECTED.is_class) tabs.push('trabalhos');
+  if (p.canAdminSelf) tabs.push('orcamento');
+  if (IS_GLOBAL) tabs.push('config');
+  const bar = $('d-tabs'); bar.innerHTML = '';
+  for (const t of tabs) {
+    const el = document.createElement('div');
+    el.className = 'tab'; el.dataset.tab = t; el.textContent = TAB_LABELS[t];
+    el.onclick = () => showTab(t);
+    bar.appendChild(el);
+  }
+  if (tabs.length) showTab(tabs.includes(ACTIVE_TAB) ? ACTIVE_TAB : tabs[0]);
+  else document.querySelectorAll('#detail .tabpanel').forEach(el => el.classList.add('hidden'));
+}
+async function refreshSelected() { const id = SELECTED.id; await loadUnits(false); if (UNITS.find(u => u.id === id)) selectUnit(id); }
+
+async function selectUnit(id) {
+  SELECTED = UNITS.find(u => u.id === id) || null;
+  if (!SELECTED) return;
+  $('detail-none').classList.add('hidden'); $('detail').classList.remove('hidden');
+  const p = computePerms();
+  $('members-admin').classList.toggle('hidden', !p.canAdminSelf);
+  $('budget-admin').classList.toggle('hidden', !p.canConfigAbove);
+  $('pkg-allocate-row').classList.toggle('hidden', !IS_GLOBAL); // alocação-raiz = equipe ORATIA
+  $('works-create').classList.toggle('hidden', !p.canEditWorks);
+  $('tenant-root').classList.toggle('hidden', !p.isRoot);
+  renderDetailHeader(p);
+  buildTabs(p);
+  loadUnits();
+  const jobs = [];
+  if (p.canAdminSelf) jobs.push(loadMembers(), loadBudget(), loadEntitlements(), loadInvites());
+  if (SELECTED.is_class) jobs.push(loadWorks());
+  if (IS_GLOBAL) { jobs.push(loadAccepted()); if (p.isRoot) jobs.push(loadTenant(), loadDomains(), loadProviders()); }
+  await Promise.all(jobs);
+}
+function renderDetailHeader(p) {
+  p = p || computePerms();
+  // breadcrumb: caminho da raiz até esta unidade (clicável quando acessível)
+  const byId = new Map(UNITS.map(u => [u.id, u]));
+  const path = []; let cur = SELECTED;
+  while (cur) { path.unshift(cur); cur = cur.parent_id != null ? byId.get(cur.parent_id) : null; }
+  $('d-crumb').innerHTML = path.map((u, i) => {
+    const clickable = u.id !== SELECTED.id && u.access !== 'context';
+    return (i ? '<span class="sep">›</span>' : '') +
+      `<span class="seg${u.access === 'context' ? ' ctx' : ''}" ${clickable ? `data-uid="${u.id}"` : ''}>${esc(u.name)}</span>`;
+  }).join('');
+  $('d-crumb').querySelectorAll('.seg[data-uid]').forEach(s => s.onclick = () => selectUnit(Number(s.dataset.uid)));
+  $('d-name').textContent = SELECTED.name;
+  // Turma = 🎓 (sem repetir a palavra); demais tipos = nome do rótulo.
+  $('d-label').textContent = SELECTED.is_class ? '🎓 Turma' : (SELECTED.label_name ? `(${SELECTED.label_name})` : '');
+  const badges = [];
+  if (!SELECTED.is_active) badges.push('<span class="badge-pill">inativa</span>');
+  if (SELECTED.access === 'view') badges.push('<span class="badge-pill">consulta</span>');
+  $('d-badges').innerHTML = badges.join(' ');
+  // Nome e TIPO se editam juntos ("configurar de cima"): o botão Editar abre a
+  // linha com o campo de nome + o <select> de tipo.
+  $('d-rename').classList.toggle('hidden', !p.canConfigAbove);
+  $('d-toggle').classList.toggle('hidden', !p.canAdminSelf);
+  $('d-toggle').textContent = SELECTED.is_active ? 'Desativar' : 'Reativar';
+  $('d-budget').value = SELECTED.budget_usd ?? '';
+  $('d-struct-msg').textContent = '';
+}
+$('d-rename').onclick = () => {
+  const open = $('d-rename-row').classList.toggle('hidden') === false;
+  if (open) {
+    $('d-rename-name').value = SELECTED.name;
+    fillLabelSelect($('d-rename-label'), SELECTED.label_id, false);
+  }
+};
+$('d-rename-save').onclick = async () => {
+  const newName = $('d-rename-name').value.trim();
+  const newLabelId = $('d-rename-label').value ? Number($('d-rename-label').value) : null;
+  // Dois campos, dois PATCH (o backend aceita um por vez). Nome primeiro; depois
+  // o tipo, só se mudou — assim erros de tipo (has_children/has_works) aparecem
+  // sem desfazer a renomeação.
+  if (newName && newName !== SELECTED.name) {
+    const r = await api('PATCH', `/admin/units/${SELECTED.id}`, { name: newName });
+    if (!r.ok) { $('d-struct-msg').textContent = 'Falha ao renomear: ' + (r.j.error || ''); return; }
+  }
+  if (newLabelId !== (SELECTED.label_id ?? null)) {
+    const r = await api('PATCH', `/admin/units/${SELECTED.id}`, { label_id: newLabelId });
+    if (!r.ok) { $('d-struct-msg').textContent = 'Falha ao mudar o tipo: ' + (CLASS_ERRORS[r.j.error] || r.j.error || ''); return; }
+  }
+  $('d-rename-row').classList.add('hidden'); refreshSelected();
+};
+$('d-toggle').onclick = async () => {
+  const { ok } = await api('PATCH', `/admin/units/${SELECTED.id}`, { is_active: !SELECTED.is_active });
+  if (ok) refreshSelected();
+};
+async function loadBudget() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/budget`);
+  if (!ok) return;
+  const b = j.balance || {};
+  $('d-budget-kv').innerHTML =
+    `<span>Teto próprio: <b>${b.budget_usd == null ? 'sem teto' : usd(b.budget_usd)}</b></span>` +
+    `<span title="gasto direto + reservas das filhas + gasto das filhas sem teto">Comprometido: <b>${usd(b.committed_usd)}</b></span>` +
+    `<span title="gasto real consolidado da sub-árvore">Gasto real: <b>${usd(b.spent_usd)}</b></span>` +
+    (b.remaining_usd != null ? `<span>Saldo: <b>${usd(b.remaining_usd)}</b></span>` : '');
+}
+const BUDGET_ERRORS = {
+  insufficient_parent_balance: 'não cabe no saldo do pai — reduza o valor ou libere reservas de irmãs',
+  budget_below_committed: 'novo teto ficaria abaixo do já comprometido desta unidade (gasto + reservas das filhas)',
+};
+$('d-budget-save').onclick = async () => {
+  const v = $('d-budget').value.trim();
+  const { ok, j } = await api('PUT', `/admin/units/${SELECTED.id}/budget`, { budget_usd: v === '' ? null : Number(v) });
+  $('d-budget-msg').textContent = ok ? 'Teto atualizado.' : 'Falha: ' + (BUDGET_ERRORS[j.error] || j.error || '');
+  if (ok) { await loadUnits(); loadBudget(); }
+};
+$('d-budget-clear').onclick = async () => {
+  const { ok } = await api('PUT', `/admin/units/${SELECTED.id}/budget`, { budget_usd: null });
+  if (ok) { $('d-budget').value = ''; await loadUnits(); loadBudget(); }
+};
+
+// ---- membros ----
+async function loadMembers() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/members`);
+  if (!ok) return;
+  ROLES = j.roles || ROLES; // [{id, key, name}]
+  const sel = $('m-role');
+  const keep = sel.value;
+  sel.innerHTML = ROLES.filter(r => r.key !== 'admin_global').map(r => `<option value="${esc(r.key)}">${esc(r.name)}</option>`).join('');
+  if (keep) sel.value = keep;
+  syncRoleSelects();
+  const roleName = (key) => (ROLES.find(r => r.key === key)?.name) || key;
+  const box = $('d-members');
+  box.innerHTML = (j.members || []).map(m =>
+    `<div class="member-row"><span class="badge-role ${esc(m.role)}">${esc(roleName(m.role))}</span>` +
+    `<span>${esc(m.display_name || m.username)}</span><span class="muted">${esc(m.email || '')}</span>` +
+    `<button class="btn btn-sm" data-mid="${m.id}" style="margin-left:auto">Remover</button></div>`
+  ).join('') || '<p class="hint">Ninguém vinculado ainda.</p>';
+  if (SELECTED.access !== 'admin') box.querySelectorAll('button[data-mid]').forEach(b => b.remove());
+  box.querySelectorAll('button[data-mid]').forEach(b => b.onclick = async () => {
+    await api('DELETE', `/admin/units/${SELECTED.id}/members/${b.dataset.mid}`);
+    loadMembers(); loadAvailable();
+  });
+  if (SELECTED.access === 'admin') loadAvailable();
+}
+
+// ---- trabalhos da turma (reusa as telas existentes) ----
+const TYPE_PT = { prova_oral: 'Prova oral', entrevista_profunda: 'Entrevista profunda', entrevista_simples: 'Entrevista simples' };
+async function loadWorks() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/works`);
+  if (!ok) { $('d-works').innerHTML = '<p class="hint">Sem acesso aos trabalhos desta turma.</p>'; return; }
+  const KIND_PT = { oral_realtime: 'prova oral', interview: 'entrevista', scenario: 'cenário' };
+  const kindOf = (w) => (KIND_PT[w.kind] || w.kind) + (w.interview_variant === 'realtime' ? ' (tempo real)' : '');
+  // Seletor por TIPO (some o "pacote"): "Prova oral (3 disponíveis)". Sem pacote na
+  // turma → tipos crus, limitados só pelo teto US$.
+  if (j.can_edit) {
+    const types = j.available_types || [];
+    const sel = $('nw-kind');
+    if (types.length) {
+      sel.innerHTML = types.map(t => `<option value="type:${esc(t.item_key)}">${esc(TYPE_PT[t.item_key] || t.item_key)} (${t.available} ${t.available === 1 ? 'disponível' : 'disponíveis'})</option>`).join('');
+      $('nw-type-hint').textContent = 'A cota de cada tipo é reservada quando você gera os tokens de envio.';
+    } else {
+      sel.innerHTML = '<option value="kind:scenario">cenário</option><option value="kind:interview">entrevista</option><option value="kind:oral_realtime">prova oral</option>';
+      $('nw-type-hint').textContent = 'Esta turma não tem pacote — o trabalho fica limitado só pelo teto US$ (herdado).';
+    }
+  }
+  $('d-works').innerHTML = (j.works || []).map(w => {
+    const open = j.can_edit
+      ? `<a class="btn btn-sm" href="/w/${esc(w.work_token)}" style="margin-left:auto">Abrir (professor)</a>`
+      : (w.my_submission_token
+          ? `<a class="btn btn-sm" href="/s/${esc(w.my_submission_token)}" style="margin-left:auto">Meu envio</a>`
+          : `<span class="muted" style="margin-left:auto">consulta</span>`);
+    return `<div class="member-row"><span>${esc(w.name)}</span>` +
+      `<span class="muted">${esc(kindOf(w))}${w.is_active ? '' : ' · inativo'}</span>` + open + `</div>`;
+  }).join('') || '<p class="hint">Nenhum trabalho nesta turma ainda.</p>';
+}
+// Criar trabalho NA turma (professor da turma / admin global). Grava unit_id=turma;
+// o professor termina de configurar em /w/:token (a tela de professor existente).
+$('nw-create').onclick = async () => {
+  const name = $('nw-name').value.trim();
+  if (!name) { $('nw-msg').textContent = 'Informe o nome do trabalho.'; return; }
+  const v = $('nw-kind').value || '';
+  const body = { name, unit_id: SELECTED.id };
+  if (v.startsWith('type:')) body.item_key = v.slice(5);   // vínculo pelo TIPO (auto)
+  else if (v.startsWith('kind:')) body.kind = v.slice(5);  // sem pacote: tipo cru
+  const { ok, j } = await api('POST', '/admin/works', body);
+  $('nw-msg').textContent = ok ? 'Trabalho criado.' : 'Falha: ' + (j.error === 'forbidden_unit' ? 'só professor desta turma cria trabalho' : j.error === 'type_not_in_package' ? 'esta turma não tem cota desse tipo' : j.error || '');
+  if (ok) { $('nw-name').value = ''; loadWorks(); }
+}
+// Candidatos DISPONÍVEIS (do ancestral mais próximo que tiver gente no papel).
+// Escolher preenche o campo de vínculo — a inscrição continua sendo o clique
+// explícito em "Vincular".
+async function loadAvailable() {
+  const role = $('m-role').value;
+  const row = $('m-avail-row');
+  if (!role || role === 'admin_global' || !SELECTED.parent_id) { row.classList.add('hidden'); return; }
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/available-people?role=${encodeURIComponent(role)}`);
+  if (!ok) { row.classList.add('hidden'); return; }
+  const people = j.people || [];
+  if (!people.length) { row.classList.add('hidden'); return; }
+  row.classList.remove('hidden');
+  const srcName = UNITS.find(u => u.id === j.source_unit_id)?.name || '';
+  $('m-avail-hint').textContent = `disponíveis em “${srcName}”`;
+  $('m-avail').innerHTML = `<option value="">— escolher disponível (${people.length}) —</option>` +
+    people.map(p => `<option value="${esc(p.email || p.username)}">${esc(p.display_name || p.username)}${p.email ? ' · ' + esc(p.email) : ''}</option>`).join('');
+}
+$('m-role').onchange = loadAvailable;
+$('m-avail').onchange = () => { if ($('m-avail').value) $('m-login').value = $('m-avail').value; };
+$('m-add').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/members`, { login: $('m-login').value.trim(), role: $('m-role').value });
+  $('m-msg').textContent = ok ? 'Vinculado.' : 'Falha: ' + (j.error === 'user_not_found' ? 'usuário não encontrado — cadastre em "Nova pessoa" abaixo' : j.error === 'membership_exists' ? 'já vinculado com esse papel' : j.error || '');
+  if (ok) { $('m-login').value = ''; loadMembers(); }
+};
+
+// ---- nova pessoa + convites ----
+function syncRoleSelects() {
+  $('np-role').innerHTML = ROLES.filter(r => r.key !== 'admin_global').map(r => `<option value="${esc(r.key)}">${esc(r.name)}</option>`).join('');
+}
+$('np-create').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/people`, {
+    name: $('np-name').value.trim(), email: $('np-email').value.trim(), role: $('np-role').value,
+  });
+  $('np-msg').textContent = ok
+    ? (j.invite ? 'Pessoa criada e convite gerado — baixe o TXT para enviar.' : 'Pessoa vinculada (a conta já tinha acesso; sem convite novo).')
+    : 'Falha: ' + (j.error === 'invalid_email' ? 'e-mail inválido' : j.error === 'name_required' ? 'nome obrigatório' : j.error || '');
+  if (ok) { $('np-name').value = ''; $('np-email').value = ''; loadMembers(); loadInvites(); }
+};
+async function loadInvites() {
+  $('inv-txt').href = `/admin/units/${SELECTED.id}/invites.txt`;
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/invites`);
+  if (!ok) return;
+  const STATE = { pendente: '⏳ pendente', ativado: '✅ ativado', expirado: '⌛ expirado', cancelado: '✖ cancelado' };
+  $('d-invites').innerHTML = (j.invites || []).map(i =>
+    `<div class="member-row"><span>${STATE[i.state] || esc(i.state)}</span>` +
+    `<span>${esc(i.display_name || i.username)}</span><span class="muted">${esc(i.email)}</span>` +
+    `<span class="muted">expira ${new Date(i.expires_at).toLocaleDateString('pt-BR')}</span>` +
+    (i.activation_link ? `<button class="btn btn-sm" data-link="${esc(i.activation_link)}" style="margin-left:auto">Copiar link</button>` : '') +
+    (i.state !== 'ativado' ? `<button class="btn btn-sm" data-reuser="${i.user_id}"${i.activation_link ? '' : ' style="margin-left:auto"'}>Reenviar</button>` : '') +
+    (i.state === 'pendente' ? `<button class="btn btn-sm" data-cancel="${i.id}">Cancelar</button>` : '') +
+    `</div>`
+  ).join('') || '<p class="hint">Nenhum convite nesta unidade.</p>';
+  $('d-invites').querySelectorAll('button[data-link]').forEach(b => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.link); b.textContent = 'Copiado!'; setTimeout(() => b.textContent = 'Copiar link', 1500); }
+    catch { prompt('Link de ativação:', b.dataset.link); }
+  });
+  $('d-invites').querySelectorAll('button[data-reuser]').forEach(b => b.onclick = async () => {
+    const { ok: o2, j: r } = await api('POST', `/admin/units/${SELECTED.id}/people/${b.dataset.reuser}/invite`, {});
+    $('np-msg').textContent = o2 ? 'Convite reemitido (o link anterior foi invalidado).' : 'Falha: ' + (r.error || '');
+    if (o2) loadInvites();
+  });
+  $('d-invites').querySelectorAll('button[data-cancel]').forEach(b => b.onclick = async () => {
+    await api('POST', `/admin/units/${SELECTED.id}/invites/${b.dataset.cancel}/cancel`, {});
+    loadInvites();
+  });
+}
+
+// ---- pacotes ----
+async function loadTemplates() {
+  const { ok, j } = await api('GET', '/admin/packages');
+  if (!ok) return;
+  TEMPLATES = j.templates || j.packages || [];
+  $('p-template').innerHTML = TEMPLATES.map(t => `<option value="${esc(t.key)}">${esc(t.name || t.key)}</option>`).join('');
+}
+$('p-allocate').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/packages/allocate`, { template_key: $('p-template').value, packages: Number($('p-qty').value) });
+  $('p-msg').textContent = ok ? 'Alocado.' : 'Falha: ' + PKG_ERR(j.error);
+  if (ok) loadEntitlements();
+};
+async function loadEntitlements() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/entitlements`);
+  if (!ok) return;
+  const children = UNITS.filter(u => u.parent_id === SELECTED.id);
+  const box = $('d-allocs');
+  box.innerHTML = (j.allocations || []).map(a => {
+    const main = (a.items || []).filter(i => !i.item_key.includes('__prep_'));
+    const derived = (a.items || []).filter(i => i.item_key.includes('__prep_'));
+    const rows = (list, cls) => list.map(i =>
+      `<div class="ent-item ${cls}"><span>${esc(i.item_key)}</span><span title="capacidade">${i.capacity}</span><span title="consumido">${i.consumed}</span><span title="disponível"><b>${i.available}</b></span></div>`).join('');
+    const delegate = children.length
+      ? `<div class="row" style="margin-top:var(--sp-2)"><select class="select del-child" style="flex:1; min-width:150px">${children.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>` +
+        `<input class="input del-qty" type="number" min="1" value="1" style="width:80px"/>` +
+        `<button class="btn btn-sm del-go" data-alloc="${a.allocation_id}">Delegar p/ filho</button></div>`
+      : '<p class="hint" style="margin-top:var(--sp-2)">Sem unidades filhas para delegar.</p>';
+    const ret = a.parent_allocation_id != null
+      ? `<div class="row" style="margin-top:var(--sp-2)"><input class="input ret-qty" type="number" min="1" value="1" style="width:80px"/>` +
+        `<button class="btn btn-sm ret-go" data-alloc="${a.allocation_id}">Devolver ao pai</button></div>`
+      : '';
+    return `<div class="alloc-card"><div class="row" style="justify-content:space-between">` +
+      `<b>${esc(a.template_name || a.template_key)}</b>` +
+      `<span class="muted">concedidos ${a.granted_packages} · delegados ${a.delegated_packages} · retidos <b>${a.retained_packages}</b></span></div>` +
+      `<div class="ent-item ent-head"><span>item</span><span>cap.</span><span>cons.</span><span>disp.</span></div>` +
+      rows(main, '') + rows(derived, 'derived') + delegate + ret + `</div>`;
+  }).join('') || '<p class="hint">Nenhum pacote alocado nesta unidade.</p>';
+  box.querySelectorAll('.del-go').forEach(btn => btn.onclick = async () => {
+    const card = btn.closest('.alloc-card');
+    const childId = Number(card.querySelector('.del-child').value);
+    const qty = Number(card.querySelector('.del-qty').value);
+    const { ok, j: r } = await api('POST', `/admin/units/${childId}/packages/delegate`, { parent_allocation_id: Number(btn.dataset.alloc), packages: qty });
+    $('p-msg').textContent = ok ? 'Delegado.' : 'Falha: ' + PKG_ERR(r.error);
+    if (ok) loadEntitlements();
+  });
+  box.querySelectorAll('.ret-go').forEach(btn => btn.onclick = async () => {
+    const card = btn.closest('.alloc-card');
+    const qty = Number(card.querySelector('.ret-qty').value);
+    const { ok, j: r } = await api('POST', `/admin/units/${SELECTED.id}/packages/return`, { allocation_id: Number(btn.dataset.alloc), packages: qty });
+    $('p-msg').textContent = ok ? 'Devolvido ao pai.' : 'Falha: ' + (r.error === 'insufficient_packages' ? 'sem pacotes livres para devolver (delegados ou já consumidos)' : r.error || '');
+    if (ok) loadEntitlements();
+  });
+}
+
+// ---- configuração de tenant (admin global) ----
+let PROVIDERS = [];
+async function loadTenant() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/tenant`);
+  if (!ok) return;
+  const t = j.tenant;
+  $('t-slug').value = t?.slug || '';
+  $('t-name').value = t?.display_name || '';
+  $('t-accent').value = (t?.branding_json && t.branding_json.accent) || '#7c3aed';
+  $('t-url').innerHTML = t ? `Porta: <a href="/${esc(t.slug)}" target="_blank">/${esc(t.slug)}</a>` : '<span class="muted">sem porta própria ainda</span>';
+}
+$('t-save').onclick = async () => {
+  const { ok, j } = await api('PUT', `/admin/units/${SELECTED.id}/tenant`, {
+    slug: $('t-slug').value.trim(), display_name: $('t-name').value.trim() || null, accent: $('t-accent').value,
+  });
+  const ERR = { invalid_slug:'slug inválido (a-z, 0-9, hífen)', reserved_slug:'esse slug é reservado', slug_taken:'slug já usado', tenant_requires_root_unit:'só a unidade-raiz vira tenant' };
+  $('t-msg').textContent = ok ? 'Salvo.' : 'Falha: ' + (ERR[j.error] || j.error || '');
+  if (ok) loadTenant();
+};
+$('t-remove').onclick = async () => {
+  const { ok } = await api('DELETE', `/admin/units/${SELECTED.id}/tenant`);
+  if (ok) { $('t-msg').textContent = 'Removido.'; loadTenant(); }
+};
+async function loadDomains() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/domains`);
+  if (!ok) return;
+  $('t-domains').innerHTML = (j.domains || []).map(d =>
+    `<div class="member-row"><span class="k">${esc(d.domain)}</span><button class="btn btn-sm" data-dom="${d.id}" style="margin-left:auto">Remover</button></div>`
+  ).join('') || '<p class="hint">Nenhum domínio.</p>';
+  $('t-domains').querySelectorAll('button[data-dom]').forEach(b => b.onclick = async () => { await api('DELETE', `/admin/domains/${b.dataset.dom}`); loadDomains(); });
+}
+$('dom-btn').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/domains`, { domain: $('dom-add').value.trim() });
+  if (ok) { $('dom-add').value = ''; loadDomains(); } else $('t-msg').textContent = 'Falha: ' + (j.error === 'domain_taken' ? 'domínio já associado' : j.error === 'invalid_domain' ? 'domínio inválido' : j.error || '');
+};
+async function loadProviders() {
+  const { ok, j } = await api('GET', `/admin/units/${SELECTED.id}/providers`);
+  if (!ok) return;
+  PROVIDERS = j.providers || [];
+  const owned = PROVIDERS.filter(p => p.owner_tenant_unit_id === SELECTED.id);
+  $('t-providers').innerHTML = owned.map(p =>
+    `<div class="member-row"><span>${esc(p.name)}</span><span class="muted">${esc(p.kind)} · ${esc(p.key)}</span><button class="btn btn-sm" data-prov="${p.id}" style="margin-left:auto">Remover</button></div>`
+  ).join('') || '<p class="hint">Nenhum SSO próprio (só os globais: senha, Google).</p>';
+  $('t-providers').querySelectorAll('button[data-prov]').forEach(b => b.onclick = async () => { await api('DELETE', `/admin/providers/${b.dataset.prov}`); loadProviders(); loadAccepted(); });
+}
+$('prov-btn').onclick = async () => {
+  const { ok, j } = await api('POST', `/admin/units/${SELECTED.id}/providers`, { name: $('prov-name').value.trim(), kind: $('prov-kind').value });
+  if (ok) { $('prov-name').value = ''; loadProviders(); loadAccepted(); } else $('t-msg').textContent = 'Falha: ' + (j.error || '');
+};
+async function loadAccepted() {
+  // catálogo de provedores visível a esta unidade + os já aceitos
+  const [pc, ac] = await Promise.all([
+    api('GET', `/admin/units/${SELECTED.id}/providers`),
+    api('GET', `/admin/units/${SELECTED.id}/accepted-providers`),
+  ]);
+  if (!pc.ok || !ac.ok) return;
+  const provs = pc.j.providers || [];
+  const set = new Set(ac.j.provider_ids || []);
+  $('t-accepted').innerHTML = provs.map(p =>
+    `<label class="member-row" style="cursor:pointer"><input type="checkbox" class="acc-chk" value="${p.id}" ${set.has(p.id) ? 'checked' : ''}/> ` +
+    `<span>${esc(p.name)}</span><span class="muted">${esc(p.kind)}${p.owner_tenant_unit_id ? '' : ' · global'}</span></label>`
+  ).join('') || '<p class="hint">Sem provedores.</p>';
+}
+$('acc-save').onclick = async () => {
+  const ids = [...document.querySelectorAll('.acc-chk:checked')].map(c => Number(c.value));
+  const { ok } = await api('PUT', `/admin/units/${SELECTED.id}/accepted-providers`, { provider_ids: ids });
+  $('acc-msg').textContent = ok ? (ids.length ? 'Salvo — unidade restrita aos provedores marcados.' : 'Salvo — aceita login aberto (nada marcado).') : 'Falha.';
+};
+
+async function boot() { await Promise.all([loadUnits(false), loadTemplates(), loadLabels()]); }
+checkAuth();
+</script>
+</body>
+</html>

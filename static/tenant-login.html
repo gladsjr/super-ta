@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Entrar — ORATIA</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+<script src="/static/js/theme.js"></script>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
+<style>
+  .wrap { max-width: 400px; margin: var(--sp-10) auto 0; }
+  .row { display:flex; flex-direction:column; gap: var(--sp-2); }
+  .tenant-name { font-family: var(--font-display, Georgia, serif); font-size: 1.5rem; margin: 0 0 2px; }
+  .prov-btn { width:100%; }
+  .accent { height: 4px; border-radius: 4px 4px 0 0; margin: -1px -1px var(--sp-3); }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
+</header>
+<main class="page">
+  <div class="wrap">
+    <div class="card" id="card">
+      <div id="accent" class="accent hidden"></div>
+      <h3 class="tenant-name" id="tname">Carregando…</h3>
+      <p class="hint" id="tsub">Entrar pela sua instituição.</p>
+      <div id="providers" class="row"></div>
+      <div id="msg" class="hint"></div>
+      <p class="hint" style="margin-top:var(--sp-4)"><a href="/login">Entrar por outra conta</a></p>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const slug = location.pathname.replace(/^\/+|\/+$/g,'').split('/')[0];
+const KIND_PT = { local: 'E-mail e senha', google: 'Google', mock: 'SSO da instituição', oidc: 'SSO da instituição', saml: 'SSO da instituição' };
+
+async function boot(){
+  const r = await fetch('/api/tenant/' + encodeURIComponent(slug));
+  if (!r.ok) { $('tname').textContent = 'Instituição não encontrada'; $('tsub').textContent = 'Confira o endereço.'; $('providers').innerHTML=''; return; }
+  const t = await r.json();
+  document.title = (t.display_name || t.slug) + ' — ORATIA';
+  $('tname').textContent = t.display_name || t.slug;
+  $('tsub').textContent = 'Entrar em ' + (t.display_name || t.slug) + '.';
+  const accent = t.branding && t.branding.accent;
+  if (accent) { $('accent').style.background = accent; $('accent').classList.remove('hidden'); }
+  const box = $('providers'); box.innerHTML = '';
+  for (const p of (t.providers || [])) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary prov-btn';
+    btn.textContent = 'Entrar com ' + (KIND_PT[p.kind] || p.name || p.key);
+    btn.onclick = () => start(p);
+    box.appendChild(btn);
+  }
+  if (!box.children.length) $('tsub').textContent = 'Esta instituição ainda não tem um método de login configurado.';
+}
+function start(p){
+  const next = '/unidades';
+  if (p.kind === 'mock') location.href = '/auth/mock/' + encodeURIComponent(p.key) + '?next=' + encodeURIComponent(next);
+  else if (p.kind === 'google') location.href = '/auth/google';
+  else if (p.kind === 'local') location.href = '/login';
+  else $('msg').textContent = 'Provedor "' + esc(p.kind) + '" ainda não implementado (schema pronto).';
+}
+boot();
+</script>
+</body>
+</html>

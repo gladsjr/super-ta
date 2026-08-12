@@ -1,0 +1,24 @@
+# Pacote Padrão — 1 de cada, config travada.
+# DSL: cada item vira 1 contador de consumo; `prep` gera contadores derivados
+# (<key>__prep_*). Config pura — NUNCA vai ao LLM. Validado no boot (lib/packages.js).
+key: padrao
+version: 1
+name: "Padrão"
+items:
+  - key: prova_oral
+    kind: oral_realtime
+    quantity: 1
+    locks: { question_count: 5, interaction_mode: audio, grade: true }
+    prep:  { executions: 2 }                       # consumir doc + gerar questões (máx 2)
+  - key: entrevista_simples
+    kind: interview
+    variant: realtime          # simplificada = voz em tempo real (só as perguntas do plano)
+    quantity: 1
+    locks: { question_count: 5, interaction_mode: audio, max_follow_ups: 0, evaluation_mode: automatic_only }
+    prep:  { enunciado_evaluations: 1, assistant_interactions: 0 }
+  - key: entrevista_profunda
+    kind: interview
+    variant: messages
+    quantity: 1
+    locks: { question_count: 5, interaction_mode: audio, max_follow_ups: 1, evaluation_mode: automatic_only }
+    prep:  { enunciado_evaluations: 1, assistant_interactions: 0 }

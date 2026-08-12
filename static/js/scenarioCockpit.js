@@ -9,7 +9,7 @@
   async function api(method, path, body) {
     const r = await fetch(`/w/${WT}${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(j.detail || j.error || j.message || `HTTP ${r.status}`);
     return j;
   }
 
@@ -25,7 +25,7 @@
       <td style="text-align:center">${yn(r.has_devolutiva)}</td>
       <td style="text-align:center">${r.has_grades ? (r.grade_final ?? '✓') : '—'}</td>
       <td style="text-align:center">${pub || '—'}</td>
-      <td style="white-space:nowrap"><a href="/s/${esc(r.submission_token)}" target="_blank" rel="noopener" title="abrir a tela do aluno (entrar e conversar)">abrir ↗</a> · <a href="#" class="sc-copy" data-tok="${esc(r.submission_token)}" title="copiar o link do aluno">copiar</a> · <a href="#" class="sc-view" data-tok="${esc(r.submission_token)}" title="ver a conversa (somente leitura)">ver</a></td>
+      <td style="white-space:nowrap"><a href="/s/${esc(r.submission_token)}" target="_blank" rel="noopener" title="abrir a tela do aluno (entrar e conversar)">abrir ↗</a> · <a href="#" class="sc-copy" data-tok="${esc(r.submission_token)}" title="copiar o link do aluno">copiar</a> · <a href="#" class="sc-view" data-tok="${esc(r.submission_token)}" title="ver a conversa (somente leitura)">ver</a>${r.status === 'pending' ? ` · <a href="#" class="sc-del" data-tok="${esc(r.submission_token)}" title="apagar este envio (o aluno não começou); devolve a cota do pacote, se houver">apagar</a>` : ''}</td>
     </tr>`;
   }
 
@@ -87,7 +87,8 @@
     const tb = document.getElementById('sc-rows'); if (!tb) return;
     tb.innerHTML = RUNS.length ? RUNS.map(rowHtml).join('') : '<tr><td colspan="7" class="hint">Nenhum aluno ainda. Crie tokens acima.</td></tr>';
     tb.querySelectorAll('.sc-view').forEach(a => a.onclick = e => { e.preventDefault(); openDrawer(a.dataset.tok); });
-    tb.querySelectorAll('.sc-copy').forEach(a => a.onclick = async e => { e.preventDefault(); const url = location.origin + '/s/' + a.dataset.tok; try { await navigator.clipboard.writeText(url); const o = a.textContent; a.textContent = 'copiado ✓'; setTimeout(() => a.textContent = o, 1500); } catch { prompt('Copie o link do aluno:', url); } });
+    tb.querySelectorAll('.sc-del').forEach(a => a.onclick = async e => { e.preventDefault(); try { await api('DELETE', '/submissions/' + a.dataset.tok); await load(); } catch (err) { alert('Falha: ' + err.message); } });
+    tb.querySelectorAll('.sc-copy').forEach(a => a.onclick = async e => { e.preventDefault(); const url = (window.ORATIA_BASE_URL || location.origin) + '/s/' + a.dataset.tok; try { await navigator.clipboard.writeText(url); const o = a.textContent; a.textContent = 'copiado ✓'; setTimeout(() => a.textContent = o, 1500); } catch { prompt('Copie o link do aluno:', url); } });
   }
   function renderRubric() {
     const el = document.getElementById('sc-rubric'); if (!el) return;

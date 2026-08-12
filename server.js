@@ -18,7 +18,13 @@ import rateLimit from "express-rate-limit";
 import {
     sessionMiddleware,
     seedInitialUsers,
+    seedRoles,
+    seedCivilIdTypes,
+    seedUnitLabels,
+    seedAuthProviders,
+    seedBootstrapAdmin,
     seedInterviewerTemplates,
+    seedPackageTemplates,
     loginHandler,
     logoutHandler,
     meHandler,
@@ -28,6 +34,12 @@ import {
 import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
 import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
+import unitsRoutes from "./routes/units.js";
+import activationRoutes from "./routes/activation.js";
+import authFederatedRoutes from "./routes/authFederated.js";
+import authMockRoutes from "./routes/authMock.js";
+import tenantLoginRoutes from "./routes/tenantLogin.js";
+import tenantsAdminRoutes from "./routes/tenantsAdmin.js";
 import workRoutes from "./routes/work.js";
 import interviewRoutes from "./routes/interview.js";
 import scenarioRoutes from "./routes/scenarios.js";
@@ -97,11 +109,17 @@ const loginLimiter = rateLimit({
 app.post("/login", loginLimiter, loginHandler);
 app.post("/logout", logoutHandler);
 app.get("/me", meHandler);
+app.use(authFederatedRoutes); // /auth/google[/callback] — SSO opcional (501 se não configurado)
 
 // Routers por audiência. Cada arquivo declara seus paths completos —
 // montamos sem prefixo para preservar exatamente as URLs anteriores.
 app.use(staticRoutes);
 app.use(adminRoutes);
+app.use(unitsRoutes); // /admin/units/* — camada institucional (sessão + RBAC por unidade)
+app.use(activationRoutes); // /ativar + /api/ativar — ativação de conta por convite (público, token de uso único)
+app.use(authMockRoutes); // /auth/mock/* — IdP de mentira (só dev; Fase 2 do multi-tenant)
+app.use(tenantLoginRoutes); // /api/tenant/:slug + /api/hint — config da porta do tenant + pista de domínio
+app.use(tenantsAdminRoutes); // /admin/units/:id/tenant|domains|providers|accepted-providers — config de tenant (admin global)
 app.use(scenarioCockpitRoutes); // /w/:t/scenario-runs|scenario-evaluations/* — cockpit do professor p/ cenários (requireAdmin por rota). Antes de workRoutes (paths específicos).
 app.use(workRoutes);
 app.use(interviewRoutes);
@@ -115,6 +133,23 @@ app.use(benchmarkRoutes); // /api/benchmark/* — benchmark interno (requireAdmi
 app.use(costAuditRoutes); // /api/cost-audit/* — auditoria de custo (Usage/Costs API; requireAdmin por rota)
 app.use(analyticsRoutes); // /api/analytics/query — consulta somente-leitura p/ benchmark (auth por API key; NÃO sessão; ver migration 052)
 
+// PORTA DA INSTITUIÇÃO — rota CURINGA por slug (Fase 4). Fica por ÚLTIMO: só
+// captura caminhos de 1 segmento que nenhuma rota anterior atendeu. Serve a
+// página se o slug for um tenant existente; senão, 404. Slugs são controlados
+// pela equipe (não há auto-cadastro), então não sombreiam rotas reais.
+app.get("/:slug", async (req, res, next) => {
+    const slug = String(req.params.slug || "").toLowerCase();
+    if (!/^[a-z0-9-]{2,40}$/.test(slug)) return next();
+    try {
+        const { getTenantBySlug } = await import("./lib/tenants.js");
+        if (!(await getTenantBySlug(slug))) return next();
+        return res.sendFile(path.join(__dirname, "static", "tenant-login.html"));
+    } catch (err) {
+        log.error("TENANT", `slug route failed: ${err.message}`);
+        return next();
+    }
+});
+
 const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     if (!process.env.OPENAI_API_KEY) {
         log.warn("BOOT", "OPENAI_API_KEY ausente no .env");
@@ -124,10 +159,42 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     } catch (err) {
         log.error("BOOT", `seedInitialUsers failed: ${err.message}`);
     }
+    // seedRoles/seedAuthProviders antes do bootstrap admin (que precisa da
+    // linha 'admin_global' na tabela roles).
+    try {
+        await seedRoles();
+    } catch (err) {
+        log.error("BOOT", `seedRoles failed: ${err.message}`);
+    }
+    try {
+        await seedCivilIdTypes();
+    } catch (err) {
+        log.error("BOOT", `seedCivilIdTypes failed: ${err.message}`);
+    }
+    try {
+        await seedUnitLabels();
+    } catch (err) {
+        log.error("BOOT", `seedUnitLabels failed: ${err.message}`);
+    }
+    try {
+        await seedAuthProviders();
+    } catch (err) {
+        log.error("BOOT", `seedAuthProviders failed: ${err.message}`);
+    }
+    try {
+        await seedBootstrapAdmin();
+    } catch (err) {
+        log.error("BOOT", `seedBootstrapAdmin failed: ${err.message}`);
+    }
     try {
         await seedInterviewerTemplates();
     } catch (err) {
         log.error("BOOT", `seedInterviewerTemplates failed: ${err.message}`);
+    }
+    try {
+        await seedPackageTemplates();
+    } catch (err) {
+        log.error("BOOT", `seedPackageTemplates failed: ${err.message}`);
     }
     // Inicializa o store de áudio cedo pra que o backend ativo (e eventual
     // indisponibilidade) apareça no boot, não como no-op silencioso no meio

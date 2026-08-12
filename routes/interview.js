@@ -645,6 +645,11 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         });
     }
 
+    // Gate B (pacotes): a cota já foi RESERVADA quando o professor gerou este
+    // token (ver routes/work.js#POST submissions + lib/packages.js#reserveSeats).
+    // A execução não saca de novo — o assento é deste token. Só o orçamento US$
+    // (requireWithinBudget, acima) é checado por tentativa.
+
     const studentBuffer = req.file.buffer;
     const studentFilename = req.file.originalname;
     sess.submissionPath = studentFilename;

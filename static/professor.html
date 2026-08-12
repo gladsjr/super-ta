@@ -314,7 +314,7 @@
           <div class="sub-form">
             <div>
               <label class="label" for="sub-label">Nome do aluno</label>
-              <input id="sub-label" class="input" placeholder="obrigatório"/>
+              <input id="sub-label" class="input" placeholder="obrigatório" autocomplete="off"/>
             </div>
             <div>
               <label class="label" for="sub-count">Quantidade</label>
@@ -326,7 +326,7 @@
 
         <div id="create-bulk-mode" class="hidden" style="margin-top: var(--sp-3)">
           <label class="label" for="sub-bulk">Lista de nomes (um por linha)</label>
-          <textarea id="sub-bulk" class="textarea sub-bulk-ta" placeholder="Maria Souza&#10;João Pereira&#10;..." spellcheck="false"></textarea>
+          <textarea id="sub-bulk" class="textarea sub-bulk-ta" placeholder="Maria Souza&#10;João Pereira&#10;..." spellcheck="false" autocomplete="off"></textarea>
           <div id="sub-bulk-msg" class="hint"></div>
         </div>
 
@@ -500,6 +500,7 @@ async function load() {
     return;
   }
   const j = await r.json();
+  if (j.public_base_url) window.ORATIA_BASE_URL = j.public_base_url;   // origem canônica dos links do aluno
   document.getElementById('main').classList.remove('hidden');
   document.getElementById('work-name').textContent = j.work.name;
   document.getElementById('tb-context').textContent = j.work.name;
@@ -702,6 +703,10 @@ function renderSubmissionsTable() {
     const abrirLink = s.is_test
       ? `<a href="${url}" target="_blank" title="Abrir e simular o aluno (entrevista de teste)">abrir ↗</a> · `
       : '';
+    // Apagar só faz sentido em token NÃO iniciado: devolve a cota do pacote (se houver).
+    const deleteBtn = s.status === 'pending'
+      ? ` · <button class="btn btn-sm" onclick="deleteToken('${s.submission_token}')" title="Apagar este envio (o aluno ainda não começou). Devolve a cota do pacote, se houver.">apagar</button>`
+      : '';
     const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
     // #132: estado de AVALIAÇÃO visível já na aba Alunos & progresso (não só na de
     // Notas) — o professor vê daqui o que ainda falta avaliar/publicar.
@@ -721,9 +726,21 @@ function renderSubmissionsTable() {
       </td>
       <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge} ${evalBadge}</td>
       <td>${convCell}</td>
-      <td>${abrirLink}${actionBtn}</td>
+      <td>${abrirLink}${actionBtn}${deleteBtn}</td>
     </tr>`;
   }).join('');
+}
+
+// Apaga um token não iniciado e devolve a cota do pacote (se houver). O backend
+// recusa (409) se o aluno já começou.
+async function deleteToken(submissionToken) {
+  const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(submissionToken)}`, { method: 'DELETE' });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    alert('Falha: ' + (j.detail || j.error || 'ao apagar'));
+    return;
+  }
+  load();
 }
 
 async function toggleBlock(submissionToken, isBlocked) {
@@ -1321,7 +1338,7 @@ async function createSingle() {
     body: JSON.stringify({ label, count, is_test })
   });
   const j = await r.json();
-  if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
+  if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || 'ao gerar'); return; }
   msg.textContent = `${j.submissions.length} token(s) gerados.`;
   document.getElementById('sub-label').value = '';
   load();
@@ -1340,7 +1357,7 @@ async function createBulk() {
     body: JSON.stringify({ labels, is_test: document.getElementById('sub-is-test').checked }),
   });
   const j = await r.json();
-  if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || 'ao gerar'); return; }
+  if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || 'ao gerar'); return; }
   msg.textContent = `${j.submissions.length} entrevista(s) criada(s).`;
   ta.value = '';
   load();
@@ -1841,7 +1858,8 @@ async function sendChat() {
 }
 
 async function copyStudentLink(btn, token) {
-  try { await navigator.clipboard.writeText(location.origin + '/s/' + token); }
+  const base = window.ORATIA_BASE_URL || location.origin;
+  try { await navigator.clipboard.writeText(base + '/s/' + token); }
   catch { return; }
   const prev = btn.textContent;
   btn.textContent = '✓';

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ORATIA — Entrar</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+<script src="/static/js/theme.js"></script>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
+<style>
+  .wrap { max-width: 380px; margin: var(--sp-10) auto 0; }
+  .row { display: flex; flex-direction: column; gap: var(--sp-2); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
+</header>
+
+<main class="page">
+  <div class="wrap">
+    <div class="card">
+      <h3 class="card-title">Entrar</h3>
+      <div class="row">
+        <input id="login-user" class="input" placeholder="usuário ou e-mail" autocomplete="username"/>
+        <input id="login-pass" class="input" type="password" placeholder="senha" autocomplete="current-password"/>
+        <button id="login-btn" class="btn btn-primary">Entrar</button>
+        <div id="login-msg" class="hint"></div>
+      </div>
+    </div>
+    <p class="hint" style="text-align:center; margin-top: var(--sp-3)"><a href="/">← Voltar à página inicial</a></p>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// Aterrissagem por papel: equipe (admin global) vai ao painel /admin; admin de
+// unidade, professor e aluno vão a /unidades (a escolha de instituição, se
+// houver mais de uma, acontece lá).
+async function routeByRole() {
+  const r = await fetch('/me');
+  if (!r.ok) return false;
+  const j = await r.json();
+  location.replace(j.is_global_admin === false ? '/unidades' : '/admin');
+  return true;
+}
+async function doLogin() {
+  const login = $('login-user').value.trim(), password = $('login-pass').value;
+  if (!login || !password) { $('login-msg').textContent = 'Informe usuário/e-mail e senha.'; return; }
+  const r = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login, password }) });
+  if (r.ok) { await routeByRole(); return; }
+  // Falhou: se o domínio do e-mail tem uma instituição, sugere a porta dela
+  // (a "pista" — decisão de 05/08; não roteamos automático).
+  $('login-msg').innerHTML = 'Usuário ou senha inválidos.';
+  if (login.includes('@')) {
+    try {
+      const h = await (await fetch('/api/hint?email=' + encodeURIComponent(login))).json();
+      if (h.tenant) {
+        $('login-msg').innerHTML = 'Usuário ou senha inválidos. Sua instituição usa login próprio — ' +
+          '<a href="/' + encodeURIComponent(h.tenant.slug) + '">entrar por ' + (h.tenant.display_name || h.tenant.slug) + '</a>.';
+      }
+    } catch {}
+  }
+}
+$('login-btn').onclick = doLogin;
+$('login-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+$('login-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+routeByRole(); // já logado → segue direto
+</script>
+</body>
+</html>
