@@ -74,6 +74,10 @@
   .chat-draft details { border: 1px solid var(--ink-200); border-radius: var(--r-sm); background: var(--c-bg-2, #f8fafc); padding: var(--sp-2) var(--sp-3); }
   .chat-draft summary { cursor: pointer; font-size: var(--fs-sm); font-weight: 600; color: var(--ink-700); }
   .chat-draft pre { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; }
+  /* Guarda de alterações não salvas (modal de 3 opções). */
+  .guard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.38); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: var(--sp-4); }
+  .guard-overlay.hidden { display: none; }
+  .guard-box { background: var(--bg-card, #fff); color: var(--ink-900); border-radius: var(--r-md, 10px); padding: var(--sp-5, 24px); max-width: 460px; width: 100%; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
 </style>
 </head>
 <body>
@@ -119,6 +123,17 @@
     </div>
     <!-- Config da ENTREVISTA legada (kind=interview). Ocultada em trabalhos scenario. -->
     <div id="cenario-interview-config">
+    <!-- Salvar ÚNICO da aba, no TOPO (T6): persiste de uma vez o tipo de entrevista,
+         o modo/voz, a identidade, o nº de perguntas e a fiscalização. Trocar de aba
+         com alterações pendentes pede confirmação (Salvar / Continuar / Cancelar).
+         O entrevistador (galeria/avançado) e o enunciado têm seus próprios saves. -->
+    <div class="card cfg-savebar">
+      <div class="row" style="align-items: center; gap: var(--sp-3)">
+        <button id="save-cenario" class="btn btn-primary">Salvar configuração</button>
+        <span id="cenario-save-msg" class="hint"></span>
+      </div>
+      <p class="card-sub" style="margin-top: var(--sp-2)">Salva de uma vez o <strong>tipo de entrevista</strong>, o <strong>modo/voz</strong>, a <strong>identidade</strong>, o <strong>nº de perguntas</strong> e a <strong>fiscalização por vídeo</strong>. O <strong>entrevistador</strong> e o <strong>enunciado</strong> têm seus próprios botões. A <strong>calibração de fala</strong> é gerada automaticamente ao subir o enunciado.</p>
+    </div>
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
       <p class="card-sub" id="enunciado-status">—</p>
@@ -235,41 +250,14 @@
 
       <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
         <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
-          <input type="checkbox" id="expect-spontaneous" style="margin-top: 3px"/>
-          <span class="card-sub" style="margin:0" data-help="O entrevistador combina isso na abertura, como conversa ao vivo: o aluno pode pensar, pausar e se corrigir, mas deve responder com as próprias palavras, sem consultar IA, pesquisar ou ler texto pronto.">Exigir <strong>resposta espontânea</strong> (de cabeça).</span>
+          <input type="checkbox" id="proctoring-enabled" style="margin-top: 3px"/>
+          <span class="card-sub" style="margin:0" data-help="Liga a câmera durante a entrevista, grava o vídeo e o analisa após o envio (presença, celular, outra pessoa, enquadramento). Exige modo áudio: o aluno responde por voz e comanda gravar/enviar/cancelar por ÁREAS DE COMANDO na tela (mão no canto), longe do teclado.">Ativar <strong>fiscalização por vídeo</strong> — câmera ligada + análise do vídeo após o envio. Exige o <strong>modo áudio</strong>.</span>
         </label>
-        <div id="spontaneous-msg" class="hint" style="margin-top: var(--sp-1)"></div>
       </div>
 
       <div class="row" style="margin-top: var(--sp-3)">
         <button id="clear-identity" class="btn btn-sm" type="button" title="Esvazia os campos; ao salvar, o nome e o gênero voltam a ser sorteados a cada upload">Limpar identidade</button>
         <span id="interaction-msg" class="hint"></span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 class="card-title" data-help="Liga a câmera durante a entrevista, grava o vídeo e o analisa após o envio (presença, celular, outra pessoa, enquadramento). Exige modo áudio: o aluno responde por voz e comanda gravar/enviar/cancelar por ÁREAS DE COMANDO na tela (mão no canto), longe do teclado.">Fiscalização por vídeo</h3>
-      <p class="card-sub">Câmera ligada + análise do vídeo após o envio. Ativar exige o <strong>modo áudio</strong> (respostas por voz).</p>
-      <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
-        <input type="checkbox" id="proctoring-enabled" style="margin-top: 3px"/>
-        <span class="card-sub" style="margin:0">Ativar <strong>fiscalização por vídeo</strong> nesta entrevista.</span>
-      </label>
-
-      <div id="calib-block" style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
-        <p class="card-sub" data-help="Antes da entrevista, o aluno lê esta frase em voz alta e o sistema confere se a captação transcreve bem a fala dele — mesmo gpt-4o-transcribe da correção. Orienta o aluno (volume/ritmo) e sinaliza, para você, captação ruim. Em branco = teste desligado.">Frase de <strong>calibração de fala</strong> (pré-teste de captação). <strong>Gere</strong> a partir do enunciado ou escreva à mão. Em branco = desligada.</p>
-        <textarea id="calib-sentence" class="textarea" rows="2" placeholder="Ex.: As questões deste trabalho falam de halving, hashrate e fluxo de caixa descontado."></textarea>
-        <p class="hint" id="calib-terms" style="margin-top: var(--sp-2)"></p>
-        <div class="row" style="margin-top: var(--sp-2); align-items:center">
-          <button class="btn" id="calib-gen" type="button">Gerar a partir do enunciado</button>
-          <span style="flex:1"></span>
-          <button class="btn btn-primary" id="calib-save" type="button">Salvar frase</button>
-          <span class="hint" id="calib-msg"></span>
-        </div>
-
-        <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
-          <p class="card-sub" data-help="Por padrão, quando a análise do vídeo aponta algo relevante (ausência, celular, outra pessoa, enquadramento), a devolutiva do aluno ganha uma menção BREVE, gentil e NÃO acusatória, como orientação. Escreva aqui para ajustar o tom/ênfase — ou peça explicitamente para NÃO mencionar o proctoring, se preferir excluir.">Menção do proctoring na <strong>devolutiva do aluno</strong> (opcional). Em branco = menção suave padrão.</p>
-          <textarea id="devol-proctor-prompt" class="textarea" rows="2" placeholder="Ex.: comente de forma muito breve e acolhedora; ou 'não mencione o proctoring na devolutiva'."></textarea>
-        </div>
       </div>
     </div>
 
@@ -285,13 +273,6 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="row" style="align-items: center; gap: var(--sp-3)">
-        <button id="save-cenario" class="btn btn-primary">Salvar configurações</button>
-        <span id="cenario-save-msg" class="hint"></span>
-      </div>
-      <p class="card-sub" style="margin-top: var(--sp-2)">Salva de uma vez o modo de interação, a voz, a identidade, o nº de perguntas e a espontaneidade. O <strong>entrevistador</strong> (galeria ou avançado) e o <strong>enunciado</strong> são salvos à parte, nos próprios cards.</p>
-    </div>
     </div><!-- /cenario-interview-config -->
     </div><!-- /tab-cenario -->
 
@@ -364,31 +345,11 @@
 
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
     <details class="card card-collapsible" open>
-      <summary><span class="card-title" data-help="Três passos, todos em lote: 1) avaliar as entrevistas (relatório interno, só você vê); 2) gerar as devolutivas (prévias — o aluno ainda não vê; revise e ajuste cada uma na página da conversa); 3) publicar. As configurações abaixo valem para o trabalho inteiro e são aplicadas pelos lotes.">Avaliações e devolutivas</span></summary>
+      <summary><span class="card-title" data-help="Gera o relatório interno de avaliação de cada entrevista (só você vê). É o insumo do cálculo das notas pela rubrica, no card abaixo.">Avaliação das entrevistas</span></summary>
       <div class="card-collapsible-body">
-      <p class="card-sub">Avalie as entrevistas, gere as devolutivas e publique — tudo em lote (passos 1 → 2 → 3 abaixo).</p>
-
-      <div class="row" style="margin-bottom: var(--sp-3)">
-        <button id="open-cockpit" class="btn" type="button" title="Abre as avaliações com navegação lado a lado entre os alunos (cada turno com sua avaliação)">Abrir avaliações lado a lado ↗</button>
-        <span id="open-cockpit-msg" class="hint"></span>
-      </div>
-
-      <label class="label" for="fb-guidelines">Diretrizes para a devolutiva (opcional) — tom, formato, o que destacar</label>
-      <textarea id="fb-guidelines" class="textarea" rows="3" placeholder="Ex.: tom acolhedor e direto; texto corrido, sem comentários pergunta a pergunta; destaque a leitura dos cenários e termine com um encorajamento."></textarea>
-      <label style="display:flex; align-items:flex-start; gap: var(--sp-2); margin-top: var(--sp-3); cursor:pointer">
-        <input type="checkbox" id="fb-include-opinion" checked style="margin-top: 3px"/>
-        <span class="card-sub" style="margin:0" data-help="A impressão da persona, publicada como está, com ressalva de autoria — não editável. O lote aplica a escolha a todas as entrevistas; dá para ajustar aluno a aluno na página da conversa.">Incluir a <strong>opinião do entrevistador</strong> nas devolutivas.</span>
-      </label>
-      <div class="row" style="margin-top: var(--sp-3)">
-        <button id="save-feedback-settings" class="btn" type="button">Salvar configurações</button>
-        <span id="feedback-settings-msg" class="hint"></span>
-      </div>
-
-      <div class="row" style="margin-top: var(--sp-4); gap: var(--sp-2); flex-wrap: wrap; border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3)">
-        <button id="eval-new-btn" class="btn btn-primary" type="button" title="Gera o relatório interno das entrevistas com conversa que ainda não foram avaliadas">1 · Avaliar entrevistas</button>
-        <button id="derive-all-btn" class="btn btn-primary" type="button" title="Gera a devolutiva (prévia) das avaliações que ainda não têm — salva as configurações acima e as usa; nada é publicado">2 · Gerar devolutivas</button>
-        <button id="publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas — salva e aplica as configurações acima a todas">3 · Publicar devolutivas</button>
-        <span class="spacer"></span>
+      <p class="card-sub">Gera o relatório interno de avaliação das entrevistas com conversa — é o insumo do <strong>cálculo das notas</strong> (card abaixo).</p>
+      <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-top: var(--sp-2)">
+        <button id="eval-new-btn" class="btn btn-primary" type="button" title="Gera o relatório interno das entrevistas com conversa que ainda não foram avaliadas">Avaliar entrevistas</button>
         <button id="eval-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regenera o relatório interno de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
@@ -396,9 +357,9 @@
     </details>
 
     <details class="card card-collapsible" open>
-      <summary><span class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. A nota é uma PUBLICAÇÃO À PARTE da devolutiva: você calcula (em lote ou aluno a aluno) e publica quando quiser — antes, junto ou depois da devolutiva.">Rubrica e notas</span></summary>
+      <summary><span class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. Calcule (em lote ou aluno a aluno) e publique quando quiser.">Rubrica e notas</span></summary>
       <div class="card-collapsible-body">
-      <p class="card-sub">Defina os critérios que compõem a nota. A nota é um passo à parte: calcule e publique quando quiser, independente da devolutiva.</p>
+      <p class="card-sub">Defina os critérios que compõem a nota. Calcule e publique as notas quando quiser.</p>
       <!-- Ações no topo: não obriga a rolar a lista de critérios só para salvar/calcular. -->
       <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
         <button id="save-rubric-btn" class="btn btn-primary" type="button">Salvar rubrica</button>
@@ -434,7 +395,11 @@
     <details class="card card-collapsible" open>
       <summary><span class="card-title">Alunos</span></summary>
       <div class="card-collapsible-body">
-      <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a conversa, a avaliação, escrever a devolutiva e atribuir a nota.</p>
+      <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a conversa, a avaliação e atribuir a nota.</p>
+      <div class="row" style="margin-bottom: var(--sp-3)">
+        <button id="open-cockpit" class="btn" type="button" title="Abre as avaliações com navegação lado a lado entre os alunos (cada turno com sua avaliação)">Abrir avaliações lado a lado ↗</button>
+        <span id="open-cockpit-msg" class="hint"></span>
+      </div>
       <div id="grades-table"></div>
       </div>
     </details>
@@ -442,6 +407,19 @@
   </div>
 
 </main>
+
+<!-- Guarda de alterações não salvas ao trocar de aba (T6). -->
+<div id="save-guard-modal" class="guard-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="guard-title">
+  <div class="guard-box">
+    <h3 id="guard-title" style="margin: 0 0 var(--sp-2)">Alterações não salvas</h3>
+    <p class="card-sub" style="margin: 0">Você mudou a configuração e ainda não salvou. O que deseja fazer?</p>
+    <div class="row" style="justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-4)">
+      <button class="btn btn-ghost" id="guard-cancel" type="button">Cancelar</button>
+      <button class="btn" id="guard-continue" type="button">Continuar sem salvar</button>
+      <button class="btn btn-primary" id="guard-save" type="button">Salvar configuração</button>
+    </div>
+  </div>
+</div>
 
 <button id="open-assistant" class="fab" type="button" aria-label="Abrir assistente de configuração">
   <span aria-hidden="true">💬</span>
@@ -486,6 +464,12 @@
 <script src="/static/js/scenarioCockpit.js"></script>
 <script>
 const workToken = location.pathname.split('/').filter(Boolean)[1];
+
+// Alterações não salvas na aba Configuração (tipo, modo/voz, identidade, nº de
+// perguntas, fiscalização). Usado pela guarda ao trocar de aba. markConfigDirty()
+// só é chamado em edição do usuário — nunca em render/load — para não dar falso positivo.
+let configDirty = false;
+function markConfigDirty() { configDirty = true; }
 
 async function load() {
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/info`);
@@ -555,10 +539,7 @@ async function load() {
   applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
   applyVariantStateToUI(j.work.interview_variant || 'messages');
   applyProctoringStateToUI(j.work.proctoring_enabled === true);
-  CALIB = j.work.oral_calibration || null;
-  renderCalib();
-  document.getElementById('devol-proctor-prompt').value = j.work.devolutiva_proctor_prompt || '';
-  document.getElementById('question-count').value = j.work.question_count ?? 6;
+  document.getElementById('question-count').value = j.work.question_count ?? 5;
   // A sugestão de identidade é cosmética. Ela NUNCA pode derrubar o load() e
   // impedir a renderização da lista de alunos (que vem logo abaixo) — foi
   // exatamente esse o bug em que um gender inesperado fazia null.checked lançar.
@@ -569,9 +550,6 @@ async function load() {
   }
 
   // Configurações de devolutiva do trabalho
-  document.getElementById('fb-guidelines').value = j.work.feedback_guidelines ?? '';
-  document.getElementById('fb-include-opinion').checked = j.work.include_interviewer_opinion !== false;
-  document.getElementById('expect-spontaneous').checked = j.work.expect_spontaneous === true;
   renderRubricEditor(j.work.grading_rubric || []);
   fillPenaltySettings(j.work.grade_penalty || null);
 
@@ -640,10 +618,7 @@ function renderGradesTable() {
     const avalPill = s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>' : '<span class="muted">—</span>';
     const nota = (s.grade_final != null) ? `<strong>${escapeHtml(String(s.grade_final))}</strong>` : '<span class="muted">—</span>';
     const alerta = authorshipAlertBadge(s);
-    const pub = [
-      s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva visível ao aluno">devolutiva</span>' : '',
-      s.grade_published_at ? '<span class="badge badge-accent" title="Nota visível ao aluno">nota</span>' : '',
-    ].filter(Boolean).join(' ') || '<span class="muted">—</span>';
+    const pub = (s.grade_published_at ? '<span class="badge badge-accent" title="Nota visível ao aluno">nota</span>' : '') || '<span class="muted">—</span>';
     return `<tr>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td>${statusPill}</td>
@@ -651,7 +626,7 @@ function renderGradesTable() {
       <td style="text-align:right">${nota}</td>
       <td>${alerta}</td>
       <td>${pub}</td>
-      <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação, escrever a devolutiva e publicar a nota">gerenciar ▸</a></td>
+      <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação e publicar a nota">gerenciar ▸</a></td>
     </tr>`;
   }).join('');
   el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th>Ações</th></tr></thead><tbody>${body}</tbody></table>`;
@@ -711,7 +686,6 @@ function renderSubmissionsTable() {
     // #132: estado de AVALIAÇÃO visível já na aba Alunos & progresso (não só na de
     // Notas) — o professor vê daqui o que ainda falta avaliar/publicar.
     const evalBadge = s.grade_published_at ? '<span class="badge badge-accent" title="Nota publicada ao aluno">nota publicada</span>'
-      : s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva publicada ao aluno">devolutiva publicada</span>'
       : s.has_grades ? '<span class="badge badge-completed">nota calculada</span>'
       : s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>'
       : (s.status === 'completed' || s.status === 'gave_up') ? '<span class="badge badge-pending">a avaliar</span>'
@@ -827,8 +801,10 @@ document.getElementById('send-enunciado').onclick = async () => {
   form.append('file', f);
   msg.textContent = 'Enviando e checando o enunciado…';
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/enunciado`, { method: 'POST', body: form });
+  const j = await r.json().catch(() => ({}));
   if (!r.ok) { msg.textContent = 'Falha no envio'; return; }
-  msg.textContent = 'Enunciado salvo.';
+  // A calibração de fala é gerada em silêncio no upload (professor não lida com ela).
+  msg.textContent = 'Enunciado salvo.' + (j.calibration_generated ? ' ✓ Calibração de fala gerada.' : '');
   document.getElementById('enunciado-file').value = '';
   load();
 };
@@ -1178,62 +1154,28 @@ document.getElementById('voice-preview').onclick = async () => {
   }
 };
 
-// Salvar ÚNICO da aba Cenário: modo+voz, identidade, nº de perguntas e
-// espontaneidade de uma vez. O entrevistador (galeria/avançado) e o enunciado
-// têm seus próprios saves (não são "config escalar").
-// ---- Proctoring por vídeo + calibração de fala (entrevista) ----
-let CALIB = null;
-function renderCalib() {
-  const el = document.getElementById('calib-sentence');
-  if (el) el.value = CALIB?.sentence || '';
-  const t = document.getElementById('calib-terms');
-  const terms = (CALIB?.key_terms || []);
-  if (t) t.textContent = terms.length ? ('Termos-chave verificados na transcrição: ' + terms.join(', ')) : '';
-}
-// Proctoring exige modo áudio (o aluno responde por voz e comanda por gesto).
+// ---- Fiscalização por vídeo (entrevista) ----
+// A calibração de fala é gerada AUTOMÁTICA (em silêncio) no upload do enunciado —
+// sem card nem controles aqui. Proctoring exige modo áudio (o aluno responde por
+// voz e comanda por gesto).
 function applyProctoringStateToUI(on) {
   const chk = document.getElementById('proctoring-enabled');
   if (chk) chk.checked = !!on;
-  document.getElementById('calib-block').classList.toggle('hidden', !on);
   if (on) {
     document.getElementById('mode-audio').checked = true;
     document.getElementById('voice-row').classList.remove('hidden');
   }
-  // Fiscalização por vídeo já garante integridade → "resposta de cabeça" fica desligada.
-  const sp = document.getElementById('expect-spontaneous');
-  if (sp) { sp.disabled = on; if (on) sp.checked = false; }
-  const spm = document.getElementById('spontaneous-msg');
-  if (spm) spm.textContent = on ? 'A fiscalização por vídeo já garante a integridade — a resposta “de cabeça” fica desativada.' : '';
 }
 document.getElementById('proctoring-enabled').addEventListener('change', (e) => {
   applyProctoringStateToUI(e.target.checked);
+  markConfigDirty();
 });
-document.getElementById('calib-gen').onclick = async () => {
-  const msg = document.getElementById('calib-msg'), btn = document.getElementById('calib-gen');
-  btn.disabled = true; msg.textContent = 'Gerando…';
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/calibration/generate`, { method: 'POST' });
-    const j = await r.json();
-    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-    CALIB = j.calibration; renderCalib(); msg.textContent = 'Frase gerada e salva.';
-  } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-  finally { btn.disabled = false; }
-};
-document.getElementById('calib-save').onclick = async () => {
-  const msg = document.getElementById('calib-msg');
-  const sentence = document.getElementById('calib-sentence').value.trim();
-  // Mantém só os termos-chave que ainda aparecem na frase (se ela foi editada à mão).
-  const key_terms = (CALIB?.key_terms || []).filter(t => sentence.toLowerCase().includes(String(t).toLowerCase()));
-  msg.textContent = 'Salvando…';
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/calibration`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sentence, key_terms }) });
-    const j = await r.json();
-    if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-    CALIB = j.calibration; renderCalib(); msg.textContent = sentence ? 'Salva.' : 'Salva (teste desligado).';
-  } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-};
 
-document.getElementById('save-cenario').onclick = async () => {
+document.getElementById('save-cenario').onclick = () => saveConfigTab();
+// Salvar ÚNICO da aba Configuração: tipo de entrevista + modo/voz + identidade +
+// nº de perguntas + fiscalização, de uma vez. O entrevistador (galeria/avançado) e
+// o enunciado têm seus próprios saves. Devolve true se salvou (usado pela guarda).
+async function saveConfigTab() {
   const msg = document.getElementById('cenario-save-msg');
   msg.textContent = '';
   const proctoringOn = document.getElementById('proctoring-enabled').checked;
@@ -1241,44 +1183,43 @@ document.getElementById('save-cenario').onclick = async () => {
   let mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
   if (proctoringOn || variant === 'realtime') mode = 'audio'; // proctoring e tempo real exigem voz
   const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
-  if (mode === 'audio' && !voice) { msg.textContent = variant === 'realtime' ? 'A entrevista em tempo real é por voz — escolha uma voz.' : (proctoringOn ? 'A fiscalização por vídeo exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'); return; }
+  if (mode === 'audio' && !voice) { msg.textContent = variant === 'realtime' ? 'A entrevista em tempo real é por voz — escolha uma voz.' : (proctoringOn ? 'A fiscalização por vídeo exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'); return false; }
   const name = document.getElementById('interviewer-name').value.trim();
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
   // Identidade só persiste se foi DEFINIDA pelo professor; o rascunho sugerido
   // mantém o sorteio por upload (envia nulls). XOR só vale se explícita.
   if (identityExplicit && ((name && !gender) || (!name && gender))) {
     msg.textContent = 'Identidade: preencha nome e gênero (ou clique em Limpar identidade).';
-    return;
+    return false;
   }
   const setIdentity = identityExplicit && name && (gender === 'f' || gender === 'm');
   const count = parseInt(document.getElementById('question-count').value, 10);
   if (!Number.isInteger(count) || count < 3 || count > 20) {
     msg.textContent = 'Nº de perguntas: informe um inteiro entre 3 e 20.';
-    return;
+    return false;
   }
-  const expect = document.getElementById('expect-spontaneous').checked;
   const btn = document.getElementById('save-cenario');
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Salvando…';
+  let ok = false;
   try {
     const reqs = await Promise.all([
       fetch(`/w/${encodeURIComponent(workToken)}/interview-variant`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ variant }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/interaction`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, voice }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/interviewer-identity`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(setIdentity ? { name, gender } : { name: null, gender: null }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/question-count`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_count: count }) }),
-      fetch(`/w/${encodeURIComponent(workToken)}/expect-spontaneous`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expect_spontaneous: expect }) }),
       fetch(`/w/${encodeURIComponent(workToken)}/proctoring`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: proctoringOn }) }),
-      fetch(`/w/${encodeURIComponent(workToken)}/devolutiva-proctor-prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: document.getElementById('devol-proctor-prompt').value }) }),
     ]);
     const bad = reqs.find(r => !r.ok);
     if (bad) { const j = await bad.json().catch(() => ({})); msg.textContent = 'Erro ao salvar: ' + (j.error || bad.status); }
-    else { msg.textContent = 'Configurações salvas.'; setTimeout(() => { msg.textContent = ''; }, 3000); }
+    else { ok = true; configDirty = false; msg.textContent = 'Configuração salva.'; setTimeout(() => { msg.textContent = ''; }, 3000); }
   } catch (err) {
     msg.textContent = 'Falha ao salvar: ' + err.message;
   } finally {
     btn.disabled = false; btn.textContent = label;
   }
-};
+  return ok;
+}
 
 
 document.getElementById('save-interviewer').onclick = async () => {
@@ -1456,8 +1397,6 @@ async function pollBatchStatus() {
 function setEvalButtonsDisabled(disabled) {
   document.getElementById('eval-new-btn').disabled = disabled;
   document.getElementById('eval-all-btn').disabled = disabled;
-  document.getElementById('derive-all-btn').disabled = disabled;
-  document.getElementById('publish-all-btn').disabled = disabled;
   document.getElementById('grade-all-btn').disabled = disabled;
   document.getElementById('grade-publish-all-btn').disabled = disabled;
   document.getElementById('grade-unpublish-all-btn').disabled = disabled;
@@ -1485,34 +1424,6 @@ async function startBatch(path, body, confirmMsg) {
     setEvalButtonsDisabled(false);
   }
 }
-
-// Salva as configurações de devolutiva do trabalho. Os lotes de gerar e
-// publicar salvam antes de rodar — o que está na tela é o que vale.
-async function saveFeedbackSettings(showMsg) {
-  const msg = document.getElementById('feedback-settings-msg');
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/feedback-settings`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        feedback_guidelines: document.getElementById('fb-guidelines').value.trim() || null,
-        include_interviewer_opinion: document.getElementById('fb-include-opinion').checked,
-      }),
-    });
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      msg.textContent = 'Falha ao salvar: ' + (j.error || r.status);
-      return false;
-    }
-    if (showMsg) { msg.textContent = 'Configurações salvas.'; setTimeout(() => { msg.textContent = ''; }, 3000); }
-    return true;
-  } catch (err) {
-    msg.textContent = 'Falha ao salvar: ' + err.message;
-    return false;
-  }
-}
-
-document.getElementById('save-feedback-settings').onclick = () => saveFeedbackSettings(true);
 
 // ---- Rubrica de notas ----
 function rubricRowHtml(c) {
@@ -1604,21 +1515,10 @@ document.getElementById('grade-publish-all-btn').onclick = () =>
 document.getElementById('grade-unpublish-all-btn').onclick = () =>
   startBatch('evaluations/grade-unpublish', { force: false }, 'Despublicar as notas de TODOS os alunos? Elas deixam de aparecer na página de cada aluno (mas ficam guardadas para republicar depois).');
 
-// Espontaneidade não salva mais sozinha — vai junto no "Salvar configurações"
-// da aba Cenário (saveCenarioConfig).
-
 document.getElementById('eval-new-btn').onclick = () =>
   startBatch('evaluations', { force: false }, null);
 document.getElementById('eval-all-btn').onclick = () =>
   startBatch('evaluations', { force: true }, 'Reavaliar TODAS as entrevistas com conversa, inclusive as já avaliadas? Cada avaliação consome orçamento do trabalho.');
-document.getElementById('derive-all-btn').onclick = async () => {
-  if (!await saveFeedbackSettings(false)) return;
-  startBatch('evaluations/student-versions', { force: false }, 'Gerar as devolutivas (prévias) das avaliações que ainda não têm, usando as diretrizes acima? Nada é publicado — você revisa antes. Cada geração consome orçamento do trabalho.');
-};
-document.getElementById('publish-all-btn').onclick = async () => {
-  if (!await saveFeedbackSettings(false)) return;
-  startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas já geradas que ainda não foram publicadas? A escolha sobre a opinião do entrevistador (acima) é aplicada a todas, e elas ficam visíveis imediatamente na página de cada aluno.');
-};
 
 // Se já houver um lote em andamento quando a página abre (ex.: professor saiu
 // e voltou), retoma o acompanhamento.
@@ -1882,9 +1782,53 @@ function setTab(name) {
   try { localStorage.setItem('prof_tab', name); } catch (e) {}
   if (history.replaceState) history.replaceState(null, '', '#' + name);
 }
+// Guarda ao SAIR da aba Configuração com alterações pendentes: oferece Salvar /
+// Continuar (sem salvar) / Cancelar (fica na aba). Fora dela, troca direto.
+async function requestTab(name) {
+  const current = document.querySelector('.tab-btn.is-active')?.dataset.tab;
+  if (current === 'cenario' && name !== 'cenario' && configDirty) {
+    const choice = await showSaveGuard();
+    if (choice === 'cancel') return;
+    if (choice === 'save') { const ok = await saveConfigTab(); if (!ok) return; }
+    // 'continue' → segue sem salvar
+  }
+  setTab(name);
+}
+// Modal da guarda: resolve 'save' | 'continue' | 'cancel'.
+function showSaveGuard() {
+  return new Promise(resolve => {
+    const modal = document.getElementById('save-guard-modal');
+    modal.classList.remove('hidden');
+    const bSave = document.getElementById('guard-save');
+    const bCont = document.getElementById('guard-continue');
+    const bCancel = document.getElementById('guard-cancel');
+    const finish = (v) => {
+      modal.classList.add('hidden');
+      bSave.removeEventListener('click', onSave);
+      bCont.removeEventListener('click', onCont);
+      bCancel.removeEventListener('click', onCancel);
+      resolve(v);
+    };
+    const onSave = () => finish('save');
+    const onCont = () => finish('continue');
+    const onCancel = () => finish('cancel');
+    bSave.addEventListener('click', onSave);
+    bCont.addEventListener('click', onCont);
+    bCancel.addEventListener('click', onCancel);
+  });
+}
 TAB_NAMES.forEach(t => {
   const btn = document.getElementById('tab-btn-' + t);
-  if (btn) btn.onclick = () => setTab(t);
+  if (btn) btn.onclick = () => requestTab(t);
+});
+// Qualquer edição do usuário nos campos da aba Configuração marca alterações pendentes.
+['variant-messages','variant-realtime','mode-text','mode-audio'].forEach(id => {
+  const el = document.getElementById(id); if (el) el.addEventListener('change', markConfigDirty);
+});
+document.querySelectorAll('input[name="interviewer-gender"]').forEach(el => el.addEventListener('change', markConfigDirty));
+(() => { const v = document.getElementById('voice-select'); if (v) v.addEventListener('change', markConfigDirty); })();
+['interviewer-name','question-count'].forEach(id => {
+  const el = document.getElementById(id); if (el) el.addEventListener('input', markConfigDirty);
 });
 (function initTab() {
   const fromHash = (location.hash || '').replace('#', '');
