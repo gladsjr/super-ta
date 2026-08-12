@@ -66,6 +66,10 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
         const submissions = await db.listSubmissionsForWork(req.work.id);
         const balance = await getWorkBalance(req.work.id);
         const calibration = await db.getOralCalibration(req.work.id);
+        const hasEnunciado = !!req.work.assignment_pdf;
+        // #133: nome do arquivo + checagem mínima de persona (rodada no upload).
+        const enunciadoFilename = hasEnunciado ? await db.getEnunciadoFilename(req.work.id) : null;
+        const personaCheck = hasEnunciado ? await db.getCoherenceCache(req.work.id) : null;
         // Lista dinâmica que precisa refletir criações/bloqueios na hora. Sem
         // isto, em produção (atrás do Google Frontend) o navegador pode servir
         // uma cópia em cache e o professor não vê o token recém-gerado.
@@ -74,7 +78,9 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
             work: {
                 name: req.work.name,
                 kind: req.work.kind,
-                has_enunciado: !!req.work.assignment_pdf,
+                has_enunciado: hasEnunciado,
+                enunciado_filename: enunciadoFilename,
+                enunciado_persona_check: personaCheck,
                 has_interviewer: !!req.work.has_interviewer,
                 interaction_mode: req.work.interaction_mode,
                 interview_variant: req.work.interview_variant,
@@ -1245,51 +1251,24 @@ router.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single(
     if (!req.file) return res.status(400).json({ error: "file required" });
     try {
         await db.setEnunciadoBlob(req.work.id, req.file.buffer, req.file.originalname);
-        // Cache de coerência fica obsoleto quando o PDF é substituído.
         await db.clearCoherenceCache(req.work.id);
         log.info("WORK", `enunciado uploaded work=${req.work.work_token} bytes=${req.file.size} name=${req.file.originalname}`);
-        res.json({ ok: true });
+        // #133: checagem MÍNIMA de persona roda AUTOMÁTICA no upload (barata,
+        // fast_model). Assim some o botão "Avaliar"/"Reavaliar" e o bug de avaliar
+        // o enunciado ANTIGO por engano. Best-effort: se a checagem falhar, o
+        // upload NÃO falha (o professor sempre consegue subir o arquivo).
+        let personaCheck = null;
+        try {
+            const fileUpload = await uploadPdf({ pdf: req.file.buffer, filename: req.file.originalname }, "enunciado.pdf");
+            personaCheck = await enunciadoCoherenceAgent.evaluate({ openaiFileId: fileUpload.id, meterCtx: { workId: req.work.id } });
+            await db.setCoherenceCache(req.work.id, personaCheck);
+        } catch (chkErr) {
+            log.error("WORK", `enunciado persona-check failed work=${req.work.work_token}: ${chkErr.message}`);
+        }
+        res.json({ ok: true, filename: req.file.originalname, persona_check: personaCheck });
     } catch (err) {
         log.error("WORK", `enunciado save failed: ${err.message}`);
         res.status(500).json({ error: "failed to save enunciado" });
-    }
-});
-
-// ---- Coerência do enunciado (assistente de configuração) ----
-// Avalia se o enunciado está bem encaixado no processo de entrevista.
-// NUNCA avalia a qualidade pedagógica/técnica do trabalho em si.
-// Resultado é cacheado em works.enunciado_coherence_json até o PDF ser substituído.
-router.post("/w/:workToken/enunciado/coherence", requireWorkToken, requireWithinBudget, async (req, res) => {
-    const force = String(req.query?.force ?? "").toLowerCase() === "true";
-
-    try {
-        if (!force) {
-            const cached = await db.getCoherenceCache(req.work.id);
-            if (cached) {
-                log.info("COHERENCE", `cache hit work=${req.work.work_token}`);
-                return res.json({ ...cached, cached: true });
-            }
-        }
-
-        const enunciadoBlob = await db.getEnunciadoBlob(req.work.id);
-        if (!enunciadoBlob) {
-            return res.status(400).json({ error: "envie o enunciado do trabalho antes de avaliar" });
-        }
-
-        log.info("COHERENCE", `start work=${req.work.work_token} force=${force}`);
-        const fileUpload = await uploadPdf(enunciadoBlob, "enunciado.pdf");
-        log.info("COHERENCE", `uploaded enunciado file=${fileUpload.id}`);
-
-        const report = await enunciadoCoherenceAgent.evaluate({
-            openaiFileId: fileUpload.id,
-            meterCtx: { workId: req.work.id },
-        });
-        await db.setCoherenceCache(req.work.id, report);
-        log.info("COHERENCE", `ok work=${req.work.work_token} overall=${report.overall}`);
-        res.json({ ...report, cached: false });
-    } catch (err) {
-        log.error("COHERENCE", `failed: ${err.message}`);
-        res.status(500).json({ error: "falha ao avaliar coerência do enunciado", detail: err.message });
     }
 });
 
@@ -1358,29 +1337,14 @@ async function buildConfigStateBlock(work) {
 - Entrevistador configurado: ${originLine}
 - Personas prontas disponíveis: ${personasList}${agendaBlock}`;
 
-    if (!coherence) {
+    // Checagem MÍNIMA de persona (#133): roda sozinha no upload. NÃO há ação para
+    // "avaliar enunciado" — não sugira nem emita request_assignment_check.
+    if (!coherence || !coherence.persona) {
         return `${header}
-- Diagnóstico de coerência do enunciado: ainda não avaliado (você pode emitir action.type=request_assignment_check se o professor pedir avaliação)`;
+- Persona do entrevistador no enunciado: ${work.assignment_pdf ? "o enunciado NÃO deixa claro com quem o aluno vai conversar (oriente o professor a descrever a persona no enunciado)" : "enunciado ainda não enviado"}. (A checagem roda automaticamente no upload; não há ação para avaliar o enunciado.)`;
     }
-
-    const findingsBlock = (coherence.findings || []).map(f =>
-        `    - ${f.criterion} [${f.status}]: ${f.comment}`
-    ).join("\n");
-    const personasBlock = (coherence.suggested_personas || []).map(p =>
-        `    - ${p.filename} (fit=${p.fit}): ${p.reason}`
-    ).join("\n");
-    const fixesBlock = (coherence.fix_suggestions || []).map(s => `    - ${s}`).join("\n");
-
     return `${header}
-- Diagnóstico de coerência do enunciado JÁ DISPONÍVEL (NÃO emita request_assignment_check de novo — comente este relatório):
-    overall: ${coherence.overall}
-    summary: ${coherence.summary}
-  Achados por critério:
-${findingsBlock || "    (nenhum)"}
-  Personas sugeridas:
-${personasBlock || "    (nenhuma)"}
-  Sugestões de correção do enunciado:
-${fixesBlock || "    (nenhuma)"}`;
+- Persona do entrevistador identificada no enunciado: ${coherence.persona}${(coherence.characteristics || []).length ? ` — características: ${coherence.characteristics.join(", ")}` : ""}. (Checagem automática do upload; não há ação para reavaliar.)`;
 }
 
 async function findMatchingTemplateName(savedYamlText) {

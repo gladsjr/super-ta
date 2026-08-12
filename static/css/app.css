@@ -6,15 +6,9 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
 
-/* Display serif da marca — Hardcover (variável), self-hosted.
-   Coloque o(s) arquivo(s) em static/fonts/. Enquanto não carrega, cai para
-   uma serifa do sistema (fallback no --font-display). */
-@font-face {
-  font-family: "Hardcover";
-  src: url("/static/fonts/Hardcover.woff2") format("woff2");
-  font-weight: 100 900;
-  font-display: swap;
-}
+/* Display serif da marca: usa a serifa do sistema (Georgia). A Hardcover ainda
+   não existe como webfont — a referência foi removida para não gerar 404 na home
+   (issue #94). O wordmark "ORATIA" segue sendo uma IMAGEM já no estilo da marca. */
 
 :root {
   /* Color — slate ink + ORATIA navy. */
@@ -63,7 +57,7 @@
   --danger-50:   #fce9e9;
 
   /* Typography */
-  --font-display: "Hardcover", "Spectral", Georgia, serif;
+  --font-display: "Spectral", Georgia, serif;
   --font-sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --fs-xs:   0.78rem;

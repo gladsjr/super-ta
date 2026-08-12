@@ -444,7 +444,7 @@ function renderWorks() {
           <div class="label">Token de trabalho</div>
           <div class="row-tight">
             <code class="token-chip">${escapeHtml(w.work_token)}</code>
-            <button class="icon-btn" title="Copiar token" onclick="copyToken(this, '${w.work_token}')">📋</button>
+            <button class="icon-btn" title="Copiar link do painel" onclick="copyToken(this, location.origin + '${profUrl}')">📋</button>
             <a class="btn btn-ghost btn-sm" href="${profUrl}" target="_blank" title="Abrir painel do professor">Abrir ↗</a>
           </div>
         </div>

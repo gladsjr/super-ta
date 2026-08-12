@@ -122,13 +122,14 @@
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
       <p class="card-sub" id="enunciado-status">—</p>
+      <!-- #133: checagem mínima de persona, rodada automaticamente no upload. -->
+      <p class="card-sub" id="persona-check" style="margin-top: var(--sp-1)"></p>
       <div class="row" style="margin-bottom: var(--sp-3)">
         <button id="open-orientacoes" class="btn" type="button">Orientações</button>
       </div>
       <div class="row">
         <input type="file" id="enunciado-file" accept="application/pdf" class="input" style="flex:1; min-width:260px"/>
         <button id="send-enunciado" class="btn btn-primary">Enviar PDF</button>
-        <button id="avaliar-enunciado" class="btn" type="button" title="Envie o enunciado antes de avaliar" disabled>Avaliar Enunciado</button>
       </div>
       <div id="enunciado-msg" class="hint"></div>
     </div>
@@ -467,47 +468,13 @@
   </div>
 </aside>
 
-<dialog id="coherence-dialog" class="coherence-dialog">
-  <div class="dlg-body">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap: var(--sp-3); margin-bottom: var(--sp-3)">
-      <h3 style="margin:0">Avaliação do enunciado</h3>
-      <span id="coh-overall" class="coherence-overall"></span>
-    </div>
-    <p id="coh-summary" style="margin:0 0 var(--sp-2) 0"></p>
-    <p id="coh-cached" class="muted" style="font-size: var(--fs-xs); margin:0"></p>
-
-    <div class="coherence-section">
-      <h4>Achados por critério</h4>
-      <div id="coh-findings"></div>
-    </div>
-
-    <div class="coherence-section">
-      <h4>Personas sugeridas</h4>
-      <div id="coh-personas"></div>
-    </div>
-
-    <div class="coherence-section" id="coh-fixes-section">
-      <h4>Sugestões de melhoria do enunciado</h4>
-      <ul id="coh-fixes" class="coherence-fix-list"></ul>
-    </div>
-
-    <p class="hint" style="margin-top: var(--sp-4); font-size: var(--fs-xs)">
-      Esta avaliação examina apenas se o enunciado fornece base para uma entrevista produtiva — não avalia a qualidade pedagógica do trabalho em si.
-    </p>
-  </div>
-  <div class="dlg-actions">
-    <button id="coh-rerun" class="btn" type="button">Reavaliar</button>
-    <button id="close-coherence" class="btn btn-primary" type="button">Fechar</button>
-  </div>
-</dialog>
-
 <dialog id="orientacoes-dialog">
   <div class="dlg-body">
     <h3>Orientações para o enunciado do trabalho</h3>
     <div style="line-height: 1.55">
       <p>Envie aqui o PDF do enunciado que os alunos receberam. Esse documento é a referência principal usada pelo ORATIA para entender o que foi pedido, quais são os critérios de avaliação e quais conceitos o aluno precisa demonstrar dominar durante a entrevista.</p>
       <p>Quanto mais claro e específico for o enunciado, melhor será a entrevista. Tente garantir que o documento descreva os objetivos do trabalho, o produto esperado (relatório, código, apresentação etc.), os critérios de avaliação e quaisquer restrições importantes. Se o enunciado original for vago, considere complementá-lo com uma rubrica ou um pequeno guia antes de enviar.</p>
-      <p>Depois de carregar o PDF, você poderá clicar em <strong>Avaliar Enunciado</strong> para receber um diagnóstico automático sobre pontos que podem confundir o aluno ou dificultar uma entrevista produtiva. Use esse retorno para revisar o enunciado antes de gerar os tokens dos alunos.</p>
+      <p>Ao enviar o PDF, o sistema faz uma <strong>checagem mínima</strong>: se o enunciado deixa claro <strong>com quem o aluno vai conversar</strong> (a persona do entrevistador) e quais as características dela. Se não definir, aparece um aviso para você descrever a persona. Ele <strong>não</strong> avalia a qualidade do trabalho.</p>
     </div>
   </div>
   <div class="dlg-actions">
@@ -567,8 +534,9 @@ async function load() {
 
   const enunciadoUrl = `/w/${encodeURIComponent(workToken)}/enunciado`;
   document.getElementById('enunciado-status').innerHTML = j.work.has_enunciado
-    ? `Enunciado atual: <a href="${enunciadoUrl}" target="_blank">abrir PDF ↗</a>. Envie um novo arquivo para substituir.`
+    ? `Enunciado atual: <strong>${escapeHtml(j.work.enunciado_filename || 'arquivo')}</strong> — <a href="${enunciadoUrl}" target="_blank">abrir PDF ↗</a>. Envie um novo arquivo para substituir.`
     : 'Nenhum enunciado enviado ainda.';
+  renderPersonaCheck(j.work.has_enunciado ? j.work.enunciado_persona_check : null);
   document.getElementById('send-enunciado').textContent = j.work.has_enunciado ? 'Substituir' : 'Enviar PDF';
   hasEnunciado = !!j.work.has_enunciado;
   hasSavedInterviewer = !!j.work.has_interviewer;
@@ -583,11 +551,6 @@ async function load() {
   personaAdaptBtn.title = hasEnunciado
     ? 'Reescreve a persona escolhida com os termos do seu enunciado'
     : 'Envie o enunciado do trabalho antes de ajustar';
-  const avaliarBtn = document.getElementById('avaliar-enunciado');
-  avaliarBtn.disabled = !j.work.has_enunciado;
-  avaliarBtn.title = j.work.has_enunciado
-    ? 'Avaliar a clareza e completude do enunciado enviado'
-    : 'Envie o enunciado antes de avaliar';
 
   applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
   applyVariantStateToUI(j.work.interview_variant || 'messages');
@@ -745,6 +708,14 @@ function renderSubmissionsTable() {
       ? ` · <button class="btn btn-sm" onclick="deleteToken('${s.submission_token}')" title="Apagar este envio (o aluno ainda não começou). Devolve a cota do pacote, se houver.">apagar</button>`
       : '';
     const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
+    // #132: estado de AVALIAÇÃO visível já na aba Alunos & progresso (não só na de
+    // Notas) — o professor vê daqui o que ainda falta avaliar/publicar.
+    const evalBadge = s.grade_published_at ? '<span class="badge badge-accent" title="Nota publicada ao aluno">nota publicada</span>'
+      : s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva publicada ao aluno">devolutiva publicada</span>'
+      : s.has_grades ? '<span class="badge badge-completed">nota calculada</span>'
+      : s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>'
+      : (s.status === 'completed' || s.status === 'gave_up') ? '<span class="badge badge-pending">a avaliar</span>'
+      : '';
     return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td>
@@ -753,7 +724,7 @@ function renderSubmissionsTable() {
           <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button>
         </div>
       </td>
-      <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge}</td>
+      <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge} ${evalBadge}</td>
       <td>${convCell}</td>
       <td>${abrirLink}${actionBtn}${deleteBtn}</td>
     </tr>`;
@@ -832,11 +803,20 @@ document.getElementById('close-orientacoes').onclick = () => {
   document.getElementById('orientacoes-dialog').close();
 };
 
-document.getElementById('avaliar-enunciado').onclick = () => runCoherence(false);
-document.getElementById('coh-rerun').onclick = () => runCoherence(true);
-document.getElementById('close-coherence').onclick = () => {
-  document.getElementById('coherence-dialog').close();
-};
+// #133: checagem MÍNIMA de persona (roda no upload). Não avalia qualidade — só
+// diz com QUEM o aluno vai conversar (a persona do entrevistador) e as
+// características, ou avisa que o enunciado não define isso.
+function renderPersonaCheck(pc) {
+  const el = document.getElementById('persona-check');
+  if (!el) return;
+  if (!pc) { el.innerHTML = ''; return; }
+  if (pc.persona_defined) {
+    const chars = (pc.characteristics || []).map(escapeHtml).join(', ');
+    el.innerHTML = `<span style="color:#1a8a4a">✓</span> <strong>Persona:</strong> ${escapeHtml(pc.persona)}${chars ? ` — <span class="muted">${chars}</span>` : ''}`;
+  } else {
+    el.innerHTML = `<span style="color:#c0392b">⚠</span> O enunciado não define com quem o aluno vai conversar — <strong>descreva a persona</strong> no enunciado.`;
+  }
+}
 
 document.getElementById('send-enunciado').onclick = async () => {
   const msg = document.getElementById('enunciado-msg');
@@ -845,10 +825,11 @@ document.getElementById('send-enunciado').onclick = async () => {
   if (!f) { msg.textContent = 'Escolha um arquivo PDF.'; return; }
   const form = new FormData();
   form.append('file', f);
-  msg.textContent = 'Enviando...';
+  msg.textContent = 'Enviando e checando o enunciado…';
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/enunciado`, { method: 'POST', body: form });
   if (!r.ok) { msg.textContent = 'Falha no envio'; return; }
   msg.textContent = 'Enunciado salvo.';
+  document.getElementById('enunciado-file').value = '';
   load();
 };
 
@@ -1648,126 +1629,6 @@ function escapeHtml(s) {
 }
 
 // ============================================================================
-// Coherence report (modal) — wired to /enunciado/coherence
-// Same agent feeds both this modal and the assistant chat.
-// ============================================================================
-
-let coherenceLoading = false;
-
-async function runCoherence(force) {
-  const dialog = document.getElementById('coherence-dialog');
-  const overallEl = document.getElementById('coh-overall');
-  const summaryEl = document.getElementById('coh-summary');
-  const cachedEl = document.getElementById('coh-cached');
-  const findingsEl = document.getElementById('coh-findings');
-  const personasEl = document.getElementById('coh-personas');
-  const fixesEl = document.getElementById('coh-fixes');
-  const fixesSection = document.getElementById('coh-fixes-section');
-  const rerunBtn = document.getElementById('coh-rerun');
-
-  if (coherenceLoading) return;
-  coherenceLoading = true;
-
-  if (!dialog.open) dialog.showModal();
-  overallEl.className = 'coherence-overall';
-  overallEl.textContent = '';
-  summaryEl.textContent = 'Avaliando enunciado… isso pode levar 20–40 segundos.';
-  cachedEl.textContent = '';
-  findingsEl.innerHTML = '';
-  personasEl.innerHTML = '';
-  fixesEl.innerHTML = '';
-  fixesSection.classList.remove('hidden');
-  rerunBtn.disabled = true;
-
-  try {
-    const url = `/w/${encodeURIComponent(workToken)}/enunciado/coherence${force ? '?force=true' : ''}`;
-    const r = await fetch(url, { method: 'POST' });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      summaryEl.textContent = 'Falha: ' + (j.error || 'erro ao avaliar');
-      return j;
-    }
-    renderCoherenceReport(j);
-    return j;
-  } catch (e) {
-    summaryEl.textContent = 'Falha de comunicação ao avaliar.';
-    return null;
-  } finally {
-    coherenceLoading = false;
-    rerunBtn.disabled = false;
-  }
-}
-
-function renderCoherenceReport(report) {
-  const overallEl = document.getElementById('coh-overall');
-  const summaryEl = document.getElementById('coh-summary');
-  const cachedEl = document.getElementById('coh-cached');
-  const findingsEl = document.getElementById('coh-findings');
-  const personasEl = document.getElementById('coh-personas');
-  const fixesEl = document.getElementById('coh-fixes');
-  const fixesSection = document.getElementById('coh-fixes-section');
-
-  overallEl.className = 'coherence-overall coherence-overall-' + report.overall;
-  overallEl.textContent = report.overall;
-  summaryEl.textContent = report.summary || '';
-  cachedEl.textContent = report.cached ? 'Resultado em cache (PDF não foi alterado).' : 'Resultado recém-calculado.';
-
-  // Primário define o overall; necessários ancoram a entrevista; opcionais
-  // são reportados mas não rebaixam o overall.
-  const CRIT_META = {
-    business_context:           { label: 'Contexto de negócio',         kind: 'primary' },
-    deliverable:                { label: 'Entregável a defender',       kind: 'required' },
-    concept_density:            { label: 'Densidade conceitual',        kind: 'required' },
-    interviewer_profile_detail: { label: 'Perfil do entrevistador',     kind: 'optional' },
-    explicit_criteria:          { label: 'Critérios explícitos',        kind: 'optional' },
-    constraints:                { label: 'Restrições formais',          kind: 'optional' },
-  };
-  const CRIT_ORDER = ['business_context','deliverable','concept_density','interviewer_profile_detail','explicit_criteria','constraints'];
-  const findings = (report.findings || []).slice().sort((a, b) => {
-    const ai = CRIT_ORDER.indexOf(a.criterion); const bi = CRIT_ORDER.indexOf(b.criterion);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-  findingsEl.innerHTML = findings.map(f => {
-    const meta = CRIT_META[f.criterion] || { label: f.criterion, kind: 'optional' };
-    const tag = meta.kind === 'primary' ? '<span class="muted" style="font-size: var(--fs-xs); font-weight: 600; color: var(--accent-700)"> · primário</span>'
-              : meta.kind === 'optional' ? '<span class="muted" style="font-size: var(--fs-xs)"> · opcional</span>'
-              : '';
-    return `
-    <div class="coherence-finding">
-      <div class="status status-${escapeHtml(f.status)}">${escapeHtml(f.status)}</div>
-      <div class="body"><strong>${escapeHtml(meta.label)}${tag}</strong>${escapeHtml(f.comment || '')}</div>
-    </div>`;
-  }).join('');
-
-  personasEl.innerHTML = (report.suggested_personas || []).map(p => `
-    <div class="coherence-persona">
-      <div class="fit fit-${escapeHtml(p.fit)}">${escapeHtml(p.fit)}</div>
-      <div class="body"><strong>${escapeHtml(personaLabel(p.filename))}</strong> — ${escapeHtml(p.reason || '')}</div>
-      <button class="btn" type="button" onclick="loadPersonaFromCoherence('${encodeURIComponent(p.filename)}')">Usar esta persona</button>
-    </div>
-  `).join('');
-
-  if (Array.isArray(report.fix_suggestions) && report.fix_suggestions.length) {
-    fixesSection.classList.remove('hidden');
-    fixesEl.innerHTML = report.fix_suggestions.map(s => `<li>${escapeHtml(s)}</li>`).join('');
-  } else {
-    fixesSection.classList.add('hidden');
-  }
-}
-
-async function loadPersonaFromCoherence(encodedFilename) {
-  const r = await fetch(`/interviewers/templates/${encodedFilename}`);
-  if (!r.ok) return;
-  const yamlText = await r.text();
-  const ta = document.getElementById('interviewer-yaml');
-  if (ta.value.trim() && !confirm('Substituir o conteúdo atual do editor pelo template?')) return;
-  ta.value = yamlText;
-  setInterviewerMode('advanced'); // o resultado vai para o editor — torná-lo visível
-  document.getElementById('interviewer-msg').textContent = 'Template carregado no editor. Revise e clique em Salvar.';
-  document.getElementById('coherence-dialog').close();
-}
-
-// ============================================================================
 // Configuration assistant (drawer + chat) — wired to /config-chat
 // Histórico ephemero: vive só nesta página/aba e some ao recarregar.
 // O assistente nunca salva nada — só propõe; o professor aplica via cards.
@@ -1809,7 +1670,8 @@ function appendChatBubble(role, text, action) {
   div.className = 'chat-msg chat-msg-' + role;
   div.textContent = text;
   if (action) {
-    div.appendChild(buildActionCard(action));
+    const card = buildActionCard(action);
+    if (card) div.appendChild(card);
   }
   body.appendChild(div);
   body.scrollTop = body.scrollHeight;
@@ -1849,30 +1711,6 @@ function removeTypingIndicator() {
 function buildActionCard(action) {
   const card = document.createElement('div');
   card.className = 'chat-action-card';
-
-  if (action.type === 'request_assignment_check') {
-    const label = document.createElement('p');
-    label.className = 'label';
-    label.textContent = 'Ação sugerida pelo assistente';
-    card.appendChild(label);
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-primary';
-    btn.type = 'button';
-    btn.textContent = 'Rodar avaliação do enunciado';
-    btn.onclick = async () => {
-      btn.disabled = true;
-      btn.textContent = 'Avaliando…';
-      const report = await runCoherence(false);
-      btn.remove();
-      if (report && !report.error) {
-        appendSystemBubble(`✓ Avaliação concluída — overall: ${report.overall}. Posso comentar os pontos principais se você quiser.`, 'system');
-      } else {
-        appendSystemBubble('Falha ao avaliar enunciado.', 'error');
-      }
-    };
-    card.appendChild(btn);
-    return card;
-  }
 
   if (action.type === 'recommend_persona') {
     const friendly = personaLabel(action.payload.filename);
@@ -1974,7 +1812,7 @@ function buildActionCard(action) {
     return card;
   }
 
-  return card;
+  return null; // tipo desconhecido (ex.: request_assignment_check, agora inerte) → sem card
 }
 
 async function sendChat() {

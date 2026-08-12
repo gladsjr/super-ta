@@ -1,0 +1,4 @@
+# Scripts de shell (inclui hooks git) SEMPRE em LF. Sem isto, em clones com
+# core.autocrlf=true (Windows), o working tree fica com CRLF e `bash` falha a
+# validar/rodar o script ("syntax error: unexpected end of file"). Ver issue #76.
+*.sh text eol=lf

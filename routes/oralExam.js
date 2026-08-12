@@ -128,6 +128,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 name: req.work.name,
                 kind: req.work.kind,
                 has_exam: req.work.has_exam,
+                exam_filename: req.work.has_exam ? await db.getExamFilename(req.work.id) : null,
                 question_count: req.work.question_count,
                 voice: req.work.voice,
                 feedback_guidelines: req.work.feedback_guidelines || "",
@@ -162,6 +163,22 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
     } catch (err) {
         log.error("ORAL", `info failed: ${err.message}`);
         res.status(500).json({ error: "falha ao carregar a prova" });
+    }
+});
+
+// Download do material da prova que o professor enviou (consulta pós-upload,
+// issue #131). Espelha o GET do enunciado da entrevista.
+router.get("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, async (req, res) => {
+    try {
+        const blob = await db.getExamBlob(req.work.id);
+        if (!blob) return res.status(404).json({ error: "exam not uploaded" });
+        const isTxt = (blob.filename || "").toLowerCase().endsWith(".txt");
+        res.type(isTxt ? "text/plain; charset=utf-8" : "application/pdf");
+        if (blob.filename) res.set("Content-Disposition", `inline; filename="${encodeURIComponent(blob.filename)}"`);
+        res.send(blob.pdf);
+    } catch (err) {
+        log.error("ORAL", `exam-pdf read failed: ${err.message}`);
+        res.status(500).json({ error: "failed to read exam" });
     }
 });
 
