@@ -21,6 +21,7 @@ import { transcribeAudio } from "../lib/audio.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL } from "../lib/config.js";
+import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
@@ -44,6 +45,9 @@ const videoUpload = multer({ dest: os.tmpdir(), limits: { fileSize: 300 * 1024 *
 const calibUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 // Nº máximo de tentativas do pré-teste de calibração antes de o aluno seguir mesmo assim.
 const MAX_CALIB_ATTEMPTS = 2;
+// Guardrail de custo: teto do BANCO de questões da prova oral (previsibilidade de
+// custo — cada questão vira rubrica/avaliação). O nº sorteado por aluno é bem menor.
+const MAX_ORAL_QUESTIONS = 100;
 
 // Alertas de proctoring por VÍDEO para a lista do professor (resumo conservador,
 // calculado dos flags brutos — limiares ajustáveis sem reprocessar o vídeo).
@@ -191,6 +195,9 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
     const isPdf = mime === "application/pdf" || name.endsWith(".pdf");
     const isTxt = mime === "text/plain" || name.endsWith(".txt");
     if (!isPdf && !isTxt) return res.status(400).json({ error: "envie um arquivo PDF ou TXT" });
+    if (isPdf && exceedsPageLimit(req.file.buffer)) {
+        return res.status(400).json({ error: `o gabarito tem mais de ${MAX_PDF_PAGES} páginas — envie um PDF menor (limite ${MAX_PDF_PAGES})` });
+    }
     try {
         // Guarda os bytes da fonte (serve de flag has_exam; col. exam_pdf é genérica).
         await db.setExamPdf(req.work.id, req.file.buffer, req.file.originalname);
@@ -211,6 +218,9 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
         // Peso 1 default; rubrica vazia → rubric_stale=true (o professor gera). Novas
         // (sem id) recebem ids frescos do contador.
         questions = questions.map(q => ({ ...q, rubric: "", weight: 1 }));
+        // Guardrail de custo: trunca o banco de questões no teto.
+        let truncated = false;
+        if (questions.length > MAX_ORAL_QUESTIONS) { questions = questions.slice(0, MAX_ORAL_QUESTIONS); truncated = true; }
         const cleaned = await db.setOralQuestions(req.work.id, questions);
         // Calibração de fala gerada AUTOMÁTICA no upload, em silêncio (o professor não
         // lida com calibração nem vê/edita a frase — some o card de calibração).
@@ -229,7 +239,7 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
             log.error("ORAL", `exam calibration auto-gen failed work=${req.work.work_token}: ${calErr.message}`);
         }
         log.info("ORAL", `exam uploaded+extracted work=${req.work.work_token} type=${isTxt ? "txt" : "pdf"} questions=${cleaned.length}`);
-        res.json({ ok: true, count: cleaned.length, questions: cleaned, calibration_generated: calibrationGenerated });
+        res.json({ ok: true, count: cleaned.length, questions: cleaned, calibration_generated: calibrationGenerated, truncated, max_questions: MAX_ORAL_QUESTIONS });
     } catch (err) {
         log.error("ORAL", `exam-pdf failed: ${err.message}`);
         res.status(500).json({ error: "falha ao processar a prova", detail: err.message });
@@ -260,6 +270,7 @@ router.post("/w/:workToken/oral/config", requireWorkToken, requireOral, async (r
 router.post("/w/:workToken/oral/questions", requireWorkToken, requireOral, async (req, res) => {
     const raw = Array.isArray(req.body?.questions) ? req.body.questions : null;
     if (!raw) return res.status(400).json({ error: "questions (array) required" });
+    if (raw.length > MAX_ORAL_QUESTIONS) return res.status(400).json({ error: `no máximo ${MAX_ORAL_QUESTIONS} questões por prova oral` });
     if (!raw.some(q => String(q?.question || "").trim())) return res.status(400).json({ error: "nenhuma pergunta válida (cada pergunta precisa de enunciado)" });
     try {
         // Salvar é RÁPIDO (sem LLM): só persiste. (A checagem advisory das rubricas

@@ -39,6 +39,7 @@ import {
 } from "../lib/evaluationOps.js";
 import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
 import { analyzeOralVideoParts } from "../lib/proctor.js";
+import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import {
     PRINCIPAL_REASONING_MODEL,
     TTS_MODEL,
@@ -1288,6 +1289,9 @@ router.get("/w/:workToken/enunciado", requireWorkToken, async (req, res) => {
 
 router.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file required" });
+    if (exceedsPageLimit(req.file.buffer)) {
+        return res.status(400).json({ error: `o enunciado tem mais de ${MAX_PDF_PAGES} páginas — envie um PDF menor (limite ${MAX_PDF_PAGES})` });
+    }
     try {
         await db.setEnunciadoBlob(req.work.id, req.file.buffer, req.file.originalname);
         await db.clearCoherenceCache(req.work.id);
