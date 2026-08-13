@@ -141,8 +141,7 @@ ${EXTEMPORANEOUS_ANSWER_PRINCIPLE}
 
 Consequência para VOCÊ, avaliador: quando o entrevistador pediu um número que exigiria recálculo e a resposta veio com direção + mecanismo + ordem de grandeza, isso é resposta COMPLETA — classifique pelo mérito do raciocínio, NUNCA como "evasive" por faltar o valor exato. Recusar-se a chutar um número na hora é sinal de seriedade, não de fraqueza.
 
-SOBRE AUTORIA (authorship_confidence — um resumo interno, NÃO mostrado ao aluno):
-- Você resume, nunca acusa. Baseie-se no CONTEÚDO: reconhecer/defender as próprias escolhas com vocabulário próprio e admitir limitações específicas SUSTENTAM autoria (→ "high"); não reconhecer conteúdo central da própria entrega, ou fluência decorada sem conexão com a pergunta concreta, LEVANTAM dúvida (→ "low"/"medium"). É só um nível de confiança para o professor; a integridade "ao vivo" fica por conta da fiscalização por vídeo.
+A INTEGRIDADE "ao vivo" (autoria da fala, consulta externa) NÃO é sua tarefa — fica por conta da fiscalização por VÍDEO, que o professor revisa à parte. Avalie o CONTEÚDO da defesa; se algo no conteúdo levantar dúvida honesta (não reconhecer a própria entrega, fluência decorada sem conexão com a pergunta), registre em weaknesses/caveats como observação para o professor — nunca como acusação.
 
 REGRAS DURAS:
 - per_question: exatamente UM item por turno da transcrição, na mesma ordem, com o MESMO turn_index. Turno sem resposta registrada = "unanswered".
@@ -157,7 +156,6 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
 {
   "overall": {
     "defense_quality": "strong" | "adequate" | "weak" | "poor",
-    "authorship_confidence": "high" | "medium" | "low",
     "summary": "<3-6 frases: o veredito da entrevista em si>"
   },
   "interviewer_impression": "<parágrafo: como a persona da agenda saiu desta conversa — o que a convenceu, o que ficou devendo, em registro profissional direto>",
@@ -234,13 +232,12 @@ Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a p
             promptLog: systemPrompt + "\n\n" + userText, maxAttempts: 2, extractObject: true,
             validate: (p) => { this._validateReport(p); return p; },
         });
-        log.info("AGENT:InterviewEvaluator", `ok defense=${parsed.overall.defense_quality} authorship=${parsed.overall.authorship_confidence} per_question=${parsed.per_question.length}`);
+        log.info("AGENT:InterviewEvaluator", `ok defense=${parsed.overall.defense_quality} per_question=${parsed.per_question.length}`);
         return parsed;
     }
 
     _validateReport(r) {
         const VALID_DEFENSE = new Set(["strong", "adequate", "weak", "poor"]);
-        const VALID_AUTHORSHIP = new Set(["high", "medium", "low"]);
         const VALID_ASSESSMENT = new Set(["convincing", "partial", "evasive", "inconsistent", "unanswered"]);
 
         if (!r.overall || typeof r.overall !== "object") {
@@ -248,9 +245,6 @@ Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a p
         }
         if (!VALID_DEFENSE.has(r.overall.defense_quality)) {
             throw new Error(`InterviewEvaluator: invalid defense_quality "${r.overall.defense_quality}"`);
-        }
-        if (!VALID_AUTHORSHIP.has(r.overall.authorship_confidence)) {
-            throw new Error(`InterviewEvaluator: invalid authorship_confidence "${r.overall.authorship_confidence}"`);
         }
         if (typeof r.overall.summary !== "string" || !r.overall.summary.trim()) {
             throw new Error("InterviewEvaluator: missing overall.summary");
@@ -290,10 +284,9 @@ const REPORT_SCHEMA = {
         overall: {
             type: "object",
             additionalProperties: false,
-            required: ["defense_quality", "authorship_confidence", "summary"],
+            required: ["defense_quality", "summary"],
             properties: {
                 defense_quality: { type: "string", enum: ["strong", "adequate", "weak", "poor"] },
-                authorship_confidence: { type: "string", enum: ["high", "medium", "low"] },
                 summary: { type: "string" },
             },
         },

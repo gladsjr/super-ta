@@ -928,13 +928,26 @@ details.penalty-inline > .penalty-inline-body { margin-top: var(--sp-2); }
 :root[data-theme="dark"] .create-panel,
 :root[data-theme="dark"] .drawer,
 :root[data-theme="dark"] .help-pop,
+/* cards de avaliação/devolutiva (conversation.html, oral-conversation.html), o
+   cartão de cada turno da transcrição (conversation.html, renderizado direto no
+   <main>, fora de card) e o modal de guarda de alterações
+   (professor/oral-professor) — fundo creme, texto navy */
+:root[data-theme="dark"] .evaluation-card,
+:root[data-theme="dark"] .turn,
+:root[data-theme="dark"] .guard-box,
 /* ilhas da página do cenário (scenario-student.html) */
 :root[data-theme="dark"] .transcript,
 :root[data-theme="dark"] .rules-panel,
 :root[data-theme="dark"] .task-note,
 :root[data-theme="dark"] .final-panel,
 :root[data-theme="dark"] .rn-tab,
-:root[data-theme="dark"] .it-timer {
+:root[data-theme="dark"] .it-timer,
+/* controles de formulário: têm fundo creme (--bg-raised) nos DOIS temas, então
+   o texto tem de ser navy sempre — reancoram mesmo quando ficam soltos sobre o
+   canvas (ex.: filtros "Mostrar/Ordenar" do admin, fora de card). */
+:root[data-theme="dark"] .input,
+:root[data-theme="dark"] .textarea,
+:root[data-theme="dark"] .select {
   --ink-900: #181f39; --ink-700: #2c3e55; --ink-600: #3f5570; --ink-500: #5a6b80;
   --ink-400: #7a8a9c; --ink-300: #a3aebc; --ink-200: #ced6de; --ink-100: #e4e9ee; --ink-50: #f3f5f8;
   --teal-700: #2a7382;

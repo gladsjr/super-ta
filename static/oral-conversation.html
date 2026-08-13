@@ -425,16 +425,12 @@
       </div>`;
     }).join('');
     const finalVal = grades && grades.final != null ? grades.final : '—';
-    const pen = grades && grades.penalty;
-    const penHtml = (pen && Number(pen.multiplier) < 1)
-      ? `<div class="hint" style="margin-top:6px; color:var(--accent-700, #92400e)">Penalidade por alertas: nota base ${pen.base} × ${pen.multiplier}${pen.justification ? ' — ' + esc(pen.justification) : ''}</div>`
-      : '';
     const seedHint = seeded ? '<p class="hint" style="margin-top: var(--sp-2)">Lançamento manual: preencha as notas e salve (a final é a média ponderada das preenchidas).</p>' : '';
     el.innerHTML = rows + `
       <div class="row" style="border-top:2px solid var(--ink-300); padding-top: var(--sp-2); margin-top: var(--sp-2); align-items:baseline">
         <strong style="flex:1">Nota final (média ponderada)</strong>
         <strong id="grade-final-oral" style="font-size: var(--fs-lg)">${finalVal}</strong>
-      </div>${penHtml}${seedHint}`;
+      </div>${seedHint}`;
     el.querySelectorAll('.g-score').forEach(inp => inp.addEventListener('input', recomputeFinalOral));
   }
   function recomputeFinalOral() {

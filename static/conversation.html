@@ -156,6 +156,20 @@
   .skipped-reason { color: var(--ink-500); margin-top: var(--sp-1); font-style: italic; }
   .skipped-meta { color: var(--ink-400); font-size: var(--fs-xs); margin-top: var(--sp-1); }
 
+  /* Tema escuro: os <details> auxiliares (apresentação, gravações fora dos
+     turnos, document map, perguntas puladas) são ilhas cremes renderizadas
+     direto no <main>, fora de card. Como os cards, reancoram a rampa ESCURA
+     para o texto (summary em --ink-700 etc.) ficar navy sobre o creme, e não
+     claro-sobre-claro. Mesmos valores da lista de ilhas em css/app.css. */
+  :root[data-theme="dark"] details.intro,
+  :root[data-theme="dark"] details.student-audio,
+  :root[data-theme="dark"] details.doc-map,
+  :root[data-theme="dark"] details.skipped {
+    --ink-900: #181f39; --ink-700: #2c3e55; --ink-600: #3f5570; --ink-500: #5a6b80;
+    --ink-400: #7a8a9c; --ink-300: #a3aebc; --ink-200: #ced6de; --ink-100: #e4e9ee; --ink-50: #f3f5f8;
+    color: var(--ink-900);
+  }
+
   .pending-section { margin-top: var(--sp-6); }
   .pending-section-title { font-size: var(--fs-md); font-weight: 600; color: var(--ink-700); margin: 0 0 var(--sp-1); }
   .pending-section-note { color: var(--ink-500); font-size: var(--fs-sm); font-style: italic; margin-bottom: var(--sp-3); }

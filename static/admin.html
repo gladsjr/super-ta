@@ -10,10 +10,14 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
 <style>
   .login-wrap { max-width: 380px; margin: var(--sp-10) auto 0; }
-  .admin-tabs { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin: var(--sp-4) 0 var(--sp-5); position: sticky; top: 0; z-index: 5; background: var(--paper-50, var(--c-bg, #faf8f2)); padding: var(--sp-2) 0; }
-  .admin-tab { border: 1px solid var(--ink-300, #c4ccd6); background: transparent; border-radius: 999px; padding: 6px 16px; cursor: pointer; font: inherit; color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
-  .admin-tab:hover { background: var(--c-bg-2, #eef1f5); }
-  .admin-tab.active { background: var(--ink-900, #1c3557); color: #fff; border-color: var(--ink-900, #1c3557); }
+  .admin-tabs { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin: var(--sp-4) 0 var(--sp-5); position: sticky; top: 0; z-index: 5; background: var(--bg-muted); padding: var(--sp-2) 0; }
+  /* No tema escuro a barra fica sobre o canvas navy (fora das ilhas claras): o
+     fundo precisa acompanhar a página, não o creme de --bg-muted, senão o texto
+     claro das abas fica ilegível sobre creme. */
+  :root[data-theme="dark"] .admin-tabs { background: #181f39; }
+  .admin-tab { border: 1px solid var(--ink-300); background: transparent; border-radius: 999px; padding: 6px 16px; cursor: pointer; font: inherit; color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  .admin-tab:hover { background: var(--ink-50); }
+  .admin-tab.active { background: var(--accent-500); color: #fff; border-color: var(--accent-500); }
   .admin-sec.hidden-sec { display: none; }
   .work-card { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4) var(--sp-5); align-items: start; }
   .work-card h3 { margin: 0 0 var(--sp-2) 0; }

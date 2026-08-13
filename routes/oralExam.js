@@ -28,7 +28,6 @@ import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
 import { mapPool } from "../lib/concurrency.js";
 import { weightedFinal } from "../lib/rubric.js";
 import { deriveOralDevolutivaNow } from "../lib/oralFeedbackOps.js";
-import { applyPenaltyToGrades } from "../lib/gradePenalty.js";
 import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
 import log from "../lib/logger.js";
 
@@ -91,15 +90,14 @@ function gradesFromReport(report, questions) {
     }));
     return { criteria, final: weightedFinal(criteria), computed_at: new Date().toISOString() };
 }
-// Após avaliar: preenche a NOTA como default (= rubrica per-questão), sem
-// sobrescrever ajuste já feito pelo professor. A DEVOLUTIVA não é preenchida
-// aqui — passou a ser um passo à parte ("Gerar devolutivas", via LLM), espelhando
-// a entrevista. Aplica o critério de penalidade (se ligado) na nota final.
+// Após avaliar: preenche a NOTA como default (= média ponderada da rubrica), sem
+// sobrescrever ajuste já feito pelo professor. Os alertas de proctoring NÃO mexem
+// na nota — são só indícios para o professor considerar e, se quiser, ajustar a
+// nota à mão (proctoring = revisão humana, nunca acusação automática).
 async function applyEvalDefaults(work, submissionId, detail, report, questions) {
     if (!detail || detail.grade_final == null) {
         const grades = gradesFromReport(report, questions);
         if (grades) {
-            await applyPenaltyToGrades(work, submissionId, grades, "oral");
             await db.setSubmissionGrades(submissionId, grades);
         }
     }

@@ -55,7 +55,7 @@ Per-turn orchestration is **delegated to a single reasoning-model call** (`Super
 - `InterviewEvaluatorAgent` — post-interview internal evaluation (+ delivery section from `lib/deliverySignals.js`); never auto-accuses, never shown to the student.
 - `StudentFeedbackAgent` — sanitized, formative student devolutiva derived from the internal eval (two-layer sanitization: prompt rules + `FORBIDDEN_PATTERNS` sweep); reused for the oral devolutiva.
 - `GradingAgent` — 0–10 per rubric criterion (one call per criterion); final = weighted average in code (`lib/rubric.js`). The grade is its OWN publication (`grade_published_at`), independent of the devolutiva.
-- `GradePenaltyAgent` — opt-in penalty (`works.grade_penalty_json`) applied AFTER the rubric grade: alerts (proctoring/voice/authorship) + professor policy → 0..1 multiplier (`grades_json.penalty`).
+- *(removed 2026-08-13)* Automatic grade penalty (`GradePenaltyAgent`): proctoring is a human-review signal, never an automatic accusation. Video alerts are now only shown to the professor (who adjusts the grade manually) and may color the student devolutiva; the grade is just the weighted rubric average.
 - Oral pipeline: `OralExamExtractorAgent`, `OralRubricBuilderAgent`, `OralExamEvaluatorAgent`, `OralCalibrationAgent` — see `docs/oral-exam.md`.
 
 **Devolutiva flow**: generate preview → professor reviews/edits → publish (`evaluation_published_at`), with independent per-section visibility; the grade is computed and published separately (professor can publish devolutiva first, read the student's comment, then the grade). Students read whatever is published at `GET /s/:submissionToken/evaluation`.
