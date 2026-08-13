@@ -2433,9 +2433,18 @@
       if (proctorStream) return; // já ligado nesta sessão
       proctorStream = camStream || null;
       if (!proctorStream) { // setup não entregou a câmera → tenta abrir; senão, segue sem proctoring
-        try { proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }); }
+        try { proctorStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: true }); }
         catch { if (typeof onConsent === 'function') onConsent(); return; }
       }
+      // Garante faixa de ÁUDIO no vídeo do proctoring — facilita a avaliação do
+      // professor (ver + OUVIR). Se a câmera do setup veio sem áudio, adiciona o
+      // microfone ao stream antes de gravar. Sem microfone → segue só com vídeo.
+      try {
+        if (proctorStream && proctorStream.getAudioTracks().length === 0) {
+          const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mic.getAudioTracks().forEach(t => proctorStream.addTrack(t));
+        }
+      } catch { /* sem microfone → vídeo sem áudio, segue */ }
       // self-view GRANDE acima da troca de mensagens (como na prova oral)
       const stage = document.createElement('div');
       stage.id = 'proctor-stage';
@@ -2464,7 +2473,7 @@
       const pv = document.getElementById('pv-cam'); pv.srcObject = proctorStream;
       if (resume) { const h = document.getElementById('pv-hint'); if (h) h.innerHTML = 'GRAVAR (↗) · CANCELAR (↖) · ENVIAR (↘) · REPETIR (↙)'; }
 
-      // gravação contínua (bitrate baixo — é para revisão humana; vídeo sem áudio)
+      // gravação contínua (bitrate baixo — é para revisão humana; vídeo COM áudio)
       try { proctorRecorder = new MediaRecorder(proctorStream, { videoBitsPerSecond: 400000 }); }
       catch { try { proctorRecorder = new MediaRecorder(proctorStream); } catch { proctorRecorder = null; } }
       if (proctorRecorder) {

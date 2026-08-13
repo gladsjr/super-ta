@@ -747,6 +747,31 @@ function renderProctorAlertsHtml(rep) {
   if (f.framing && f.framing.flag) lines.push(pill('enquadramento fora do padrão'));
   return lines.length ? `<div style="margin:6px 0">${lines.join('')}</div>` : '';
 }
+// Vídeos do MediaRecorder (webm) chegam sem metadado de DURAÇÃO — a barra do
+// player não deixa "pular" para frente até o vídeo tocar até o fim (tedioso).
+// Truque padrão do lado do player (não toca no arquivo): ao carregar, se a duração
+// vier Infinity/indefinida, força um seek para além do fim e volta ao início; o
+// navegador lê o último timecode e estabelece a duração → o seek passa a funcionar.
+function fixSeekableWebm(video) {
+  if (!video) return;
+  let fixing = false;
+  const fix = () => {
+    if (fixing) return;
+    if (video.duration === Infinity || Number.isNaN(video.duration)) {
+      fixing = true;
+      const onUpdate = () => {
+        video.removeEventListener('timeupdate', onUpdate);
+        video.currentTime = 0;
+        fixing = false;
+      };
+      video.addEventListener('timeupdate', onUpdate);
+      video.currentTime = 1e7; // além do fim → o navegador clampeia e descobre a duração
+    }
+  };
+  video.addEventListener('loadedmetadata', fix);
+  if (video.readyState >= 1) fix();
+}
+
 function renderProctoring(p) {
   if (!p || !p.enabled) return;
   let card = document.getElementById('proctoring-card');
@@ -767,6 +792,7 @@ function renderProctoring(p) {
   card.innerHTML = `<h2 class="card-title">Fiscalização por vídeo</h2>
     <div class="row" style="gap:10px;align-items:center;margin-bottom:8px">${btn}<span class="eval-meta" id="proctor-status"></span></div>
     ${body}${player}`;
+  if (hasVideo) fixSeekableWebm(card.querySelector('video'));
   const run = document.getElementById('proctor-run');
   if (run) run.onclick = async () => {
     run.disabled = true;
