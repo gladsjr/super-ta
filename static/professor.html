@@ -531,17 +531,40 @@ async function load() {
 
 let lastSubmissions = [];
 
-// Tabela de alunos (aba Avaliações): aluno → status da avaliação/devolutiva, com
-// link "Avaliação" para a tela individual (revisar/editar/publicar a devolutiva).
-// Só alunos com entrevista (status != pending). A entrevista não tem NOTA.
-// Alerta de autoria na lista: derivado de evaluation_json.overall.authorship_confidence.
-// low → alerta (vermelho); medium → atenção (amarelo); high/sem avaliação → ok/—.
-function authorshipAlertBadge(s) {
-  if (!s.has_evaluation) return '<span class="muted">—</span>';
-  const c = s.authorship_confidence;
-  if (c === 'low') return '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3" title="Baixa confiança de autoria própria — revise a entrevista">autoria</span>';
-  if (c === 'medium') return '<span class="pill" style="background:#fff6e0;border:1px solid #ecc874" title="Confiança de autoria intermediária">atenção</span>';
-  return '<span class="hint">ok</span>';
+// Tabela de alunos (aba Avaliações): aluno → status da avaliação, do vídeo e da
+// devolutiva, com link "Avaliação" para a tela individual. Sem NOTA (a entrevista
+// não tem nota). Durante o lote "Avaliar entrevistas", as colunas Avaliação e Vídeo
+// mostram uma AMPULHETA (spinner) enquanto o item ainda não foi processado.
+
+// Alertas do vídeo (proctoring) — mesma lógica conservadora do backend (lib/proctor).
+function videoAlertsList(p) {
+  if (!p || !p.flags) return [];
+  const f = p.flags, a = [];
+  if (f.absent && f.absent.pct >= 20) a.push('ausência');
+  if (f.multiple_people && f.multiple_people.pct >= 20) a.push('+1 pessoa');
+  if (f.phone && (f.phone.pct >= 5 || f.phone.count >= 10)) a.push('celular');
+  if (f.hands && f.hands.flag) a.push('mãos fora');
+  return a;
+}
+function avalCell(s) {
+  if (s.has_student_version) return '<span class="badge badge-completed">avaliada</span>';
+  const elegivel = s.status === 'completed' || s.status === 'gave_up' || s.status === 'in_progress';
+  if (batchRunning && elegivel) return '<span class="cell-spin" title="Avaliando…"></span>';
+  if (s.status === 'completed' || s.status === 'gave_up') return '<span class="badge badge-pending">a avaliar</span>';
+  return '<span class="muted">—</span>';
+}
+function videoCell(s) {
+  const hasVideo = (Number(s.oral_video_parts_count) > 0) || s.has_oral_video;
+  if (!hasVideo) return '<span class="muted" title="Nenhum vídeo gravado">sem vídeo</span>';
+  if (s.has_oral_proctor) {
+    let p = s.oral_proctor_json;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch { p = null; } }
+    const al = videoAlertsList(p);
+    if (al.length) return al.map(x => `<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">${escapeHtml(x)}</span>`).join(' ');
+    return '<span class="hint">ok</span>';
+  }
+  if (batchRunning) return '<span class="cell-spin" title="Analisando o vídeo…"></span>';
+  return '<span class="muted">—</span>';
 }
 function renderGradesTable() {
   const el = document.getElementById('grades-table');
@@ -555,21 +578,17 @@ function renderGradesTable() {
     const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token) + '?view=avaliacao';
     const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
     const statusPill = `<span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>`;
-    const avalPill = s.has_student_version ? '<span class="badge badge-completed">avaliada</span>'
-      : (s.status === 'completed' || s.status === 'gave_up') ? '<span class="badge badge-pending">a avaliar</span>'
-      : '<span class="muted">—</span>';
-    const alerta = authorshipAlertBadge(s);
     const pub = s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva visível ao aluno">devolutiva</span>' : '<span class="muted">—</span>';
     return `<tr>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td>${statusPill}</td>
-      <td>${avalPill}</td>
-      <td>${alerta}</td>
+      <td>${avalCell(s)}</td>
+      <td>${videoCell(s)}</td>
       <td>${pub}</td>
       <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação e a devolutiva — revisar, editar e publicar">Avaliação ▸</a></td>
     </tr>`;
   }).join('');
-  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th>Alertas</th><th>Devolutiva</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
+  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th>Vídeo</th><th>Devolutiva</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderSubmissionsTable() {
@@ -1237,6 +1256,21 @@ document.getElementById('download-csv').onclick = () => {
 // atualizar a coluna "Avaliação".
 let evalPollTimer = null;
 let evalWasRunning = false;
+let batchRunning = false;   // lote de avaliação em andamento → ampulhetas nas tabelas
+
+// Refresh LEVE das tabelas durante o lote (sem o load() completo): re-busca as
+// submissões e re-renderiza — os alunos flipam de ampulheta → resultado à medida
+// que o lote avança (é serial, ~1 min por aluno).
+async function refreshEvalTables() {
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/info`);
+    if (!r.ok) return;
+    const j = await r.json();
+    if (Array.isArray(j.submissions)) lastSubmissions = j.submissions;
+    renderSubmissionsTable();
+    renderGradesTable();
+  } catch { /* transitório: o próximo poll resolve */ }
+}
 
 function batchLine(batch, verbing, doneNoun) {
   if (!batch) return '';
@@ -1271,14 +1305,16 @@ async function pollBatchStatus() {
     const j = await r.json();
     renderBatchStatus(j);
     const anyRunning = j.batch?.running || j.publish?.running || j.unpublish?.running;
+    batchRunning = anyRunning;
     if (anyRunning) {
       evalWasRunning = true;
       setEvalButtonsDisabled(true);
+      await refreshEvalTables();   // ampulhetas nos pendentes + flip progressivo dos prontos
       evalPollTimer = setTimeout(pollBatchStatus, 5000);
     } else {
       evalPollTimer = null;
       setEvalButtonsDisabled(false);
-      if (evalWasRunning) { evalWasRunning = false; load(); } // atualiza a coluna "Avaliação"
+      if (evalWasRunning) { evalWasRunning = false; load(); } // estado final das colunas
     }
   } catch { /* rede instável: a próxima rodada de polling resolve */ }
 }
@@ -1316,7 +1352,7 @@ async function startBatch(path, body, confirmMsg) {
 // individual (a tela por-aluno só revisa/edita/publica o resultado).
 document.getElementById('eval-new-btn').onclick = () =>
   startBatch('evaluations', { force: false },
-    'Avaliar as entrevistas com conversa ainda não avaliadas?\n\nÉ um processo EM LOTE: para cada aluno, o sistema analisa o vídeo, gera a avaliação interna e o rascunho da devolutiva (que já considera o vídeo). Cada item leva por volta de um minuto e consome orçamento do trabalho. Você pode sair desta página e voltar.');
+    'Avaliar as entrevistas com conversa ainda não avaliadas?\n\nÉ um processo EM LOTE: para cada aluno, o sistema analisa o vídeo, gera a avaliação interna e o rascunho da devolutiva (que já considera o vídeo). Cada item leva por volta de um minuto. Você pode sair desta página e voltar.');
 document.getElementById('publish-all-btn').onclick = () =>
   startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas já geradas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Não custa orçamento.');
 document.getElementById('unpublish-all-btn').onclick = () =>
