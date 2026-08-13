@@ -39,6 +39,7 @@ import {
 } from "../lib/evaluationOps.js";
 import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
 import { analyzeOralVideoParts } from "../lib/proctor.js";
+import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import {
     PRINCIPAL_REASONING_MODEL,
     TTS_MODEL,
@@ -876,19 +877,41 @@ function publicBatchState(state) {
 // A rota de avaliação em lote usa o runner genérico `startBatchRoute` (definido
 // adiante). A avaliação custa LLM (checkBudget=true) e mapeia cache-hit ->
 // "pulada", igual aos lotes de devolutiva.
+// "Avaliar entrevistas" (lote) = PIPELINE COMPLETO por aluno, num clique só:
+//   (1) análise do vídeo (proctoring) PRIMEIRO — alimenta a devolutiva;
+//   (2) avaliação interna (relatório do entrevistador);
+//   (3) devolutiva automática (resumo do relatório + proctoring, sanitizada).
+// A ordem (vídeo → avaliação → devolutiva) garante que a devolutiva considere o
+// vídeo. Sem botão separado de "analisar vídeo" nem de "gerar devolutiva".
+// Candidatas: têm conversa e ainda não têm devolutiva (o produto final). A
+// elegibilidade fina é decidida item a item — não-prontas contam como "puladas".
 router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), startBatchRoute({
     map: batchEvalRuns,
     scope: "EVALUATION",
-    // Candidatas: têm conversa (status derivado != pending). A elegibilidade
-    // fina (tem resposta? insumos presentes?) é decidida item a item no runner
-    // — itens não-prontos contam como "puladas", não como erro.
-    queueFilter: (s, force) => s.status !== "pending" && (force || !s.has_evaluation),
+    queueFilter: (s, force) => s.status !== "pending" && (force || !s.has_student_version),
     emptyError: force => force
         ? "nenhuma entrevista com conversa para avaliar"
-        : "nenhuma entrevista nova para avaliar — todas as elegíveis já têm avaliação",
+        : "nenhuma entrevista nova para avaliar — todas as elegíveis já foram avaliadas",
     itemFn: async (work, found, force) => {
-        const r = await evaluateSubmissionNow(work, found, { force });
-        return { skipped: r.cached };
+        // (1) Vídeo: best-effort — falha na análise NÃO derruba a avaliação.
+        if (work.proctoring_enabled === true || work.interview_variant === "realtime") {
+            try {
+                const parts = await db.getOralVideoParts(found.id);
+                const detail = await db.getOralSubmissionDetail(found.id);
+                if (parts.length && (force || !(detail && detail.oral_proctor_json))) {
+                    const report = await analyzeOralVideoParts(parts);
+                    await db.setOralProctor(found.id, report);
+                }
+            } catch (e) {
+                log.error("EVALUATION", `proctor (lote) sub=${found.submission_token} falhou (ignorado): ${e.message}`);
+            }
+        }
+        // (2) Avaliação interna (idempotente; sem resposta → notReady → pulada).
+        await evaluateSubmissionNow(work, found, { force });
+        // (3) Devolutiva automática, com os defaults de visibilidade do trabalho.
+        await db.setSubmissionSections(found.id, workSectionDefaults(work));
+        const dv = await deriveStudentVersionNow(work, found, { force });
+        return { skipped: !dv.generated };
     },
     checkBudget: true,
 }));
@@ -902,6 +925,7 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
 //   por orçamento.
 const batchDeriveRuns = new Map();       // work.id -> estado (gerar prévias)
 const batchPublishRuns = new Map();      // work.id -> estado (publicar devolutivas)
+const batchUnpublishRuns = new Map();    // work.id -> estado (despublicar devolutivas)
 const batchGradeRuns = new Map();        // work.id -> estado (calcular notas)
 const batchGradePublishRuns = new Map();   // work.id -> estado (publicar notas)
 const batchGradeUnpublishRuns = new Map(); // work.id -> estado (despublicar notas)
@@ -910,6 +934,7 @@ function anyBatchRunning(workId) {
     return batchEvalRuns.get(workId)?.running
         || batchDeriveRuns.get(workId)?.running
         || batchPublishRuns.get(workId)?.running
+        || batchUnpublishRuns.get(workId)?.running
         || batchGradeRuns.get(workId)?.running
         || batchGradePublishRuns.get(workId)?.running
         || batchGradeUnpublishRuns.get(workId)?.running;
@@ -1025,6 +1050,20 @@ router.post("/w/:workToken/evaluations/publish", requireWorkToken, express.json(
     checkBudget: false,
 }));
 
+// Lote de DESPUBLICAR devolutivas: submissões com devolutiva publicada. Não custa
+// LLM (só retira a visibilidade; a devolutiva fica guardada para republicar).
+router.post("/w/:workToken/evaluations/unpublish", requireWorkToken, express.json({ limit: "8kb" }), startBatchRoute({
+    map: batchUnpublishRuns,
+    scope: "PUBLISH",
+    queueFilter: (s) => !!s.evaluation_published_at,
+    emptyError: () => "nenhuma devolutiva publicada para despublicar",
+    itemFn: async (work, found) => {
+        await db.setEvaluationPublished(found.id, false);
+        return { skipped: false };
+    },
+    checkBudget: false,
+}));
+
 // Lote de NOTAS: submissões COM avaliação interna; sem force, pula as que já
 // têm nota. Custa LLM (uma chamada por critério × submissão).
 router.post("/w/:workToken/evaluations/grades", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), startBatchRoute({
@@ -1077,6 +1116,7 @@ router.get("/w/:workToken/evaluations/status", requireWorkToken, (req, res) => {
         batch: publicBatchState(batchEvalRuns.get(req.work.id)),
         derive: publicBatchState(batchDeriveRuns.get(req.work.id)),
         publish: publicBatchState(batchPublishRuns.get(req.work.id)),
+        unpublish: publicBatchState(batchUnpublishRuns.get(req.work.id)),
         grade: publicBatchState(batchGradeRuns.get(req.work.id)),
         grade_publish: publicBatchState(batchGradePublishRuns.get(req.work.id)),
         grade_unpublish: publicBatchState(batchGradeUnpublishRuns.get(req.work.id)),
@@ -1249,6 +1289,9 @@ router.get("/w/:workToken/enunciado", requireWorkToken, async (req, res) => {
 
 router.post("/w/:workToken/enunciado", requireWorkToken, enunciadoUpload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file required" });
+    if (exceedsPageLimit(req.file.buffer)) {
+        return res.status(400).json({ error: `o enunciado tem mais de ${MAX_PDF_PAGES} páginas — envie um PDF menor (limite ${MAX_PDF_PAGES})` });
+    }
     try {
         await db.setEnunciadoBlob(req.work.id, req.file.buffer, req.file.originalname);
         await db.clearCoherenceCache(req.work.id);

@@ -16,6 +16,7 @@
 import express from "express";
 import multer from "multer";
 import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
+import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import * as db from "../lib/db.js";
 import { openai, clientForWork } from "../lib/openaiClient.js";
 import { transcribeAudio, synthesizeSpeech, AudioCache } from "../lib/audio.js";
@@ -633,6 +634,9 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
     const sess = SESSIONS.get(token);
     if (!sess) return res.status(400).json({ error: "call /start first" });
     if (!req.file) return res.status(400).json({ error: "file required" });
+    if (exceedsPageLimit(req.file.buffer)) {
+        return res.status(400).json({ error: `o PDF tem mais de ${MAX_PDF_PAGES} páginas — envie um arquivo menor (limite ${MAX_PDF_PAGES})` });
+    }
 
     // Bloqueia re-upload quando já existe entrevista em andamento. O contrato é:
     // para reiniciar, o professor gera um novo envio. Fonte de verdade é o BD
