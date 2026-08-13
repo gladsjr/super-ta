@@ -111,7 +111,7 @@
     <nav class="tabs" role="tablist" aria-label="Seções do trabalho">
       <button class="tab-btn is-active" type="button" id="tab-btn-cenario" data-tab="cenario" role="tab" aria-selected="true">Configuração</button>
       <button class="tab-btn" type="button" id="tab-btn-alunos" data-tab="alunos" role="tab" aria-selected="false">Alunos &amp; progresso</button>
-      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliação &amp; notas</button>
+      <button class="tab-btn" type="button" id="tab-btn-avaliacao" data-tab="avaliacao" role="tab" aria-selected="false">Avaliações</button>
     </nav>
 
     <div class="tab-panel" id="tab-cenario" role="tabpanel" aria-labelledby="tab-btn-cenario">
@@ -328,61 +328,22 @@
 
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
     <details class="card card-collapsible" open>
-      <summary><span class="card-title" data-help="Gera o relatório interno de avaliação de cada entrevista (só você vê). É o insumo do cálculo das notas pela rubrica, no card abaixo.">Avaliação das entrevistas</span></summary>
+      <summary><span class="card-title" data-help="Um clique só, em lote: para cada entrevista com conversa ainda não avaliada, analisa o vídeo, gera a avaliação interna (só você vê) e o rascunho da devolutiva ao aluno (que já considera o vídeo). Depois é só revisar/editar na tela de cada aluno e publicar.">Avaliações</span></summary>
       <div class="card-collapsible-body">
-      <p class="card-sub">Gera o relatório interno de avaliação das entrevistas com conversa — é o insumo do <strong>cálculo das notas</strong> (card abaixo).</p>
+      <p class="card-sub"><strong>Avaliar entrevistas</strong> roda o processo completo em lote (vídeo → avaliação → rascunho da devolutiva) das entrevistas com conversa ainda não avaliadas. Depois, publique as devolutivas para os alunos.</p>
       <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-top: var(--sp-2)">
-        <button id="eval-new-btn" class="btn btn-primary" type="button" title="Gera o relatório interno das entrevistas com conversa que ainda não foram avaliadas">Avaliar entrevistas</button>
-        <button id="eval-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regenera o relatório interno de TODAS as entrevistas com conversa, inclusive as já avaliadas">Reavaliar todas</button>
+        <button id="eval-new-btn" class="btn btn-primary" type="button" title="Processo em lote: analisa o vídeo, avalia e gera o rascunho da devolutiva de cada entrevista ainda não avaliada">Avaliar entrevistas</button>
+        <button id="publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas">Publicar devolutivas</button>
+        <button id="unpublish-all-btn" class="btn btn-ghost btn-sm" type="button" title="Retira das páginas dos alunos todas as devolutivas publicadas (ficam guardadas)">Despublicar devolutivas</button>
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
       </div>
     </details>
 
     <details class="card card-collapsible" open>
-      <summary><span class="card-title" data-help="Cada critério tem um nome, um peso e um prompt; o prompt é aplicado sobre a avaliação interna completa para calcular a nota daquele critério (0 a 10). A nota final é a média ponderada pelos pesos. Calcule (em lote ou aluno a aluno) e publique quando quiser.">Rubrica e notas</span></summary>
-      <div class="card-collapsible-body">
-      <p class="card-sub">Defina os critérios que compõem a nota. Calcule e publique as notas quando quiser.</p>
-      <!-- Ações no topo: não obriga a rolar a lista de critérios só para salvar/calcular. -->
-      <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
-        <button id="save-rubric-btn" class="btn btn-primary" type="button">Salvar rubrica</button>
-        <button id="grade-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das entrevistas já avaliadas que ainda não têm nota — usa a rubrica salva">Calcular notas</button>
-        <button id="grade-publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as notas já calculadas que ainda não foram publicadas">Publicar notas</button>
-        <span class="spacer"></span>
-        <button id="grade-unpublish-all-btn" class="btn btn-ghost btn-sm" type="button" title="Retira da página de cada aluno todas as notas publicadas (as notas ficam guardadas)">Despublicar notas</button>
-        <button id="grade-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Recalcula as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota">Recalcular todas</button>
-      </div>
-      <div id="rubric-msg" class="hint" style="margin-bottom: var(--sp-1)"></div>
-      <div id="eval-batch-status-notas" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
-      <!-- Critério de penalidade (opt-in), dobrado no início do card. -->
-      <details class="penalty-inline">
-        <summary data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de autoria da avaliação e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de forte suspeita).">Critério de penalidade (alertas de autoria)</summary>
-        <div class="penalty-inline-body">
-          <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled"/> Ativar penalidade por alertas de autoria</label>
-          <p class="card-sub" style="margin-top:4px">Aplicado <em>após</em> o cálculo da nota; reflete na próxima vez que você calcular as notas.</p>
-          <label class="label" for="penalty-prompt">Política (como transformar alertas em penalidade)</label>
-          <textarea id="penalty-prompt" class="textarea" rows="3"></textarea>
-          <div class="row" style="margin-top: var(--sp-2)">
-            <button id="save-penalty-btn" class="btn btn-sm" type="button">Salvar critério</button>
-            <span id="penalty-msg" class="hint"></span>
-          </div>
-        </div>
-      </details>
-      <div id="rubric-items" style="margin-top: var(--sp-3)"></div>
-      <div class="row" style="margin-top: var(--sp-2)">
-        <button id="rubric-add-btn" class="btn btn-ghost btn-sm" type="button">+ adicionar critério</button>
-      </div>
-      </div>
-    </details>
-
-    <details class="card card-collapsible" open>
       <summary><span class="card-title">Alunos</span></summary>
       <div class="card-collapsible-body">
-      <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a conversa, a avaliação e atribuir a nota.</p>
-      <div class="row" style="margin-bottom: var(--sp-3)">
-        <button id="open-cockpit" class="btn" type="button" title="Abre as avaliações com navegação lado a lado entre os alunos (cada turno com sua avaliação)">Abrir avaliações lado a lado ↗</button>
-        <span id="open-cockpit-msg" class="hint"></span>
-      </div>
+      <p class="card-sub">Clique em <strong>Avaliação</strong> para ver a conversa, a avaliação e a devolutiva — revisar, editar e publicar por aluno.</p>
       <div id="grades-table"></div>
       </div>
     </details>
@@ -531,10 +492,6 @@ async function load() {
     console.error('applyIdentityStateToUI falhou (ignorado, não bloqueia a lista):', e);
   }
 
-  // Configurações de devolutiva do trabalho
-  renderRubricEditor(j.work.grading_rubric || []);
-  fillPenaltySettings(j.work.grade_penalty || null);
-
   const metaEl = document.getElementById('meta');
   const pending = j.submissions.filter(s => s.status === 'pending').length;
   const inprog = j.submissions.filter(s => s.status === 'in_progress').length;
@@ -574,8 +531,9 @@ async function load() {
 
 let lastSubmissions = [];
 
-// Tabela de notas (aba Notas): aluno → nota final + status de publicação, com
-// link para o cockpit. Só alunos com entrevista (status != pending).
+// Tabela de alunos (aba Avaliações): aluno → status da avaliação/devolutiva, com
+// link "Avaliação" para a tela individual (revisar/editar/publicar a devolutiva).
+// Só alunos com entrevista (status != pending). A entrevista não tem NOTA.
 // Alerta de autoria na lista: derivado de evaluation_json.overall.authorship_confidence.
 // low → alerta (vermelho); medium → atenção (amarelo); high/sem avaliação → ok/—.
 function authorshipAlertBadge(s) {
@@ -597,21 +555,21 @@ function renderGradesTable() {
     const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token) + '?view=avaliacao';
     const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
     const statusPill = `<span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>`;
-    const avalPill = s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>' : '<span class="muted">—</span>';
-    const nota = (s.grade_final != null) ? `<strong>${escapeHtml(String(s.grade_final))}</strong>` : '<span class="muted">—</span>';
+    const avalPill = s.has_student_version ? '<span class="badge badge-completed">avaliada</span>'
+      : (s.status === 'completed' || s.status === 'gave_up') ? '<span class="badge badge-pending">a avaliar</span>'
+      : '<span class="muted">—</span>';
     const alerta = authorshipAlertBadge(s);
-    const pub = (s.grade_published_at ? '<span class="badge badge-accent" title="Nota visível ao aluno">nota</span>' : '') || '<span class="muted">—</span>';
+    const pub = s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva visível ao aluno">devolutiva</span>' : '<span class="muted">—</span>';
     return `<tr>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td>${statusPill}</td>
       <td>${avalPill}</td>
-      <td style="text-align:right">${nota}</td>
       <td>${alerta}</td>
       <td>${pub}</td>
-      <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação e publicar a nota">gerenciar ▸</a></td>
+      <td><a href="${convUrl}" target="_blank" title="Ver a conversa, a avaliação e a devolutiva — revisar, editar e publicar">Avaliação ▸</a></td>
     </tr>`;
   }).join('');
-  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th>Ações</th></tr></thead><tbody>${body}</tbody></table>`;
+  el.innerHTML = `<table class="table"><thead><tr><th>Aluno</th><th>Entrevista</th><th>Avaliação</th><th>Alertas</th><th>Devolutiva</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderSubmissionsTable() {
@@ -1273,14 +1231,6 @@ document.getElementById('download-csv').onclick = () => {
   window.location.href = `/w/${encodeURIComponent(workToken)}/submissions.csv`;
 };
 
-document.getElementById('open-cockpit').onclick = () => {
-  const msg = document.getElementById('open-cockpit-msg');
-  msg.textContent = '';
-  const first = (lastSubmissions || []).find(s => s.status !== 'pending');
-  if (!first) { msg.textContent = 'Nenhuma entrevista com conversa para avaliar ainda.'; return; }
-  window.open(`/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(first.submission_token)}?view=avaliacao`, '_blank');
-};
-
 // ---- Avaliação em lote das entrevistas ----
 // Dispara o lote no servidor (roda em background, uma entrevista por vez) e
 // acompanha o progresso por polling. Ao terminar, recarrega a lista para
@@ -1303,24 +1253,15 @@ function batchLine(batch, verbing, doneNoun) {
 }
 
 function renderBatchStatus(j) {
-  // Avaliação/devolutiva → status na aba Avaliação; notas → status na aba Notas.
-  const fill = (id, lines) => {
-    const el = document.getElementById(id);
-    const ls = lines.filter(Boolean);
-    if (ls.length === 0) { el.classList.add('hidden'); return; }
-    el.classList.remove('hidden');
-    el.innerHTML = ls.join('<br>');
-  };
-  fill('eval-batch-status', [
-    batchLine(j.batch, 'Avaliando entrevistas', 'avaliada'),
-    batchLine(j.derive, 'Gerando devolutivas (prévias)', 'gerada'),
+  const el = document.getElementById('eval-batch-status');
+  const lines = [
+    batchLine(j.batch, 'Avaliando entrevistas (vídeo + avaliação + devolutiva)', 'avaliada'),
     batchLine(j.publish, 'Publicando devolutivas', 'publicada'),
-  ]);
-  fill('eval-batch-status-notas', [
-    batchLine(j.grade, 'Calculando notas', 'calculada'),
-    batchLine(j.grade_publish, 'Publicando notas', 'publicada'),
-    batchLine(j.grade_unpublish, 'Despublicando notas', 'despublicada'),
-  ]);
+    batchLine(j.unpublish, 'Despublicando devolutivas', 'despublicada'),
+  ].filter(Boolean);
+  if (lines.length === 0) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.innerHTML = lines.join('<br>');
 }
 
 async function pollBatchStatus() {
@@ -1329,7 +1270,7 @@ async function pollBatchStatus() {
     if (!r.ok) return;
     const j = await r.json();
     renderBatchStatus(j);
-    const anyRunning = j.batch?.running || j.derive?.running || j.publish?.running || j.grade?.running || j.grade_publish?.running || j.grade_unpublish?.running;
+    const anyRunning = j.batch?.running || j.publish?.running || j.unpublish?.running;
     if (anyRunning) {
       evalWasRunning = true;
       setEvalButtonsDisabled(true);
@@ -1343,12 +1284,9 @@ async function pollBatchStatus() {
 }
 
 function setEvalButtonsDisabled(disabled) {
-  document.getElementById('eval-new-btn').disabled = disabled;
-  document.getElementById('eval-all-btn').disabled = disabled;
-  document.getElementById('grade-all-btn').disabled = disabled;
-  document.getElementById('grade-publish-all-btn').disabled = disabled;
-  document.getElementById('grade-unpublish-all-btn').disabled = disabled;
-  document.getElementById('grade-all-force-btn').disabled = disabled;
+  ['eval-new-btn','publish-all-btn','unpublish-all-btn'].forEach(id => {
+    const b = document.getElementById(id); if (b) b.disabled = disabled;
+  });
 }
 
 async function startBatch(path, body, confirmMsg) {
@@ -1373,100 +1311,16 @@ async function startBatch(path, body, confirmMsg) {
   }
 }
 
-// ---- Rubrica de notas ----
-function rubricRowHtml(c) {
-  c = c || {};
-  return `<div class="rubric-item" data-id="${escapeHtml(c.id || '')}" style="border:1px solid var(--ink-200); border-radius: 8px; padding: var(--sp-3); margin-bottom: var(--sp-2)">
-    <div class="row" style="gap: var(--sp-2); align-items:flex-end; flex-wrap:wrap">
-      <div style="flex:1; min-width:160px">
-        <label class="label">Nome do critério</label>
-        <input class="input rubric-name" value="${escapeHtml(c.name || '')}" placeholder="Ex.: Domínio do conteúdo"/>
-      </div>
-      <div style="width:88px">
-        <label class="label">Peso</label>
-        <input class="input rubric-weight" type="number" min="0.1" step="0.1" value="${c.weight != null ? escapeHtml(String(c.weight)) : '1'}"/>
-      </div>
-      <button class="btn btn-ghost btn-sm rubric-remove" type="button" title="Remover este critério">remover</button>
-    </div>
-    <label class="label" style="margin-top: var(--sp-2)">Prompt (aplicado sobre a avaliação interna)</label>
-    <textarea class="textarea rubric-prompt" rows="2" placeholder="Ex.: dê uma nota de 0 a 10 para o domínio demonstrado na conversa…">${escapeHtml(c.prompt || '')}</textarea>
-  </div>`;
-}
-
-function renderRubricEditor(criteria) {
-  const wrap = document.getElementById('rubric-items');
-  wrap.innerHTML = (criteria.length ? criteria : [{}]).map(rubricRowHtml).join('');
-}
-
-function collectRubric() {
-  return Array.from(document.querySelectorAll('#rubric-items .rubric-item')).map(el => ({
-    id: el.dataset.id || undefined,
-    name: el.querySelector('.rubric-name').value.trim(),
-    weight: parseFloat(el.querySelector('.rubric-weight').value),
-    prompt: el.querySelector('.rubric-prompt').value.trim(),
-  }));
-}
-
-document.getElementById('rubric-add-btn').onclick = () => {
-  document.getElementById('rubric-items').insertAdjacentHTML('beforeend', rubricRowHtml({}));
-};
-document.getElementById('rubric-items').addEventListener('click', (e) => {
-  const btn = e.target.closest('.rubric-remove');
-  if (!btn) return;
-  if (document.querySelectorAll('#rubric-items .rubric-item').length <= 1) {
-    alert('A rubrica precisa de ao menos um critério.'); return;
-  }
-  btn.closest('.rubric-item').remove();
-});
-document.getElementById('save-rubric-btn').onclick = async () => {
-  const msg = document.getElementById('rubric-msg');
-  const criteria = collectRubric();
-  if (criteria.some(c => !c.name || !c.prompt || !(c.weight > 0))) {
-    msg.textContent = 'Cada critério precisa de nome, peso > 0 e prompt.'; return;
-  }
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/grading-rubric`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ criteria }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { msg.textContent = 'Falha ao salvar: ' + (j.error || r.status); return; }
-    renderRubricEditor(j.rubric || criteria); // re-render com ids estáveis do servidor
-    msg.textContent = 'Rubrica salva.'; setTimeout(() => { msg.textContent = ''; }, 3000);
-  } catch (err) { msg.textContent = 'Falha ao salvar: ' + err.message; }
-};
-// Critério de penalidade por alertas de autoria (opt-in). Rota genérica /grade-penalty.
-const DEFAULT_PENALTY_PROMPT = 'Aplique penalidade SOMENTE em caso de forte e inequívoca suspeita de autoria não-própria (vários sinais convergentes questionando a autoria). Nesse caso, reduza a nota em até 50% (multiplicador 0,5). Se os sinais forem fracos, pontuais ou ambíguos, NÃO penalize (multiplicador 1,0). Na dúvida, não penalize — os alertas são para revisão humana, não prova.';
-function fillPenaltySettings(gp) {
-  document.getElementById('penalty-enabled').checked = !!(gp && gp.enabled);
-  document.getElementById('penalty-prompt').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
-}
-document.getElementById('save-penalty-btn').onclick = async () => {
-  const msg = document.getElementById('penalty-msg'); msg.textContent = 'Salvando…';
-  const enabled = document.getElementById('penalty-enabled').checked;
-  const prompt = document.getElementById('penalty-prompt').value.trim();
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/grade-penalty`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, prompt }),
-    });
-    const j = await r.json().catch(() => ({}));
-    msg.textContent = r.ok ? (enabled ? 'Critério ligado e salvo.' : 'Critério desligado.') : 'Falha: ' + (j.error || r.status);
-    setTimeout(() => { msg.textContent = ''; }, 3000);
-  } catch (err) { msg.textContent = 'Falha: ' + err.message; }
-};
-document.getElementById('grade-all-btn').onclick = () =>
-  startBatch('evaluations/grades', { force: false }, 'Calcular as notas das entrevistas avaliadas que ainda não têm nota, usando a rubrica salva? Cada critério consome orçamento do trabalho.');
-document.getElementById('grade-all-force-btn').onclick = () =>
-  startBatch('evaluations/grades', { force: true }, 'Recalcular as notas de TODAS as entrevistas avaliadas, inclusive as que já têm nota? Cada critério consome orçamento do trabalho.');
-document.getElementById('grade-publish-all-btn').onclick = () =>
-  startBatch('evaluations/grade-publish', { force: false }, 'Publicar as notas já calculadas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Não recalcula nada nem custa orçamento.');
-document.getElementById('grade-unpublish-all-btn').onclick = () =>
-  startBatch('evaluations/grade-unpublish', { force: false }, 'Despublicar as notas de TODOS os alunos? Elas deixam de aparecer na página de cada aluno (mas ficam guardadas para republicar depois).');
-
+// "Avaliar entrevistas": processo em LOTE (vídeo → avaliação interna → rascunho da
+// devolutiva). Popup avisando que é um lote e consome orçamento. Não há avaliação
+// individual (a tela por-aluno só revisa/edita/publica o resultado).
 document.getElementById('eval-new-btn').onclick = () =>
-  startBatch('evaluations', { force: false }, null);
-document.getElementById('eval-all-btn').onclick = () =>
-  startBatch('evaluations', { force: true }, 'Reavaliar TODAS as entrevistas com conversa, inclusive as já avaliadas? Cada avaliação consome orçamento do trabalho.');
+  startBatch('evaluations', { force: false },
+    'Avaliar as entrevistas com conversa ainda não avaliadas?\n\nÉ um processo EM LOTE: para cada aluno, o sistema analisa o vídeo, gera a avaliação interna e o rascunho da devolutiva (que já considera o vídeo). Cada item leva por volta de um minuto e consome orçamento do trabalho. Você pode sair desta página e voltar.');
+document.getElementById('publish-all-btn').onclick = () =>
+  startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas já geradas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Não custa orçamento.');
+document.getElementById('unpublish-all-btn').onclick = () =>
+  startBatch('evaluations/unpublish', { force: false }, 'Despublicar as devolutivas de TODOS os alunos? Elas deixam de aparecer para os alunos (ficam guardadas para republicar depois).');
 
 // Se já houver um lote em andamento quando a página abre (ex.: professor saiu
 // e voltou), retoma o acompanhamento.

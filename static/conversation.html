@@ -353,18 +353,18 @@
     </div>
 
     <div id="sf-needs-eval" class="eval-empty-note hidden">
-      Para criar a devolutiva, gere antes a <strong>Avaliação do entrevistador</strong> (logo abaixo nesta página) — é dela que a devolutiva é derivada.
+      A devolutiva ainda não foi gerada. Ela sai automaticamente ao rodar <strong>Avaliar entrevistas</strong> na aba <strong>Avaliações</strong> — depois, você revisa e edita aqui.
     </div>
 
     <div id="sf-controls" class="hidden">
       <div class="eval-publish-row">
-        <button class="btn btn-primary btn-sm hidden" id="eval-edit-btn">Escrever devolutiva</button>
+        <button class="btn btn-primary btn-sm hidden" id="eval-edit-btn">Editar devolutiva</button>
         <button class="btn btn-primary btn-sm hidden" id="eval-publish-btn" title="Torna a devolutiva abaixo visível na página do aluno">Publicar para o aluno</button>
         <button class="btn btn-sm hidden" id="eval-unpublish-btn">Despublicar</button>
         <button class="btn btn-ghost btn-sm hidden" id="eval-discard-edit-btn" title="Descarta a edição manual — a versão automática volta a valer">Restaurar automática</button>
       </div>
       <p class="eval-publish-help">
-        Escreva a devolutiva à mão a partir da <strong>Avaliação do entrevistador</strong> (logo abaixo) e clique em <strong>Publicar</strong> — o aluno só a vê depois disso.
+        A devolutiva é gerada automaticamente a partir da <strong>Avaliação do entrevistador</strong> (inclui o vídeo). Revise, edite se quiser e clique em <strong>Publicar</strong> — o aluno só a vê depois disso.
       </p>
 
       <div class="eval-sections hidden" id="eval-sections">
@@ -416,51 +416,17 @@
     </div>
   </section>
 
-  <!-- Notas por rubrica: PUBLICAÇÃO À PARTE da devolutiva (grade_published_at).
-       Vem logo após a devolutiva para dar a perspectiva dos passos. -->
-  <section id="rubric-grades-card" class="evaluation-card hidden">
-    <div class="eval-header">
-      <h2>Notas <span style="font-weight: 400; color: var(--ink-500); font-size: var(--fs-sm);">(rubrica)</span> <span id="grade-publish-status" class="eval-meta"></span></h2>
-      <div>
-        <span class="eval-meta" id="grades-meta"></span>
-        <button class="btn btn-sm" id="grades-btn">Calcular notas</button>
-      </div>
-    </div>
-    <div class="eval-empty-note" id="grades-empty-note">
-      Notas por critério da rubrica, calculadas sobre a avaliação do entrevistador.
-      Defina a rubrica no painel do professor. A nota final é a média ponderada pelos pesos.
-    </div>
-    <div class="notice notice-error eval-error hidden" id="grades-error"></div>
-    <div id="grades-body"></div>
-    <div class="eval-publish-row hidden" id="grade-publish-row" style="margin-top: var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-3);">
-      <button class="btn btn-primary btn-sm hidden" id="grade-publish-btn" title="Torna a nota visível na página do aluno">Publicar nota</button>
-      <button class="btn btn-sm hidden" id="grade-unpublish-btn">Despublicar nota</button>
-      <span class="eval-publish-help" style="margin:0">A nota é uma publicação à parte da devolutiva — pode sair agora ou depois do comentário do aluno.</span>
-    </div>
-    <details class="hidden" id="grades-adhoc" style="margin-top: var(--sp-3); border-top: 1px dashed var(--ink-200); padding-top: var(--sp-2);">
-      <summary>Ajustar a rubrica só para este aluno</summary>
-      <p class="eval-publish-help">Edita pesos e prompts apenas para recalcular ESTE aluno — não muda a rubrica do trabalho.</p>
-      <div id="grades-adhoc-items"></div>
-      <div class="eval-publish-row" style="margin-top: var(--sp-2);">
-        <button class="btn btn-sm" id="grades-adhoc-btn">Recalcular com esta rubrica</button>
-      </div>
-    </details>
-  </section>
-
-  <!-- REFERÊNCIA: a avaliação interna do entrevistador (o aluno nunca vê). -->
+  <!-- REFERÊNCIA: a avaliação interna do entrevistador (o aluno nunca vê). Gerada
+       pelo lote "Avaliar entrevistas" (aba Avaliações) — sem botão individual aqui. -->
   <section id="evaluation" class="evaluation-card hidden">
     <div class="eval-header">
       <h2>Avaliação do entrevistador <span style="font-weight: 400; color: var(--ink-500); font-size: var(--fs-sm);">(interna — o aluno não vê)</span></h2>
-      <div>
-        <span class="eval-meta" id="eval-meta"></span>
-        <button class="btn btn-sm" id="eval-btn">Gerar avaliação</button>
-      </div>
+      <span class="eval-meta" id="eval-meta"></span>
     </div>
     <div class="eval-empty-note" id="eval-empty-note">
       Relatório de como o aluno sustentou o trabalho nesta entrevista, sob a
-      perspectiva do entrevistador. Usa o enunciado, o trabalho enviado e a
-      transcrição completa. A geração leva por volta de um minuto. A devolutiva
-      ao aluno (acima) é derivada deste relatório.
+      perspectiva do entrevistador. É gerado pelo lote <strong>Avaliar entrevistas</strong>
+      (aba Avaliações), junto com o rascunho da devolutiva (acima), que é derivada dele.
     </div>
     <div class="notice notice-error eval-error hidden" id="eval-error"></div>
     <div id="eval-body"></div>
@@ -847,7 +813,6 @@ function renderEvaluation(ev, evaluatedAt) {
 
   document.getElementById('eval-meta').textContent =
     evaluatedAt ? `gerada em ${fmtTime(evaluatedAt)}` : '';
-  document.getElementById('eval-btn').textContent = 'Reavaliar';
   document.getElementById('eval-empty-note').classList.add('hidden');
   const delivery = ev.delivery || null;
   const deliveryHtml = delivery ? `
@@ -902,221 +867,8 @@ async function loadEvaluation() {
     const j = await r.json();
     if (j.evaluation) renderEvaluation(j.evaluation, j.evaluated_at);
     renderFeedbackCard(j);
-    renderGrades(j);
-  } catch { /* leitura do cache é best-effort; o botão continua funcional */ }
+  } catch { /* leitura do cache é best-effort */ }
 }
-
-// ---- Notas por rubrica ----
-// Editor ad-hoc (recalcula SÓ este aluno, sem mudar a rubrica do trabalho).
-function adhocRubricRowHtml(c) {
-  c = c || {};
-  return `<div class="adhoc-item" data-id="${escapeHtml(c.id || '')}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0;">
-    <div class="row" style="gap: var(--sp-2); align-items:center; flex-wrap:wrap">
-      <strong style="flex:1; min-width:140px">${escapeHtml(c.name || '')}</strong>
-      <input class="input adhoc-weight" type="number" min="0.1" step="0.1" value="${escapeHtml(String(c.weight ?? 1))}" style="width:80px" title="peso"/>
-    </div>
-    <textarea class="editor-textarea adhoc-prompt" rows="2">${escapeHtml(c.prompt || '')}</textarea>
-  </div>`;
-}
-function renderAdhocRubric(rubric) {
-  const det = document.getElementById('grades-adhoc');
-  if (det.open) return; // não sobrescreve enquanto o professor edita
-  document.getElementById('grades-adhoc-items').innerHTML = (rubric || []).map(adhocRubricRowHtml).join('');
-}
-function collectAdhocRubric() {
-  return Array.from(document.querySelectorAll('#grades-adhoc-items .adhoc-item')).map(el => ({
-    id: el.dataset.id || undefined,
-    name: el.querySelector('strong').textContent,
-    weight: parseFloat(el.querySelector('.adhoc-weight').value),
-    prompt: el.querySelector('.adhoc-prompt').value.trim(),
-  }));
-}
-
-function gradesBodyHtml(grades) {
-  const crit = Array.isArray(grades.criteria) ? grades.criteria : [];
-  const rows = crit.map(c => `
-    <div class="grade-row" data-id="${escapeHtml(c.id || '')}" data-weight="${escapeHtml(String(c.weight ?? 1))}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0;">
-      <div class="row" style="gap: var(--sp-2); align-items:center; flex-wrap:wrap">
-        <strong style="flex:1; min-width:140px">${escapeHtml(c.name || '')}</strong>
-        <span class="eval-meta">peso ${escapeHtml(String(c.weight ?? 1))}</span>
-        <input class="input grade-score" type="number" min="0" max="10" step="0.1" value="${c.score != null ? escapeHtml(String(c.score)) : ''}" style="width:80px"/>
-        ${c.manual ? '<span class="badge badge-accent" title="Nota ajustada manualmente">manual</span>' : ''}
-      </div>
-      ${c.justification ? `<div class="sf-text" style="margin-top: var(--sp-1); color: var(--ink-600); font-size: var(--fs-sm);">${escapeHtml(c.justification)}</div>` : ''}
-    </div>`).join('');
-  const final = grades.final != null ? grades.final : '—';
-  const pen = grades.penalty;
-  const penHtml = (pen && Number(pen.multiplier) < 1)
-    ? `<div class="hint" style="margin-top:6px; color: var(--accent-700);">Penalidade por alertas de autoria: nota base ${escapeHtml(String(pen.base))} × ${escapeHtml(String(pen.multiplier))}${pen.justification ? ' — ' + escapeHtml(pen.justification) : ''}</div>`
-    : '';
-  return `${rows}
-    <div class="row" style="gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); border-top: 2px solid var(--ink-300); padding-top: var(--sp-2);">
-      <strong style="flex:1">Nota final (média ponderada)</strong>
-      <strong id="grade-final" style="font-size: var(--fs-lg)">${escapeHtml(String(final))}</strong>
-    </div>${penHtml}
-    <div class="eval-publish-row" style="margin-top: var(--sp-2);">
-      <button class="btn btn-primary btn-sm" id="grades-save-btn">Salvar notas</button>
-      <span class="hint">Edite as notas e salve. A nota só vai ao aluno quando você <strong>publicar</strong> (abaixo).</span>
-    </div>`;
-}
-
-// Prévia EDITÁVEL da rubrica (antes de calcular): mostra os critérios (nome +
-// peso) com nota em branco, permitindo LANÇAMENTO MANUAL da nota sem rodar o
-// cálculo automático (o backend semeia a rubrica ao salvar). Também é a forma de
-// pontuar quando não se quer/precisa da avaliação do entrevistador.
-function gradesPreviewHtml(rubric) {
-  const crit = Array.isArray(rubric) ? rubric : [];
-  if (!crit.length) return '<p class="eval-publish-help">Nenhum critério na rubrica. Defina a rubrica no painel do professor.</p>';
-  const rows = crit.map(c => `
-    <div class="grade-row" data-id="${escapeHtml(c.id || '')}" data-weight="${escapeHtml(String(c.weight ?? 1))}" style="border-top:1px solid var(--ink-200); padding: var(--sp-2) 0;">
-      <div class="row" style="gap: var(--sp-2); align-items:center; flex-wrap:wrap">
-        <strong style="flex:1; min-width:140px">${escapeHtml(c.name || '')}</strong>
-        <span class="eval-meta">peso ${escapeHtml(String(c.weight ?? 1))}</span>
-        <input class="input grade-score" type="number" min="0" max="10" step="0.1" placeholder="—" style="width:80px"/>
-      </div>
-    </div>`).join('');
-  return `${rows}
-    <div class="row" style="gap: var(--sp-2); align-items:center; margin-top: var(--sp-3); border-top: 2px solid var(--ink-300); padding-top: var(--sp-2);">
-      <strong style="flex:1">Nota final (média ponderada)</strong>
-      <strong id="grade-final" style="font-size: var(--fs-lg)">—</strong>
-    </div>
-    <div class="eval-publish-row" style="margin-top: var(--sp-2);">
-      <button class="btn btn-primary btn-sm" id="grades-save-btn">Salvar notas</button>
-      <span class="hint">Lance as notas à mão e salve, ou use <strong>Calcular notas</strong> para gerar automaticamente sobre a avaliação do entrevistador.</span>
-    </div>`;
-}
-
-function recomputeFinalPreview() {
-  let num = 0, den = 0;
-  document.querySelectorAll('#grades-body .grade-row').forEach(row => {
-    const w = parseFloat(row.dataset.weight);
-    const s = parseFloat(row.querySelector('.grade-score').value);
-    if (w > 0 && Number.isFinite(s)) { num += s * w; den += w; }
-  });
-  const final = den ? Math.round((num / den) * 10) / 10 : '—';
-  const el = document.getElementById('grade-final'); if (el) el.textContent = String(final);
-}
-
-function renderGrades(j) {
-  const card = document.getElementById('rubric-grades-card');
-  if (VIEW_MODE !== 'avaliacao') { card.classList.add('hidden'); return; }
-  card.classList.remove('hidden');
-  const hasInternal = !!j.evaluation;
-  const btn = document.getElementById('grades-btn');
-  const meta = document.getElementById('grades-meta');
-  const empty = document.getElementById('grades-empty-note');
-  const body = document.getElementById('grades-body');
-  const grades = j.grades;
-  btn.disabled = !hasInternal;
-  btn.textContent = grades ? 'Recalcular notas' : 'Calcular notas';
-  // Ajuste ad-hoc só faz sentido quando há avaliação para recalcular.
-  renderAdhocRubric(j.rubric || []);
-  document.getElementById('grades-adhoc').classList.toggle('hidden', !hasInternal);
-
-  if (grades && Array.isArray(grades.criteria) && grades.criteria.length) {
-    empty.classList.add('hidden');
-    meta.textContent = grades.computed_at ? `calculada ${fmtTime(grades.computed_at)}` : '';
-    body.innerHTML = gradesBodyHtml(grades);
-    renderGradePublishState(grades);
-    return;
-  }
-  // Ainda sem notas: prévia DESABILITADA dos critérios (perspectiva dos passos).
-  // Quando nem a avaliação interna existe, avisa que ela vem antes.
-  meta.textContent = '';
-  body.innerHTML = gradesPreviewHtml(j.rubric || []);
-  renderGradePublishState(null);
-  if (!hasInternal) {
-    empty.textContent = 'Você pode lançar as notas à mão acima e salvar. Para o cálculo automático, gere antes a Avaliação do entrevistador (abaixo).';
-    empty.classList.remove('hidden');
-  } else {
-    empty.classList.add('hidden');
-  }
-}
-
-// Estado de PUBLICAÇÃO da nota (independente da devolutiva). Mostra o status no
-// header e os botões Publicar/Despublicar. Só aparece quando há nota calculada.
-function renderGradePublishState(grades) {
-  const row = document.getElementById('grade-publish-row');
-  const statusEl = document.getElementById('grade-publish-status');
-  const pubBtn = document.getElementById('grade-publish-btn');
-  const unpubBtn = document.getElementById('grade-unpublish-btn');
-  const hasGrades = !!(grades && grades.final != null);
-  row.classList.toggle('hidden', !hasGrades);
-  if (!hasGrades) { statusEl.innerHTML = ''; return; }
-  const published = !!grades.published_at;
-  statusEl.innerHTML = published
-    ? `<span class="badge badge-completed">publicada</span> em ${fmtTime(grades.published_at)}`
-    : `não publicada (o aluno não vê)`;
-  pubBtn.classList.toggle('hidden', published);
-  unpubBtn.classList.toggle('hidden', !published);
-}
-
-document.getElementById('grade-publish-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('grade-publish-btn');
-  btn.disabled = true; btn.textContent = 'Publicando…';
-  await gradesRequest('POST', 'grade-publish');
-  btn.disabled = false; btn.textContent = 'Publicar nota';
-});
-document.getElementById('grade-unpublish-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('grade-unpublish-btn');
-  btn.disabled = true; btn.textContent = 'Despublicando…';
-  await gradesRequest('DELETE', 'grade-publish');
-  btn.disabled = false; btn.textContent = 'Despublicar nota';
-});
-
-async function gradesRequest(method, path, body) {
-  const errEl = document.getElementById('grades-error');
-  errEl.classList.add('hidden');
-  try {
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation/${path}`, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    await loadEvaluation(); // refresca o card de notas (cálculo, edição e publicação)
-    return j;
-  } catch (err) {
-    errEl.textContent = `Falha: ${err.message}`;
-    errEl.classList.remove('hidden');
-    return null;
-  }
-}
-
-document.getElementById('grades-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('grades-btn');
-  const force = !!pubState?.grades;
-  const label = btn.textContent;
-  btn.textContent = 'Calculando…'; btn.disabled = true;
-  await gradesRequest('POST', `grades${force ? '?force=true' : ''}`);
-  btn.textContent = label; btn.disabled = false;
-});
-document.getElementById('grades-adhoc-btn').addEventListener('click', async () => {
-  const errEl = document.getElementById('grades-error');
-  const rubricOverride = collectAdhocRubric();
-  if (rubricOverride.some(c => !c.name || !c.prompt || !(c.weight > 0))) {
-    errEl.textContent = 'Cada critério precisa de nome, peso > 0 e prompt.'; errEl.classList.remove('hidden'); return;
-  }
-  const btn = document.getElementById('grades-adhoc-btn');
-  const label = btn.textContent;
-  btn.textContent = 'Calculando…'; btn.disabled = true;
-  await gradesRequest('POST', 'grades', { rubricOverride });
-  btn.textContent = label; btn.disabled = false;
-});
-document.getElementById('grades-body').addEventListener('input', e => {
-  if (e.target.classList.contains('grade-score')) recomputeFinalPreview();
-});
-document.getElementById('grades-body').addEventListener('click', async e => {
-  if (e.target.id !== 'grades-save-btn') return;
-  const scores = Array.from(document.querySelectorAll('#grades-body .grade-row')).map(row => ({
-    criterion_id: row.dataset.id,
-    score: parseFloat(row.querySelector('.grade-score').value),
-  })).filter(s => Number.isFinite(s.score));
-  if (!scores.length) return;
-  e.target.disabled = true; e.target.textContent = 'Salvando…';
-  await gradesRequest('PUT', 'grades', { scores });
-});
 
 // ---- Publicação da devolutiva ao aluno ----
 
@@ -1146,7 +898,7 @@ function renderStudentPreview(ev) {
 // a perspectiva do que será produzido, com um marcador de "ainda não gerado".
 function renderStudentPreviewSkeleton() {
   const persona = window.__personaName;
-  const ph = '<div class="sf-text" style="color: var(--ink-400); font-style: italic;">(escreva a devolutiva e salve)</div>';
+  const ph = '<div class="sf-text" style="color: var(--ink-400); font-style: italic;">(gerada ao rodar “Avaliar entrevistas”)</div>';
   return `
     <div class="sf-label">Opinião do entrevistador${persona ? ` (${escapeHtml(persona)})` : ''} — não editável</div>
     ${ph}
@@ -1194,21 +946,20 @@ function renderFeedbackCard(j) {
 
   let statusHtml;
   if (!hasVersion) {
-    statusHtml = 'devolutiva ainda não escrita';
+    statusHtml = 'devolutiva ainda não gerada';
   } else {
-    const versionNote = (isEdited && hasAuto)
+    const versionNote = isEdited
       ? `<span class="badge badge-accent" title="A versão automática fica preservada — Restaurar automática descarta a edição">editada pelo professor</span>`
-      : 'escrita pelo professor';
+      : 'gerada automaticamente';
     statusHtml = published
       ? `<span class="badge badge-completed">publicada para o aluno</span> em ${fmtTime(j.published_at)} · ${versionNote}`
       : `não publicada (o aluno não vê) · ${versionNote}`;
   }
   statusEl.innerHTML = statusHtml;
 
-  // Edição manual SEMPRE disponível (basta a avaliação interna existir, já
-  // garantida acima). "Escrever" quando ainda não há devolutiva; "Editar" quando há.
-  document.getElementById('eval-edit-btn').textContent = hasVersion ? 'Editar devolutiva' : 'Escrever devolutiva';
-  show('eval-edit-btn', true);
+  // A devolutiva é gerada pelo lote "Avaliar entrevistas". Aqui o professor só
+  // EDITA a versão gerada — o botão de editar aparece quando ela existe.
+  show('eval-edit-btn', hasVersion);
   show('eval-publish-btn', hasVersion && !published);
   show('eval-unpublish-btn', published);
   // "Restaurar automática" só faz sentido se houver uma versão automática antiga.
@@ -1240,7 +991,7 @@ function renderFeedbackCard(j) {
   const preview = document.getElementById('student-eval-preview');
   document.getElementById('student-eval-preview-summary').textContent = hasVersion
     ? `Devolutiva (o que o aluno ${published ? 'vê' : 'verá quando publicada'})${isEdited ? ' — versão do professor' : ''}`
-    : 'Devolutiva (o que o aluno verá) — ainda não escrita';
+    : 'Devolutiva (o que o aluno verá) — ainda não gerada';
   document.getElementById('student-eval-preview-body').innerHTML = hasVersion
     ? renderStudentPreview(j.student_evaluation)
     : renderStudentPreviewSkeleton();
@@ -1376,33 +1127,6 @@ document.getElementById('eval-save-edit-btn').addEventListener('click', async ()
   if (!report.summary) { alert('Escreva ao menos o resumo da devolutiva.'); return; }
   await pubRequest('PUT', 'student-version', { report });
 });
-
-async function generateEvaluation() {
-  const btn = document.getElementById('eval-btn');
-  const errEl = document.getElementById('eval-error');
-  errEl.classList.add('hidden');
-  const hadReport = btn.textContent === 'Reavaliar';
-  btn.disabled = true;
-  btn.textContent = 'Avaliando…';
-  try {
-    const force = hadReport ? '?force=true' : '';
-    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/evaluation${force}`, { method: 'POST' });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    renderEvaluation(j.evaluation, j.evaluated_at);
-    loadEvaluation(); // sincroniza o bloco de publicação (estado vem do GET)
-  } catch (err) {
-    errEl.textContent = `Falha ao gerar a avaliação: ${err.message}`;
-    errEl.classList.remove('hidden');
-    if (hadReport) btn.textContent = 'Reavaliar';
-    else btn.textContent = 'Gerar avaliação';
-  } finally {
-    btn.disabled = false;
-    if (btn.textContent === 'Avaliando…') btn.textContent = 'Reavaliar';
-  }
-}
-
-document.getElementById('eval-btn').addEventListener('click', generateEvaluation);
 
 async function load() {
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/conversation`);
