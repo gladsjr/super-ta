@@ -736,15 +736,27 @@ const DELIVERY_LABEL = {
 
 // Proctoring por vídeo (entrevista com proctoring ligado): alertas + botão de
 // análise + player. Reusa os mesmos limiares dos badges da prova oral.
+const mmss = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+// Leva o vídeo do proctoring direto ao segundo indicado (clique nos "trechos").
+window.seekVideoProctor = function (sec) {
+  const vid = document.querySelector('#proctoring-card video');
+  if (!vid) return;
+  const go = () => { try { vid.currentTime = sec; } catch {} const pr = vid.play && vid.play(); if (pr && pr.catch) pr.catch(() => {}); };
+  if (vid.readyState >= 1) go();
+  else { vid.addEventListener('loadedmetadata', go, { once: true }); vid.load(); }
+  vid.scrollIntoView({ block: 'center' });
+};
 function renderProctorAlertsHtml(rep) {
   const f = rep && rep.flags; if (!f) return '';
-  const pill = t => `<span style="display:inline-block;margin:2px 5px 2px 0;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">${t}</span>`;
+  const stamps = at => (Array.isArray(at) && at.length)
+    ? ` <span class="hint">· trechos: ${at.map(s => `<a href="#" onclick="seekVideoProctor(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}</span>` : '';
+  const row = (label, at) => `<div style="margin:4px 0"><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">${label}</span>${stamps(at)}</div>`;
   const lines = [];
-  if (f.absent && f.absent.pct >= 20) lines.push(pill(`ausência ${f.absent.pct}%`));
-  if (f.multiple_people && f.multiple_people.pct >= 20) lines.push(pill(`+1 pessoa ${f.multiple_people.pct}%`));
-  if (f.phone && f.phone.pct >= 25) lines.push(pill(`celular ${f.phone.pct}%`));
-  if (f.hands && f.hands.flag) lines.push(pill('mãos fora do quadro'));
-  if (f.framing && f.framing.flag) lines.push(pill('enquadramento fora do padrão'));
+  if (f.absent && f.absent.pct >= 20) lines.push(row(`ausência ${f.absent.pct}%`, f.absent.at));
+  if (f.multiple_people && f.multiple_people.pct >= 20) lines.push(row(`+1 pessoa ${f.multiple_people.pct}%`, f.multiple_people.at));
+  if (f.phone && f.phone.pct >= 25) lines.push(row(`celular ${f.phone.pct}%`, f.phone.at));
+  if (f.hands && f.hands.flag) lines.push(row('mãos fora do quadro', f.hands.at));
+  if (f.framing && f.framing.flag) lines.push(row('enquadramento fora do padrão', f.framing.at));
   return lines.length ? `<div style="margin:6px 0">${lines.join('')}</div>` : '';
 }
 // Vídeos do MediaRecorder (webm) chegam sem metadado de DURAÇÃO — a barra do
@@ -786,24 +798,15 @@ function renderProctoring(p) {
   const rep = p.report;
   const hasVideo = p.video_parts > 0;
   const alerts = rep ? renderProctorAlertsHtml(rep) : '';
-  const btn = hasVideo ? `<button class="btn btn-sm" id="proctor-run">${rep ? 'Reanalisar vídeo' : 'Analisar vídeo'}</button>` : '<span class="eval-meta">Sem vídeo gravado para esta submissão.</span>';
+  // A análise do vídeo roda no LOTE "Avaliar entrevistas" (aba Avaliações) — sem
+  // botão individual de (re)analisar aqui.
   const player = hasVideo ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-video/0"></video>` : '';
-  const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>') : (hasVideo ? '<div class="eval-meta">Vídeo ainda não analisado — clique em “Analisar vídeo”.</div>' : '');
+  const head = hasVideo ? '' : '<div class="eval-meta">Sem vídeo gravado para esta submissão.</div>';
+  const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>')
+    : (hasVideo ? '<div class="eval-meta">Vídeo ainda não analisado — rode “Avaliar entrevistas” na aba Avaliações.</div>' : '');
   card.innerHTML = `<h2 class="card-title">Fiscalização por vídeo</h2>
-    <div class="row" style="gap:10px;align-items:center;margin-bottom:8px">${btn}<span class="eval-meta" id="proctor-status"></span></div>
-    ${body}${player}`;
+    ${head}${body}${player}`;
   if (hasVideo) fixSeekableWebm(card.querySelector('video'));
-  const run = document.getElementById('proctor-run');
-  if (run) run.onclick = async () => {
-    run.disabled = true;
-    const st = document.getElementById('proctor-status'); st.textContent = 'Analisando o vídeo (pode levar alguns instantes)…';
-    try {
-      const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor`, { method: 'POST' });
-      const jj = await r.json();
-      if (!r.ok) { st.textContent = 'Falha: ' + (jj.error || r.status); run.disabled = false; return; }
-      renderProctoring({ enabled: true, report: jj.proctor, video_parts: p.video_parts });
-    } catch { st.textContent = 'Falha de comunicação.'; run.disabled = false; }
-  };
 }
 
 function renderEvalList(title, items) {
@@ -816,10 +819,11 @@ function renderEvalList(title, items) {
 
 function renderEvaluation(ev, evaluatedAt) {
   const overall = ev.overall || {};
+  // Só a qualidade da defesa (autoria/forma-e-entrega saíram: eram para análise de
+  // VOZ; com o proctoring de vídeo, viram redundantes — simplifica e reduz custo).
   const badges = `
     <div class="eval-badges">
       <span class="eval-badge q-${escapeHtml(overall.defense_quality ?? '')}">${escapeHtml(DEFENSE_LABEL[overall.defense_quality] ?? overall.defense_quality ?? '—')}</span>
-      <span class="eval-badge a-${escapeHtml(overall.authorship_confidence ?? '')}">${escapeHtml(AUTHORSHIP_LABEL[overall.authorship_confidence] ?? overall.authorship_confidence ?? '—')}</span>
     </div>`;
   const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
     <div class="eval-pq">
@@ -830,21 +834,10 @@ function renderEvaluation(ev, evaluatedAt) {
       <div class="eval-text">${escapeHtml(q.comment ?? '')}</div>
       ${q.evidence ? `<div class="pq-evidence">Evidência: ${escapeHtml(q.evidence)}</div>` : ''}
     </div>`).join('');
-  const signals = (Array.isArray(ev.authorship_signals) ? ev.authorship_signals : []).map(s => `
-    <div class="eval-signal ${escapeHtml(s.direction ?? '')}">
-      <span class="sig-dir">${s.direction === 'supports' ? 'sustenta autoria' : 'vale sondar'}</span>
-      <div class="eval-text">${escapeHtml(s.signal ?? '')}</div>
-      ${s.where ? `<div class="sig-where">${escapeHtml(s.where)}</div>` : ''}
-    </div>`).join('');
 
   document.getElementById('eval-meta').textContent =
     evaluatedAt ? `gerada em ${fmtTime(evaluatedAt)}` : '';
   document.getElementById('eval-empty-note').classList.add('hidden');
-  const delivery = ev.delivery || null;
-  const deliveryHtml = delivery ? `
-    <div class="eval-section-title">Forma e entrega</div>
-    <div class="eval-badges"><span class="eval-badge d-${escapeHtml(delivery.overall_impression ?? '')}">${escapeHtml(DELIVERY_LABEL[delivery.overall_impression] ?? delivery.overall_impression ?? '—')}</span></div>
-    ${Array.isArray(delivery.observations) && delivery.observations.length ? `<ul class="eval-list">${delivery.observations.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}` : '';
 
   document.getElementById('eval-body').innerHTML = `
     ${badges}
@@ -855,8 +848,6 @@ function renderEvaluation(ev, evaluatedAt) {
     ${perQuestion ? `<div class="eval-section-title">Pergunta a pergunta</div>${perQuestion}` : ''}
     ${renderEvalList('Pontos fortes da defesa', ev.strengths)}
     ${renderEvalList('Pontos fracos da defesa', ev.weaknesses)}
-    ${deliveryHtml}
-    ${signals ? `<div class="eval-section-title">Sinais de autoria</div>${signals}` : ''}
     ${renderEvalList('Sugestões de follow-up presencial', ev.follow_up_suggestions)}
     ${renderEvalList('Ressalvas desta avaliação', ev.caveats)}`;
 
