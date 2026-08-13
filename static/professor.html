@@ -132,7 +132,7 @@
         <button id="save-cenario" class="btn btn-primary">Salvar configuração</button>
         <span id="cenario-save-msg" class="hint"></span>
       </div>
-      <p class="card-sub" style="margin-top: var(--sp-2)">Salva de uma vez o <strong>tipo de entrevista</strong>, o <strong>modo/voz</strong>, a <strong>identidade</strong>, o <strong>nº de perguntas</strong> e a <strong>fiscalização por vídeo</strong>. O <strong>entrevistador</strong> e o <strong>enunciado</strong> têm seus próprios botões. A <strong>calibração de fala</strong> é gerada automaticamente ao subir o enunciado.</p>
+      <p class="card-sub" style="margin-top: var(--sp-2)">Salva de uma vez o <strong>tipo de entrevista</strong>, a <strong>voz</strong>, a <strong>identidade</strong> e o <strong>nº de perguntas</strong>. A entrevista é sempre por voz com fiscalização por vídeo (fixos). O <strong>entrevistador</strong> e o <strong>enunciado</strong> têm seus próprios botões. A <strong>calibração de fala</strong> é gerada automaticamente ao subir o enunciado.</p>
     </div>
     <div class="card">
       <h3 class="card-title">Enunciado do trabalho</h3>
@@ -206,19 +206,9 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title" data-help="Vale para novas submissões — entrevistas já em andamento mantêm o modo com que começaram.">Modo de interação com o aluno</h3>
-      <p class="card-sub">Define como o aluno conversa com o entrevistador.</p>
-      <div class="row" style="gap: var(--sp-4); margin-bottom: var(--sp-3)">
-        <label style="display:flex; align-items:center; gap: var(--sp-2)">
-          <input type="radio" name="interaction-mode" value="text" id="mode-text" checked/>
-          <span>Texto (chat escrito)</span>
-        </label>
-        <label style="display:flex; align-items:center; gap: var(--sp-2)">
-          <input type="radio" name="interaction-mode" value="audio" id="mode-audio"/>
-          <span>Áudio (mensagens de voz)</span>
-        </label>
-      </div>
-      <div id="voice-row" class="row hidden">
+      <h3 class="card-title">Voz e identidade do entrevistador</h3>
+      <p class="card-sub">A entrevista é sempre por <strong>voz</strong>, com <strong>câmera ligada e fiscalização por vídeo</strong>: o aluno responde falando e comanda a gravação por gestos na tela (fixo, não desligável).</p>
+      <div id="voice-row" class="row">
         <label class="label" for="voice-select" style="margin:0">Voz do entrevistador:</label>
         <select id="voice-select" class="select" style="flex:1; min-width:240px"></select>
         <button id="voice-preview" class="btn" type="button" title="Ouvir uma frase de exemplo">▶ Ouvir prévia</button>
@@ -246,13 +236,6 @@
           </div>
         </div>
         <div id="identity-warning" class="hint" style="margin-top: var(--sp-2); color: #b8732a"></div>
-      </div>
-
-      <div style="margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px dashed var(--ink-200)">
-        <label style="display:flex; align-items:flex-start; gap: var(--sp-2); cursor:pointer">
-          <input type="checkbox" id="proctoring-enabled" style="margin-top: 3px"/>
-          <span class="card-sub" style="margin:0" data-help="Liga a câmera durante a entrevista, grava o vídeo e o analisa após o envio (presença, celular, outra pessoa, enquadramento). Exige modo áudio: o aluno responde por voz e comanda gravar/enviar/cancelar por ÁREAS DE COMANDO na tela (mão no canto), longe do teclado.">Ativar <strong>fiscalização por vídeo</strong> — câmera ligada + análise do vídeo após o envio. Exige o <strong>modo áudio</strong>.</span>
-        </label>
       </div>
 
       <div class="row" style="margin-top: var(--sp-3)">
@@ -536,9 +519,8 @@ async function load() {
     ? 'Reescreve a persona escolhida com os termos do seu enunciado'
     : 'Envie o enunciado do trabalho antes de ajustar';
 
-  applyInteractionStateToUI(j.work.interaction_mode || 'text', j.work.voice);
+  applyInteractionStateToUI(j.work.interaction_mode || 'audio', j.work.voice);
   applyVariantStateToUI(j.work.interview_variant || 'messages');
-  applyProctoringStateToUI(j.work.proctoring_enabled === true);
   document.getElementById('question-count').value = j.work.question_count ?? 5;
   // A sugestão de identidade é cosmética. Ela NUNCA pode derrubar o load() e
   // impedir a renderização da lista de alunos (que vem logo abaixo) — foi
@@ -1007,10 +989,8 @@ async function loadVoices() {
   sel.innerHTML = j.voices.map(v => `<option value="${escapeHtml(v.id)}" data-gender="${escapeHtml(v.gender || 'neutro')}">${escapeHtml(v.label)}</option>`).join('');
 }
 
-function applyInteractionStateToUI(mode, voice) {
-  const isAudio = mode === 'audio';
-  document.getElementById(isAudio ? 'mode-audio' : 'mode-text').checked = true;
-  document.getElementById('voice-row').classList.toggle('hidden', !isAudio);
+function applyInteractionStateToUI(_mode, voice) {
+  // Entrevista é SEMPRE por voz (áudio fixo) — o seletor de voz está sempre visível.
   if (voice) {
     const sel = document.getElementById('voice-select');
     if ([...sel.options].some(o => o.value === voice)) sel.value = voice;
@@ -1062,8 +1042,6 @@ function guessVoiceGender(_voiceId) {
 function checkIdentityVoiceCoherence() {
   const warn = document.getElementById('identity-warning');
   warn.textContent = '';
-  const mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
-  if (mode !== 'audio') return;
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
   const voiceId = document.getElementById('voice-select').value;
   const voiceOpt = [...document.getElementById('voice-select').options].find(o => o.value === voiceId);
@@ -1073,26 +1051,12 @@ function checkIdentityVoiceCoherence() {
   }
 }
 
-document.querySelectorAll('input[name="interaction-mode"]').forEach(el => {
-  el.addEventListener('change', (e) => {
-    const isAudio = e.target.value === 'audio';
-    document.getElementById('voice-row').classList.toggle('hidden', !isAudio);
-    checkIdentityVoiceCoherence();
-  });
-});
-
 // ---- Tipo de entrevista (profunda por mensagens vs simplificada em tempo real) ----
-// A simplificada é sempre por VOZ: força o modo áudio (para a voz persistir no
-// mesmo lugar da entrevista/oral) e trava o rádio de texto enquanto ativa.
+// Ambas são por VOZ com câmera ligada (áudio + proctoring são fixos na entrevista).
 function applyVariantStateToUI(variant) {
   const rt = variant === 'realtime';
   document.getElementById(rt ? 'variant-realtime' : 'variant-messages').checked = true;
   document.getElementById('variant-realtime-note').classList.toggle('hidden', !rt);
-  document.getElementById('mode-text').disabled = rt;
-  if (rt) {
-    document.getElementById('mode-audio').checked = true;
-    document.getElementById('voice-row').classList.remove('hidden');
-  }
   checkIdentityVoiceCoherence();
 }
 document.querySelectorAll('input[name="interview-variant"]').forEach(el => {
@@ -1154,36 +1118,20 @@ document.getElementById('voice-preview').onclick = async () => {
   }
 };
 
-// ---- Fiscalização por vídeo (entrevista) ----
-// A calibração de fala é gerada AUTOMÁTICA (em silêncio) no upload do enunciado —
-// sem card nem controles aqui. Proctoring exige modo áudio (o aluno responde por
-// voz e comanda por gesto).
-function applyProctoringStateToUI(on) {
-  const chk = document.getElementById('proctoring-enabled');
-  if (chk) chk.checked = !!on;
-  if (on) {
-    document.getElementById('mode-audio').checked = true;
-    document.getElementById('voice-row').classList.remove('hidden');
-  }
-}
-document.getElementById('proctoring-enabled').addEventListener('change', (e) => {
-  applyProctoringStateToUI(e.target.checked);
-  markConfigDirty();
-});
-
 document.getElementById('save-cenario').onclick = () => saveConfigTab();
-// Salvar ÚNICO da aba Configuração: tipo de entrevista + modo/voz + identidade +
-// nº de perguntas + fiscalização, de uma vez. O entrevistador (galeria/avançado) e
-// o enunciado têm seus próprios saves. Devolve true se salvou (usado pela guarda).
+// Salvar ÚNICO da aba Configuração: tipo de entrevista + voz + identidade + nº de
+// perguntas, de uma vez. Modo=áudio e fiscalização=ligada são FIXOS na entrevista.
+// O entrevistador (galeria/avançado) e o enunciado têm seus próprios saves. Devolve
+// true se salvou (usado pela guarda).
 async function saveConfigTab() {
   const msg = document.getElementById('cenario-save-msg');
   msg.textContent = '';
-  const proctoringOn = document.getElementById('proctoring-enabled').checked;
+  // Entrevista é sempre por VOZ com fiscalização por vídeo (fixos, não configuráveis).
+  const proctoringOn = true;
+  const mode = 'audio';
   const variant = document.querySelector('input[name="interview-variant"]:checked')?.value || 'messages';
-  let mode = document.querySelector('input[name="interaction-mode"]:checked')?.value || 'text';
-  if (proctoringOn || variant === 'realtime') mode = 'audio'; // proctoring e tempo real exigem voz
-  const voice = mode === 'audio' ? document.getElementById('voice-select').value : null;
-  if (mode === 'audio' && !voice) { msg.textContent = variant === 'realtime' ? 'A entrevista em tempo real é por voz — escolha uma voz.' : (proctoringOn ? 'A fiscalização por vídeo exige o modo áudio — escolha uma voz.' : 'Escolha uma voz para o modo áudio.'); return false; }
+  const voice = document.getElementById('voice-select').value;
+  if (!voice) { msg.textContent = 'A entrevista é por voz — escolha uma voz do entrevistador.'; return false; }
   const name = document.getElementById('interviewer-name').value.trim();
   const gender = document.querySelector('input[name="interviewer-gender"]:checked')?.value || null;
   // Identidade só persiste se foi DEFINIDA pelo professor; o rascunho sugerido
@@ -1822,7 +1770,7 @@ TAB_NAMES.forEach(t => {
   if (btn) btn.onclick = () => requestTab(t);
 });
 // Qualquer edição do usuário nos campos da aba Configuração marca alterações pendentes.
-['variant-messages','variant-realtime','mode-text','mode-audio'].forEach(id => {
+['variant-messages','variant-realtime'].forEach(id => {
   const el = document.getElementById(id); if (el) el.addEventListener('change', markConfigDirty);
 });
 document.querySelectorAll('input[name="interviewer-gender"]').forEach(el => el.addEventListener('change', markConfigDirty));
