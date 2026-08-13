@@ -226,20 +226,7 @@
             <button id="gen-rubrics-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regera a rubrica de TODAS as questões que têm resposta esperada">Gerar todas</button>
             <span class="hint" id="gen-rubrics-status"></span>
           </div>
-          <!-- Critério de penalidade (opt-in), dobrado no início do card. -->
-          <details class="penalty-inline">
-            <summary data-help="Critério fixo, aplicado DEPOIS do cálculo da nota pela rubrica. Um agente lê os alertas de proctoring/voz e a sua política, e devolve um multiplicador (por ex., reduzir a nota pela metade em caso de violação fragrante).">Critério de penalidade (alertas de proctoring)</summary>
-            <div class="penalty-inline-body">
-              <p class="card-sub">Opcional. Quando ligado, aplica uma penalidade à nota final conforme os alertas de proctoring e a política abaixo.</p>
-              <label style="display:flex; gap:8px; align-items:center; cursor:pointer"><input type="checkbox" id="penalty-enabled-oral"/> Ativar penalidade por alertas de proctoring</label>
-              <label class="label" for="penalty-prompt-oral" style="margin-top: var(--sp-2)">Política (como transformar alertas em penalidade)</label>
-              <textarea id="penalty-prompt-oral" class="textarea" rows="3"></textarea>
-              <div class="row" style="margin-top: var(--sp-2)">
-                <button id="save-penalty-oral" class="btn btn-sm" type="button">Salvar critério</button>
-                <span class="hint" id="penalty-msg-oral"></span>
-              </div>
-            </div>
-          </details>
+          <p class="card-sub" data-help="Os alertas de vídeo (ausência, celular, outra pessoa, mãos fora) aparecem na coluna Alertas da lista e no card de fiscalização de cada aluno, com os trechos do vídeo. Eles NÃO mexem na nota automaticamente — servem para você revisar e, se julgar necessário, ajustar a nota à mão.">Os alertas de <strong>fiscalização por vídeo</strong> são indícios para a sua revisão — não alteram a nota automaticamente. Se algo justificar, ajuste a nota à mão na tela de cada aluno.</p>
           <div id="rubric-items-oral" style="margin-top: var(--sp-3)"></div>
           <div class="row" style="margin-top: var(--sp-2)">
             <button id="rubric-add-oral" class="btn btn-ghost btn-sm" type="button">+ adicionar questão</button>
@@ -641,19 +628,10 @@
     QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: false }));
     renderQuestions();
     renderRubric();
-    fillSettings(j.work);
     renderSubsTable();
     renderEvalTable();
     cfgWarn();
     configDirty = false;   // estado recém-carregado do banco = limpo
-  }
-  // Política default do critério de penalidade (espelha lib/gradePenalty.js /
-  // agents/GradePenaltyAgent.js — mostrada quando o professor ainda não escreveu a sua).
-  const DEFAULT_PENALTY_PROMPT = 'Aplique penalidade SOMENTE em caso de violação FRAGRANTE e inequívoca dos critérios de integridade (ex.: ausência prolongada do candidato, presença clara de outra pessoa, uso de celular durante boa parte da prova). Nesses casos, reduza a nota em até 50% (multiplicador 0,5). Se os alertas forem leves, pontuais ou ambíguos, NÃO penalize (multiplicador 1,0). Na dúvida, não penalize.';
-  function fillSettings(work) {
-    const gp = work.grade_penalty || null;
-    document.getElementById('penalty-enabled-oral').checked = !!(gp && gp.enabled);
-    document.getElementById('penalty-prompt-oral').value = (gp && gp.prompt) ? gp.prompt : DEFAULT_PENALTY_PROMPT;
   }
   document.getElementById('cfg-n').addEventListener('input', () => { markConfigDirty(); cfgWarn(); });
   document.getElementById('cfg-voice').addEventListener('change', markConfigDirty);
@@ -980,18 +958,6 @@
   }
   document.getElementById('pub-grade-btn').onclick = () => runPublishAll('grade', true, 'pub-batch-status');
   document.getElementById('unpub-grade-btn').onclick = () => { if (confirm('Despublicar TODAS as notas?')) runPublishAll('grade', false, 'pub-batch-status'); };
-
-  // Critério de penalidade (opt-in). Rota genérica /grade-penalty.
-  document.getElementById('save-penalty-oral').onclick = async () => {
-    const msg = document.getElementById('penalty-msg-oral'); msg.textContent = 'Salvando…';
-    const enabled = document.getElementById('penalty-enabled-oral').checked;
-    const prompt = document.getElementById('penalty-prompt-oral').value.trim();
-    try {
-      const r = await fetch(`${API}/grade-penalty`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, prompt }) });
-      const j = await r.json();
-      msg.textContent = r.ok ? (enabled ? 'Critério ligado e salvo.' : 'Critério desligado.') : 'Falha: ' + (j.error || r.status);
-    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-  };
 
   // Abrir avaliações lado a lado: leva ao primeiro aluno com prova realizada
   // (a página do aluno tem navegação ◀/▶ entre os alunos).

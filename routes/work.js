@@ -601,22 +601,6 @@ router.patch("/w/:workToken/feedback-settings", requireWorkToken, express.json({
     }
 });
 
-// Critério FIXO de penalidade por alertas (opt-in), aplicado APÓS a nota da
-// rubrica. Genérico p/ os dois kinds (entrevista: autoria; oral: proctoring).
-// Body: { enabled:bool, prompt?:string }. prompt vazio => usa o default do agente.
-router.patch("/w/:workToken/grade-penalty", requireWorkToken, express.json({ limit: "16kb" }), async (req, res) => {
-    const enabled = req.body?.enabled === true;
-    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
-    try {
-        const saved = await db.setWorkGradePenalty(req.work.id, enabled ? { enabled, prompt } : { enabled: false, prompt });
-        log.info("GRADING", `grade penalty work=${req.work.work_token} enabled=${enabled}`);
-        res.json({ ok: true, grade_penalty: saved });
-    } catch (err) {
-        log.error("GRADING", `grade penalty save failed: ${err.message}`);
-        res.status(500).json({ error: "falha ao salvar o critério de penalidade" });
-    }
-});
-
 // Rubrica de notas do TRABALHO: critérios (nome, peso, prompt) que o
 // GradingAgent aplica sobre a avaliação interna. Vale como padrão de todos os
 // alunos (ajuste ad-hoc por aluno vem na rota de notas). Substitui a rubrica
