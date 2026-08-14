@@ -145,10 +145,10 @@
     <!-- ABA: ALUNOS & PROGRESSO (gerar tokens + tabela) -->
     <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
       <div class="card">
-        <h3 class="card-title">Tokens de envio para alunos</h3>
-        <p class="card-sub">Cada token é um link individual de prova. Tokens de teste servem para experimentar e não contam como prova real do aluno.</p>
+        <h3 class="card-title">Links de envio para alunos</h3>
+        <p class="card-sub">Cada link é individual, por aluno. Links de teste servem para experimentar e não contam como prova real do aluno.</p>
         <div class="create-bar">
-          <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar tokens</button>
+          <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar links</button>
         </div>
         <div id="create-panel" class="create-panel hidden">
           <div class="row" style="align-items: flex-end; gap: var(--sp-3)">
@@ -189,7 +189,7 @@
           <button id="download-csv" class="btn btn-sm" type="button" title="Baixar lista (rótulo, token, URL) em CSV">⬇ Baixar CSV</button>
         </div>
         <table id="sub-table" class="table hidden">
-          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Prova</th><th>Ações</th></tr></thead>
+          <thead><tr><th>Rótulo</th><th>Link de envio</th><th>Status</th><th>Prova</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
@@ -226,7 +226,6 @@
             <button id="gen-rubrics-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regera a rubrica de TODAS as questões que têm resposta esperada">Gerar todas</button>
             <span class="hint" id="gen-rubrics-status"></span>
           </div>
-          <p class="card-sub" data-help="Os alertas de vídeo (ausência, celular, outra pessoa, mãos fora) aparecem na coluna Alertas da lista e no card de fiscalização de cada aluno, com os trechos do vídeo. Eles NÃO mexem na nota automaticamente — servem para você revisar e, se julgar necessário, ajustar a nota à mão.">Os alertas de <strong>fiscalização por vídeo</strong> são indícios para a sua revisão — não alteram a nota automaticamente. Se algo justificar, ajuste a nota à mão na tela de cada aluno.</p>
           <div id="rubric-items-oral" style="margin-top: var(--sp-3)"></div>
           <div class="row" style="margin-top: var(--sp-2)">
             <button id="rubric-add-oral" class="btn btn-ghost btn-sm" type="button">+ adicionar questão</button>
@@ -240,6 +239,7 @@
         <summary><span class="card-title">Alunos</span></summary>
         <div class="card-collapsible-body">
           <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo) e atribuir a nota.</p>
+          <p class="card-sub" data-help="Os alertas de vídeo (ausência, celular, outra pessoa, mãos fora) aparecem na coluna Alertas abaixo e no card de fiscalização de cada aluno, com os trechos do vídeo. Eles NÃO mexem na nota automaticamente — servem para você revisar e, se julgar necessário, ajustar a nota à mão.">Os alertas de <strong>fiscalização por vídeo</strong> (coluna <strong>Alertas</strong>) são indícios para a sua revisão — não alteram a nota automaticamente. Se algo justificar, ajuste a nota à mão na tela de cada aluno.</p>
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-3)">
             <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
             <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar vídeos</button>
