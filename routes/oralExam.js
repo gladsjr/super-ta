@@ -291,7 +291,13 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
     try {
         const scope = req.query.scope === "all" || req.body?.scope === "all" ? "all" : "stale";
         const all = await db.getOralQuestions(req.work.id);
-        const targets = all.filter(q => String(q.answer || "").trim() && (scope === "all" || q.rubric_stale || !String(q.rubric || "").trim()));
+        // exclude (#193): ids que o professor DESMARCOU no "pendentes" (manter a
+        // rubrica atual mesmo estando stale). Só afeta scope=stale (no "todas" o
+        // cliente não envia exclude).
+        const excludeIds = new Set(String(req.query.exclude || "").split(",").map(s => parseInt(s, 10)).filter(Number.isInteger));
+        const targets = all.filter(q => String(q.answer || "").trim()
+            && (scope === "all" || q.rubric_stale || !String(q.rubric || "").trim())
+            && !excludeIds.has(q.id));
         // COTA (#192): confere ANTES de qualquer chamada ao modelo. Só rubricas
         // NOVAS debitam (regerar existente não conta). Saldo insuficiente → NÃO
         // começa e informa quantas faltam. Sem teto configurado = ilimitado.

@@ -368,8 +368,9 @@
         '<label>Pergunta <span class="muted" style="font-weight:400">(falada ao aluno)</span></label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
         '<label>Resposta esperada <span class="muted" style="font-weight:400">(opcional — insumo da rubrica; o aluno NUNCA vê)</span></label><textarea class="q-a" placeholder="Gabarito"></textarea>' +
         '<label>Rubrica — como pontuar <span class="muted" style="font-weight:400">(5 níveis: 0 / 2,5 / 5 / 7,5 / 10; só o professor vê)</span></label><textarea class="q-rubric" style="min-height:4.5rem" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>' +
-        '<div class="row" style="margin-top: var(--sp-2); align-items:center; gap: var(--sp-2)">' + genBtn +
+        '<div class="row" style="margin-top: var(--sp-2); align-items:center; gap: var(--sp-3)">' + genBtn +
           '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input q-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
+          '<label class="rq-mark-wrap" style="display:none; align-items:center; gap:4px; font-size:var(--fs-xs); color:var(--ink-600); cursor:pointer" title="A rubrica só é regerada se a pergunta/resposta mudou. Marcada = será regerada em &quot;Gerar rubricas (pendentes)&quot;; desmarque para manter a rubrica atual."><input type="checkbox" class="rq-mark"/> regerar</label>' +
         '</div>' +
       '</div>';
     const setBadge = () => {
@@ -382,14 +383,28 @@
     div.querySelector('.q-a').value = q.answer || '';
     div.querySelector('.q-rubric').value = q.rubric || '';
     div.querySelector('.q-weight').value = Number(q.weight) > 0 ? Number(q.weight) : 1;
+    // Marcação de regeração (#193): a rubrica só é regerada se pergunta/resposta
+    // mudou APÓS uma geração (rubric_stale). O checkbox só é MARCÁVEL nesse caso
+    // (fresh → desabilitado e desmarcado; stale → marcado por default, mas o
+    // professor pode desmarcar para NÃO regerar). Só aparece se a questão já TEM
+    // rubrica (rubrica vazia é sempre gerada). O desmarcar é transiente (_regen).
+    const cb = div.querySelector('.rq-mark');
+    const markWrap = div.querySelector('.rq-mark-wrap');
+    const syncMark = () => {
+      const hasR = !!(q.rubric || '').trim();
+      markWrap.style.display = hasR ? 'inline-flex' : 'none';
+      cb.disabled = !q.rubric_stale;
+      cb.checked = !!q.rubric_stale && q._regen !== false;
+    };
     div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; q._open = !q._open; div.classList.toggle('open', q._open); };
     div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); markConfigDirty(); renderQuestions(); };
-    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; markConfigDirty(); syncHead(div, q); setBadge(); cfgWarn(); });
-    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; markConfigDirty(); setBadge(); });
-    div.querySelector('.q-rubric').addEventListener('input', (e) => { q.rubric = e.target.value; q.rubric_stale = false; markConfigDirty(); setBadge(); });
+    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; q._regen = true; markConfigDirty(); syncHead(div, q); setBadge(); syncMark(); cfgWarn(); });
+    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; q._regen = true; markConfigDirty(); setBadge(); syncMark(); });
+    div.querySelector('.q-rubric').addEventListener('input', (e) => { q.rubric = e.target.value; q.rubric_stale = false; q._regen = false; markConfigDirty(); setBadge(); syncMark(); });
     div.querySelector('.q-weight').addEventListener('input', (e) => { q.weight = Number(e.target.value) > 0 ? Number(e.target.value) : 1; markConfigDirty(); });
+    cb.addEventListener('change', () => { q._regen = cb.checked; });
     const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
-    syncHead(div, q); setBadge();
+    syncHead(div, q); setBadge(); syncMark();
     return div;
   }
   function renderQuestions() {
@@ -741,10 +756,17 @@
     btns.forEach(i => document.getElementById(i).disabled = true);
     status.textContent = 'Salvando…';
     try {
+      // #193: no "pendentes", exclui as questões STALE que o professor DESMARCOU
+      // (regerar por default; desmarcar = manter a rubrica atual). Ids estáveis (têm
+      // rubrica → já foram salvas); coletado ANTES do save (o save não muda ids).
+      const excludeIds = scope === 'stale'
+        ? QUESTIONS.filter(x => x.id != null && (x.rubric || '').trim() && x.rubric_stale && x._regen === false).map(x => x.id)
+        : [];
       const s = await saveQuestions();
       if (s.error) { status.textContent = 'Falha: ' + s.error; return; }
       status.textContent = scope === 'all' ? 'Gerando todas as rubricas…' : 'Gerando rubricas pendentes…';
-      const r = await fetch(`${API}/oral/rubrics/generate?scope=${scope}`, { method: 'POST' });
+      const exq = excludeIds.length ? `&exclude=${excludeIds.join(',')}` : '';
+      const r = await fetch(`${API}/oral/rubrics/generate?scope=${scope}${exq}`, { method: 'POST' });
       if (!r.ok || !r.body) {
         // Cota conferida ANTES de chamar o modelo (#192): saldo insuficiente
         // não começa, e avisa quantas faltam.
