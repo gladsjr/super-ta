@@ -20,7 +20,7 @@ import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/a
 import { transcribeAudio } from "../lib/audio.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
-import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL } from "../lib/config.js";
+import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
@@ -313,16 +313,36 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
         const send = (o) => res.write(JSON.stringify(o) + "\n");
         send({ type: "start", ids: targets.map(q => q.id), candidates: targets.length, quota: quotaInfo });
         let generated = 0; const errors = [];
-        await mapPool(targets, 4, async (q) => {
+        // Fatia em BLOCOS (#194): cada bloco é UMA chamada ao modelo que devolve N
+        // rubricas amarradas por id. Concorrência de BLOCOS (não de questões).
+        // Progresso segue item a item (o professor não percebe o bloco) e a falha
+        // de um bloco não derruba os outros — os itens do bloco voltam como erro.
+        const blocks = [];
+        for (let i = 0; i < targets.length; i += ORAL_RUBRIC_BLOCK_SIZE) blocks.push(targets.slice(i, i + ORAL_RUBRIC_BLOCK_SIZE));
+        await mapPool(blocks, 4, async (block) => {
             try {
-                const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
-                await db.updateOralQuestionRubric(req.work.id, q.id, { rubric, weight });
-                generated++;
-                send({ type: "item", id: q.id, ok: true });
+                const rubrics = await oralRubricBuilderAgent.buildBatch({
+                    items: block.map(q => ({ id: q.id, question: q.question, answer: q.answer })),
+                    meterCtx: { openai: clientForWork(req.work), workId: req.work.id },
+                });
+                const byId = new Map(rubrics.map(r => [r.id, r]));
+                for (const q of block) {
+                    const r = byId.get(q.id);
+                    if (r) {
+                        await db.updateOralQuestionRubric(req.work.id, q.id, { rubric: r.rubric, weight: r.weight });
+                        generated++;
+                        send({ type: "item", id: q.id, ok: true });
+                    } else {
+                        errors.push({ id: q.id, error: "rubrica não retornada" });
+                        send({ type: "item", id: q.id, ok: false, error: "rubrica não retornada" });
+                    }
+                }
             } catch (e) {
-                errors.push({ id: q.id, error: e.message });
-                log.error("ORAL", `rubric gen item failed q=${q.id}: ${e.message}`);
-                send({ type: "item", id: q.id, ok: false, error: e.message });
+                log.error("ORAL", `rubric gen block failed (${block.map(q => q.id).join(",")}): ${e.message}`);
+                for (const q of block) {
+                    errors.push({ id: q.id, error: e.message });
+                    send({ type: "item", id: q.id, ok: false, error: e.message });
+                }
             }
         });
         const questions = await db.getOralQuestions(req.work.id);
