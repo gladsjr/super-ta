@@ -456,54 +456,74 @@ export async function createUser(username, password, opts = {}) {
 // external_id_map fica para identificadores ACADÊMICOS (RA), não de login.
 export async function provisionFederatedUser({ provider = "google", sub, email = null, displayName = null }) {
   if (!sub) throw Object.assign(new Error("federated_sub_required"), { status: 400 });
-  const prov = await pool.query(
-    `SELECT id FROM auth_providers WHERE key = $1 AND is_active LIMIT 1`,
-    [provider]
-  );
-  if (prov.rowCount === 0) throw Object.assign(new Error(`unknown_auth_provider: ${provider}`), { status: 400 });
-  const providerId = prov.rows[0].id;
-
-  // (1) identidade já vinculada
-  const known = await pool.query(
-    `SELECT u.* FROM user_identities i JOIN users u ON u.id = i.user_id
-      WHERE i.provider_id = $1 AND i.subject = $2 LIMIT 1`,
-    [providerId, sub]
-  );
-  if (known.rowCount > 0) return known.rows[0];
-
-  // (2) e-mail verificado → vincula identidade à conta existente
-  let user = null;
-  if (email) {
-    const byEmail = await pool.query("SELECT * FROM users WHERE lower(email) = lower($1) LIMIT 1", [email]);
-    if (byEmail.rowCount > 0) user = byEmail.rows[0];
-  }
-
-  // (3) cria SSO-only
-  if (!user) {
-    // username único derivado do e-mail/sub; sem senha (source='synced').
-    const base = (email ? email.split("@")[0] : `${provider}_${sub}`).replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 24) || "user";
-    let candidate = base, n = 1;
-    // colisão rara: sufixa até achar livre
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const clash = await pool.query("SELECT 1 FROM users WHERE username = $1", [candidate]);
-      if (clash.rowCount === 0) break;
-      candidate = `${base}_${n++}`;
-    }
-    const ins = await pool.query(
-      `INSERT INTO users (username, email, display_name, source)
-       VALUES ($1, $2, $3, 'synced') RETURNING *`,
-      [candidate, email, displayName]
+  // Transacional e determinístico sob concorrência (issue #158): duas requisições
+  // simultâneas do mesmo (provider, subject) não podem criar/retornar donos
+  // diferentes. A vinculação da identidade é a serialização — quem perde a corrida
+  // relê o dono CANÔNICO e o retorna, em vez de devolver o user que criou localmente.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const prov = await client.query(
+      `SELECT id FROM auth_providers WHERE key = $1 AND is_active LIMIT 1`,
+      [provider]
     );
-    user = ins.rows[0];
-  }
+    if (prov.rowCount === 0) throw Object.assign(new Error(`unknown_auth_provider: ${provider}`), { status: 400 });
+    const providerId = prov.rows[0].id;
+    const ownerOfIdentity = async () => (await client.query(
+      `SELECT u.* FROM user_identities i JOIN users u ON u.id = i.user_id
+        WHERE i.provider_id = $1 AND i.subject = $2 LIMIT 1`,
+      [providerId, sub]
+    )).rows[0] || null;
 
-  await pool.query(
-    `INSERT INTO user_identities (user_id, provider_id, subject)
-     VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-    [user.id, providerId, sub]
-  );
-  return user;
+    // (1) identidade já vinculada
+    const known = await ownerOfIdentity();
+    if (known) { await client.query("COMMIT"); return known; }
+
+    // (2) e-mail (já exigido VERIFICADO pelo caller) → vincula à conta existente
+    let user = null;
+    if (email) {
+      const byEmail = await client.query("SELECT * FROM users WHERE lower(email) = lower($1) LIMIT 1", [email]);
+      if (byEmail.rowCount > 0) user = byEmail.rows[0];
+    }
+
+    // (3) cria SSO-only
+    if (!user) {
+      const base = (email ? email.split("@")[0] : `${provider}_${sub}`).replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 24) || "user";
+      let candidate = base, n = 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const clash = await client.query("SELECT 1 FROM users WHERE username = $1", [candidate]);
+        if (clash.rowCount === 0) break;
+        candidate = `${base}_${n++}`;
+      }
+      const ins = await client.query(
+        `INSERT INTO users (username, email, display_name, source)
+         VALUES ($1, $2, $3, 'synced') RETURNING *`,
+        [candidate, email, displayName]
+      );
+      user = ins.rows[0];
+    }
+
+    // Vincula a identidade. Se OUTRA requisição concorrente já vinculou (o INSERT
+    // não pega), relê o dono canônico e retorna ELE — nunca o user local desta
+    // corrida (que poderia ser um SSO-only recém-criado sem identidade).
+    const linked = await client.query(
+      `INSERT INTO user_identities (user_id, provider_id, subject)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING user_id`,
+      [user.id, providerId, sub]
+    );
+    if (linked.rowCount === 0) {
+      const owner = await ownerOfIdentity();
+      if (owner) { await client.query("COMMIT"); return owner; }
+    }
+    await client.query("COMMIT");
+    return user;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // Lets a logged-in user change their own password. Verifies the current
