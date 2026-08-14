@@ -50,6 +50,21 @@ async function canViewUnit(userId, unitId) {
     return roles.size > 0;
 }
 
+// Autorização COMPLETA para ADMINISTRAR uma unidade: RBAC (canAdminUnit) MAIS a
+// política de provedor (a unidade tem de aceitar o provedor com que o admin
+// logou — a mesma trava do /my-units e do GET works). Fecha o bypass (issue #140)
+// em que ocultar a unidade na UI não impedia a ação direta pela API: membros,
+// convites, orçamento e pacotes só checavam o RBAC. Admin global passa direto
+// (governa toda a árvore). Todas as rotas de mutação por unidade usam este guard.
+async function canAdminUnitVerified(req, unitId) {
+    const userId = uid(req);
+    if (await isGlobalAdmin(userId)) return true;
+    if (!(await canAdminUnit(userId, unitId))) return false;
+    const acceptMap = await acceptedProviderMap();
+    const p = req.session.authProvider || { key: "local", kind: "local" };
+    return unitAcceptsProvider(acceptMap, unitId, p.key, p.kind);
+}
+
 // ---------------------------------------------------------------------------
 // Unidades (árvore)
 // ---------------------------------------------------------------------------
@@ -139,7 +154,7 @@ router.patch("/admin/units/:unitId", requireAuth, json, async (req, res) => {
         }
         // ativar/desativar = operar a própria unidade
         if (typeof req.body?.is_active === "boolean") {
-            if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+            if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
             const u = await setUnitActive(unitId, req.body.is_active);
             return res.json({ unit: u });
         }
@@ -188,7 +203,7 @@ router.get("/admin/units/:unitId/budget", requireAuth, async (req, res) => {
 router.get("/admin/units/:unitId/members", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         res.json({ members: await listUnitMembers(unitId), roles: await listRoles() });
     } catch (err) { return httpErr(res, err); }
 });
@@ -199,7 +214,7 @@ router.get("/admin/units/:unitId/members", requireAuth, async (req, res) => {
 router.get("/admin/units/:unitId/available-people", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const role = String(req.query.role || "aluno");
         res.json(await listAvailablePeople(unitId, role));
     } catch (err) { return httpErr(res, err); }
@@ -209,7 +224,7 @@ router.get("/admin/units/:unitId/available-people", requireAuth, async (req, res
 router.post("/admin/units/:unitId/members", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         let userId = Number(req.body?.user_id);
         if (!Number.isInteger(userId)) {
             const u = await getUserByLogin(req.body?.login);
@@ -226,7 +241,7 @@ router.post("/admin/units/:unitId/members", requireAuth, json, async (req, res) 
 router.delete("/admin/units/:unitId/members/:membershipId", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         await removeMembership(Number(req.params.membershipId), unitId); // escopo por unidade (issue #141)
         res.json({ ok: true });
     } catch (err) { return httpErr(res, err); }
@@ -427,7 +442,7 @@ router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
 router.post("/admin/units/:unitId/people", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const { user, membership, invite } = await createPersonWithInvite({
             name: req.body?.name,
             email: req.body?.email,
@@ -452,7 +467,7 @@ router.post("/admin/units/:unitId/people", requireAuth, json, async (req, res) =
 router.get("/admin/units/:unitId/invites", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const invites = await listUnitInvites(unitId);
         // O token cru não é mais guardado (issue #156), então a LISTA não traz
         // link — o link vem na criação/reenvio, ou no "baixar e-mails" (que
@@ -465,7 +480,7 @@ router.get("/admin/units/:unitId/invites", requireAuth, async (req, res) => {
 router.get("/admin/units/:unitId/invites.txt", requireAuth, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const invites = await listUnitInvites(unitId);
         // Sem armazenar o token cru (issue #156), o link só existe na emissão.
         // "Baixar e-mails" REEMITE cada convite pendente (token novo) e monta o
@@ -489,7 +504,7 @@ router.post("/admin/units/:unitId/people/:userId/invite", requireAuth, json, asy
     const unitId = Number(req.params.unitId);
     const userId = Number(req.params.userId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const member = await pool.query(
             `SELECT 1 FROM memberships WHERE user_id = $1 AND unit_id = $2 LIMIT 1`,
             [userId, unitId]
@@ -515,7 +530,7 @@ router.post("/admin/units/:unitId/people/:userId/invite", requireAuth, json, asy
 router.post("/admin/units/:unitId/invites/:inviteId/cancel", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         await cancelInvite(Number(req.params.inviteId), unitId); // escopo por unidade (issue #141)
         res.json({ ok: true });
     } catch (err) { return httpErr(res, err); }
@@ -562,7 +577,7 @@ router.post("/admin/units/:unitId/packages/allocate", requireAdmin, json, async 
 router.post("/admin/units/:unitId/packages/delegate", requireAuth, json, async (req, res) => {
     const childUnitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), childUnitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, childUnitId))) return res.status(403).json({ error: "forbidden" });
         const r = await allocateToChild({
             parentAllocationId: Number(req.body?.parent_allocation_id),
             childUnitId,
@@ -579,7 +594,7 @@ router.post("/admin/units/:unitId/packages/delegate", requireAuth, json, async (
 router.post("/admin/units/:unitId/packages/return", requireAuth, json, async (req, res) => {
     const unitId = Number(req.params.unitId);
     try {
-        if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
+        if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const allocationId = Number(req.body?.allocation_id);
         const owns = await pool.query(
             `SELECT 1 FROM package_allocations WHERE id = $1 AND unit_id = $2`,

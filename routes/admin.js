@@ -5,7 +5,7 @@
 import express from "express";
 import crypto from "crypto";
 import { requireAdmin, sanitizeLabel } from "../lib/middleware.js";
-import { listGlobalAdmins, createUser, deleteUser, changeOwnPassword, requireAuth } from "../auth.js";
+import { listGlobalAdmins, createUser, deleteUser, changeOwnPassword, requireAuth, pool } from "../auth.js";
 import { isGlobalAdmin, resolveEffectiveRoles, addMembership } from "../lib/rbac.js";
 import { getUnit } from "../lib/units.js";
 import { getPackageSpec, releaseForWork, templateForClassType } from "../lib/packages.js";
@@ -136,9 +136,22 @@ router.delete("/admin/works/:workToken", requireAdmin, async (req, res) => {
         const work = await db.getWorkByToken(workToken);
         if (!work) return res.status(404).json({ error: "work not found" });
         // Devolve ao pool os assentos dos tokens NÃO usados ANTES de apagar (o
-        // cascade removeria as reservas sem creditar de volta). Ver lib/packages.js.
-        await releaseForWork(work.id);
-        const ok = await db.deleteWork(work.id);
+        // cascade removeria as reservas sem creditar de volta). Devolução + delete
+        // numa ÚNICA transação (issue #145): falha no delete desfaz a devolução —
+        // nada de reembolso de cota sem apagar o trabalho. Ver lib/packages.js.
+        const client = await pool.connect();
+        let ok;
+        try {
+            await client.query("BEGIN");
+            await releaseForWork(work.id, client);
+            ok = await db.deleteWork(work.id, client);
+            await client.query("COMMIT");
+        } catch (e) {
+            await client.query("ROLLBACK").catch(() => {});
+            throw e;
+        } finally {
+            client.release();
+        }
         if (!ok) return res.status(404).json({ error: "work not found" });
         log.info("ADMIN", `work DELETED token=${workToken} name="${work.name}" by=${req.session.user.username}`);
         res.json({ ok: true, deleted: workToken });

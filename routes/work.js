@@ -1513,14 +1513,22 @@ router.delete("/w/:workToken/submissions/:subToken", requireWorkToken, requirePr
     if (sub.status !== "pending") {
         return res.status(409).json({ error: "submission_in_use", detail: "só é possível apagar um envio que o aluno ainda não iniciou" });
     }
+    // Devolução do assento + delete numa ÚNICA transação (issue #145): se o delete
+    // falhar, a devolução de cota é desfeita (nada de reembolso sem apagar o token).
+    const client = await pool.connect();
     try {
-        await releaseForSubmission(sub.id); // devolve o assento (no-op se não havia reserva)
-        await db.deleteSubmission(sub.id);
+        await client.query("BEGIN");
+        await releaseForSubmission(sub.id, client); // devolve o assento (no-op se não havia reserva)
+        await db.deleteSubmission(sub.id, client);
+        await client.query("COMMIT");
         log.info("SUBMISSION", `deleted+refunded submission=${sub.submission_token} work=${req.work.work_token}`);
         res.json({ ok: true, submission_token: sub.submission_token });
     } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
         log.error("SUBMISSION", `delete failed submission=${sub.submission_token}: ${err.message}`);
         res.status(500).json({ error: "failed to delete submission" });
+    } finally {
+        client.release();
     }
 });
 

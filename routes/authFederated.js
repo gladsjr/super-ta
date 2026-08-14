@@ -79,8 +79,10 @@ router.get("/auth/google/callback", async (req, res) => {
         const user = await provisionFederatedUser({
             provider: "google",
             sub: info.sub,
-            // Só casa por e-mail se verificado; senão vincula só por sub.
-            email: info.email_verified === false ? null : (info.email || null),
+            // Só casa por e-mail se EXPLICITAMENTE verificado (issue #158) — antes
+            // aceitava com email_verified ausente/undefined (só descartava === false),
+            // o que permitiria associar uma conta existente com e-mail não verificado.
+            email: info.email_verified === true ? (info.email || null) : null,
             displayName: info.name || null,
         });
 
