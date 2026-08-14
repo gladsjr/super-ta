@@ -2557,12 +2557,20 @@
         });
       } else if (typeof onConsent === 'function') { onConsent(); } // sem o módulo → não trava
     }
-    function uploadProctorVideo() {
+    async function uploadProctorVideo() {
       if (!proctorChunks.length) return;
       const blob = new Blob(proctorChunks, { type: (proctorRecorder && proctorRecorder.mimeType) || 'video/webm' });
       proctorChunks = [];
+      // Vídeo obrigatório: tenta algumas vezes (rede instável/tela fechando). A
+      // conclusão só é liberada quando o servidor recebe o vídeo (awaiting_video).
       const form = new FormData(); form.append('file', blob, 'proctor.webm');
-      fetch(`/s/${encodeURIComponent(submissionToken)}/proctor-video`, { method: 'POST', body: form }).catch(() => {});
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/proctor-video`, { method: 'POST', body: form });
+          if (r.ok) return;
+        } catch {}
+        await new Promise(res => setTimeout(res, 800 * attempt));
+      }
     }
     function stopProctoringAndUpload() {
       if (proctorDone || !proctorStream) return; proctorDone = true;

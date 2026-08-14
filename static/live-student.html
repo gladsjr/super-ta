@@ -814,10 +814,16 @@
       try {
         const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
         const form = new FormData(); form.append('file', blob, 'entrevista.webm');
-        const r = await fetch(`/s/${SUB}/live/video`, { method: 'POST', body: form });
-        note = r.ok ? 'Vídeo enviado.' : 'A entrevista foi registrada (o envio do vídeo falhou; avise o professor).';
+        // Vídeo obrigatório: retenta (conclusão liberada só quando o servidor
+        // recebe o vídeo — awaiting_video no backend).
+        let ok = false;
+        for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+          try { const r = await fetch(`/s/${SUB}/live/video`, { method: 'POST', body: form }); ok = r.ok; } catch {}
+          if (!ok && attempt < 3) await new Promise(res => setTimeout(res, 800 * attempt));
+        }
+        note = ok ? 'Vídeo enviado.' : 'O envio do vídeo falhou. Recarregue a página para tentar de novo; se persistir, avise o professor.';
       } catch {
-        note = 'A entrevista foi registrada (o envio do vídeo falhou; avise o professor).';
+        note = 'O envio do vídeo falhou. Recarregue a página para tentar de novo; se persistir, avise o professor.';
       } finally { stopTracks(); }
       enterPostInterview({ uploadNote: note });
     }
