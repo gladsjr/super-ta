@@ -227,7 +227,7 @@ router.delete("/admin/units/:unitId/members/:membershipId", requireAuth, async (
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
-        await removeMembership(Number(req.params.membershipId));
+        await removeMembership(Number(req.params.membershipId), unitId); // escopo por unidade (issue #141)
         res.json({ ok: true });
     } catch (err) { return httpErr(res, err); }
 });
@@ -487,6 +487,13 @@ router.post("/admin/units/:unitId/people/:userId/invite", requireAuth, json, asy
             [userId, unitId]
         );
         if (member.rowCount === 0) return res.status(404).json({ error: "person_not_in_unit" });
+        // Segurança (issue #142): NÃO reemitir convite de ativação para uma conta
+        // JÁ ATIVA — a ativação redefine a senha, então um admin de unidade poderia
+        // sequestrar a conta de um professor/admin gerando um novo link. Conta ativa
+        // = já tem password_hash. (Mesmo guard já existe em createPersonWithInvite.)
+        const acct = await pool.query(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
+        if (!acct.rows[0]) return res.status(404).json({ error: "user_not_found" });
+        if (acct.rows[0].password_hash) return res.status(409).json({ error: "account_already_active" });
         const invite = await issueInvite({ userId, createdByUserId: uid(req) });
         log.info("UNITS", `invite resent user=${userId} unit=${unitId} by=${req.session.user.username}`);
         res.json({ invite: { id: invite.id, state: invite.state, expires_at: invite.expires_at } });
@@ -497,7 +504,7 @@ router.post("/admin/units/:unitId/invites/:inviteId/cancel", requireAuth, json, 
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnit(uid(req), unitId))) return res.status(403).json({ error: "forbidden" });
-        await cancelInvite(Number(req.params.inviteId));
+        await cancelInvite(Number(req.params.inviteId), unitId); // escopo por unidade (issue #141)
         res.json({ ok: true });
     } catch (err) { return httpErr(res, err); }
 });

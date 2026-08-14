@@ -156,9 +156,19 @@ router.post("/admin/units/:unitId/providers", requireAdmin, json, async (req, re
 // ON DELETE CASCADE, então some junto — ok em dev; em prod, cuidado.
 router.delete("/admin/providers/:id", requireAdmin, async (req, res) => {
     try {
+        const id = Number(req.params.id);
+        // Segurança (issue #154): não apagar um provedor que ainda tem identidades
+        // de login vinculadas. O FK user_identities.provider_id é ON DELETE CASCADE,
+        // então o delete removeria em silêncio os mapeamentos de login e TRANCARIA
+        // esses usuários. Bloqueia e informa a contagem — o admin deve migrar as
+        // identidades ou apenas DESATIVAR o provedor (que não apaga nada).
+        const used = await pool.query(`SELECT count(*)::int AS n FROM user_identities WHERE provider_id = $1`, [id]);
+        if (used.rows[0].n > 0) {
+            return res.status(409).json({ error: "provider_in_use", identities: used.rows[0].n });
+        }
         const r = await pool.query(
             `DELETE FROM auth_providers WHERE id = $1 AND owner_tenant_unit_id IS NOT NULL RETURNING id`,
-            [Number(req.params.id)]
+            [id]
         );
         if (r.rowCount === 0) throw Object.assign(new Error("not_removable"), { status: 400 });
         res.json({ ok: true });
