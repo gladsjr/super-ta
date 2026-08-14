@@ -20,12 +20,13 @@ import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/a
 import { transcribeAudio } from "../lib/audio.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
-import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL } from "../lib/config.js";
+import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
 import { mapPool } from "../lib/concurrency.js";
+import { rubricQuota, rubricsThatConsume } from "../lib/rubricQuota.js";
 import { weightedFinal } from "../lib/rubric.js";
 import { deriveOralDevolutivaNow } from "../lib/oralFeedbackOps.js";
 import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
@@ -297,27 +298,69 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
     try {
         const scope = req.query.scope === "all" || req.body?.scope === "all" ? "all" : "stale";
         const all = await db.getOralQuestions(req.work.id);
-        const targets = all.filter(q => String(q.answer || "").trim() && (scope === "all" || q.rubric_stale || !String(q.rubric || "").trim()));
+        // exclude (#193): ids que o professor DESMARCOU no "pendentes" (manter a
+        // rubrica atual mesmo estando stale). Só afeta scope=stale (no "todas" o
+        // cliente não envia exclude).
+        const excludeIds = new Set(String(req.query.exclude || "").split(",").map(s => parseInt(s, 10)).filter(Number.isInteger));
+        const targets = all.filter(q => String(q.answer || "").trim()
+            && (scope === "all" || q.rubric_stale || !String(q.rubric || "").trim())
+            && !excludeIds.has(q.id));
+        // COTA (#192): confere ANTES de qualquer chamada ao modelo. Só rubricas
+        // NOVAS debitam (regerar existente não conta). Saldo insuficiente → NÃO
+        // começa e informa quantas faltam. Sem teto configurado = ilimitado.
+        const consumes = rubricsThatConsume(targets);
+        const quota = rubricQuota(all);
+        if (quota.limit != null && consumes > quota.remaining) {
+            return res.status(402).json({
+                error: "rubric_quota_exceeded",
+                needed: consumes, remaining: quota.remaining, limit: quota.limit, used: quota.used,
+                candidates: targets.length,
+            });
+        }
+        const quotaInfo = {
+            limit: quota.limit, used: quota.used, will_consume: consumes,
+            remaining_after: quota.limit == null ? null : quota.remaining - consumes,
+        };
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
         started = true;
         const send = (o) => res.write(JSON.stringify(o) + "\n");
-        send({ type: "start", ids: targets.map(q => q.id) });
+        send({ type: "start", ids: targets.map(q => q.id), candidates: targets.length, quota: quotaInfo });
         let generated = 0; const errors = [];
-        await mapPool(targets, 4, async (q) => {
+        // Fatia em BLOCOS (#194): cada bloco é UMA chamada ao modelo que devolve N
+        // rubricas amarradas por id. Concorrência de BLOCOS (não de questões).
+        // Progresso segue item a item (o professor não percebe o bloco) e a falha
+        // de um bloco não derruba os outros — os itens do bloco voltam como erro.
+        const blocks = [];
+        for (let i = 0; i < targets.length; i += ORAL_RUBRIC_BLOCK_SIZE) blocks.push(targets.slice(i, i + ORAL_RUBRIC_BLOCK_SIZE));
+        await mapPool(blocks, 4, async (block) => {
             try {
-                const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
-                await db.updateOralQuestionRubric(req.work.id, q.id, { rubric, weight });
-                generated++;
-                send({ type: "item", id: q.id, ok: true });
+                const rubrics = await oralRubricBuilderAgent.buildBatch({
+                    items: block.map(q => ({ id: q.id, question: q.question, answer: q.answer })),
+                    meterCtx: { openai: clientForWork(req.work), workId: req.work.id },
+                });
+                const byId = new Map(rubrics.map(r => [r.id, r]));
+                for (const q of block) {
+                    const r = byId.get(q.id);
+                    if (r) {
+                        await db.updateOralQuestionRubric(req.work.id, q.id, { rubric: r.rubric, weight: r.weight });
+                        generated++;
+                        send({ type: "item", id: q.id, ok: true });
+                    } else {
+                        errors.push({ id: q.id, error: "rubrica não retornada" });
+                        send({ type: "item", id: q.id, ok: false, error: "rubrica não retornada" });
+                    }
+                }
             } catch (e) {
-                errors.push({ id: q.id, error: e.message });
-                log.error("ORAL", `rubric gen item failed q=${q.id}: ${e.message}`);
-                send({ type: "item", id: q.id, ok: false, error: e.message });
+                log.error("ORAL", `rubric gen block failed (${block.map(q => q.id).join(",")}): ${e.message}`);
+                for (const q of block) {
+                    errors.push({ id: q.id, error: e.message });
+                    send({ type: "item", id: q.id, ok: false, error: e.message });
+                }
             }
         });
         const questions = await db.getOralQuestions(req.work.id);
         log.info("ORAL", `rubrics generate work=${req.work.work_token} scope=${scope} geradas=${generated}/${targets.length}`);
-        send({ type: "done", generated, candidates: targets.length, errors, questions });
+        send({ type: "done", generated, candidates: targets.length, consumed: consumes, errors, questions, quota: quotaInfo });
         res.end();
     } catch (err) {
         log.error("ORAL", `rubrics generate failed: ${err.message}`);

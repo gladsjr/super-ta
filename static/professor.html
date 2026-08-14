@@ -261,11 +261,11 @@
 
     <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
     <div class="card">
-      <h3 class="card-title">Tokens de envio para alunos</h3>
-      <p class="card-sub">Gere tokens para cada aluno e compartilhe o link com eles. Cada token abre uma entrevista independente.</p>
+      <h3 class="card-title">Links de envio para alunos</h3>
+      <p class="card-sub">Gere um link individual para cada aluno e compartilhe com eles. Cada link abre uma entrevista independente.</p>
 
       <div class="create-bar">
-        <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar tokens</button>
+        <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar links</button>
       </div>
 
       <div id="create-panel" class="create-panel hidden">
@@ -318,7 +318,7 @@
         <button id="download-csv" class="btn" type="button" title="Baixar lista (label, token, URL) em CSV">⬇ Baixar CSV</button>
       </div>
       <table id="sub-table" class="table hidden">
-        <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Conversa</th><th>Ações</th></tr></thead>
+        <thead><tr><th>Rótulo</th><th>Link de envio</th><th>Status</th><th>Conversa</th><th>Ações</th></tr></thead>
         <tbody></tbody>
       </table>
       <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
@@ -1186,7 +1186,7 @@ function setCreatePanel(open) {
   document.getElementById('create-panel').classList.toggle('hidden', !open);
   const btn = document.getElementById('toggle-create');
   btn.setAttribute('aria-expanded', String(open));
-  btn.textContent = open ? '− Fechar' : '+ Gerar tokens';
+  btn.textContent = open ? '− Fechar' : '+ Gerar links';
 }
 document.getElementById('toggle-create').onclick = () => {
   const open = document.getElementById('create-panel').classList.contains('hidden');

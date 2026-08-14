@@ -127,10 +127,13 @@
           <span class="hint" id="upload-msg"></span>
         </div>
         <p class="hint" style="margin-top: var(--sp-1)">A extração monta o <strong>banco de perguntas</strong> a partir do material inteiro — pode vir mais perguntas do que cada aluno responde. Na prova, cada aluno recebe um <strong>sorteio</strong> com o nº definido em "nº de perguntas por aluno".</p>
-        <div class="row" style="margin-top: var(--sp-3); align-items: center">
+        <div class="row" style="margin-top: var(--sp-3); align-items: center; gap: var(--sp-2); flex-wrap: wrap">
           <button class="btn btn-ghost btn-sm" id="q-add" type="button">+ adicionar pergunta</button>
+          <button id="gen-rubrics-stale-btn" class="btn btn-sm" type="button" title="Gera a rubrica das questões pendentes/vazias que têm resposta esperada">Gerar rubricas (pendentes)</button>
+          <button id="gen-rubrics-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regera a rubrica de TODAS as questões que têm resposta esperada">Gerar todas</button>
+          <span class="hint" id="gen-rubrics-status"></span>
         </div>
-        <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas (ou edite o que veio do arquivo) — só o <strong>enunciado</strong>, que é falado ao aluno. O peso e o critério/gabarito de cada questão ficam na aba <strong>Avaliação &amp; notas</strong>. Clique numa linha para editar.</p>
+        <p class="card-sub" style="margin-top: var(--sp-2)">Clique numa questão para editar <strong>pergunta</strong>, <strong>resposta esperada</strong>, <strong>rubrica</strong> (como pontuar — 5 níveis) e <strong>peso</strong>. Só o <strong>enunciado</strong> é falado ao aluno — <strong>resposta e rubrica NUNCA vão ao aluno</strong>. A rubrica pode ser escrita à mão ou <strong>gerada</strong> a partir da resposta esperada.</p>
         <div id="questions" class="q-list"></div>
       </div>
 
@@ -139,10 +142,10 @@
     <!-- ABA: ALUNOS & PROGRESSO (gerar tokens + tabela) -->
     <div class="tab-panel hidden" id="tab-alunos" role="tabpanel" aria-labelledby="tab-btn-alunos">
       <div class="card">
-        <h3 class="card-title">Tokens de envio para alunos</h3>
-        <p class="card-sub">Cada token é um link individual de prova. Tokens de teste servem para experimentar e não contam como prova real do aluno.</p>
+        <h3 class="card-title">Links de envio para alunos</h3>
+        <p class="card-sub">Cada link é individual, por aluno. Links de teste servem para experimentar e não contam como prova real do aluno.</p>
         <div class="create-bar">
-          <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar tokens</button>
+          <button id="toggle-create" class="btn" type="button" aria-expanded="false" aria-controls="create-panel">+ Gerar links</button>
         </div>
         <div id="create-panel" class="create-panel hidden">
           <div class="row" style="align-items: flex-end; gap: var(--sp-3)">
@@ -183,7 +186,7 @@
           <button id="download-csv" class="btn btn-sm" type="button" title="Baixar lista (rótulo, token, URL) em CSV">⬇ Baixar CSV</button>
         </div>
         <table id="sub-table" class="table hidden">
-          <thead><tr><th>Rótulo</th><th>Token de envio</th><th>Status</th><th>Prova</th><th>Ações</th></tr></thead>
+          <thead><tr><th>Rótulo</th><th>Link de envio</th><th>Status</th><th>Prova</th><th>Ações</th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="sub-empty" class="table-empty hidden">Nenhum token criado ainda.</div>
@@ -194,46 +197,27 @@
     <!-- ABA: AVALIAÇÃO & NOTAS — rubrica primeiro (todas as ações no topo), depois a lista de alunos -->
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
 
-      <!-- 1. Rubrica por questão — TODAS as ações de avaliação/nota no topo do card. -->
-      <details class="card card-collapsible" open>
-        <summary><span class="card-title">Rubrica por questão</span></summary>
-        <div class="card-collapsible-body">
-          <!-- Ações no topo do card: salvar a rubrica, analisar os vídeos, calcular e
-               publicar as notas. (Sem devolutiva — a prova oral entrega só a nota.) -->
-          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
-            <button id="save-rubric-oral" class="btn btn-primary" type="button" title="Salva as perguntas, respostas, pesos e rubricas">Salvar rubrica</button>
-            <button id="proctor-all-btn" class="btn" type="button" title="Analisa (visão computacional local) os vídeos ainda não analisados; alimenta a coluna Alertas">Analisar vídeos</button>
-            <button id="eval-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das provas realizadas que ainda não têm relatório (compara a transcrição ao gabarito)">Calcular Notas</button>
-            <button id="eval-all-force-btn" class="btn" type="button" title="Recalcula as notas de TODAS as provas realizadas">Reavaliar todas</button>
-            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
-            <button id="unpub-grade-btn" class="btn" type="button">Despublicar notas</button>
-            <span class="spacer"></span>
-            <span class="hint" id="rubric-msg-oral"></span>
-          </div>
-          <div id="eval-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
-          <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
-          <div id="proctor-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
-          <p class="card-sub">O peso de cada questão e como ela é pontuada. A nota final é a <strong>média ponderada</strong> pelos pesos, sobre as questões que o aluno recebeu.</p>
-          <p class="card-sub" data-help="A rubrica é a instrução de como pontuar cada questão, em 5 níveis (0 / 2,5 / 5 / 7,5 / 10). Você pode escrevê-la à mão OU, se a questão tiver resposta esperada (aba Configuração), gerar automaticamente. O agente que calcula a nota usa sempre a rubrica.">Escreva a rubrica de cada questão ou <strong>gere</strong> a partir da resposta esperada. Ao mudar pergunta/resposta, a rubrica fica marcada para <strong>revisar</strong>.</p>
-          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
-            <button id="gen-rubrics-stale-btn" class="btn" type="button" title="Gera a rubrica das questões pendentes/vazias que têm resposta esperada">Gerar rubricas (pendentes)</button>
-            <button id="gen-rubrics-all-btn" class="btn btn-ghost btn-sm" type="button" title="Regera a rubrica de TODAS as questões que têm resposta esperada">Gerar todas</button>
-            <span class="hint" id="gen-rubrics-status"></span>
-          </div>
-          <p class="card-sub" data-help="Os alertas de vídeo (ausência, celular, outra pessoa, mãos fora) aparecem na coluna Alertas da lista e no card de fiscalização de cada aluno, com os trechos do vídeo. Eles NÃO mexem na nota automaticamente — servem para você revisar e, se julgar necessário, ajustar a nota à mão.">Os alertas de <strong>fiscalização por vídeo</strong> são indícios para a sua revisão — não alteram a nota automaticamente. Se algo justificar, ajuste a nota à mão na tela de cada aluno.</p>
-          <div id="rubric-items-oral" style="margin-top: var(--sp-3)"></div>
-          <div class="row" style="margin-top: var(--sp-2)">
-            <button id="rubric-add-oral" class="btn btn-ghost btn-sm" type="button">+ adicionar questão</button>
-            <span class="hint">Adicionar/remover aqui reflete na aba Configuração.</span>
-          </div>
-        </div>
-      </details>
+      <!-- Avaliação & notas (#188/#189): o card "Rubrica por questão" saiu daqui — a
+           rubrica agora mora na Configuração, junto das perguntas (é preparação da
+           prova). As ações de avaliação/nota EM LOTE foram para o topo do card Alunos. -->
 
-      <!-- 2. Alunos — o botão de avaliações lado a lado fica logo acima da lista. -->
+      <!-- Alunos — ações em lote (avaliar/publicar) + o botão de avaliações lado a lado no topo. -->
       <details class="card card-collapsible" open>
         <summary><span class="card-title">Alunos</span></summary>
         <div class="card-collapsible-body">
           <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo) e atribuir a nota.</p>
+          <p class="card-sub" data-help="Os alertas de vídeo (ausência, celular, outra pessoa, mãos fora) aparecem na coluna Alertas abaixo e no card de fiscalização de cada aluno, com os trechos do vídeo. Eles NÃO mexem na nota automaticamente — servem para você revisar e, se julgar necessário, ajustar a nota à mão.">Os alertas de <strong>fiscalização por vídeo</strong> (coluna <strong>Alertas</strong>) são indícios para a sua revisão — não alteram a nota automaticamente. Se algo justificar, ajuste a nota à mão na tela de cada aluno.</p>
+          <!-- Ações EM LOTE sobre os alunos (issue #189): analisar vídeos, calcular e publicar notas. -->
+          <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
+            <button id="proctor-all-btn" class="btn" type="button" title="Analisa (visão computacional local) os vídeos ainda não analisados; alimenta a coluna Alertas">Analisar vídeos</button>
+            <button id="eval-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das provas realizadas que ainda não têm relatório (compara a transcrição ao gabarito)">Calcular Notas</button>
+            <button id="eval-all-force-btn" class="btn" type="button" title="Recalcula as notas de TODAS as provas realizadas">Reavaliar todas</button>
+            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
+            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+          </div>
+          <div id="eval-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+          <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
+          <div id="proctor-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-3)">
             <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
             <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar vídeos</button>
@@ -362,24 +346,59 @@
     if (val) { txt.textContent = val; txt.classList.remove('q-empty'); }
     else { txt.textContent = '(pergunta vazia)'; txt.classList.add('q-empty'); }
   }
-  // Configuração: um item recolhível por questão — enunciado + resposta esperada
-  // (opcional). Escreve DIRETO no objeto q (identidade estável), o mesmo lido pela
-  // rubrica. Mudar pergunta/resposta marca a rubrica para revisão (rubric_stale).
+  // Configuração: EDITOR ÚNICO por questão (issue #188) — enunciado + resposta
+  // esperada + rubrica + peso, tudo junto (a rubrica é preparação da prova, mora
+  // com as perguntas). Escreve DIRETO no objeto q (identidade estável). Mudar
+  // pergunta/resposta marca a rubrica para revisão (rubric_stale); editar a
+  // rubrica limpa a marca. Resposta e rubrica NUNCA vão ao aluno (marcado na UI).
   function makeItem(q) {
     const div = document.createElement('div');
     div.className = 'q-item' + (q._open ? ' open' : '');
+    const genBtn = (q.answer || '').trim() ? '<button class="btn btn-ghost btn-sm rq-gen" type="button" title="Gerar a rubrica a partir da resposta esperada">gerar</button>' : '';
     div.innerHTML =
       '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num"></span>' +
-      '<span class="q-text"></span><button class="q-del" title="remover">✕</button></div>' +
-      '<div class="q-body"><label>Pergunta</label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
-      '<label>Resposta esperada (opcional)</label><textarea class="q-a" placeholder="Gabarito — insumo para gerar a rubrica; o aluno nunca vê"></textarea></div>';
+      '<span class="q-text"></span><span class="rq-badge" style="margin-left:6px"></span><button class="q-del" title="remover">✕</button></div>' +
+      '<div class="q-body">' +
+        '<label>Pergunta <span class="muted" style="font-weight:400">(falada ao aluno)</span></label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
+        '<label>Resposta esperada <span class="muted" style="font-weight:400">(opcional — insumo da rubrica; o aluno NUNCA vê)</span></label><textarea class="q-a" placeholder="Gabarito"></textarea>' +
+        '<label>Rubrica — como pontuar <span class="muted" style="font-weight:400">(5 níveis: 0 / 2,5 / 5 / 7,5 / 10; só o professor vê)</span></label><textarea class="q-rubric" style="min-height:4.5rem" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>' +
+        '<div class="row" style="margin-top: var(--sp-2); align-items:center; gap: var(--sp-3)">' + genBtn +
+          '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input q-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
+          '<label class="rq-mark-wrap" style="display:none; align-items:center; gap:4px; font-size:var(--fs-xs); color:var(--ink-600); cursor:pointer" title="A rubrica só é regerada se a pergunta/resposta mudou. Marcada = será regerada em &quot;Gerar rubricas (pendentes)&quot;; desmarque para manter a rubrica atual."><input type="checkbox" class="rq-mark"/> regerar</label>' +
+        '</div>' +
+      '</div>';
+    const setBadge = () => {
+      const b = div.querySelector('.rq-badge');
+      const stale = q.rubric_stale || !(q.rubric || '').trim();
+      if (stale) { b.className = 'pill rq-badge'; b.style.cssText = 'margin-left:6px;background:#fff6e0;border:1px solid #ecc874;font-size:var(--fs-xs)'; b.textContent = 'revisar'; }
+      else { b.className = 'rq-badge'; b.style.cssText = 'margin-left:6px'; b.textContent = ''; }
+    };
     div.querySelector('.q-q').value = q.question || '';
     div.querySelector('.q-a').value = q.answer || '';
+    div.querySelector('.q-rubric').value = q.rubric || '';
+    div.querySelector('.q-weight').value = Number(q.weight) > 0 ? Number(q.weight) : 1;
+    // Marcação de regeração (#193): a rubrica só é regerada se pergunta/resposta
+    // mudou APÓS uma geração (rubric_stale). O checkbox só é MARCÁVEL nesse caso
+    // (fresh → desabilitado e desmarcado; stale → marcado por default, mas o
+    // professor pode desmarcar para NÃO regerar). Só aparece se a questão já TEM
+    // rubrica (rubrica vazia é sempre gerada). O desmarcar é transiente (_regen).
+    const cb = div.querySelector('.rq-mark');
+    const markWrap = div.querySelector('.rq-mark-wrap');
+    const syncMark = () => {
+      const hasR = !!(q.rubric || '').trim();
+      markWrap.style.display = hasR ? 'inline-flex' : 'none';
+      cb.disabled = !q.rubric_stale;
+      cb.checked = !!q.rubric_stale && q._regen !== false;
+    };
     div.querySelector('.q-head').onclick = (e) => { if (e.target.classList.contains('q-del')) return; q._open = !q._open; div.classList.toggle('open', q._open); };
-    div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); markConfigDirty(); renderQuestions(); renderRubric(); };
-    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; markConfigDirty(); syncHead(div, q); cfgWarn(); });
-    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; markConfigDirty(); });
-    syncHead(div, q);
+    div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); markConfigDirty(); renderQuestions(); };
+    div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; q._regen = true; markConfigDirty(); syncHead(div, q); setBadge(); syncMark(); cfgWarn(); });
+    div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; q._regen = true; markConfigDirty(); setBadge(); syncMark(); });
+    div.querySelector('.q-rubric').addEventListener('input', (e) => { q.rubric = e.target.value; q.rubric_stale = false; q._regen = false; markConfigDirty(); setBadge(); syncMark(); });
+    div.querySelector('.q-weight').addEventListener('input', (e) => { q.weight = Number(e.target.value) > 0 ? Number(e.target.value) : 1; markConfigDirty(); });
+    cb.addEventListener('change', () => { q._regen = cb.checked; });
+    const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
+    syncHead(div, q); setBadge(); syncMark();
     return div;
   }
   function renderQuestions() {
@@ -389,46 +408,9 @@
     updateQCount();
   }
 
-  // ---------- Rubrica por questão (aba Avaliação): EDITOR COMPLETO ----------
-  // Mostra e edita pergunta + resposta + rubrica + peso, permite adicionar/excluir —
-  // tudo sobre a MESMA lista compartilhada, então reflete na Configuração. Editar
-  // pergunta/resposta marca a rubrica p/ revisão; editar a rubrica limpa a marca.
-  function renderRubric() {
-    const c = document.getElementById('rubric-items-oral'); c.innerHTML = '';
-    if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
-    QUESTIONS.forEach((q, i) => {
-      // Cada questão é RECOLHÍVEL (reusa .q-item): fechada mostra só a pergunta;
-      // aberta edita pergunta + resposta + rubrica + peso. _ropen guarda o estado.
-      const div = document.createElement('div');
-      div.className = 'q-item' + (q._ropen ? ' open' : '');
-      const stale = q.rubric_stale || !(q.rubric || '').trim();
-      const badge = stale ? '<span class="pill" style="background:#fff6e0;border:1px solid #ecc874; font-size:var(--fs-xs)">revisar</span>' : '';
-      const genBtn = (q.answer || '').trim() ? '<button class="btn btn-ghost btn-sm rq-gen" type="button" title="Gerar a rubrica a partir da resposta esperada">gerar</button>' : '';
-      div.innerHTML =
-        '<div class="q-head"><span class="q-chevron">▶</span><span class="q-num">' + (i + 1) + '.</span>' +
-          '<span class="q-text"></span><span class="rq-badge" style="margin-left:6px">' + badge + '</span></div>' +
-        '<div class="q-body">' +
-          '<label>Pergunta</label><textarea class="rq-question" placeholder="Enunciado da pergunta"></textarea>' +
-          '<label>Resposta esperada (opcional)</label><textarea class="rq-answer" placeholder="Gabarito — insumo para gerar a rubrica; o aluno não vê"></textarea>' +
-          '<label>Rubrica — como pontuar (5 níveis: 0 / 2,5 / 5 / 7,5 / 10); só o professor vê</label><textarea class="rq-rubric" style="min-height:4.5rem" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>' +
-          '<div class="row" style="margin-top: var(--sp-2); align-items:center">' + genBtn +
-            '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input rq-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
-            '<span class="spacer" style="flex:1"></span>' +
-            '<button class="btn btn-ghost btn-sm rq-del" type="button" title="remover questão">✕ excluir</button>' +
-          '</div>' +
-        '</div>';
-      const setHead = () => { const t = div.querySelector('.q-text'); const v = (q.question || '').trim(); if (v) { t.textContent = v; t.classList.remove('q-empty'); } else { t.textContent = '(pergunta vazia)'; t.classList.add('q-empty'); } };
-      div.querySelector('.q-head').onclick = (e) => { q._ropen = !q._ropen; div.classList.toggle('open', q._ropen); };
-      const qq = div.querySelector('.rq-question'); qq.value = q.question || ''; qq.addEventListener('input', () => { q.question = qq.value; q.rubric_stale = true; setHead(); });
-      const a = div.querySelector('.rq-answer'); a.value = q.answer || ''; a.addEventListener('input', () => { q.answer = a.value; q.rubric_stale = true; });
-      const w = div.querySelector('.rq-weight'); w.value = Number(q.weight) > 0 ? Number(q.weight) : 1; w.addEventListener('input', () => { q.weight = Number(w.value) > 0 ? Number(w.value) : 1; });
-      const rub = div.querySelector('.rq-rubric'); rub.value = q.rubric || ''; rub.addEventListener('input', () => { q.rubric = rub.value; q.rubric_stale = false; });
-      div.querySelector('.rq-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); renderRubric(); renderQuestions(); };
-      const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
-      setHead();
-      c.appendChild(div);
-    });
-  }
+  // Editor único (#188): a rubrica agora mora na Configuração (makeItem). renderRubric
+  // vira um ALIAS de renderQuestions para as chamadas antigas seguirem funcionando.
+  function renderRubric() { renderQuestions(); }
   // Payload de save: as questões COM enunciado (com id estável), na ordem atual.
   function questionsPayload() {
     return QUESTIONS.filter(q => (q.question || '').trim())
@@ -719,14 +701,8 @@
     const last = items[items.length - 1];
     if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.q-q').focus(); }
   };
-  // Adicionar questão a partir da aba Avaliação (mesma lista compartilhada).
-  document.getElementById('rubric-add-oral').onclick = () => {
-    QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
-    renderRubric();
-    const rows = document.querySelectorAll('#rubric-items-oral .rubric-q');
-    const last = rows[rows.length - 1];
-    if (last) { last.scrollIntoView({ block: 'nearest' }); last.querySelector('.rq-question').focus(); }
-  };
+  // (issue #188: "adicionar questão" da aba Avaliação removido — o editor único
+  // fica na Configuração, onde "+ adicionar pergunta" já cobre.)
   // Salva a lista COMPARTILHADA (perguntas + respostas + rubricas). Devolve j (ou null).
   async function saveQuestions() {
     const qs = questionsPayload();
@@ -737,14 +713,8 @@
     adoptSaved(j.questions); renderQuestions(); renderRubric();
     return j;
   }
-  document.getElementById('save-rubric-oral').onclick = async () => {
-    const msg = document.getElementById('rubric-msg-oral'); msg.textContent = 'Salvando…';
-    try {
-      const j = await saveQuestions();
-      if (j.error) { msg.textContent = 'Falha: ' + j.error; return; }
-      msg.textContent = 'Rubrica salva.';
-    } catch (e) { msg.textContent = 'Falha de comunicação.'; }
-  };
+  // (issue #188: "Salvar rubrica" removido — a Configuração salva perguntas,
+  // respostas, pesos E rubricas de uma vez em "Salvar configuração".)
   // Gera a rubrica de UMA questão (a partir da resposta). Salva antes (para o servidor
   // ter a resposta atual) e adota o resultado.
   async function generateOneRubric(q, btn) {
@@ -770,17 +740,36 @@
     btns.forEach(i => document.getElementById(i).disabled = true);
     status.textContent = 'Salvando…';
     try {
+      // #193: no "pendentes", exclui as questões STALE que o professor DESMARCOU
+      // (regerar por default; desmarcar = manter a rubrica atual). Ids estáveis (têm
+      // rubrica → já foram salvas); coletado ANTES do save (o save não muda ids).
+      const excludeIds = scope === 'stale'
+        ? QUESTIONS.filter(x => x.id != null && (x.rubric || '').trim() && x.rubric_stale && x._regen === false).map(x => x.id)
+        : [];
       const s = await saveQuestions();
       if (s.error) { status.textContent = 'Falha: ' + s.error; return; }
       status.textContent = scope === 'all' ? 'Gerando todas as rubricas…' : 'Gerando rubricas pendentes…';
-      const r = await fetch(`${API}/oral/rubrics/generate?scope=${scope}`, { method: 'POST' });
-      if (!r.ok || !r.body) { let m = r.status; try { m = (await r.json()).error || r.status; } catch (e) {} status.textContent = 'Falha: ' + m; return; }
+      const exq = excludeIds.length ? `&exclude=${excludeIds.join(',')}` : '';
+      const r = await fetch(`${API}/oral/rubrics/generate?scope=${scope}${exq}`, { method: 'POST' });
+      if (!r.ok || !r.body) {
+        // Cota conferida ANTES de chamar o modelo (#192): saldo insuficiente
+        // não começa, e avisa quantas faltam.
+        let msg = 'Falha: ' + r.status;
+        try {
+          const j = await r.json();
+          if (j.error === 'rubric_quota_exceeded') {
+            msg = `Cota insuficiente: seriam ${j.needed} nova(s) rubrica(s), mas resta(m) ${j.remaining} (limite ${j.limit}). Reduza o banco de questões ou peça mais cota.`;
+          } else msg = 'Falha: ' + (j.error || r.status);
+        } catch (e) {}
+        status.textContent = msg; return;
+      }
       await readNdjson(r, (m) => {
         if (m.type === 'done') {
           if (Array.isArray(m.questions)) { adoptSaved(m.questions); renderQuestions(); renderRubric(); }
           let t = m.candidates === 0 ? 'Nenhuma rubrica a gerar (as questões precisam de resposta esperada).'
             : `${m.generated} rubrica(s) gerada(s) de ${m.candidates}.`;
           if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          if (m.quota && m.quota.limit != null) t += ` Resta(m) ${m.quota.remaining_after} na cota.`;
           status.textContent = t;
         }
       });

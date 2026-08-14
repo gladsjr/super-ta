@@ -89,6 +89,59 @@ Escreva a rubrica dos 5 níveis e sugira o peso.`;
         log.info("AGENT:OralRubricBuilder", `ok weight=${weight} len=${rubric.length}`);
         return { rubric, weight };
     }
+
+    /**
+     * Versão em BLOCO (issue #194): recebe N questões (com id) e devolve N
+     * rubricas+pesos, AMARRADAS pelo id (não depende da ordem). Corta o overhead
+     * de raciocínio por chamada sem diluir por questão. Ignora itens sem resposta
+     * esperada. Se o bloco INTEIRO falhar, lança — o caller trata cada item do
+     * bloco como erro individual (isolamento preservado).
+     * @param {object} p
+     * @param {Array<{id:number,question:string,answer:string}>} p.items
+     * @returns {Promise<Array<{id:number,rubric:string,weight:number}>>}
+     */
+    async buildBatch({ items, meterCtx = null }) {
+        const list = (items || [])
+            .map(it => ({ id: Number(it.id), q: String(it.question ?? "").trim(), a: String(it.answer ?? "").trim() }))
+            .filter(it => Number.isFinite(it.id) && it.a);
+        if (!list.length) return [];
+        if (list.length === 1) { // bloco de 1 → caminho single (schema mais simples)
+            const one = await this.build({ question: list[0].q, answer: list[0].a, meterCtx });
+            return [{ id: list[0].id, rubric: one.rubric, weight: one.weight }];
+        }
+        const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}
+
+${this.systemPromptBody}
+
+# Em BLOCO
+Você recebe VÁRIAS questões, cada uma com um "id". Gere UMA rubrica por questão, seguindo TODAS as regras acima, e amarre cada rubrica ao "id" da sua questão (não dependa da ordem). RELEIA a resposta esperada de CADA questão — não copie o formato da anterior nem encurte as últimas. Devolva TODAS as questões recebidas.`;
+        const userText = "Gere a rubrica de CADA questão abaixo (uma por questão, amarrada pelo id). NÃO dependa da ordem.\n\n" +
+            list.map(it => `[id ${it.id}]\nPERGUNTA:\n${it.q || "(sem enunciado)"}\n\nRESPOSTA ESPERADA (gabarito):\n${it.a}`).join("\n\n---\n\n");
+
+        const { rubrics } = await runStructured({
+            client: this.client, model: this.model, label: "AGENT:OralRubricBuilder(batch)",
+            instructions: systemPrompt, input: [{ role: "user", content: [{ type: "input_text", text: userText }] }],
+            schema: SCHEMA_BATCH, schemaName: "oral_rubrics", meterCtx,
+            promptLog: systemPrompt + "\n\n" + userText, maxAttempts: 2, extractObject: true,
+            validate: (parsed) => {
+                const arr = Array.isArray(parsed.rubrics) ? parsed.rubrics : [];
+                const out = [];
+                for (const r of arr) {
+                    const id = Number(r.id);
+                    const rub = typeof r.rubric === "string" ? r.rubric.trim() : "";
+                    if (!Number.isFinite(id) || !rub) continue;
+                    let w = Math.round(Number(r.weight));
+                    if (!Number.isFinite(w) || w < 1) w = 1;
+                    if (w > 5) w = 5;
+                    out.push({ id, rubric: rub, weight: w });
+                }
+                if (!out.length) throw new Error("OralRubricBuilder(batch): nenhuma rubrica válida");
+                return { rubrics: out };
+            },
+        });
+        log.info("AGENT:OralRubricBuilder", `batch ok n=${rubrics.length}/${list.length}`);
+        return rubrics;
+    }
 }
 
 // JSON Schema strict. Limites do weight garantidos no código (validate).
@@ -99,5 +152,27 @@ const SCHEMA = {
     properties: {
         rubric: { type: "string" },
         weight: { type: "number" },
+    },
+};
+
+// Schema do caminho em BLOCO (#194): N rubricas amarradas pelo id da questão.
+const SCHEMA_BATCH = {
+    type: "object",
+    additionalProperties: false,
+    required: ["rubrics"],
+    properties: {
+        rubrics: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["id", "rubric", "weight"],
+                properties: {
+                    id: { type: "number" },
+                    rubric: { type: "string" },
+                    weight: { type: "number" },
+                },
+            },
+        },
     },
 };
