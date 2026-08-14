@@ -45,6 +45,12 @@ run = ["node", "server.js"]
 
 [userenv.production]
 PUBLIC_BASE_URL = "https://oratia.education"
+ENFORCE_AUTH_POLICY = "true"
+ORAL_RUBRIC_BLOCK_SIZE = "5"
+RUBRIC_QUOTA_LIMIT = "100"
+
+[userenv.development]
+RUBRIC_QUOTA_LIMIT = "100"
 
 [postMerge]
 path = "scripts/post-merge.sh"
