@@ -965,7 +965,11 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUploa
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.appendOralVideoPart(req.submission.id, key);
-        log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}`);
+        // Gate de vídeo obrigatório: a conclusão da prova é marcada no encerramento
+        // da sessão de voz, ANTES do vídeo subir. Se ficou 'aguardando vídeo',
+        // promove para concluída agora que o segmento chegou.
+        const promoted = await db.promoteAwaitingVideo(req.submission.id);
+        log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
         res.json({ ok: true });
     } catch (err) {
         log.error("ORAL", `video upload failed: ${err.message}`);

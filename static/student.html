@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/css/app.css" />
   <script src="/static/js/theme.js"></script>
   <script src="/static/js/commandZones.js"></script>
+  <script src="/static/js/proctorGate.js"></script>
   <script src="/static/js/interviewSetup.js"></script>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png" />
@@ -1910,8 +1911,16 @@
         const release = finishUpload(j);
         if (!release) { if (camStream) try { camStream.getTracks().forEach(t => t.stop()); } catch {} return; }
         if (setupOk) startProctoring(camStream, release, j.narrator?.audio_url); // "Ciente – Começar" solta o entrevistador
-        else if (interactionMode === 'audio' && j.narrator?.audio_url) appendNarrator(j.narrator.audio_url, release);
-        else release();
+        else {
+          // Proctoring OBRIGATÓRIO: o setup NÃO confirmou captura de vídeo (câmera
+          // negada/indisponível ou navegador sem gravação) → a entrevista não
+          // começa. O aluno vê o painel de bloqueio (o setup normalmente já o
+          // mostra e nem chega aqui; isto cobre uma rejeição inesperada do setup).
+          if (camStream) try { camStream.getTracks().forEach(t => t.stop()); } catch {}
+          box.classList.remove('hidden');
+          document.getElementById('chat-area')?.classList.add('hidden');
+          if (window.proctorGate) window.proctorGate.blockingCameraError(box, { reason: 'no-data', onRetry: () => location.reload() });
+        }
       } else {
         // Sem fiscalização: espera o upload e começa (comportamento normal).
         const j = await uploadPromise;
@@ -2429,6 +2438,19 @@
     ];
     // resume=true: reentrada de entrevista em andamento — sem setup nem consentimento,
     // já entra com as áreas de gravação (Gravar/Enviar/Cancelar/Repetir).
+    // Captura de vídeo caiu NO MEIO da entrevista (proctoring obrigatório): overlay
+    // bloqueante até religar a câmera. A entrevista é retomável — recarregar
+    // continua de onde parou. Se a track só mutou e volta, o overlay some sozinho.
+    function showCaptureLost() {
+      if (document.getElementById('cap-lost')) return;
+      const o = document.createElement('div'); o.id = 'cap-lost';
+      o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,12,.93);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
+      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A entrevista está <strong>pausada</strong>. Reative a câmera; se não voltar sozinha, recarregue esta página para continuar de onde você parou.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
+      document.body.appendChild(o);
+      document.getElementById('cap-reload').onclick = () => location.reload();
+    }
+    function hideCaptureLost() { const o = document.getElementById('cap-lost'); if (o) o.remove(); }
+
     async function startProctoring(camStream, onConsent, narratorUrl, resume) {
       if (proctorStream) return; // já ligado nesta sessão
       proctorStream = camStream || null;
@@ -2482,6 +2504,11 @@
         proctorRecorder.onstop = uploadProctorVideo;
         proctorRecorder.start(2000);
       }
+      // Vigia a captura no MEIO (proctoring obrigatório): se a câmera cai, um
+      // overlay bloqueante impede gravar respostas até religar; ao voltar, some.
+      if (window.proctorGate) window.proctorGate.attachTrackLossGuard(proctorStream, proctorRecorder, {
+        onLost: showCaptureLost, onRegained: hideCaptureLost,
+      });
 
       // instruções faladas (orientador) + a área "Ciente – Começar"
       let narratorAudio = null;
@@ -2530,12 +2557,20 @@
         });
       } else if (typeof onConsent === 'function') { onConsent(); } // sem o módulo → não trava
     }
-    function uploadProctorVideo() {
+    async function uploadProctorVideo() {
       if (!proctorChunks.length) return;
       const blob = new Blob(proctorChunks, { type: (proctorRecorder && proctorRecorder.mimeType) || 'video/webm' });
       proctorChunks = [];
+      // Vídeo obrigatório: tenta algumas vezes (rede instável/tela fechando). A
+      // conclusão só é liberada quando o servidor recebe o vídeo (awaiting_video).
       const form = new FormData(); form.append('file', blob, 'proctor.webm');
-      fetch(`/s/${encodeURIComponent(submissionToken)}/proctor-video`, { method: 'POST', body: form }).catch(() => {});
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const r = await fetch(`/s/${encodeURIComponent(submissionToken)}/proctor-video`, { method: 'POST', body: form });
+          if (r.ok) return;
+        } catch {}
+        await new Promise(res => setTimeout(res, 800 * attempt));
+      }
     }
     function stopProctoringAndUpload() {
       if (proctorDone || !proctorStream) return; proctorDone = true;

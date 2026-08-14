@@ -49,6 +49,7 @@
     .poses figure { margin: 0; flex: 1; }
     .qa-who { font-size:.72rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
   </style>
+  <script src="/static/js/proctorGate.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -720,23 +721,55 @@
     }
     $('calib-rec-btn').onclick = calibToggleRecord;
 
+    // Bloqueia o INÍCIO quando o proctoring de vídeo obrigatório não tem captura
+    // confirmada (câmera/navegador incompatível). Para gravação/streams e mostra
+    // o painel; o retry recarrega (e o professor pode liberar sem vídeo).
+    function blockCapture(reason) {
+      try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch {}
+      try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {}
+      show('setup');
+      if (window.proctorGate) window.proctorGate.blockingCameraError($('setup'), { reason, onRetry: () => location.reload() });
+    }
+
+    // Captura de vídeo caiu NO MEIO (proctoring obrigatório): overlay bloqueante,
+    // entrevista pausada no servidor (capture_lost), retoma de onde parou.
+    let captureGuard = null;
+    function showCaptureLost() {
+      if (document.getElementById('cap-lost')) return;
+      const o = document.createElement('div'); o.id = 'cap-lost';
+      o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,12,.93);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
+      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A entrevista está <strong>pausada</strong>. Reative a câmera; se não voltar sozinha, recarregue esta página para continuar de onde você parou.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
+      document.body.appendChild(o);
+      document.getElementById('cap-reload').onclick = () => location.reload();
+    }
+    function hideCaptureLost() { const o = document.getElementById('cap-lost'); if (o) o.remove(); }
+
     // Começa a entrevista de fato: grava o vídeo + conecta ao relay.
-    function beginInterview() {
+    async function beginInterview() {
       posLoop = false;
       stopNoiseMeter();
       startPresenceWatch();
       show('live');
       $('selfview').srcObject = micStream;
       setStatus('Conectando…');
-      // grava o vídeo (áudio + câmera) para avaliação posterior — bitrate baixo
-      // de propósito (revisão humana / proctoring, não precisa de HD).
+      // Proctoring OBRIGATÓRIO: inicia a gravação e SÓ conecta ao relay depois de
+      // confirmar que o vídeo grava de fato (1º chunk não-vazio). Navegador sem
+      // MediaRecorder/codec (ex.: alguns iOS) → bloqueia, não conecta.
+      const mime = window.proctorGate ? window.proctorGate.pickVideoMime() : '';
+      if (mime === null) { blockCapture('no-recorder'); return; }
       try {
-        try { recorder = new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
-        catch (e0) { recorder = new MediaRecorder(micStream); }
-        recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
-        recorder.onstop = uploadVideo;
-        recorder.start(1000);
-      } catch (e) { /* sem gravação se o navegador não suportar — não bloqueia */ }
+        recorder = mime ? new MediaRecorder(micStream, { mimeType: mime, videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 })
+                        : new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 });
+      } catch (e0) { try { recorder = new MediaRecorder(micStream); } catch { recorder = null; } }
+      if (!recorder) { blockCapture('no-recorder'); return; }
+      let recOk = false;
+      const firstChunk = new Promise((res) => {
+        const to = setTimeout(() => res(false), 2500);
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size) { recChunks.push(e.data); if (!recOk) { recOk = true; clearTimeout(to); res(true); } } };
+      });
+      recorder.onstop = uploadVideo;
+      recorder.start(1000);
+      if (!(await firstChunk)) { try { recorder.stop(); } catch {} blockCapture('no-data'); return; }
       ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
       playHead = ctx.currentTime;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -760,6 +793,12 @@
         setStatus('Conexão encerrada', 'err');
         salvageVideo(); // queda inesperada: sobe o vídeo parcial
       };
+      // Vigia a CAPTURA: track de vídeo cai/recorder morre → pausa no servidor +
+      // overlay; volta (unmute) → retoma.
+      if (window.proctorGate) captureGuard = window.proctorGate.attachTrackLossGuard(micStream, recorder, {
+        onLost: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_lost' })); } catch {} showCaptureLost(); },
+        onRegained: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_ok' })); } catch {} hideCaptureLost(); },
+      });
     }
     $('to-check-btn').onclick = continueToCheck;
     // Fones obrigatórios: só libera o "Continuar" com o checkbox marcado.
@@ -775,10 +814,16 @@
       try {
         const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
         const form = new FormData(); form.append('file', blob, 'entrevista.webm');
-        const r = await fetch(`/s/${SUB}/live/video`, { method: 'POST', body: form });
-        note = r.ok ? 'Vídeo enviado.' : 'A entrevista foi registrada (o envio do vídeo falhou; avise o professor).';
+        // Vídeo obrigatório: retenta (conclusão liberada só quando o servidor
+        // recebe o vídeo — awaiting_video no backend).
+        let ok = false;
+        for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+          try { const r = await fetch(`/s/${SUB}/live/video`, { method: 'POST', body: form }); ok = r.ok; } catch {}
+          if (!ok && attempt < 3) await new Promise(res => setTimeout(res, 800 * attempt));
+        }
+        note = ok ? 'Vídeo enviado.' : 'O envio do vídeo falhou. Recarregue a página para tentar de novo; se persistir, avise o professor.';
       } catch {
-        note = 'A entrevista foi registrada (o envio do vídeo falhou; avise o professor).';
+        note = 'O envio do vídeo falhou. Recarregue a página para tentar de novo; se persistir, avise o professor.';
       } finally { stopTracks(); }
       enterPostInterview({ uploadNote: note });
     }
