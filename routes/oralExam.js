@@ -205,6 +205,13 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
         if (isTxt) {
             const text = req.file.buffer.toString("utf-8").replace(/^\uFEFF/, "").trim();
             if (!text) return res.status(400).json({ error: "o arquivo .txt está vazio" });
+            // Guardrail de custo: o .txt não passava por nenhum teto antes de ir ao
+            // modelo (o PDF tem exceedsPageLimit). ~60k chars ≈ 20 páginas — mesmo
+            // patamar do limite de páginas do PDF (issue #191).
+            const MAX_TXT_CHARS = 60000;
+            if (text.length > MAX_TXT_CHARS) {
+                return res.status(400).json({ error: `o arquivo .txt é muito grande (${text.length} caracteres; limite ${MAX_TXT_CHARS}, ~20 páginas) — envie um material menor` });
+            }
             questions = await oralExamExtractorAgent.extract({ examText: text, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
         } else {
             const examFile = await openai.files.create({

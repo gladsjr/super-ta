@@ -58,7 +58,10 @@
 <body>
 
 <header class="topbar">
-  <a class="brand" href="/admin"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
+  <!-- Destino neutro por padrão (/unidades) — evita mandar usuário institucional
+       para /admin e ser redirecionado de volta (flicker, issue #164). Admin global
+       recebe /admin por JS quando o papel é conhecido. -->
+  <a class="brand" id="brand-link" href="/unidades"><img class="brand-mark" src="/static/branding/oratia-icon.png" alt=""><img class="brand-word" src="/static/branding/oratia-wordmark.png" alt="ORATIA"></a>
   <div id="user-area" class="topbar-right hidden" style="display:flex; align-items:center; gap: var(--sp-3)">
     <span id="user-info" class="muted"></span>
     <a id="admin-link" class="btn btn-sm hidden" href="/admin">← Admin</a>
@@ -290,6 +293,7 @@ async function checkAuth() {
       const j = await r.json();
       IS_GLOBAL = j.is_global_admin !== false;
       $('admin-link').classList.toggle('hidden', !IS_GLOBAL);
+      if (IS_GLOBAL) $('brand-link').href = '/admin'; // admin global volta ao painel admin pelo logo (issue #164)
       showApp(j.user); boot();
     }
     else showLogin();
