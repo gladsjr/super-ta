@@ -153,12 +153,22 @@
         `<div class="qa">${esc(q.comment || '')}</div></div>`;
     }).join('') + (ev.summary ? `<p style="margin-top: var(--sp-3)"><strong>Resumo:</strong> ${esc(ev.summary)}</p>` : '');
   }
-  function renderTranscript(turns) {
+  function renderTranscript(turns, alerts) {
     const el = document.getElementById('transcript');
     if (!turns || !turns.length) { el.innerHTML = '<p class="hint">Sem transcrição — o aluno ainda não realizou a prova.</p>'; return; }
-    el.innerHTML = turns.map(t => {
+    // Alertas de transcrição (#137): trechos prováveis de ruído/eco/silêncio. Índice → rótulo.
+    const flagged = {};
+    (alerts && Array.isArray(alerts.turns) ? alerts.turns : []).forEach(a => { flagged[a.index] = a.label; });
+    const banner = (alerts && alerts.count > 0)
+      ? `<p class="hint" style="margin-bottom:var(--sp-2); color:var(--ink-700)">⚠️ ${alerts.count} trecho(s) da fala do aluno destacado(s) abaixo — provável ruído, eco ou silêncio transcrito (idioma não reconhecido/ininteligível). É indício para conferência, não altera a nota.</p>`
+      : '';
+    el.innerHTML = banner + turns.map((t, i) => {
       const who = t.role === 'examiner' ? 'Examinador' : 'Aluno';
-      return `<div class="turn ${t.role === 'examiner' ? 'examiner' : ''}"><div class="who">${who}</div><div class="what">${esc(t.text)}</div></div>`;
+      const flag = flagged[i]
+        ? ` <span class="pill" style="background:#eae6fb;border:1px solid #b9adec">${esc(flagged[i])}</span>`
+        : '';
+      const style = flagged[i] ? ' style="background:#f6f3fe;border-radius:var(--r-sm)"' : '';
+      return `<div class="turn ${t.role === 'examiner' ? 'examiner' : ''}"${style}><div class="who">${who}${flag}</div><div class="what">${esc(t.text)}</div></div>`;
     }).join('');
   }
 
@@ -186,7 +196,7 @@
     renderGrades(d.grades, d.grading_mode, CUR_QUESTIONS);
     document.getElementById('dev-pub').checked = !!d.devolutiva_published;
     document.getElementById('grade-pub').checked = !!d.grade_published;
-    renderTranscript(d.transcript);
+    renderTranscript(d.transcript, d.voice?.transcript_alerts);
 
     const scCard = document.getElementById('student-comment-card');
     if (d.student_comment) {
