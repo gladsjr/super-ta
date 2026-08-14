@@ -11,7 +11,7 @@ Per-turn orchestration is **delegated to a single reasoning-model call** (`Super
 - `docs/architecture.md` — `/chat` cycle + prompt map (mermaid)
 - `docs/super-orchestrator-plan.md` — rationale + action schema
 - `docs/oral-exam.md` — oral exam (Realtime): relay, guaranteed ending, setup gate, calibration, proctoring, oral agents, schema
-- `docs/video-proctoring.md` — camera-on "fiscalização" for the message interview (command areas, penalty composition)
+- `docs/video-proctoring.md` — camera-on "fiscalização" for the message interview (command areas; vídeo OBRIGATÓRIO/bloqueante — gate `static/js/proctorGate.js`, estado `awaiting_video`, liberação do professor)
 - `docs/scenarios.md` — multi-agent scenarios subsystem (experimental)
 - `docs/access-model.md` — camada institucional: unidades (árvore recursiva + flag de turma), RBAC tenant-aware (herança só p/ admin; disponibilidade ≠ acesso), identidade/login (pessoa ≠ identidades; local + Google SSO), dois portões de uso como reserva (US$ + pacotes/DSL, com devolução), integração gradual
 

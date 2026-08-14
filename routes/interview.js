@@ -57,6 +57,7 @@ import {
 } from "../lib/sessionLifecycle.js";
 import { attachNarratorAudio } from "../lib/narrator.js";
 import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
+import { videoMandatory } from "../lib/proctor.js";
 import log from "../lib/logger.js";
 import { generateStudentAnswer, STUDENT_PROFILES } from "../lib/studentSimulator.js";
 
@@ -120,7 +121,11 @@ async function evaluateWithConversationLockRetry(fn, { retries = 3, baseDelayMs 
 // ainda aberta. Falha de escrita é logada, não derruba a despedida.
 async function persistFinalization(req, completionReason) {
     try {
-        await db.finalizeSubmission(req.submission.id, null, completionReason);
+        // Gate de vídeo obrigatório: quando o proctoring é exigido e ainda não há
+        // vídeo, a submissão fica 'awaiting_video' (não 'complete') até o upload
+        // chegar. give_up sempre conclui. Tokens de teste ficam isentos.
+        const mandatory = videoMandatory(req.work) && req.submission.is_test !== true;
+        await db.finalizeWithVideoGate(req.submission.id, { mandatory, reason: completionReason });
     } catch (err) {
         log.error("SUBMISSION", `finalize persist failed token=${req.submission.submission_token} reason=${completionReason}: ${err.message}`);
     }
@@ -595,7 +600,10 @@ router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUp
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.appendOralVideoPart(req.submission.id, key);
-        log.info("SUBMISSION", `proctor-video armazenado submission=${req.submission.submission_token} key=${key} bytes=${req.file.buffer.length}`);
+        // Gate de vídeo obrigatório: se a submissão estava aguardando o vídeo p/
+        // concluir (encerrou antes de o vídeo subir), promove para concluída.
+        const promoted = await db.promoteAwaitingVideo(req.submission.id);
+        log.info("SUBMISSION", `proctor-video armazenado submission=${req.submission.submission_token} key=${key} bytes=${req.file.buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
         res.json({ ok: true });
     } catch (err) {
         log.error("SUBMISSION", `proctor-video failed: ${err.message}`);
@@ -1892,7 +1900,11 @@ router.post("/s/:submissionToken/finalize", requireSubmissionToken, express.json
     const rawComment = req.body?.comment;
     const comment = typeof rawComment === "string" ? rawComment.slice(0, MAX_COMMENT_LEN) : null;
     try {
-        await db.finalizeSubmission(req.submission.id, comment, reason);
+        // Gate de vídeo obrigatório (ver persistFinalization / finalizeWithVideoGate):
+        // com proctoring exigido e sem vídeo ainda, fica 'awaiting_video' e só
+        // conclui quando o vídeo sobe (promoteAwaitingVideo no upload).
+        const mandatory = videoMandatory(req.work) && req.submission.is_test !== true;
+        const gateStatus = await db.finalizeWithVideoGate(req.submission.id, { mandatory, reason, comment });
         // Tenta atualizar a sessão em memória pra evitar uma janela em que ela
         // possa parecer ainda "viva". Tolerante a sess inexistente — sem sessão
         // em memória, os endpoints já estão bloqueados pelo middleware via DB.
@@ -1901,8 +1913,8 @@ router.post("/s/:submissionToken/finalize", requireSubmissionToken, express.json
             sess.conversationCompleted = true;
             sess.currentPhase = "finalized";
         }
-        log.info("SUBMISSION", `finalized token=${req.submission.submission_token} reason=${reason} has_comment=${!!comment}`);
-        res.json({ ok: true, completion_reason: reason });
+        log.info("SUBMISSION", `finalized token=${req.submission.submission_token} reason=${reason} status=${gateStatus} has_comment=${!!comment}`);
+        res.json({ ok: true, completion_reason: reason, status: gateStatus });
     } catch (err) {
         log.error("SUBMISSION", `finalize failed token=${req.submission.submission_token}: ${err.message}`);
         res.status(500).json({ error: "falha ao finalizar entrevista", detail: err.message });

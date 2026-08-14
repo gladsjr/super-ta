@@ -1490,6 +1490,21 @@ router.patch("/w/:workToken/submissions/:subToken", requireWorkToken, requirePro
     }
 });
 
+// Liberar o aluno a concluir SEM vídeo — válvula de escape do gate de proctoring
+// obrigatório (câmera/navegador do aluno genuinamente incompatível). Marca
+// video_waived e, se a submissão estava 'aguardando vídeo', conclui na hora.
+router.post("/w/:workToken/submissions/:subToken/waive-video", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    try {
+        await db.waiveSubmissionVideo(found.id);
+        log.info("SUBMISSION", `vídeo liberado (waive) submission=${found.submission_token} work=${req.work.work_token}`);
+        res.json({ ok: true, submission_token: found.submission_token, video_waived: true });
+    } catch (err) {
+        log.error("SUBMISSION", `waive-video failed submission=${found.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "falha ao liberar sem vídeo" });
+    }
+});
+
 // Apagar um token de envio. Só quando o aluno NÃO iniciou (status pending): aí
 // devolve o assento do pacote ao pool (Gate B) e remove a submissão. Se já
 // começou, houve custo — não dá pra apagar nem devolver (bloqueie em vez disso).
@@ -1498,14 +1513,22 @@ router.delete("/w/:workToken/submissions/:subToken", requireWorkToken, requirePr
     if (sub.status !== "pending") {
         return res.status(409).json({ error: "submission_in_use", detail: "só é possível apagar um envio que o aluno ainda não iniciou" });
     }
+    // Devolução do assento + delete numa ÚNICA transação (issue #145): se o delete
+    // falhar, a devolução de cota é desfeita (nada de reembolso sem apagar o token).
+    const client = await pool.connect();
     try {
-        await releaseForSubmission(sub.id); // devolve o assento (no-op se não havia reserva)
-        await db.deleteSubmission(sub.id);
+        await client.query("BEGIN");
+        await releaseForSubmission(sub.id, client); // devolve o assento (no-op se não havia reserva)
+        await db.deleteSubmission(sub.id, client);
+        await client.query("COMMIT");
         log.info("SUBMISSION", `deleted+refunded submission=${sub.submission_token} work=${req.work.work_token}`);
         res.json({ ok: true, submission_token: sub.submission_token });
     } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
         log.error("SUBMISSION", `delete failed submission=${sub.submission_token}: ${err.message}`);
         res.status(500).json({ error: "failed to delete submission" });
+    } finally {
+        client.release();
     }
 });
 

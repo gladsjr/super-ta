@@ -334,7 +334,7 @@
       <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-top: var(--sp-2)">
         <button id="eval-new-btn" class="btn btn-primary" type="button" title="Processo em lote: analisa o vídeo, avalia e gera o rascunho da devolutiva de cada entrevista ainda não avaliada">Avaliar entrevistas</button>
         <button id="publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas">Publicar devolutivas</button>
-        <button id="unpublish-all-btn" class="btn btn-ghost btn-sm" type="button" title="Retira das páginas dos alunos todas as devolutivas publicadas (ficam guardadas)">Despublicar devolutivas</button>
+        <button id="unpublish-all-btn" class="btn" type="button" title="Retira das páginas dos alunos todas as devolutivas publicadas (ficam guardadas)">Despublicar devolutivas</button>
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
       </div>
@@ -553,9 +553,23 @@ function avalCell(s) {
   if (s.status === 'completed' || s.status === 'gave_up') return '<span class="badge badge-pending">a avaliar</span>';
   return '<span class="muted">—</span>';
 }
+async function waiveVideo(token) {
+  if (!confirm('Liberar este aluno a concluir SEM vídeo?\n\nUse quando a câmera/navegador do aluno for realmente incompatível — a arguição foi feita, mas o vídeo obrigatório não chegou.')) return;
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(token)}/waive-video`, { method: 'POST' });
+    if (!r.ok) throw new Error();
+    await load();
+  } catch { alert('Falha ao liberar sem vídeo.'); }
+}
 function videoCell(s) {
   const hasVideo = (Number(s.oral_video_parts_count) > 0) || s.has_oral_video;
-  if (!hasVideo) return '<span class="muted" title="Nenhum vídeo gravado">sem vídeo</span>';
+  if (!hasVideo) {
+    // Proctoring obrigatório: a arguição terminou mas o vídeo não chegou. O
+    // professor pode liberar o aluno a concluir sem vídeo (válvula de escape).
+    if (s.status === 'awaiting_video') return `<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="A arguição terminou, mas o vídeo obrigatório ainda não chegou.">aguardando vídeo</span> <button class="btn btn-sm" type="button" onclick="waiveVideo('${escapeHtml(s.submission_token)}')" title="Concluir sem vídeo (câmera/navegador do aluno incompatível)">Liberar</button>`;
+    if (s.video_waived) return '<span class="muted" title="Concluída sem vídeo por liberação do professor">liberado s/ vídeo</span>';
+    return '<span class="muted" title="Nenhum vídeo gravado">sem vídeo</span>';
+  }
   if (s.has_oral_proctor) {
     let p = s.oral_proctor_json;
     if (typeof p === 'string') { try { p = JSON.parse(p); } catch { p = null; } }
@@ -694,6 +708,7 @@ function statusLabel(s) {
   return {
     pending: 'aguardando',
     in_progress: 'em andamento',
+    awaiting_video: 'aguardando vídeo',
     completed: 'concluída',
     gave_up: 'desistiu',
   }[s] || s;

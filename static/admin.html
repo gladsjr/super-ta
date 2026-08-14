@@ -393,9 +393,18 @@ function renderWorks() {
     const enunBadge = w.assignment_pdf
       ? '<span class="badge badge-accent">enunciado ✓</span>'
       : '<span class="badge">sem enunciado</span>';
-    const kindBadge = w.kind === 'scenario'
-      ? '<span class="badge badge-accent" title="Trabalho multi-interação (cenário)">multi-interação</span>'
-      : '<span class="badge" title="Trabalho de entrevista única (legado)">entrevista</span>';
+    // Mapeamento EXAUSTIVO por kind — antes só distinguia 'scenario' vs. resto, e
+    // a prova oral (oral_realtime) caía no "resto" ganhando o selo "entrevista"
+    // (issue #163). Tipo desconhecido mostra o próprio kind, não "entrevista".
+    const KIND_BADGE = {
+      scenario:      { cls: 'badge-accent', label: 'multi-interação', title: 'Trabalho multi-interação (cenário)' },
+      oral_realtime: { cls: '',             label: 'prova oral',      title: 'Prova oral (tempo real)' },
+      interview:     { cls: '',             label: 'entrevista',      title: 'Entrevista' },
+    };
+    const kbi = KIND_BADGE[w.kind];
+    const kindBadge = kbi
+      ? `<span class="badge ${kbi.cls}" title="${kbi.title}">${kbi.label}</span>`
+      : `<span class="badge" title="Tipo: ${w.kind || '—'}">${w.kind || '—'}</span>`;
     const inactive = w.is_active === false;
     const inactiveBadge = inactive ? '<span class="badge-inactive">desativado</span>' : '';
     const budget = Number(w.budget_usd || 0);
