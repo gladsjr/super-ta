@@ -205,6 +205,13 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
         if (isTxt) {
             const text = req.file.buffer.toString("utf-8").replace(/^\uFEFF/, "").trim();
             if (!text) return res.status(400).json({ error: "o arquivo .txt está vazio" });
+            // Guardrail de custo: o .txt não passava por nenhum teto antes de ir ao
+            // modelo (o PDF tem exceedsPageLimit). ~60k chars ≈ 20 páginas — mesmo
+            // patamar do limite de páginas do PDF (issue #191).
+            const MAX_TXT_CHARS = 60000;
+            if (text.length > MAX_TXT_CHARS) {
+                return res.status(400).json({ error: `o arquivo .txt é muito grande (${text.length} caracteres; limite ${MAX_TXT_CHARS}, ~20 páginas) — envie um material menor` });
+            }
             questions = await oralExamExtractorAgent.extract({ examText: text, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
         } else {
             const examFile = await openai.files.create({
@@ -965,7 +972,11 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUploa
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.appendOralVideoPart(req.submission.id, key);
-        log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}`);
+        // Gate de vídeo obrigatório: a conclusão da prova é marcada no encerramento
+        // da sessão de voz, ANTES do vídeo subir. Se ficou 'aguardando vídeo',
+        // promove para concluída agora que o segmento chegou.
+        const promoted = await db.promoteAwaitingVideo(req.submission.id);
+        log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
         res.json({ ok: true });
     } catch (err) {
         log.error("ORAL", `video upload failed: ${err.message}`);

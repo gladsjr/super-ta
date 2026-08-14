@@ -242,7 +242,7 @@ router.delete("/admin/units/:unitId/members/:membershipId", requireAuth, async (
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
-        await removeMembership(Number(req.params.membershipId));
+        await removeMembership(Number(req.params.membershipId), unitId); // escopo por unidade (issue #141)
         res.json({ ok: true });
     } catch (err) { return httpErr(res, err); }
 });
@@ -452,10 +452,14 @@ router.post("/admin/units/:unitId/people", requireAuth, json, async (req, res) =
             createdByUserId: uid(req),
         });
         log.info("UNITS", `person ${user.username} (${user.email}) role=${req.body?.role} unit=${unitId} invite=${invite ? "yes" : "no"} by=${req.session.user.username}`);
+        // O link de ativação vem AGORA (token cru só existe na emissão, issue #156).
         res.json({
             user: { id: user.id, username: user.username, email: user.email, display_name: user.display_name },
             membership_created: !!membership,
-            invite: invite ? { id: invite.id, state: invite.state, expires_at: invite.expires_at } : null,
+            invite: invite ? {
+                id: invite.id, state: invite.state, expires_at: invite.expires_at,
+                activation_link: `${publicBaseUrl(req)}/ativar?token=${invite.token}`,
+            } : null,
         });
     } catch (err) { return httpErr(res, err); }
 });
@@ -465,15 +469,10 @@ router.get("/admin/units/:unitId/invites", requireAuth, async (req, res) => {
     try {
         if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const invites = await listUnitInvites(unitId);
-        const base = publicBaseUrl(req);
-        // Sem servidor de e-mail, o admin precisa do LINK para enviar à mão — só
-        // dos convites pendentes (os já usados/cancelados não têm link ativo).
-        res.json({
-            invites: invites.map(({ token, ...rest }) => ({
-                ...rest,
-                activation_link: rest.state === "pendente" ? `${base}/ativar?token=${token}` : null,
-            })),
-        });
+        // O token cru não é mais guardado (issue #156), então a LISTA não traz
+        // link — o link vem na criação/reenvio, ou no "baixar e-mails" (que
+        // reemite). A lista mostra só o estado; pendentes ganham um "reenviar".
+        res.json({ invites: invites.map((inv) => ({ ...inv, activation_link: null })) });
     } catch (err) { return httpErr(res, err); }
 });
 
@@ -483,10 +482,19 @@ router.get("/admin/units/:unitId/invites.txt", requireAuth, async (req, res) => 
     try {
         if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
         const invites = await listUnitInvites(unitId);
+        // Sem armazenar o token cru (issue #156), o link só existe na emissão.
+        // "Baixar e-mails" REEMITE cada convite pendente (token novo) e monta o
+        // TXT com links frescos — preserva a entrega em lote do v1-sem-e-mail.
+        // Reemitir invalida o link anterior (que estava pendente e não usado).
+        const reissued = [];
+        for (const p of invites.filter((i) => i.state === "pendente")) {
+            const inv = await issueInvite({ userId: p.user_id, email: p.email, createdByUserId: uid(req) });
+            reissued.push({ ...p, token: inv.token, expires_at: inv.expires_at, state: "pendente" });
+        }
         const base = publicBaseUrl(req);
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="convites-unidade-${unitId}.txt"`);
-        res.send(buildInviteEmailsText(invites, base));
+        res.send(buildInviteEmailsText(reissued, base));
     } catch (err) { return httpErr(res, err); }
 });
 
@@ -502,9 +510,20 @@ router.post("/admin/units/:unitId/people/:userId/invite", requireAuth, json, asy
             [userId, unitId]
         );
         if (member.rowCount === 0) return res.status(404).json({ error: "person_not_in_unit" });
+        // Segurança (issue #142): NÃO reemitir convite de ativação para uma conta
+        // JÁ ATIVA — a ativação redefine a senha, então um admin de unidade poderia
+        // sequestrar a conta de um professor/admin gerando um novo link. Conta ativa
+        // = já tem password_hash. (Mesmo guard já existe em createPersonWithInvite.)
+        const acct = await pool.query(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
+        if (!acct.rows[0]) return res.status(404).json({ error: "user_not_found" });
+        if (acct.rows[0].password_hash) return res.status(409).json({ error: "account_already_active" });
         const invite = await issueInvite({ userId, createdByUserId: uid(req) });
         log.info("UNITS", `invite resent user=${userId} unit=${unitId} by=${req.session.user.username}`);
-        res.json({ invite: { id: invite.id, state: invite.state, expires_at: invite.expires_at } });
+        // Link fresco na resposta (token cru só existe agora, issue #156).
+        res.json({ invite: {
+            id: invite.id, state: invite.state, expires_at: invite.expires_at,
+            activation_link: `${publicBaseUrl(req)}/ativar?token=${invite.token}`,
+        } });
     } catch (err) { return httpErr(res, err); }
 });
 
@@ -512,7 +531,7 @@ router.post("/admin/units/:unitId/invites/:inviteId/cancel", requireAuth, json, 
     const unitId = Number(req.params.unitId);
     try {
         if (!(await canAdminUnitVerified(req, unitId))) return res.status(403).json({ error: "forbidden" });
-        await cancelInvite(Number(req.params.inviteId));
+        await cancelInvite(Number(req.params.inviteId), unitId); // escopo por unidade (issue #141)
         res.json({ ok: true });
     } catch (err) { return httpErr(res, err); }
 });

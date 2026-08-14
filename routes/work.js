@@ -1490,6 +1490,21 @@ router.patch("/w/:workToken/submissions/:subToken", requireWorkToken, requirePro
     }
 });
 
+// Liberar o aluno a concluir SEM vídeo — válvula de escape do gate de proctoring
+// obrigatório (câmera/navegador do aluno genuinamente incompatível). Marca
+// video_waived e, se a submissão estava 'aguardando vídeo', conclui na hora.
+router.post("/w/:workToken/submissions/:subToken/waive-video", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    try {
+        await db.waiveSubmissionVideo(found.id);
+        log.info("SUBMISSION", `vídeo liberado (waive) submission=${found.submission_token} work=${req.work.work_token}`);
+        res.json({ ok: true, submission_token: found.submission_token, video_waived: true });
+    } catch (err) {
+        log.error("SUBMISSION", `waive-video failed submission=${found.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "falha ao liberar sem vídeo" });
+    }
+});
+
 // Apagar um token de envio. Só quando o aluno NÃO iniciou (status pending): aí
 // devolve o assento do pacote ao pool (Gate B) e remove a submissão. Se já
 // começou, houve custo — não dá pra apagar nem devolver (bloqueie em vez disso).

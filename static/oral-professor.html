@@ -39,9 +39,6 @@
     .q-item.open .q-body { display: block; }
     .q-body label { display: block; font-size: var(--fs-xs); color: var(--ink-500); margin: var(--sp-2) 0 2px; }
     .q-body textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--ink-200); border-radius: var(--r-sm); }
-    /* Recolhido: mostra só as 2 primeiras perguntas (o resto fica oculto atrás do botão). */
-    .q-list.collapsed .q-item:nth-child(n+3) { display: none; }
-    .q-collapse-foot { margin-top: var(--sp-1); text-align: center; }
 
     code.tok { background: var(--bg-muted); padding: 1px 6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
 
@@ -135,9 +132,6 @@
         </div>
         <p class="card-sub" style="margin-top: var(--sp-2)">Digite as perguntas (ou edite o que veio do arquivo) — só o <strong>enunciado</strong>, que é falado ao aluno. O peso e o critério/gabarito de cada questão ficam na aba <strong>Avaliação &amp; notas</strong>. Clique numa linha para editar.</p>
         <div id="questions" class="q-list"></div>
-        <div class="q-collapse-foot hidden" id="q-collapse-foot">
-          <button class="btn btn-ghost btn-sm" id="q-collapse-toggle" type="button"></button>
-        </div>
       </div>
 
     </div>
@@ -212,7 +206,7 @@
             <button id="eval-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das provas realizadas que ainda não têm relatório (compara a transcrição ao gabarito)">Calcular Notas</button>
             <button id="eval-all-force-btn" class="btn" type="button" title="Recalcula as notas de TODAS as provas realizadas">Reavaliar todas</button>
             <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
-            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+            <button id="unpub-grade-btn" class="btn" type="button">Despublicar notas</button>
             <span class="spacer"></span>
             <span class="hint" id="rubric-msg-oral"></span>
           </div>
@@ -393,22 +387,7 @@
     if (!QUESTIONS.length) QUESTIONS.push({ id: null, question: '', answer: '', rubric: '', weight: 1, rubric_stale: true, _open: true });
     QUESTIONS.forEach((q, i) => { const it = makeItem(q); c.appendChild(it); it.querySelector('.q-num').textContent = (i + 1) + '.'; });
     updateQCount();
-    applyQCollapse();
   }
-  // Colapso da lista de perguntas: recolhida mostra só as 2 primeiras (CSS). O botão
-  // de rodapé só aparece quando há mais de 2 perguntas (senão não há o que recolher).
-  let qCollapsed = true;
-  function applyQCollapse() {
-    const list = document.getElementById('questions');
-    const foot = document.getElementById('q-collapse-foot');
-    const toggle = document.getElementById('q-collapse-toggle');
-    const n = QUESTIONS.length;
-    if (n <= 2) { list.classList.remove('collapsed'); foot.classList.add('hidden'); return; }
-    foot.classList.remove('hidden');
-    list.classList.toggle('collapsed', qCollapsed);
-    toggle.textContent = qCollapsed ? `▸ Mostrar todas as ${n} perguntas` : '▾ Recolher lista';
-  }
-  document.getElementById('q-collapse-toggle').onclick = () => { qCollapsed = !qCollapsed; applyQCollapse(); };
 
   // ---------- Rubrica por questão (aba Avaliação): EDITOR COMPLETO ----------
   // Mostra e edita pergunta + resposta + rubrica + peso, permite adicionar/excluir —
@@ -677,6 +656,11 @@
       const j = await r.json();
       if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
       msg.textContent = `${j.count} pergunta(s) extraída(s).` + (j.calibration_generated ? ' ✓ Calibração de fala gerada.' : '');
+      // O servidor trunca o banco de questões no teto (guardrail de custo) — avisa
+      // o professor em vez de descartar em silêncio (issue #184).
+      if (j.truncated) {
+        msg.innerHTML = `<span style="color:#8a6d1a">⚠ O material tinha mais perguntas do que o limite de <strong>${j.max_questions}</strong>; as excedentes foram <strong>descartadas</strong>. Se precisar de todas, divida o material em provas separadas.</span>`;
+      }
       document.getElementById('exam-status').innerHTML = `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(f.name || 'abrir arquivo')} ↗</a>. As perguntas abaixo podem ser editadas.`;
       adoptSaved(j.questions);
       renderQuestions();

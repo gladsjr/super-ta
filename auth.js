@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import log from "./lib/logger.js";
+import { assertPasswordOk } from "./lib/authPolicy.js";
 
 const { Pool } = pg;
 
@@ -383,7 +384,7 @@ export async function meHandler(req, res) {
 // ---------------------------------------------------------------------
 
 const USERNAME_RE = /^[A-Za-z0-9_.-]{2,32}$/;
-const MIN_PASSWORD_LEN = 6;
+// Mínimo/força da senha ficam em lib/authPolicy.js (reforço opcional, issue #157).
 
 export async function listUsers() {
   const r = await pool.query(
@@ -427,9 +428,7 @@ export async function createUser(username, password, opts = {}) {
   if (!USERNAME_RE.test(u)) {
     throw Object.assign(new Error("invalid_username"), { status: 400 });
   }
-  if (p.length < MIN_PASSWORD_LEN) {
-    throw Object.assign(new Error("password_too_short"), { status: 400 });
-  }
+  assertPasswordOk(p);
   const email = opts.email ? String(opts.email).trim() : null;
   const displayName = opts.displayName ? String(opts.displayName).trim() : null;
   const exists = await pool.query("SELECT id FROM users WHERE username = $1", [u]);
@@ -533,9 +532,7 @@ export async function changeOwnPassword(userId, currentPassword, newPassword) {
   if (!Number.isInteger(id) || id < 1) {
     throw Object.assign(new Error("invalid_id"), { status: 400 });
   }
-  if (String(newPassword ?? "").length < MIN_PASSWORD_LEN) {
-    throw Object.assign(new Error("password_too_short"), { status: 400 });
-  }
+  assertPasswordOk(newPassword);
   const r = await pool.query("SELECT password_hash FROM users WHERE id = $1", [id]);
   if (r.rowCount === 0) {
     throw Object.assign(new Error("not_found"), { status: 404 });
