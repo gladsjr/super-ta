@@ -2438,6 +2438,19 @@
     ];
     // resume=true: reentrada de entrevista em andamento — sem setup nem consentimento,
     // já entra com as áreas de gravação (Gravar/Enviar/Cancelar/Repetir).
+    // Captura de vídeo caiu NO MEIO da entrevista (proctoring obrigatório): overlay
+    // bloqueante até religar a câmera. A entrevista é retomável — recarregar
+    // continua de onde parou. Se a track só mutou e volta, o overlay some sozinho.
+    function showCaptureLost() {
+      if (document.getElementById('cap-lost')) return;
+      const o = document.createElement('div'); o.id = 'cap-lost';
+      o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,12,.93);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
+      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A entrevista está <strong>pausada</strong>. Reative a câmera; se não voltar sozinha, recarregue esta página para continuar de onde você parou.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
+      document.body.appendChild(o);
+      document.getElementById('cap-reload').onclick = () => location.reload();
+    }
+    function hideCaptureLost() { const o = document.getElementById('cap-lost'); if (o) o.remove(); }
+
     async function startProctoring(camStream, onConsent, narratorUrl, resume) {
       if (proctorStream) return; // já ligado nesta sessão
       proctorStream = camStream || null;
@@ -2491,6 +2504,11 @@
         proctorRecorder.onstop = uploadProctorVideo;
         proctorRecorder.start(2000);
       }
+      // Vigia a captura no MEIO (proctoring obrigatório): se a câmera cai, um
+      // overlay bloqueante impede gravar respostas até religar; ao voltar, some.
+      if (window.proctorGate) window.proctorGate.attachTrackLossGuard(proctorStream, proctorRecorder, {
+        onLost: showCaptureLost, onRegained: hideCaptureLost,
+      });
 
       // instruções faladas (orientador) + a área "Ciente – Começar"
       let narratorAudio = null;

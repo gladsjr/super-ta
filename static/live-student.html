@@ -731,6 +731,19 @@
       if (window.proctorGate) window.proctorGate.blockingCameraError($('setup'), { reason, onRetry: () => location.reload() });
     }
 
+    // Captura de vídeo caiu NO MEIO (proctoring obrigatório): overlay bloqueante,
+    // entrevista pausada no servidor (capture_lost), retoma de onde parou.
+    let captureGuard = null;
+    function showCaptureLost() {
+      if (document.getElementById('cap-lost')) return;
+      const o = document.createElement('div'); o.id = 'cap-lost';
+      o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,12,.93);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
+      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A entrevista está <strong>pausada</strong>. Reative a câmera; se não voltar sozinha, recarregue esta página para continuar de onde você parou.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
+      document.body.appendChild(o);
+      document.getElementById('cap-reload').onclick = () => location.reload();
+    }
+    function hideCaptureLost() { const o = document.getElementById('cap-lost'); if (o) o.remove(); }
+
     // Começa a entrevista de fato: grava o vídeo + conecta ao relay.
     async function beginInterview() {
       posLoop = false;
@@ -780,6 +793,12 @@
         setStatus('Conexão encerrada', 'err');
         salvageVideo(); // queda inesperada: sobe o vídeo parcial
       };
+      // Vigia a CAPTURA: track de vídeo cai/recorder morre → pausa no servidor +
+      // overlay; volta (unmute) → retoma.
+      if (window.proctorGate) captureGuard = window.proctorGate.attachTrackLossGuard(micStream, recorder, {
+        onLost: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_lost' })); } catch {} showCaptureLost(); },
+        onRegained: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_ok' })); } catch {} hideCaptureLost(); },
+      });
     }
     $('to-check-btn').onclick = continueToCheck;
     // Fones obrigatórios: só libera o "Continuar" com o checkbox marcado.
