@@ -231,7 +231,7 @@
       async function startPosition() {
         const vid = $('ps-pos-cam'), stage = $('ps-pos-stage'), g = $('ps-pos-guid');
         try { camStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }); }
-        catch { $('ps-pos-err').textContent = 'Não foi possível abrir a câmera. Você ainda pode começar a entrevista.'; setTimeout(goCommands, 1200); return; }
+        catch { blockCapture('permission'); return; } // proctoring OBRIGATÓRIO: sem câmera não começa
         vid.srcObject = camStream;
         playAudio('position');
         try { await initVision(); } catch (e) { banner(g, 'Checagem de posição indisponível — seguindo.', 'wait'); setTimeout(goCommands, 800); return; }
@@ -281,7 +281,7 @@
           if (id === 'record') doRecord();
           else if (id === 'send') doSend();
           else if (id === 'cancel') doCancel();
-          else if (id === 'start') finish();
+          else if (id === 'start') tryFinish();
         };
         if (window.createCommandZones) {
           zones = window.createCommandZones({
@@ -306,6 +306,30 @@
             if (r) stage.classList.toggle('bad', !r.ok);
           }, 300);
         }
+      }
+
+      // Confirma que a CAPTURA de vídeo realmente grava antes de liberar a
+      // entrevista (proctoring OBRIGATÓRIO). Pega navegador sem MediaRecorder/
+      // codec (ex.: alguns iOS) ou câmera que abre mas não gera dados.
+      async function tryFinish() {
+        if (done) return;
+        if (!camStream) { blockCapture('no-video-track'); return; }
+        const st = $('pr-status'); if (st) st.textContent = 'Verificando a gravação de vídeo…';
+        const probe = window.proctorGate ? await window.proctorGate.probeCapture(camStream) : { ok: false, reason: 'no-recorder' };
+        if (!probe.ok) { blockCapture(probe.reason); return; }
+        finish();
+      }
+      // Bloqueia o INÍCIO: para tudo e mostra o painel de câmera obrigatória. O
+      // retry recarrega (o navegador volta a pedir a permissão). Enquanto isso a
+      // Promise do setup NÃO resolve — a entrevista não começa.
+      function blockCapture(reason) {
+        if (done) return;
+        if (posRAF) { cancelAnimationFrame(posRAF); posRAF = 0; }
+        if (cmdPosTimer) { clearInterval(cmdPosTimer); cmdPosTimer = 0; }
+        try { zones && zones.stop(); } catch {}
+        try { noiseRAF && cancelAnimationFrame(noiseRAF); } catch {}
+        try { camStream && camStream.getTracks().forEach(t => t.stop()); } catch {} camStream = null;
+        if (window.proctorGate) window.proctorGate.blockingCameraError(container, { reason, onRetry: () => location.reload() });
       }
 
       function finish() {

@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/css/app.css" />
   <script src="/static/js/theme.js"></script>
   <script src="/static/js/commandZones.js"></script>
+  <script src="/static/js/proctorGate.js"></script>
   <script src="/static/js/interviewSetup.js"></script>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png" />
@@ -1910,8 +1911,16 @@
         const release = finishUpload(j);
         if (!release) { if (camStream) try { camStream.getTracks().forEach(t => t.stop()); } catch {} return; }
         if (setupOk) startProctoring(camStream, release, j.narrator?.audio_url); // "Ciente – Começar" solta o entrevistador
-        else if (interactionMode === 'audio' && j.narrator?.audio_url) appendNarrator(j.narrator.audio_url, release);
-        else release();
+        else {
+          // Proctoring OBRIGATÓRIO: o setup NÃO confirmou captura de vídeo (câmera
+          // negada/indisponível ou navegador sem gravação) → a entrevista não
+          // começa. O aluno vê o painel de bloqueio (o setup normalmente já o
+          // mostra e nem chega aqui; isto cobre uma rejeição inesperada do setup).
+          if (camStream) try { camStream.getTracks().forEach(t => t.stop()); } catch {}
+          box.classList.remove('hidden');
+          document.getElementById('chat-area')?.classList.add('hidden');
+          if (window.proctorGate) window.proctorGate.blockingCameraError(box, { reason: 'no-data', onRetry: () => location.reload() });
+        }
       } else {
         // Sem fiscalização: espera o upload e começa (comportamento normal).
         const j = await uploadPromise;

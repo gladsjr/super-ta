@@ -53,6 +53,7 @@
     .poses { display: flex; gap: 10px; margin: 12px 0; }
     .poses figure { margin: 0; flex: 1; }
   </style>
+  <script src="/static/js/proctorGate.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -670,8 +671,18 @@
     }
     $('calib-rec-btn').onclick = calibToggleRecord;
 
+    // Bloqueia o INÍCIO da prova quando o proctoring de vídeo obrigatório não tem
+    // captura confirmada (câmera/navegador incompatível). Para gravação/streams e
+    // mostra o painel; o retry recarrega (e o professor pode liberar sem vídeo).
+    function blockCapture(reason) {
+      try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch {}
+      try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {}
+      show('setup');
+      if (window.proctorGate) window.proctorGate.blockingCameraError($('setup'), { reason, onRetry: () => location.reload() });
+    }
+
     // Começa a prova de fato: grava o vídeo + conecta ao relay.
-    function beginExam() {
+    async function beginExam() {
       posLoop = false; // garante que o loop de posição parou
       stopNoiseMeter(); // libera o stream/contexto de áudio do medidor de ruído
       startPresenceWatch(); // Layer 2: mantém só a pose viva p/ sinal de presença
@@ -682,13 +693,24 @@
       // BAIXO de propósito: o vídeo é só para revisão humana / proctoring (que
       // reduz para 640px), não precisa de HD — envio rápido no fim, sem disputar
       // banda com a voz durante a prova.
+      // Proctoring OBRIGATÓRIO: inicia a gravação e SÓ conecta ao relay depois de
+      // confirmar que o vídeo grava de fato (1º chunk não-vazio). Navegador sem
+      // MediaRecorder/codec (ex.: alguns iOS) → bloqueia, não conecta ao examinador.
+      const mime = window.proctorGate ? window.proctorGate.pickVideoMime() : '';
+      if (mime === null) { blockCapture('no-recorder'); return; }
       try {
-        try { recorder = new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 }); }
-        catch (e0) { recorder = new MediaRecorder(micStream); }
-        recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
-        recorder.onstop = uploadVideo;
-        recorder.start(1000);
-      } catch (e) { /* sem gravação se o navegador não suportar — não bloqueia a prova */ }
+        recorder = mime ? new MediaRecorder(micStream, { mimeType: mime, videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 })
+                        : new MediaRecorder(micStream, { videoBitsPerSecond: 400000, audioBitsPerSecond: 32000 });
+      } catch (e0) { try { recorder = new MediaRecorder(micStream); } catch { recorder = null; } }
+      if (!recorder) { blockCapture('no-recorder'); return; }
+      let recOk = false;
+      const firstChunk = new Promise((res) => {
+        const to = setTimeout(() => res(false), 2500);
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size) { recChunks.push(e.data); if (!recOk) { recOk = true; clearTimeout(to); res(true); } } };
+      });
+      recorder.onstop = uploadVideo;
+      recorder.start(1000);
+      if (!(await firstChunk)) { try { recorder.stop(); } catch {} blockCapture('no-data'); return; }
       // áudio em PCM via Web Audio + conexão ao relay
       ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SR });
       playHead = ctx.currentTime;
