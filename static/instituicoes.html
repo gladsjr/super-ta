@@ -242,7 +242,7 @@
 
           <div class="row" style="justify-content: space-between; margin-top: var(--sp-2)">
             <h4 style="margin: 0">Convites</h4>
-            <a id="inv-txt" class="btn btn-sm" href="#" download>Baixar e-mails (TXT)</a>
+            <a id="inv-txt" class="btn btn-sm" href="#" download title="Gera links de ativação FRESCOS para todos os convites pendentes (os links anteriores, se não usados, deixam de valer).">Baixar e-mails (TXT)</a>
           </div>
           <div id="d-invites"></div>
           </div>
@@ -667,8 +667,14 @@ $('np-create').onclick = async () => {
     name: $('np-name').value.trim(), email: $('np-email').value.trim(), role: $('np-role').value,
   });
   $('np-msg').textContent = ok
-    ? (j.invite ? 'Pessoa criada e convite gerado — baixe o TXT para enviar.' : 'Pessoa vinculada (a conta já tinha acesso; sem convite novo).')
+    ? (j.invite ? 'Pessoa criada e convite gerado.' : 'Pessoa vinculada (a conta já tinha acesso; sem convite novo).')
     : 'Falha: ' + (j.error === 'invalid_email' ? 'e-mail inválido' : j.error === 'name_required' ? 'nome obrigatório' : j.error || '');
+  // O link de ativação só existe AGORA (o token é guardado como hash, #156) —
+  // copia na hora; depois, use "Reenviar" ou "Baixar e-mails" para gerar de novo.
+  if (ok && j.invite?.activation_link) {
+    try { await navigator.clipboard.writeText(j.invite.activation_link); $('np-msg').textContent = 'Pessoa criada — link de ativação COPIADO. Envie à pessoa (ou use "Baixar e-mails").'; }
+    catch { prompt('Link de ativação — copie e envie à pessoa:', j.invite.activation_link); }
+  }
   if (ok) { $('np-name').value = ''; $('np-email').value = ''; loadMembers(); loadInvites(); }
 };
 async function loadInvites() {
@@ -691,7 +697,10 @@ async function loadInvites() {
   });
   $('d-invites').querySelectorAll('button[data-reuser]').forEach(b => b.onclick = async () => {
     const { ok: o2, j: r } = await api('POST', `/admin/units/${SELECTED.id}/people/${b.dataset.reuser}/invite`, {});
-    $('np-msg').textContent = o2 ? 'Convite reemitido (o link anterior foi invalidado).' : 'Falha: ' + (r.error || '');
+    if (o2 && r.invite?.activation_link) {
+      try { await navigator.clipboard.writeText(r.invite.activation_link); $('np-msg').textContent = 'Convite reemitido — novo link COPIADO (o anterior foi invalidado).'; }
+      catch { prompt('Novo link de ativação:', r.invite.activation_link); }
+    } else { $('np-msg').textContent = o2 ? 'Convite reemitido.' : 'Falha: ' + (r.error || ''); }
     if (o2) loadInvites();
   });
   $('d-invites').querySelectorAll('button[data-cancel]').forEach(b => b.onclick = async () => {
