@@ -26,6 +26,7 @@ import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
 import { mapPool } from "../lib/concurrency.js";
+import { rubricQuota, rubricsThatConsume } from "../lib/rubricQuota.js";
 import { weightedFinal } from "../lib/rubric.js";
 import { deriveOralDevolutivaNow } from "../lib/oralFeedbackOps.js";
 import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
@@ -291,10 +292,26 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
         const scope = req.query.scope === "all" || req.body?.scope === "all" ? "all" : "stale";
         const all = await db.getOralQuestions(req.work.id);
         const targets = all.filter(q => String(q.answer || "").trim() && (scope === "all" || q.rubric_stale || !String(q.rubric || "").trim()));
+        // COTA (#192): confere ANTES de qualquer chamada ao modelo. Só rubricas
+        // NOVAS debitam (regerar existente não conta). Saldo insuficiente → NÃO
+        // começa e informa quantas faltam. Sem teto configurado = ilimitado.
+        const consumes = rubricsThatConsume(targets);
+        const quota = rubricQuota(all);
+        if (quota.limit != null && consumes > quota.remaining) {
+            return res.status(402).json({
+                error: "rubric_quota_exceeded",
+                needed: consumes, remaining: quota.remaining, limit: quota.limit, used: quota.used,
+                candidates: targets.length,
+            });
+        }
+        const quotaInfo = {
+            limit: quota.limit, used: quota.used, will_consume: consumes,
+            remaining_after: quota.limit == null ? null : quota.remaining - consumes,
+        };
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
         started = true;
         const send = (o) => res.write(JSON.stringify(o) + "\n");
-        send({ type: "start", ids: targets.map(q => q.id) });
+        send({ type: "start", ids: targets.map(q => q.id), candidates: targets.length, quota: quotaInfo });
         let generated = 0; const errors = [];
         await mapPool(targets, 4, async (q) => {
             try {
@@ -310,7 +327,7 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
         });
         const questions = await db.getOralQuestions(req.work.id);
         log.info("ORAL", `rubrics generate work=${req.work.work_token} scope=${scope} geradas=${generated}/${targets.length}`);
-        send({ type: "done", generated, candidates: targets.length, errors, questions });
+        send({ type: "done", generated, candidates: targets.length, consumed: consumes, errors, questions, quota: quotaInfo });
         res.end();
     } catch (err) {
         log.error("ORAL", `rubrics generate failed: ${err.message}`);

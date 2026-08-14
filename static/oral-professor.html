@@ -790,13 +790,25 @@
       if (s.error) { status.textContent = 'Falha: ' + s.error; return; }
       status.textContent = scope === 'all' ? 'Gerando todas as rubricas…' : 'Gerando rubricas pendentes…';
       const r = await fetch(`${API}/oral/rubrics/generate?scope=${scope}`, { method: 'POST' });
-      if (!r.ok || !r.body) { let m = r.status; try { m = (await r.json()).error || r.status; } catch (e) {} status.textContent = 'Falha: ' + m; return; }
+      if (!r.ok || !r.body) {
+        // Cota conferida ANTES de chamar o modelo (#192): saldo insuficiente
+        // não começa, e avisa quantas faltam.
+        let msg = 'Falha: ' + r.status;
+        try {
+          const j = await r.json();
+          if (j.error === 'rubric_quota_exceeded') {
+            msg = `Cota insuficiente: seriam ${j.needed} nova(s) rubrica(s), mas resta(m) ${j.remaining} (limite ${j.limit}). Reduza o banco de questões ou peça mais cota.`;
+          } else msg = 'Falha: ' + (j.error || r.status);
+        } catch (e) {}
+        status.textContent = msg; return;
+      }
       await readNdjson(r, (m) => {
         if (m.type === 'done') {
           if (Array.isArray(m.questions)) { adoptSaved(m.questions); renderQuestions(); renderRubric(); }
           let t = m.candidates === 0 ? 'Nenhuma rubrica a gerar (as questões precisam de resposta esperada).'
             : `${m.generated} rubrica(s) gerada(s) de ${m.candidates}.`;
           if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
+          if (m.quota && m.quota.limit != null) t += ` Resta(m) ${m.quota.remaining_after} na cota.`;
           status.textContent = t;
         }
       });
