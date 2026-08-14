@@ -27,6 +27,8 @@
   .tree-caret.leaf { visibility: hidden; cursor: default; }
   .tree-caret:not(.leaf):hover { opacity: .65; }
   .tree-node.selected .tree-caret { color: #fff; }
+  /* Foco de teclado visível (a11y, issue #165). */
+  .tree-node:focus-visible, .tab:focus-visible { outline: 2px solid var(--c-accent, #2563eb); outline-offset: 1px; }
   .ctx-choice { display: flex; flex-direction: column; gap: var(--sp-2); }
   .kv { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-size: .92em; margin: var(--sp-2) 0; }
   .kv b { font-variant-numeric: tabular-nums; }
@@ -345,7 +347,7 @@ function renderTree() {
   // Nó cujo pai não é visível vira raiz da MINHA visão (ex.: admin de um
   // departamento enxerga o departamento como topo).
   for (const u of UNITS) { const k = (u.parent_id != null && idSet.has(u.parent_id)) ? u.parent_id : 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(u); }
-  const tree = $('tree'); tree.innerHTML = '';
+  const tree = $('tree'); tree.innerHTML = ''; tree.setAttribute('role', 'tree'); tree.setAttribute('aria-label', 'Unidades');
   const parentSel = $('nu-parent'); parentSel.innerHTML = IS_GLOBAL ? '<option value="">— raiz (sem pai) —</option>' : '';
   const canCreateSomewhere = IS_GLOBAL || UNITS.some(u => u.access === 'admin');
   $('unit-create').classList.toggle('hidden', !canCreateSomewhere);
@@ -360,23 +362,44 @@ function renderTree() {
         const div = document.createElement('div');
         div.className = 'tree-node' + (u.is_active ? '' : ' inactive') + (SELECTED?.id === u.id ? ' selected' : '') + (u.access === 'context' ? ' context' : '');
         div.style.paddingLeft = (8 + depth * 18) + 'px';
+        // A11y (issue #165): treeitem operável por teclado, com semântica ARIA.
+        div.setAttribute('role', 'treeitem');
+        div.setAttribute('aria-level', String(depth + 1));
+        div.dataset.uid = String(u.id);
+        if (u.access !== 'context') div.setAttribute('aria-selected', SELECTED?.id === u.id ? 'true' : 'false');
+        if (hasKids) div.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        div.tabIndex = 0;
         // Turma = só o ícone 🎓 (evita "turma" triplicado que quebrava o nome);
         // demais tipos = nome do rótulo, discreto.
         const typeChip = u.is_class
           ? `<span class="u-label muted" title="Turma — recebe trabalhos">🎓</span>`
           : (u.label_name ? `<span class="u-label muted">${esc(u.label_name)}</span>` : '');
+        // caret decorativo (aria-hidden): o estado de expansão vive no aria-expanded
+        // do nó; teclado usa ←/→.
         const caret = hasKids
-          ? `<span class="tree-caret" title="${collapsed ? 'expandir' : 'recolher'}">${collapsed ? '▸' : '▾'}</span>`
-          : `<span class="tree-caret leaf">•</span>`;
+          ? `<span class="tree-caret" aria-hidden="true" title="${collapsed ? 'expandir' : 'recolher'}">${collapsed ? '▸' : '▾'}</span>`
+          : `<span class="tree-caret leaf" aria-hidden="true">•</span>`;
         div.innerHTML = caret + `<span>${esc(u.name)}</span>${typeChip}` +
           (u.access === 'view' ? `<span class="u-label muted" title="acesso de consulta">· consulta</span>` : '');
+        const toggleKids = () => {
+          if (COLLAPSED.has(u.id)) COLLAPSED.delete(u.id); else COLLAPSED.add(u.id);
+          renderTree();
+          const n = tree.querySelector(`.tree-node[data-uid="${u.id}"]`); if (n) n.focus(); // restaura o foco após re-render
+        };
         // Nó de contexto: só situa na hierarquia — não abre detalhe. Clique no
         // caret só recolhe/expande (não seleciona).
         if (u.access !== 'context') div.onclick = (e) => { if (e.target.classList.contains('tree-caret')) return; selectUnit(u.id); };
-        if (hasKids) div.querySelector('.tree-caret').onclick = (e) => {
-          e.stopPropagation();
-          if (COLLAPSED.has(u.id)) COLLAPSED.delete(u.id); else COLLAPSED.add(u.id);
-          renderTree();
+        if (hasKids) div.querySelector('.tree-caret').onclick = (e) => { e.stopPropagation(); toggleKids(); };
+        div.onkeydown = (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (u.access !== 'context') selectUnit(u.id); }
+          else if (e.key === 'ArrowRight' && hasKids && collapsed) { e.preventDefault(); toggleKids(); }
+          else if (e.key === 'ArrowLeft' && hasKids && !collapsed) { e.preventDefault(); toggleKids(); }
+          else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const nodes = [...tree.querySelectorAll('.tree-node')];
+            const nxt = nodes[nodes.indexOf(div) + (e.key === 'ArrowDown' ? 1 : -1)];
+            if (nxt) nxt.focus();
+          }
         };
         tree.appendChild(div);
       }
@@ -447,7 +470,13 @@ function computePerms() {
 function showTab(tab) {
   ACTIVE_TAB = tab;
   document.querySelectorAll('#detail .tabpanel').forEach(p => p.classList.toggle('hidden', p.dataset.tab !== tab));
-  document.querySelectorAll('#d-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  // A11y (issue #165): estado + tabindex rotativo (só a aba ativa é tabbable).
+  document.querySelectorAll('#d-tabs .tab').forEach(t => {
+    const on = t.dataset.tab === tab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+    t.tabIndex = on ? 0 : -1;
+  });
 }
 function buildTabs(p) {
   const tabs = [];
@@ -455,13 +484,37 @@ function buildTabs(p) {
   if (SELECTED.is_class) tabs.push('trabalhos');
   if (p.canAdminSelf) tabs.push('orcamento');
   if (IS_GLOBAL) tabs.push('config');
-  const bar = $('d-tabs'); bar.innerHTML = '';
+  const bar = $('d-tabs'); bar.innerHTML = ''; bar.setAttribute('role', 'tablist'); bar.setAttribute('aria-label', 'Seções da unidade');
   for (const t of tabs) {
     const el = document.createElement('div');
     el.className = 'tab'; el.dataset.tab = t; el.textContent = TAB_LABELS[t];
+    el.setAttribute('role', 'tab');
+    el.id = 'tab-btn-' + t;
+    el.setAttribute('aria-controls', 'tabpanel-' + t);
+    el.tabIndex = -1;
     el.onclick = () => showTab(t);
+    el.onkeydown = (e) => {
+      let ni = null;
+      const idx = tabs.indexOf(t);
+      if (e.key === 'ArrowRight') ni = (idx + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft') ni = (idx - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') ni = 0;
+      else if (e.key === 'End') ni = tabs.length - 1;
+      else return;
+      e.preventDefault();
+      showTab(tabs[ni]);
+      const nb = bar.querySelector(`[data-tab="${tabs[ni]}"]`); if (nb) nb.focus();
+    };
     bar.appendChild(el);
   }
+  // Painéis: semântica de tabpanel ligada às abas.
+  document.querySelectorAll('#detail .tabpanel').forEach(pnl => {
+    const t = pnl.dataset.tab;
+    pnl.setAttribute('role', 'tabpanel');
+    pnl.id = 'tabpanel-' + t;
+    pnl.setAttribute('aria-labelledby', 'tab-btn-' + t);
+    pnl.tabIndex = 0;
+  });
   if (tabs.length) showTab(tabs.includes(ACTIVE_TAB) ? ACTIVE_TAB : tabs[0]);
   else document.querySelectorAll('#detail .tabpanel').forEach(el => el.classList.add('hidden'));
 }
