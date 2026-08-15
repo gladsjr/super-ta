@@ -21,7 +21,7 @@ import { transcribeAudio } from "../lib/audio.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
-import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
+import { exceedsPageLimit } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
@@ -48,6 +48,14 @@ const MAX_CALIB_ATTEMPTS = 2;
 // Guardrail de custo: teto do BANCO de questões da prova oral (previsibilidade de
 // custo — cada questão vira rubrica/avaliação). O nº sorteado por aluno é bem menor.
 const MAX_ORAL_QUESTIONS = 100;
+// Limites de TAMANHO do material importado (banco de perguntas+respostas), próprios
+// da oral — não herdam os globais da entrevista por mensagem (issue #184). Dimensionados
+// para ~100 perguntas com resposta esperada dissertativa (Humanas): orço ~650 chars por
+// pergunta × 100 ≈ 65k chars ≈ ~20 páginas. O PDF global de 50 páginas caberia 300–500
+// perguntas — muito além do cap de 100 (daí o truncamento constante). O cap de 100 +
+// aviso (truncated) segue como backstop para arquivo pequeno mas denso.
+const MAX_ORAL_PDF_PAGES = 20;
+const MAX_ORAL_TXT_CHARS = 65000;
 
 // Alertas de proctoring por VÍDEO para a lista do professor (resumo conservador,
 // calculado dos flags brutos — limiares ajustáveis sem reprocessar o vídeo).
@@ -194,8 +202,8 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
     const isPdf = mime === "application/pdf" || name.endsWith(".pdf");
     const isTxt = mime === "text/plain" || name.endsWith(".txt");
     if (!isPdf && !isTxt) return res.status(400).json({ error: "envie um arquivo PDF ou TXT" });
-    if (isPdf && exceedsPageLimit(req.file.buffer)) {
-        return res.status(400).json({ error: `o gabarito tem mais de ${MAX_PDF_PAGES} páginas — envie um PDF menor (limite ${MAX_PDF_PAGES})` });
+    if (isPdf && exceedsPageLimit(req.file.buffer, MAX_ORAL_PDF_PAGES)) {
+        return res.status(400).json({ error: `o banco de questões tem mais de ${MAX_ORAL_PDF_PAGES} páginas — envie um PDF menor (limite ${MAX_ORAL_PDF_PAGES}, ~100 perguntas com resposta)` });
     }
     try {
         // Guarda os bytes da fonte (serve de flag has_exam; col. exam_pdf é genérica).
@@ -207,11 +215,10 @@ router.post("/w/:workToken/oral/exam-pdf", requireWorkToken, requireOral, examUp
             const text = req.file.buffer.toString("utf-8").replace(/^\uFEFF/, "").trim();
             if (!text) return res.status(400).json({ error: "o arquivo .txt está vazio" });
             // Guardrail de custo: o .txt não passava por nenhum teto antes de ir ao
-            // modelo (o PDF tem exceedsPageLimit). ~60k chars ≈ 20 páginas — mesmo
-            // patamar do limite de páginas do PDF (issue #191).
-            const MAX_TXT_CHARS = 60000;
-            if (text.length > MAX_TXT_CHARS) {
-                return res.status(400).json({ error: `o arquivo .txt é muito grande (${text.length} caracteres; limite ${MAX_TXT_CHARS}, ~20 páginas) — envie um material menor` });
+            // modelo (o PDF tem exceedsPageLimit). Dimensionado como o PDF (issues
+            // #191/#184): ~65k chars ≈ ~20 páginas ≈ banco de ~100 perguntas com resposta.
+            if (text.length > MAX_ORAL_TXT_CHARS) {
+                return res.status(400).json({ error: `o banco de questões é muito grande (${text.length} caracteres; limite ${MAX_ORAL_TXT_CHARS}, ~100 perguntas com resposta) — envie um material menor` });
             }
             questions = await oralExamExtractorAgent.extract({ examText: text, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
         } else {
