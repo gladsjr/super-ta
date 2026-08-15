@@ -427,6 +427,16 @@ hr { border: none; border-top: 1px solid var(--ink-100); margin: var(--sp-5) 0; 
 .pill-pub          { background: #e9f0fe; color: var(--ink-700); border-color: #b9cdf6; }
 .pill-test         { background: #fff7e6; color: var(--ink-700); border-color: #f0c890; }
 
+/* Dark mode: os pills acima têm fundo claro FIXO; sem isto, o texto (var(--ink-700),
+   que clareia no dark) fica ilegível sobre fundo claro (ex.: "prova concluída").
+   Fundos escuros translúcidos da mesma matiz + texto claro. */
+:root[data-theme="dark"] .badge-completed,
+:root[data-theme="dark"] .pill-done { background: rgba(63,168,105,.20); color: #a9e0bd; border-color: rgba(63,168,105,.5); }
+:root[data-theme="dark"] .badge-accent,
+:root[data-theme="dark"] .pill-pub  { background: rgba(91,141,239,.20); color: #bcd0f8; border-color: rgba(91,141,239,.5); }
+:root[data-theme="dark"] .pill-test { background: rgba(224,169,94,.20); color: #f0c890; border-color: rgba(224,169,94,.5); }
+:root[data-theme="dark"] .badge-gave_up { background: rgba(200,80,80,.22); color: #f0b3b3; border-color: rgba(200,80,80,.5); }
+
 /* Spinner de progresso (lotes) — compartilhado entre entrevista e prova oral. */
 .cell-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #cfd8e3; border-top-color: #2a6df4; border-radius: 50%; animation: cellspin .8s linear infinite; vertical-align: -2px; }
 @keyframes cellspin { to { transform: rotate(360deg); } }
