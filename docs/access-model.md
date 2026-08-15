@@ -221,24 +221,26 @@ iniciais: `padrao` (1 prova oral + 1 entrevista simplificada realtime + 1
 profunda com aprofundamento único) e `autoral_simples` (2 simplificadas + 1
 profunda). Nos itens `interview`, `variant` é obrigatório e propagado ao
 trabalho no binding: `realtime` = entrevista simplificada (voz ao vivo, só as
-perguntas do plano); `messages` = profunda. Um pacote com 2 aprofundamentos
-(8 perguntas) fica para quando o teto de aprofundamentos for aplicado no motor
-— decisão de 01/08/2026.
+perguntas do plano); `messages` = profunda.
 
 **Config travada:** ao criar um trabalho sob um item, `applyWorkPackageBinding`
 grava o binding (`entitlement_template_key`/`item_key`) + a config do `locks`
 (`question_count`/`interaction_mode`/`max_follow_ups`/`evaluation_mode`) no work.
-`evaluation_mode: automatic_only` = roda só a avaliação interna, **sem devolutiva
-e sem nota** ao aluno (`requireEvaluationOutputsAllowed` bloqueia as rotas de
-student-version/grades/publish/grade-publish). `grade: true` (oral) mantém a nota.
+Toda trava tem um consumidor no runtime — chave desconhecida no `locks` **falha na
+carga** do template (`validateLocks`, #152), para um pacote não vender restrição
+que o motor ignora:
+- **`max_follow_ups`**: teto TOTAL de follow-ups por pergunta (soma completude +
+  contradição), aplicado no dispatcher do `/chat` (`routes/interview.js`) como
+  guardrail vinculante, além dos tetos per-tipo já existentes — vale o mais
+  apertado. `NULL` = não travado; `0` = sem aprofundamento. Isso libera vender um
+  pacote com 2 aprofundamentos (decisão adiada em 01/08/2026 justamente por
+  faltar o teto no motor).
+- **`evaluation_mode: automatic_only`**: roda só a avaliação interna, **sem
+  devolutiva e sem nota** ao aluno (`requireEvaluationOutputsAllowed` bloqueia as
+  rotas de student-version/grades/publish/grade-publish). `grade: true` (oral)
+  mantém a nota.
 
 ## Pendências conhecidas
-- **`max_follow_ups`**: o valor é gravado no work na criação, mas o teto ainda
-  não é aplicado no dispatcher do `/chat` (a checagem toca a lógica de veto em
-  streaming do super-orquestrador — a ligar com teste ao vivo). Mitigação
-  comercial: os pacotes iniciais só vendem 0 (simplificada realtime, sem
-  follow-up por construção) e 1 (profunda, que é o comportamento cravado no
-  prompt hoje) — nenhuma configuração vendida depende do teto no motor.
 - **Envio real de e-mail dos convites**: o fluxo existe (TXT manual); falta
   escolher provedor e plugar o envio (mantendo o comando explícito do admin).
 - **Associação envio↔aluno**: o aluno logado só vê "Meu envio" quando
