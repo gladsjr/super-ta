@@ -1,6 +1,6 @@
 # 0009 — Nota e devolutiva têm publicações independentes
 
-> **Estado:** Aceita
+> **Estado:** Aceita (entrevista) · Superada por [0012](0012-publicacao-conjunta-na-prova-oral.md) na prova oral
 > **Data:** 2026-07 (registrada em 2026-08-15)
 
 ## Contexto
