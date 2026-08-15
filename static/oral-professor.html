@@ -540,7 +540,8 @@
         ? `${SPIN} <span class="hint">analisando vídeo…</span>`
         : (alertPills.length ? alertPills.join(' ')
           : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>'
-            : (s.has_oral_video ? '<span class="hint">não analisado</span>' : '<span class="hint">—</span>')));
+            : (s.proctor_failed ? '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3" title="A análise do vídeo começou e não terminou (erro ou reinício). Use \'Analisar vídeos\' para reprocessar.">falha na análise ⚠</span>'
+              : (s.has_oral_video ? '<span class="hint">não analisado</span>' : '<span class="hint">—</span>'))));
       return `<tr data-sub="${s.submission_token}">
         <td>${esc(s.student_label || '')}${test}</td>
         <td>${STATUS_PILL[s.status] || esc(s.status)}</td>

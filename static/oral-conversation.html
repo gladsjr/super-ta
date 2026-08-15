@@ -231,7 +231,7 @@
     } else {
       vw.innerHTML = '<p class="hint">Sem vídeo gravado para esta prova.</p>';
     }
-    renderProctor(d.proctor, d.has_oral_video);
+    renderProctor(d.proctor, d.has_oral_video, d.voice?.proctor_status?.state);
     renderVoice(d.voice);
     renderCalibration(d.calibration);
     setupOralCockpit();
@@ -333,12 +333,16 @@
     else { vid.addEventListener('loadedmetadata', go, { once: true }); vid.load(); }
     vid.scrollIntoView({ block: 'center' });
   };
-  function renderProctor(p, hasVideo) {
+  function renderProctor(p, hasVideo, procState) {
     const el = document.getElementById('proctor-result');
     if (!p || !p.flags) {
-      el.innerHTML = hasVideo
-        ? '<p class="hint">Processando a análise do vídeo… (roda automaticamente ao fim da prova; recarregue em instantes)</p>'
-        : '<p class="hint">Ainda sem vídeo para analisar.</p>';
+      el.innerHTML = procState === 'failed'
+        ? '<p class="hint" style="color:#8a1c1c">⚠ A análise do vídeo começou e não terminou (erro ou reinício do servidor). Rode “Analisar vídeos” no painel de alunos para reprocessar.</p>'
+        : (procState === 'running'
+          ? '<p class="hint">Analisando o vídeo agora… recarregue em instantes.</p>'
+          : (hasVideo
+            ? '<p class="hint">Análise do vídeo pendente — roda automaticamente ao fim da prova; ou rode “Analisar vídeos” no painel.</p>'
+            : '<p class="hint">Ainda sem vídeo para analisar.</p>'));
       return;
     }
     const rows = Object.keys(FLAG_LABELS).map(k => {
