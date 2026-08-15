@@ -54,6 +54,7 @@
 <body>
   <div class="wrap">
     <h1>Entrevista sobre o seu trabalho</h1>
+    <p id="work-context" class="sub" style="margin-top:-8px"></p>
 
     <div class="card">
       <!-- Tela 0: termo (LGPD) + envio do trabalho -->
@@ -179,6 +180,9 @@
       try {
         const st = await (await fetch(`/s/${SUB}/live/status`)).json();
         consented = !!st.consented;
+        // Nome do trabalho + do aluno no cabeçalho (#135), como na entrevista profunda.
+        const wc = document.getElementById('work-context');
+        if (wc) wc.textContent = [st.work_name, st.student_label].filter(Boolean).join(' · ');
         if (st.done) { blocked = true; enterPostInterview({}); return; }
         if (st.prep_status === 'ready' || st.prep_status === 'preparing') {
           resumeMode = true;
