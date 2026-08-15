@@ -9,6 +9,12 @@ Esta é a camada que responde "se eu mudar isso, o que é afetado?". Se uma muda
 altera qualquer resposta de alguma página aqui, ela é uma mudança de produto,
 não de implementação — e a página tem que ser atualizada no mesmo PR.
 
+> **Estas páginas são para ler ANTES de implementar, não só depois.** A regra
+> completa — localizar a capacidade, ler "o que NÃO faz", abrir as ADRs ligadas e
+> **avisar antes de escrever código** quando a mudança contradiz o que está aqui —
+> está no [`AGENTS.md`](../../AGENTS.md#antes-de-implementar--regra-permanente),
+> que todo agente carrega em contexto.
+
 ## Dois públicos, mesmo tratamento
 
 As capacidades se dividem por **quem é o usuário**, não por importância:
