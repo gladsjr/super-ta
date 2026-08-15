@@ -58,6 +58,7 @@ import {
 import { attachNarratorAudio } from "../lib/narrator.js";
 import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import { videoMandatory } from "../lib/proctor.js";
+import { runProctorAuto } from "../lib/proctorAuto.js";
 import log from "../lib/logger.js";
 import { generateStudentAnswer, STUDENT_PROFILES } from "../lib/studentSimulator.js";
 
@@ -604,6 +605,10 @@ router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUp
         // concluir (encerrou antes de o vídeo subir), promove para concluída.
         const promoted = await db.promoteAwaitingVideo(req.submission.id);
         log.info("SUBMISSION", `proctor-video armazenado submission=${req.submission.submission_token} key=${key} bytes=${req.file.buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
+        // Análise de vídeo AUTOMÁTICA (#210): dispara em background ao chegar o vídeo
+        // (não espera o professor rodar "Avaliar entrevistas"). O lote segue como
+        // backstop idempotente.
+        runProctorAuto(req.submission.id, req.submission.submission_token);
         res.json({ ok: true });
     } catch (err) {
         log.error("SUBMISSION", `proctor-video failed: ${err.message}`);

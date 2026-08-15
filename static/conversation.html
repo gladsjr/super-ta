@@ -812,12 +812,12 @@ function renderProctoring(p) {
   const rep = p.report;
   const hasVideo = p.video_parts > 0;
   const alerts = rep ? renderProctorAlertsHtml(rep) : '';
-  // A análise do vídeo roda no LOTE "Avaliar entrevistas" (aba Avaliações) — sem
-  // botão individual de (re)analisar aqui.
+  // A análise do vídeo roda AUTOMATICAMENTE ao fim da entrevista (#210); o lote
+  // "Avaliar entrevistas" segue como reprocessamento. Sem botão individual aqui.
   const player = hasVideo ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-video/0"></video>` : '';
   const head = hasVideo ? '' : '<div class="eval-meta">Sem vídeo gravado para esta submissão.</div>';
   const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>')
-    : (hasVideo ? '<div class="eval-meta">Vídeo ainda não analisado — rode “Avaliar entrevistas” na aba Avaliações.</div>' : '');
+    : (hasVideo ? '<div class="eval-meta">Processando a análise do vídeo… (roda automaticamente ao fim da entrevista; recarregue em instantes)</div>' : '');
   card.innerHTML = `<h2 class="card-title">Fiscalização por vídeo</h2>
     ${head}${body}${player}`;
   if (hasVideo) fixSeekableWebm(card.querySelector('video'));

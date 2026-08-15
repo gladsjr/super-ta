@@ -17,6 +17,7 @@ import fs from "fs";
 import os from "os";
 import { requireSubmissionToken, requireNotFinalized, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
+import { runProctorAuto } from "../lib/proctorAuto.js";
 import { clientForWork } from "../lib/openaiClient.js";
 import { prepBuilderAgent } from "../lib/agents.js";
 import { putAudio, extFromMimetype } from "../lib/audioStore.js";
@@ -263,6 +264,8 @@ router.post("/s/:submissionToken/live/video", requireSubmissionToken, videoUploa
         // concluir (o vídeo sobe após o encerramento da sessão de voz).
         const promoted = await db.promoteAwaitingVideo(req.submission.id);
         log.info("LIVE", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
+        // Análise de vídeo AUTOMÁTICA (#210): dispara em background ao chegar o vídeo.
+        runProctorAuto(req.submission.id, req.submission.submission_token);
         res.json({ ok: true });
     } catch (err) {
         log.error("LIVE", `video upload failed: ${err.message}`);
