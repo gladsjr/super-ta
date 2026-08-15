@@ -121,6 +121,11 @@ Fluxo: veja o último número → crie `NNN+1` → escreva SQL direto, **sem**
 Limites conhecidos: o runner é serial, sem paralelismo e sem rollback automático
 de migration bem-sucedida (para reverter, crie a inversa).
 
+> Estas regras também são injetadas automaticamente por um hook sempre que um
+> agente vai escrever em `migrations/` (`.claude/hooks/migrations-guard.mjs`).
+> Ele avisa, não bloqueia. Para mudar o texto, edite `migrations-guard.md` ao
+> lado — não o script.
+
 ## Mapa de prompts — regra permanente
 
 Todo prompt enviado à LLM deve ser alcançável a partir do diagrama em
