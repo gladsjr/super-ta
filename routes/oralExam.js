@@ -77,6 +77,9 @@ function proctorAlerts(p) {
 function voiceAlert(v) { return !!(v && v.latency && v.latency.flagged_count > 0); }
 // Alerta de CALIBRAÇÃO DE FALA: o pré-teste de captação foi feito e NÃO passou.
 function calibrationAlert(c) { return !!(c && c.passed === false); }
+// Alerta de TRANSCRIÇÃO (#137): a detecção guardou >=1 trecho suspeito de alucinação
+// (silêncio/ruído/eco). Mora em oral_voice_json.transcript_alerts (ver lib/transcriptAlerts).
+function transcriptAlertCount(v) { return (v && v.transcript_alerts && v.transcript_alerts.count) || 0; }
 
 // grades_json (mesma forma da entrevista) a partir do relatório do avaliador + os
 // pesos das questões. Um único modelo: o avaliador dá um score ANCORADO nos 5
@@ -168,6 +171,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 proctor_alerts: proctorAlerts(s.oral_proctor_json),
                 voice_alert: voiceAlert(s.oral_voice_json),
                 calibration_alert: calibrationAlert(s.oral_calibration_json),
+                transcript_alerts: transcriptAlertCount(s.oral_voice_json),
             })),
             voices: VOICES,
         });
@@ -952,6 +956,7 @@ router.get("/s/:submissionToken/oral/review", requireSubmissionToken, async (req
                 locked: !!d?.student_comment,
             },
             transcript: Array.isArray(d?.oral_transcript) ? d.oral_transcript : [],
+            transcript_alerts: d?.oral_voice_json?.transcript_alerts || { count: 0, turns: [] },
             calibration_flagged: calibrationAlert(d?.oral_calibration_json),
         });
     } catch (err) {

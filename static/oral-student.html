@@ -199,7 +199,7 @@
           if (rv.status === 409 && attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
           if (rv.ok) {
             const j = await rv.json();
-            renderReviewTranscript(j.transcript || []);
+            renderReviewTranscript(j.transcript || [], j.transcript_alerts || null);
             renderCommentBox(j.comment || {}, { calibFlagged: !!j.calibration_flagged });
           } else if (rv.status === 410) {
             $('review-transcript').innerHTML = '<p class="sub" style="text-align:center">A janela de revisão (7 dias) já se encerrou.</p>';
@@ -216,15 +216,24 @@
       } catch {}
     }
 
-    function renderReviewTranscript(turns) {
+    function renderReviewTranscript(turns, alerts) {
       const el = $('review-transcript');
       if (!turns.length) { el.innerHTML = ''; return; }
-      const rows = turns.map(t => {
+      // Alertas de transcrição (#137): destaca trechos da SUA fala prováveis de ruído/
+      // eco/silêncio, para você conferir se algo foi captado errado.
+      const flagged = {};
+      (alerts && Array.isArray(alerts.turns) ? alerts.turns : []).forEach(a => { flagged[a.index] = a.label; });
+      const rows = turns.map((t, i) => {
         const who = t.role === 'examiner' ? 'Examinador' : 'Aluno';
         const color = t.role === 'examiner' ? '#9a7b1f' : '#5a6b80';
-        return `<div style="margin-bottom:10px"><div style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${color}">${who}</div><div style="white-space:pre-wrap">${esc(t.text)}</div></div>`;
+        const flag = flagged[i] ? ` <span style="font-weight:600;color:#6b52c9">• ${esc(flagged[i])}</span>` : '';
+        const box = flagged[i] ? 'background:#f6f3fe;border-radius:8px;padding:6px 8px;' : '';
+        return `<div style="margin-bottom:10px;${box}"><div style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${color}">${who}${flag}</div><div style="white-space:pre-wrap">${esc(t.text)}</div></div>`;
       }).join('');
-      el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${rows}</div>`;
+      const note = (alerts && alerts.count > 0)
+        ? `<p class="sub" style="text-align:left;margin:0 0 8px">⚠️ Destacamos ${alerts.count} trecho(s) da sua fala que podem ter sido captados com ruído, eco ou silêncio (idioma não reconhecido/ininteligível). Se algo importante foi transcrito errado, avise o professor no comentário.</p>`
+        : '';
+      el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${note}${rows}</div>`;
     }
 
     function renderCommentBox(comment, opts) {
