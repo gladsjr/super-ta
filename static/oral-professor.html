@@ -153,10 +153,6 @@
               <label class="label" for="lk-label">Rótulo (ex.: Turma A)</label>
               <input type="text" id="lk-label" class="input" value="Aluno" autocomplete="off" style="width: 100%"/>
             </div>
-            <div class="field" style="margin: 0">
-              <label class="label" for="lk-count">Quantos</label>
-              <input type="number" id="lk-count" class="input" min="1" max="50" value="1" style="width: 90px"/>
-            </div>
           </div>
           <div class="field" style="margin-top: var(--sp-3)">
             <label class="label" for="lk-names">…ou um nome por linha (cada nome vira um link próprio)</label>
@@ -165,6 +161,10 @@
           <div class="create-actions">
             <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
               <input type="checkbox" id="lk-test"/> Marcar como <strong>teste</strong>
+            </label>
+            <!-- Quantidade só faz sentido para acessos de teste (#211): junto do checkbox, oculta até marcar. -->
+            <label id="lk-count-wrap" style="display: none; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--ink-700)" title="Quantos acessos de teste gerar com este rótulo.">
+              Acessos a gerar <input type="number" id="lk-count" class="input" min="1" max="50" value="1" style="width: 70px"/>
             </label>
             <span class="spacer"></span>
             <button class="btn btn-primary" id="lk-btn" type="button">Gerar</button>
@@ -828,13 +828,19 @@
     panel.classList.toggle('hidden', !open);
     document.getElementById('toggle-create').setAttribute('aria-expanded', String(open));
   };
+  // Quantidade só aparece quando "teste" está marcado (#211).
+  document.getElementById('lk-test').addEventListener('change', (e) => {
+    document.getElementById('lk-count-wrap').style.display = e.target.checked ? 'inline-flex' : 'none';
+  });
   document.getElementById('lk-btn').onclick = async () => {
     const msg = document.getElementById('lk-msg');
     const is_test = document.getElementById('lk-test').checked;
     const names = document.getElementById('lk-names').value.split('\n').map(s => s.trim()).filter(Boolean);
+    // Fora do teste, sempre 1 acesso por nome/linha (a quantidade só multiplica em teste).
+    const count = is_test ? (Number(document.getElementById('lk-count').value) || 1) : 1;
     const body = names.length
       ? { labels: names, is_test }
-      : { label: document.getElementById('lk-label').value.trim() || 'Aluno', count: Number(document.getElementById('lk-count').value), is_test };
+      : { label: document.getElementById('lk-label').value.trim() || 'Aluno', count, is_test };
     msg.textContent = 'Gerando…';
     try {
       const r = await fetch(`${API}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

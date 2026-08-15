@@ -280,10 +280,6 @@
               <label class="label" for="sub-label">Nome do aluno</label>
               <input id="sub-label" class="input" placeholder="obrigatório" autocomplete="off"/>
             </div>
-            <div>
-              <label class="label" for="sub-count">Quantidade</label>
-              <input id="sub-count" class="input" type="number" min="1" max="50" value="1"/>
-            </div>
           </div>
           <div id="sub-msg" class="hint"></div>
         </div>
@@ -298,6 +294,12 @@
           <label class="create-test" title="Só entrevistas de teste podem ser abertas por você para simular o aluno; as reais não expõem esse caminho (proteção). A marcação vale para o que você gerar agora e não muda depois.">
             <input type="checkbox" id="sub-is-test"/>
             <span>de teste <span class="info-dot" aria-hidden="true">ⓘ</span></span>
+          </label>
+          <!-- Quantidade só faz sentido para gerar vários acessos de teste (#211):
+               fica junto do checkbox e só habilita quando "de teste" está marcado. -->
+          <label id="sub-count-wrap" class="create-test" style="display:none; align-items:center; gap:6px" title="Quantos acessos de teste gerar com este nome (para simular vários alunos).">
+            <span>Acessos a gerar</span>
+            <input id="sub-count" class="input" type="number" min="1" max="50" value="1" style="width:70px"/>
           </label>
           <span class="spacer"></span>
           <button id="create-go" class="btn btn-primary" type="button">Gerar</button>
@@ -1210,10 +1212,11 @@ document.getElementById('cmode-bulk').onclick = () => setCreateMode('bulk');
 async function createSingle() {
   const msg = document.getElementById('sub-msg');
   const label = document.getElementById('sub-label').value.trim();
-  const count = Number(document.getElementById('sub-count').value) || 1;
+  const is_test = document.getElementById('sub-is-test').checked;
+  // Quantidade só multiplica quando é acesso de teste (#211); fora disso, sempre 1.
+  const count = is_test ? (Number(document.getElementById('sub-count').value) || 1) : 1;
   msg.textContent = '';
   if (!label) { msg.textContent = 'Informe o nome do aluno.'; return; }
-  const is_test = document.getElementById('sub-is-test').checked;
   const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ label, count, is_test })
@@ -1244,6 +1247,10 @@ async function createBulk() {
   load();
 }
 
+// Quantidade só aparece quando "de teste" está marcado (#211).
+document.getElementById('sub-is-test').addEventListener('change', (e) => {
+  document.getElementById('sub-count-wrap').style.display = e.target.checked ? 'inline-flex' : 'none';
+});
 document.getElementById('create-go').onclick = async () => {
   const btn = document.getElementById('create-go');
   btn.disabled = true;
