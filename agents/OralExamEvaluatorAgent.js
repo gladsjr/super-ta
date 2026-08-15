@@ -11,6 +11,7 @@
 import log from "../lib/logger.js";
 import { runStructured } from "../lib/agentRun.js";
 import { renderAgentPreamble } from "../lib/agentPreamble.js";
+import { rubricForPrompt } from "../lib/oralRubric.js";
 
 // Modelo ÚNICO de pontuação: cada questão traz uma RUBRICA detalhada (5 níveis) e o
 // avaliador dá um score ANCORADO em 0 / 2,5 / 5 / 7,5 / 10.
@@ -78,7 +79,7 @@ export class OralExamEvaluatorAgent {
         if (!Array.isArray(questions) || questions.length === 0) throw new Error("OralExamEvaluator: sem questões");
         if (!Array.isArray(transcript) || transcript.length === 0) throw new Error("OralExamEvaluator: transcrição vazia");
 
-        const material = questions.map(q => `Pergunta ${q.id}: ${q.question}\nRubrica de pontuação: ${q.rubric || "(sem rubrica)"}`).join("\n\n");
+        const material = questions.map(q => `Pergunta ${q.id}: ${q.question}\nRubrica de pontuação (por nível):\n${rubricForPrompt(q) || "(sem rubrica)"}`).join("\n\n");
         const conversa = transcript.map(t => `${t.role === "examiner" ? "EXAMINADOR" : "ALUNO"}: ${t.text}`).join("\n");
         const userText = `**MATERIAL DO PROFESSOR**\n${material}\n\n**TRANSCRIÇÃO DA PROVA**\n${conversa}\n\nAvalie pergunta a pergunta conforme o contrato e retorne o JSON.`;
 
