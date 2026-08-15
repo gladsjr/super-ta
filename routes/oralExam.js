@@ -170,6 +170,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 grade_published: !!s.grade_published_at,
                 has_oral_proctor: !!s.has_oral_proctor,
                 proctor_running: proctorRunning.has(s.submission_token),
+                proctor_failed: s.oral_voice_json?.proctor_status?.state === "failed",
                 proctor_alerts: proctorAlerts(s.oral_proctor_json),
                 voice_alert: voiceAlert(s.oral_voice_json),
                 calibration_alert: calibrationAlert(s.oral_calibration_json),
@@ -603,10 +604,13 @@ function runOralProctorAuto(submissionId, token) {
         try {
             const parts = await db.getOralVideoParts(submissionId);
             if (!parts.length) return;
+            await db.setOralProctorStatus(submissionId, { state: "running", at: new Date().toISOString() });
             const report = await analyzeOralVideoParts(parts);
-            await db.setOralProctor(submissionId, report);
+            await db.setOralProctor(submissionId, report); // grava o relatório e limpa o status
             log.info("ORAL", `proctoring automático ok submission=${token} frames=${report.frames} ms=${report.ms}`);
         } catch (e) {
+            // Persiste a FALHA (#220): distingue "não foi até o final" de "nunca analisada".
+            await db.setOralProctorStatus(submissionId, { state: "failed", at: new Date().toISOString(), error: e.message }).catch(() => {});
             log.error("ORAL", `proctoring automático falhou submission=${token}: ${e.message}`);
         } finally {
             proctorRunning.delete(token);

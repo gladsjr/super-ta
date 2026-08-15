@@ -32,6 +32,7 @@ import {
 // O lib/config.js valida policy.yaml + pricing.yaml ao ser carregado.
 // Importar PORT antes de tudo garante fail-fast no boot.
 import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
+import { failOrphanProctorRunning } from "./lib/db.js";
 import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import unitsRoutes from "./routes/units.js";
@@ -204,6 +205,14 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         log.info("BOOT", `audio_store backend=${audio.backend} available=${audio.available}${audio.available ? "" : ` reason=${audio.reason}`}`);
     } catch (err) {
         log.error("BOOT", `initAudioStore failed: ${err.message}`);
+    }
+    // Análises de proctoring que ficaram 'running' no banco são órfãs de um
+    // reinício anterior (o processo que as rodava morreu) → marca 'failed' (#220).
+    try {
+        const n = await failOrphanProctorRunning();
+        if (n) log.info("BOOT", `proctoring: ${n} análise(s) 'running' órfã(s) marcada(s) como 'failed'`);
+    } catch (err) {
+        log.error("BOOT", `failOrphanProctorRunning failed: ${err.message}`);
     }
     log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });

@@ -427,7 +427,7 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
                 db.getOralSubmissionDetail(found.id),
                 db.getOralVideoParts(found.id),
             ]);
-            proctoring = { enabled: true, report: detail?.oral_proctor_json || null, video_parts: parts.length };
+            proctoring = { enabled: true, report: detail?.oral_proctor_json || null, video_parts: parts.length, status: detail?.oral_voice_json?.proctor_status?.state || null };
         }
         res.json({
             work: { work_token: req.work.work_token, name: req.work.name },
