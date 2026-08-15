@@ -220,6 +220,7 @@ ${ACTION_SCHEMA_DESCRIPTION}`;
         onMessageReady = null,
         minTurnsBeforeFinalize = null,
         maxTurns = null,
+        maxFollowUps = null,
         forceAdvanceDirective = null,
     }) {
         // Guardrails de turno: a fonte de verdade das fórmulas é routes/interview.js
@@ -252,7 +253,14 @@ ${resolvedBody}`;
         const contraUsed = lastIvs.filter(iv => iv?.follow_up_reason === "contradicts_work" || iv?.follow_up_reason === "contradicts_earlier_self").length;
         const totalFups = (Array.isArray(turnLog) ? turnLog : [])
             .reduce((sum, t) => sum + (t?.interventions ?? []).filter(iv => iv?.type === "follow_up").length, 0);
-        const budgetLine = `Follow_ups na ENTREVISTA até agora: ${totalFups} (alvo total: 2 a 4 — acima disso, aceite e registre em open_threads em vez de insistir). Nesta pergunta: incomplete/incoherence ${softUsed}/1${softUsed >= 1 ? " — ESGOTADO (PROIBIDO follow_up por completude: registre a pendência e avance)" : ""}; contradições ${contraUsed}/2${contraUsed >= 2 ? " — ESGOTADO (registre o conflito e avance)" : ""}`;
+        // Teto TOTAL por pergunta travado pelo pacote (#152), quando houver: soma
+        // completude + contradição. É VINCULANTE no servidor — dizê-lo aqui evita
+        // que o modelo gaste um follow_up que será vetado e forçará re-chamada.
+        const totalUsedQ = softUsed + contraUsed;
+        const pkgCapLine = Number.isInteger(maxFollowUps)
+            ? ` TETO DO PACOTE nesta pergunta: ${totalUsedQ}/${maxFollowUps} follow_ups no total${totalUsedQ >= maxFollowUps ? " — ESGOTADO (PROIBIDO qualquer follow_up: registre a pendência em open_threads e avance)" : ""}.`
+            : "";
+        const budgetLine = `Follow_ups na ENTREVISTA até agora: ${totalFups} (alvo total: 2 a 4 — acima disso, aceite e registre em open_threads em vez de insistir). Nesta pergunta: incomplete/incoherence ${softUsed}/1${softUsed >= 1 ? " — ESGOTADO (PROIBIDO follow_up por completude: registre a pendência e avance)" : ""}; contradições ${contraUsed}/2${contraUsed >= 2 ? " — ESGOTADO (registre o conflito e avance)" : ""}.${pkgCapLine}`;
         const lastTurnBlock = lastTurn
             ? `Última pergunta feita: "${lastTurn.question ?? ""}" (plan_id=${lastTurn.question_metadata?.id ?? "?"})\nIntervenções já neste turno: ${lastIvs.length}\n${budgetLine}\nResposta da outra ponta até agora (se houver): ${lastTurn.answer ? JSON.stringify(lastTurn.answer) : "(ainda não respondida)"}`
             : "(sem turno ativo — a cena acabou de entrar na fase de condução; este é o primeiro turno)";
