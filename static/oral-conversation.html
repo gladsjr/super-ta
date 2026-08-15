@@ -55,13 +55,20 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">Avaliação (comparação com o gabarito)</h3>
-      <p class="card-sub">Relatório interno: como cada resposta do aluno se compara ao gabarito. O aluno não vê isto.</p>
+      <h3 class="card-title">Avaliação e notas</h3>
+      <p class="card-sub">Compara cada resposta do aluno ao gabarito e dá uma nota 0–10 por questão; a final é a <strong>média ponderada</strong> pelos pesos. A comparação com o gabarito é interna (o aluno não a vê); edite as notas se quiser e salve.</p>
       <div class="row">
         <button class="btn btn-primary" id="eval-btn" type="button">Avaliar / reavaliar</button>
         <span class="hint" id="eval-msg"></span>
       </div>
-      <div id="report" style="margin-top: var(--sp-3)"></div>
+      <div id="assessment-body" style="margin-top: var(--sp-3)"></div>
+      <div class="row" style="margin-top: var(--sp-3)">
+        <button class="btn" id="grade-save" type="button">Salvar notas</button>
+        <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
+          <input type="checkbox" id="grade-pub"/> publicar notas
+        </label>
+        <span class="hint" id="grade-msg"></span>
+      </div>
     </div>
 
     <div class="card">
@@ -77,19 +84,6 @@
           <input type="checkbox" id="dev-pub"/> publicar devolutiva
         </label>
         <span class="hint" id="dev-msg"></span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 class="card-title">Notas por questão (rubrica)</h3>
-      <p class="card-sub">Uma nota 0–10 por questão (calculada ao avaliar); a final é a <strong>média ponderada</strong> pelos pesos. Edite se quiser e salve. A nota é uma publicação à parte da devolutiva.</p>
-      <div id="grades-body-oral"></div>
-      <div class="row" style="margin-top: var(--sp-3)">
-        <button class="btn" id="grade-save" type="button">Salvar notas</button>
-        <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
-          <input type="checkbox" id="grade-pub"/> publicar notas
-        </label>
-        <span class="hint" id="grade-msg"></span>
       </div>
     </div>
 
@@ -142,16 +136,55 @@
 
   let QNUMS = {}; // id da questão → número de exibição (posição na lista completa)
   let GUIDE_INIT = false; // diretrizes da devolutiva pré-preenchidas só na 1ª carga
-  function renderReport(ev) {
-    const el = document.getElementById('report');
-    if (!ev || !Array.isArray(ev.per_question)) { el.innerHTML = '<p class="hint">Ainda não avaliado. Clique em “Avaliar / reavaliar”.</p>'; return; }
-    el.innerHTML = ev.per_question.map(q => {
-      const num = QNUMS[q.id] != null ? QNUMS[q.id] : q.id;
-      const score = (q.score != null) ? `<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">${q.score}/10</span>` : '';
-      return `<div class="q"><div class="qt">${num}. ${esc(q.question)} ${score}</div>` +
-        `<div class="qa"><strong>Aluno:</strong> ${esc(q.student_answer || '(sem resposta)')}</div>` +
-        `<div class="qa">${esc(q.comment || '')}</div></div>`;
-    }).join('') + (ev.summary ? `<p style="margin-top: var(--sp-3)"><strong>Resumo:</strong> ${esc(ev.summary)}</p>` : '');
+  let CUR_EVAL = null; // última avaliação carregada (p/ re-render das notas sem reload)
+  // Card único "Avaliação e notas": um bloco por questão com a comparação ao
+  // gabarito (resposta do aluno + comentário do avaliador) E a nota editável +
+  // peso juntos. Funde o antigo relatório com o grid de notas.
+  function renderAssessment(evaluation, grades, questions) {
+    const el = document.getElementById('assessment-body');
+    const evById = {};
+    if (evaluation && Array.isArray(evaluation.per_question)) {
+      evaluation.per_question.forEach(q => { evById[q.id] = q; });
+    }
+    let criteria = grades && Array.isArray(grades.criteria) && grades.criteria.length ? grades.criteria : null;
+    let seeded = false;
+    if (!criteria) {
+      const qs = Array.isArray(questions) ? questions : [];
+      if (!qs.length) { el.innerHTML = '<p class="hint">Sem perguntas nesta prova — defina-as na Configuração.</p>'; return; }
+      criteria = qs.map(q => ({ id: q.id, name: q.question, weight: Number(q.weight) || 1, score: null, justification: '' }));
+      seeded = true;
+    }
+    const rows = criteria.map((c, i) => {
+      const has = c.score != null && c.score !== '';
+      const num = QNUMS[c.id] != null ? QNUMS[c.id] : (i + 1);
+      const ev = evById[c.id];
+      const answer = ev ? `<div class="qa"><strong>Aluno:</strong> ${esc(ev.student_answer || '(sem resposta)')}</div>` : '';
+      const comment = ev && ev.comment ? `<div class="qa">${esc(ev.comment)}</div>` : '';
+      const just = c.justification ? `<div class="hint" style="margin-top:4px">${esc(c.justification)}</div>` : '';
+      const manual = c.manual ? '<div class="hint" style="margin-top:2px; color:var(--accent-700, #92400e)">nota ajustada manualmente</div>' : '';
+      return `
+      <div class="grade-q" data-id="${c.id}" data-weight="${Number(c.weight) || 1}" data-orig="${has ? c.score : ''}" style="border-top:1px solid var(--ink-200); padding: var(--sp-3) 0">
+        <div style="display:flex; gap: var(--sp-3); align-items:flex-start">
+          <div style="flex:1; min-width:0">
+            <div style="font-weight:600">${num}. ${esc(c.name || '')}</div>
+            ${answer}${comment}${just}${manual}
+          </div>
+          <div style="text-align:right; flex:none">
+            <span class="hint">peso ${Number(c.weight) || 1}</span><br/>
+            <input class="input g-score" type="number" min="0" max="10" step="0.1" value="${has ? c.score : ''}" placeholder="—" style="width:80px; margin-top:4px"/>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    const finalVal = grades && grades.final != null ? grades.final : '—';
+    const summary = (evaluation && evaluation.summary) ? `<p style="margin-top: var(--sp-3)"><strong>Resumo da avaliação:</strong> ${esc(evaluation.summary)}</p>` : '';
+    const seedHint = seeded ? '<p class="hint" style="margin-top: var(--sp-2)">Clique em “Avaliar / reavaliar” para comparar as respostas ao gabarito e calcular as notas — ou lance as notas manualmente aqui e salve.</p>' : '';
+    el.innerHTML = rows + `
+      <div class="row" style="border-top:2px solid var(--ink-300); padding-top: var(--sp-2); margin-top: var(--sp-2); align-items:baseline">
+        <strong style="flex:1">Nota final (média ponderada)</strong>
+        <strong id="grade-final-oral" style="font-size: var(--fs-lg)">${finalVal}</strong>
+      </div>${seedHint}${summary}`;
+    el.querySelectorAll('.g-score').forEach(inp => inp.addEventListener('input', recomputeFinalOral));
   }
   function renderTranscript(turns) {
     const el = document.getElementById('transcript');
@@ -177,13 +210,13 @@
     document.getElementById('meta').innerHTML = pills.join(' ');
 
     QNUMS = d.question_numbers || {};
-    renderReport(d.evaluation);
+    CUR_QUESTIONS = d.questions || [];
+    CUR_EVAL = d.evaluation || null;
+    renderAssessment(d.evaluation, d.grades, CUR_QUESTIONS);
     document.getElementById('devolutiva').value = d.devolutiva || '';
     // Diretrizes pré-preenchidas com o padrão do trabalho UMA vez (não sobrescreve
     // o que o professor digitar em recargas, ex.: após avaliar).
     if (!GUIDE_INIT) { document.getElementById('dev-guidelines').value = d.feedback_guidelines || ''; GUIDE_INIT = true; }
-    CUR_QUESTIONS = d.questions || [];
-    renderGrades(d.grades, d.grading_mode, CUR_QUESTIONS);
     document.getElementById('dev-pub').checked = !!d.devolutiva_published;
     document.getElementById('grade-pub').checked = !!d.grade_published;
     renderTranscript(d.transcript);
@@ -393,49 +426,9 @@
       msg.textContent = document.getElementById('dev-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
     } catch { msg.textContent = 'Falha de comunicação.'; }
   };
-  function renderGrades(grades, mode, questions) {
-    const el = document.getElementById('grades-body-oral');
-    let criteria = grades && Array.isArray(grades.criteria) && grades.criteria.length ? grades.criteria : null;
-    let seeded = false;
-    if (!criteria) {
-      // Sem avaliação ainda: semeia as questões para lançamento MANUAL da nota.
-      const qs = Array.isArray(questions) ? questions : [];
-      if (!qs.length) {
-        el.innerHTML = '<p class="hint">Sem notas ainda — avalie a prova (acima) para calcular, ou defina as perguntas na Configuração.</p>';
-        return;
-      }
-      criteria = qs.map(q => ({ id: q.id, name: q.question, weight: Number(q.weight) || 1, score: null, justification: '' }));
-      seeded = true;
-    }
-    const rows = criteria.map((c, i) => {
-      const has = c.score != null && c.score !== '';
-      return `
-      <div class="grade-q" data-id="${c.id}" data-weight="${Number(c.weight) || 1}" data-orig="${has ? c.score : ''}" style="border-top:1px solid var(--ink-200); padding: var(--sp-3) 0">
-        <div style="display:flex; gap: var(--sp-3); align-items:flex-start">
-          <div style="flex:1; min-width:0">
-            <div style="font-weight:600">${QNUMS[c.id] != null ? QNUMS[c.id] : (i + 1)}. ${esc(c.name || '')}</div>
-            ${c.justification ? `<div class="hint" style="margin-top:4px">${esc(c.justification)}</div>` : ''}
-            ${c.manual ? '<div class="hint" style="margin-top:2px; color:var(--accent-700, #92400e)">nota ajustada manualmente</div>' : ''}
-          </div>
-          <div style="text-align:right; flex:none">
-            <span class="hint">peso ${Number(c.weight) || 1}</span><br/>
-            <input class="input g-score" type="number" min="0" max="10" step="0.1" value="${has ? c.score : ''}" placeholder="—" style="width:80px; margin-top:4px"/>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-    const finalVal = grades && grades.final != null ? grades.final : '—';
-    const seedHint = seeded ? '<p class="hint" style="margin-top: var(--sp-2)">Lançamento manual: preencha as notas e salve (a final é a média ponderada das preenchidas).</p>' : '';
-    el.innerHTML = rows + `
-      <div class="row" style="border-top:2px solid var(--ink-300); padding-top: var(--sp-2); margin-top: var(--sp-2); align-items:baseline">
-        <strong style="flex:1">Nota final (média ponderada)</strong>
-        <strong id="grade-final-oral" style="font-size: var(--fs-lg)">${finalVal}</strong>
-      </div>${seedHint}`;
-    el.querySelectorAll('.g-score').forEach(inp => inp.addEventListener('input', recomputeFinalOral));
-  }
   function recomputeFinalOral() {
     let num = 0, den = 0;
-    document.querySelectorAll('#grades-body-oral .grade-q').forEach(row => {
+    document.querySelectorAll('#assessment-body .grade-q').forEach(row => {
       const w = Number(row.dataset.weight) || 1;
       const raw = row.querySelector('.g-score').value;
       if (raw === '') return; // não conta questões ainda não preenchidas
@@ -448,7 +441,7 @@
   }
   document.getElementById('grade-save').onclick = async () => {
     const msg = document.getElementById('grade-msg'); msg.textContent = 'Salvando…';
-    const rows = [...document.querySelectorAll('#grades-body-oral .grade-q')];
+    const rows = [...document.querySelectorAll('#assessment-body .grade-q')];
     // Só envia as questões cujo score o professor de fato preencheu/alterou — assim
     // a marca "ajustada manualmente" fica só nas que ele mexeu. Campo vazio (orig
     // ausente, grid semeado) conta como alterado se um número foi digitado.
@@ -465,7 +458,7 @@
         const r = await fetch(`${API}/oral/submissions/${SUB}/grades`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scores }) });
         const j = await r.json();
         if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-        renderGrades(j.grades, j.grading_mode, CUR_QUESTIONS);
+        renderAssessment(CUR_EVAL, j.grades, CUR_QUESTIONS);
       }
       await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('grade-pub').checked }) });
       msg.textContent = document.getElementById('grade-pub').checked ? 'Salvas e publicadas.' : 'Salvas (não publicadas).';
