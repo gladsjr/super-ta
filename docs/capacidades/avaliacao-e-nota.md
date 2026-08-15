@@ -14,10 +14,16 @@ publicada à parte) — são coisas separadas de propósito.
 | **Nota por rubrica** | o aluno, se publicada | Cálculo pelos critérios e pesos do professor. Nasce como sugestão. |
 | **[Devolutiva](devolutiva.md)** | o aluno, se publicada | Texto formativo, limpo de bastidores. **Em revisão.** |
 
-A separação é deliberada: o que serve à decisão do professor não é o que serve ao
-aprendizado do aluno, e publicar um não implica publicar o outro. O professor
-pode, por exemplo, publicar a devolutiva primeiro, ler o comentário do aluno, e
-só então publicar a nota.
+A separação entre a avaliação interna e o que chega ao aluno é deliberada: o que
+serve à decisão do professor não é o que serve ao aprendizado.
+
+**A publicação, porém, difere por forma de arguição.** Na **entrevista**, nota e
+devolutiva são publicações independentes — o professor pode publicar a devolutiva
+primeiro, ler o comentário do aluno, e só então publicar a nota
+([ADR 0009](../decisoes/0009-nota-e-devolutiva-publicam-separado.md)). Na **prova
+oral**, as duas publicam **juntas**, sob um controle só
+([ADR 0012](../decisoes/0012-publicacao-conjunta-na-prova-oral.md), que supersede
+a 0009 nesse escopo).
 
 ## Como a nota é calculada
 
@@ -48,8 +54,10 @@ A avaliação **recusa** perguntas sem rubrica em vez de improvisar um critério
   aluno tira 8 e 4, **então** a nota final é 7,0, calculada em código.
 - **Dado** que o professor discorda da nota sugerida, **quando** ele a edita e
   publica, **então** o aluno vê a nota do professor.
-- **Dado** que a devolutiva já foi publicada e a nota não, **quando** o aluno abre
-  o link, **então** vê apenas a devolutiva.
+- **Dado** uma ENTREVISTA cuja devolutiva já foi publicada e a nota não, **quando**
+  o aluno abre o link, **então** vê apenas a devolutiva.
+- **Dado** uma PROVA ORAL, **quando** o professor publica, **então** nota e
+  devolutiva chegam ao aluno na mesma ação — não há como publicar só uma.
 - **Dado** um aluno com alerta de "mais de uma pessoa" no vídeo, **quando** a nota
   é calculada, **então** ela não sofre desconto — o alerta aparece para o
   professor decidir.
@@ -62,4 +70,5 @@ A avaliação **recusa** perguntas sem rubrica em vez de improvisar um critério
 ## Decisões relacionadas
 
 - [ADR 0004 — Fiscalização não acusa automaticamente](../decisoes/0004-proctoring-nao-acusa-automaticamente.md)
-- [ADR 0009 — Nota e devolutiva têm publicações independentes](../decisoes/0009-nota-e-devolutiva-publicam-separado.md)
+- [ADR 0009 — Nota e devolutiva têm publicações independentes](../decisoes/0009-nota-e-devolutiva-publicam-separado.md) (entrevista)
+- [ADR 0012 — Na prova oral, nota e devolutiva publicam juntas](../decisoes/0012-publicacao-conjunta-na-prova-oral.md)

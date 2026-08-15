@@ -1,4 +1,4 @@
-# 0012 — Resultados de benchmark são portáveis entre ambientes
+# 0013 — Resultados de benchmark são portáveis entre ambientes
 
 > **Estado:** Aceita
 > **Data:** 2026-07 (registrada em 2026-08-15)

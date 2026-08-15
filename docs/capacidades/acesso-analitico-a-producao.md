@@ -41,7 +41,7 @@ A primeira versão usava um schema separado só de *views*, para esconder dados
 pessoais e conter o alcance. **Quebrou em produção**: o Publish do Replit só
 reconcilia objetos "de tabela" no schema padrão — não propaga schemas
 alternativos, views nem funções. A solução foi consultar as **tabelas-base**
-direto. Ver [ADR 0013](../decisoes/0013-analytics-consulta-tabelas-base.md).
+direto. Ver [ADR 0014](../decisoes/0014-analytics-consulta-tabelas-base.md).
 
 A proteção que as views dariam era, na prática, redundante: quem tem o token já
 tem direito aos dados, e o token expira, é revogável e é auditado.
@@ -79,5 +79,5 @@ tem direito aos dados, e o token expira, é revogável e é auditado.
 
 ## Decisões relacionadas
 
-- [ADR 0013 — O endpoint de análise consulta tabelas-base, não views](../decisoes/0013-analytics-consulta-tabelas-base.md)
+- [ADR 0014 — O endpoint de análise consulta tabelas-base, não views](../decisoes/0014-analytics-consulta-tabelas-base.md)
 - [ADR 0001 — Migrations não rodam no boot](../decisoes/0001-migrations-nao-rodam-no-boot.md) — mesma família de armadilha do Publish

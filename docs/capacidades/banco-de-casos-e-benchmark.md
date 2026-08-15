@@ -49,7 +49,7 @@ exportação e importação, que leva versões de setup, de júri, releases e as
 execuções completas com seus filhos. Colunas de identidade local — quem publicou,
 qual chave gerou, qual diretório de artefato — são zeradas na importação, porque
 não existem no destino. Ver
-[ADR 0012](../decisoes/0012-resultados-de-benchmark-sao-portaveis.md).
+[ADR 0013](../decisoes/0013-resultados-de-benchmark-sao-portaveis.md).
 
 Há adaptadores por provedor (hoje OpenAI e Anthropic), então o mesmo caso pode
 ser rodado contra modelos de casas diferentes.
@@ -115,5 +115,5 @@ Histórico dos experimentos que motivaram tudo isso:
 
 ## Decisões relacionadas
 
-- [ADR 0012 — Resultados de benchmark são portáveis entre ambientes](../decisoes/0012-resultados-de-benchmark-sao-portaveis.md)
+- [ADR 0013 — Resultados de benchmark são portáveis entre ambientes](../decisoes/0013-resultados-de-benchmark-sao-portaveis.md)
 - [ADR 0008 — Voz em tempo real não é mais barata](../decisoes/0008-voz-realtime-nao-e-mais-barata.md)
