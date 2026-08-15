@@ -20,7 +20,11 @@ const RESERVED_SLUGS = new Set([
     "admin", "login", "logout", "unidades", "instituicoes", "benchmark", "cost-audit",
     "trabalho", "envio", "ativar", "scenarios", "api", "auth", "static", "s", "w", "i", "me", "diag",
 ]);
-const CREATABLE_KINDS = new Set(["mock", "oidc", "saml"]); // federados; local/google são globais (seed)
+// Só kinds com HANDLER de login funcional (#149). Federados criáveis por tenant =
+// mock (google/local são globais, via seed). oidc/saml têm schema mas nenhum
+// runtime — criá-los produziria uma porta com login impossível. Reabrir quando os
+// adaptadores OIDC/SAML existirem.
+const CREATABLE_KINDS = new Set(["mock"]);
 
 function httpErr(res, err) {
     const status = err?.status || 500;
