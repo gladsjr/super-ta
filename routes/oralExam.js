@@ -28,6 +28,7 @@ import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.j
 import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
 import { mapPool } from "../lib/concurrency.js";
 import { rubricQuota, rubricsThatConsume } from "../lib/rubricQuota.js";
+import { questionHasRubric } from "../lib/oralRubric.js";
 import { weightedFinal } from "../lib/rubric.js";
 import { deriveOralDevolutivaNow } from "../lib/oralFeedbackOps.js";
 import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
@@ -317,7 +318,7 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
         // cliente não envia exclude).
         const excludeIds = new Set(String(req.query.exclude || "").split(",").map(s => parseInt(s, 10)).filter(Number.isInteger));
         const targets = all.filter(q => String(q.answer || "").trim()
-            && (scope === "all" || q.rubric_stale || !String(q.rubric || "").trim())
+            && (scope === "all" || q.rubric_stale || !questionHasRubric(q))
             && !excludeIds.has(q.id));
         // COTA (#192): confere ANTES de qualquer chamada ao modelo. Só rubricas
         // NOVAS debitam (regerar existente não conta). Saldo insuficiente → NÃO
@@ -356,7 +357,7 @@ router.post("/w/:workToken/oral/rubrics/generate", requireWorkToken, requireOral
                 for (const q of block) {
                     const r = byId.get(q.id);
                     if (r) {
-                        await db.updateOralQuestionRubric(req.work.id, q.id, { rubric: r.rubric, weight: r.weight });
+                        await db.updateOralQuestionRubric(req.work.id, q.id, { rubric_levels: r.rubric_levels, weight: r.weight });
                         generated++;
                         send({ type: "item", id: q.id, ok: true });
                     } else {
@@ -390,8 +391,8 @@ router.post("/w/:workToken/oral/questions/:qid/rubric/generate", requireWorkToke
         const q = (await db.getOralQuestions(req.work.id)).find(x => Number(x.id) === qid);
         if (!q) return res.status(404).json({ error: "questão não encontrada" });
         if (!String(q.answer || "").trim()) return res.status(409).json({ error: "esta questão não tem resposta esperada — escreva a rubrica à mão ou preencha a resposta" });
-        const { rubric, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
-        const updated = await db.updateOralQuestionRubric(req.work.id, qid, { rubric, weight });
+        const { rubric_levels, weight } = await oralRubricBuilderAgent.build({ question: q.question, answer: q.answer, meterCtx: { openai: clientForWork(req.work), workId: req.work.id } });
+        const updated = await db.updateOralQuestionRubric(req.work.id, qid, { rubric_levels, weight });
         res.json({ ok: true, question: updated });
     } catch (err) {
         log.error("ORAL", `rubric gen (single) failed: ${err.message}`);
@@ -448,11 +449,11 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
         // antigas), enriquecidas com a rubrica + peso ATUAIS do trabalho (por id).
         const byId = {}; for (const q of workQ) byId[q.id] = q;
         const questions = (asked && asked.length ? asked : workQ)
-            .map(q => byId[q.id] ? { ...q, rubric: byId[q.id].rubric, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
+            .map(q => byId[q.id] ? { ...q, rubric: byId[q.id].rubric, rubric_levels: byId[q.id].rubric_levels, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
         const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
         if (!questions.length) return res.status(409).json({ error: "a prova não tem perguntas" });
         if (!transcript.length) return res.status(409).json({ error: "sem transcrição — o aluno ainda não realizou a prova" });
-        const semRubrica = questions.filter(q => !String(q.rubric || "").trim());
+        const semRubrica = questions.filter(q => !questionHasRubric(q));
         if (semRubrica.length) return res.status(409).json({ error: `gere ou escreva a rubrica de ${semRubrica.length} questão(ões) antes de avaliar (aba Avaliação & notas)` });
         const report = await oralExamEvaluatorAgent.evaluate({
             questions, transcript, meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: req.submission.id },
@@ -671,14 +672,14 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
                 const [asked, detail] = await Promise.all([db.getOralAsked(s.id), db.getOralSubmissionDetail(s.id)]);
                 // só as perguntas feitas a este aluno, com rubrica + peso atuais (por id)
                 const questions = (asked && asked.length ? asked : allQuestions)
-                    .map(q => byId[q.id] ? { ...q, rubric: byId[q.id].rubric, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
+                    .map(q => byId[q.id] ? { ...q, rubric: byId[q.id].rubric, rubric_levels: byId[q.id].rubric_levels, weight: byId[q.id].weight } : { ...q, weight: Number(q.weight) > 0 ? Number(q.weight) : 1 });
                 const transcript = Array.isArray(detail?.oral_transcript) ? detail.oral_transcript : [];
                 if (!transcript.length) {
                     // Item pulado: avisa o cliente p/ tirar a ampulheta dessa linha.
                     send({ type: "item", submission_token: s.submission_token, ok: false, error: "sem transcrição" });
                     return;
                 }
-                if (questions.some(q => !String(q.rubric || "").trim())) {
+                if (questions.some(q => !questionHasRubric(q))) {
                     send({ type: "item", submission_token: s.submission_token, ok: false, error: "rubrica faltando" });
                     return;
                 }

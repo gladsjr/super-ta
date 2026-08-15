@@ -351,7 +351,22 @@
   // com as perguntas). Escreve DIRETO no objeto q (identidade estável). Mudar
   // pergunta/resposta marca a rubrica para revisão (rubric_stale); editar a
   // rubrica limpa a marca. Resposta e rubrica NUNCA vão ao aluno (marcado na UI).
+  // Rubrica estruturada (#195): 5 níveis de nota FIXA, cada um com um critério.
+  const RUBRIC_LEVELS = [10, 7.5, 5, 2.5, 0];
+  const fmtScore = s => String(s).replace('.', ',');
+  // Normaliza os níveis de uma questão para os 5 na ordem canônica (criteria string).
+  function qLevels(q) {
+    const by = {};
+    (Array.isArray(q.rubric_levels) ? q.rubric_levels : []).forEach(l => { if (RUBRIC_LEVELS.includes(Number(l.score))) by[Number(l.score)] = String(l.criteria || ''); });
+    return RUBRIC_LEVELS.map(score => ({ score, criteria: by[score] || '' }));
+  }
+  // A questão tem rubrica utilizável? (níveis preenchidos OU string legada).
+  function qHasRubric(q) {
+    return (Array.isArray(q.rubric_levels) && q.rubric_levels.some(l => String(l.criteria || '').trim())) || !!String(q.rubric || '').trim();
+  }
+
   function makeItem(q) {
+    q.rubric_levels = qLevels(q); // garante os 5 níveis no objeto in-memory
     const div = document.createElement('div');
     div.className = 'q-item' + (q._open ? ' open' : '');
     const genBtn = (q.answer || '').trim() ? '<button class="btn btn-ghost btn-sm rq-gen" type="button" title="Gerar a rubrica a partir da resposta esperada">gerar</button>' : '';
@@ -361,7 +376,11 @@
       '<div class="q-body">' +
         '<label>Pergunta <span class="muted" style="font-weight:400">(falada ao aluno)</span></label><textarea class="q-q" placeholder="Enunciado da pergunta"></textarea>' +
         '<label>Resposta esperada <span class="muted" style="font-weight:400">(opcional — insumo da rubrica; o aluno NUNCA vê)</span></label><textarea class="q-a" placeholder="Gabarito"></textarea>' +
-        '<label>Rubrica — como pontuar <span class="muted" style="font-weight:400">(5 níveis: 0 / 2,5 / 5 / 7,5 / 10; só o professor vê)</span></label><textarea class="q-rubric" style="min-height:4.5rem" placeholder="Escreva a rubrica ou clique em gerar (se houver resposta esperada)…"></textarea>' +
+        '<label>Rubrica — critério por nota <span class="muted" style="font-weight:400">(notas fixas 10 / 7,5 / 5 / 2,5 / 0; só o professor vê)</span></label>' +
+        '<div class="rq-levels">' +
+          RUBRIC_LEVELS.map(s => `<div class="rq-level" style="display:flex; gap:8px; align-items:flex-start; margin-bottom:4px"><span style="flex:none; min-width:2.6em; text-align:right; font-weight:600; color:var(--ink-600); padding-top:8px; font-size:var(--fs-sm)">${fmtScore(s)}</span><textarea class="q-level" data-score="${s}" rows="1" placeholder="O que a resposta precisa demonstrar para a nota ${fmtScore(s)}…" style="min-height:2.2rem"></textarea></div>`).join('') +
+        '</div>' +
+        '<div class="rq-legacy hint" style="display:none; margin-top:2px"></div>' +
         '<div class="row" style="margin-top: var(--sp-2); align-items:center; gap: var(--sp-3)">' + genBtn +
           '<label class="label" style="font-size:var(--fs-xs); margin:0">Peso</label><input class="input q-weight" type="number" min="0.1" step="0.1" style="width:64px"/>' +
           '<label class="rq-mark-wrap" style="display:none; align-items:center; gap:4px; font-size:var(--fs-xs); color:var(--ink-600); cursor:pointer" title="A rubrica só é regerada se a pergunta/resposta mudou. Marcada = será regerada em &quot;Gerar rubricas (pendentes)&quot;; desmarque para manter a rubrica atual."><input type="checkbox" class="rq-mark"/> regerar</label>' +
@@ -369,13 +388,21 @@
       '</div>';
     const setBadge = () => {
       const b = div.querySelector('.rq-badge');
-      const stale = q.rubric_stale || !(q.rubric || '').trim();
+      const stale = q.rubric_stale || !qHasRubric(q);
       if (stale) { b.className = 'pill rq-badge'; b.style.cssText = 'margin-left:6px;background:#fff6e0;border:1px solid #ecc874;font-size:var(--fs-xs)'; b.textContent = 'revisar'; }
       else { b.className = 'rq-badge'; b.style.cssText = 'margin-left:6px'; b.textContent = ''; }
     };
     div.querySelector('.q-q').value = q.question || '';
     div.querySelector('.q-a').value = q.answer || '';
-    div.querySelector('.q-rubric').value = q.rubric || '';
+    // Preenche os 5 níveis da rubrica (#195).
+    div.querySelectorAll('.q-level').forEach(ta => { const lv = q.rubric_levels.find(l => l.score === Number(ta.dataset.score)); ta.value = lv ? lv.criteria : ''; });
+    // Aviso de rubrica LEGADA (texto livre) quando ainda não há níveis preenchidos.
+    const legacyEl = div.querySelector('.rq-legacy');
+    const syncLegacy = () => {
+      const hasLevels = q.rubric_levels.some(l => String(l.criteria || '').trim());
+      if (!hasLevels && String(q.rubric || '').trim()) { legacyEl.style.display = ''; legacyEl.textContent = `Rubrica antiga (texto livre), ainda em uso: “${q.rubric}”. Gere ou preencha os níveis acima para estruturá-la.`; }
+      else legacyEl.style.display = 'none';
+    };
     div.querySelector('.q-weight').value = Number(q.weight) > 0 ? Number(q.weight) : 1;
     // Marcação de regeração (#193): a rubrica só é regerada se pergunta/resposta
     // mudou APÓS uma geração (rubric_stale). O checkbox só é MARCÁVEL nesse caso
@@ -385,7 +412,7 @@
     const cb = div.querySelector('.rq-mark');
     const markWrap = div.querySelector('.rq-mark-wrap');
     const syncMark = () => {
-      const hasR = !!(q.rubric || '').trim();
+      const hasR = qHasRubric(q);
       markWrap.style.display = hasR ? 'inline-flex' : 'none';
       cb.disabled = !q.rubric_stale;
       cb.checked = !!q.rubric_stale && q._regen !== false;
@@ -394,11 +421,19 @@
     div.querySelector('.q-del').onclick = () => { QUESTIONS = QUESTIONS.filter(x => x !== q); markConfigDirty(); renderQuestions(); };
     div.querySelector('.q-q').addEventListener('input', (e) => { q.question = e.target.value; q.rubric_stale = true; q._regen = true; markConfigDirty(); syncHead(div, q); setBadge(); syncMark(); cfgWarn(); });
     div.querySelector('.q-a').addEventListener('input', (e) => { q.answer = e.target.value; q.rubric_stale = true; q._regen = true; markConfigDirty(); setBadge(); syncMark(); });
-    div.querySelector('.q-rubric').addEventListener('input', (e) => { q.rubric = e.target.value; q.rubric_stale = false; q._regen = false; markConfigDirty(); setBadge(); syncMark(); });
+    // Editar QUALQUER nível = definir a rubrica: atualiza rubric_levels e limpa a
+    // string legada e o stale (#195/#193).
+    div.querySelectorAll('.q-level').forEach(ta => ta.addEventListener('input', (e) => {
+      const s = Number(e.target.dataset.score);
+      const lv = q.rubric_levels.find(l => l.score === s);
+      if (lv) lv.criteria = e.target.value;
+      q.rubric = ''; q.rubric_stale = false; q._regen = false;
+      markConfigDirty(); setBadge(); syncMark(); syncLegacy();
+    }));
     div.querySelector('.q-weight').addEventListener('input', (e) => { q.weight = Number(e.target.value) > 0 ? Number(e.target.value) : 1; markConfigDirty(); });
     cb.addEventListener('change', () => { q._regen = cb.checked; });
     const gb = div.querySelector('.rq-gen'); if (gb) gb.onclick = () => generateOneRubric(q, gb);
-    syncHead(div, q); setBadge(); syncMark();
+    syncHead(div, q); setBadge(); syncMark(); syncLegacy();
     return div;
   }
   function renderQuestions() {
@@ -414,14 +449,14 @@
   // Payload de save: as questões COM enunciado (com id estável), na ordem atual.
   function questionsPayload() {
     return QUESTIONS.filter(q => (q.question || '').trim())
-      .map(q => ({ id: q.id ?? null, question: q.question, answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1 }));
+      .map(q => ({ id: q.id ?? null, question: q.question, answer: q.answer || '', rubric: q.rubric || '', rubric_levels: q.rubric_levels || [], weight: Number(q.weight) > 0 ? Number(q.weight) : 1 }));
   }
   // Adota as questões salvas (com ids + rubric_stale do servidor) como nova fonte;
   // preserva o estado de expansão casando por id.
   function adoptSaved(saved) {
     const openById = {}; QUESTIONS.forEach(q => { if (q.id != null) openById[q.id] = q._open; });
     QUESTIONS = (saved || []).map(q => ({
-      id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '',
+      id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '', rubric_levels: q.rubric_levels || [],
       weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: !!openById[q.id],
     }));
   }
@@ -594,7 +629,7 @@
     document.getElementById('cfg-n').value = j.work.question_count || 5;
     const vs = document.getElementById('cfg-voice');
     vs.innerHTML = '<option value="">(escolha uma voz)</option>' + (j.voices || []).map(v => `<option value="${v.id}" ${j.work.voice === v.id ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
-    QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '', weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: false }));
+    QUESTIONS = (j.questions || []).map(q => ({ id: q.id, question: q.question || '', answer: q.answer || '', rubric: q.rubric || '', rubric_levels: q.rubric_levels || [], weight: Number(q.weight) > 0 ? Number(q.weight) : 1, rubric_stale: q.rubric_stale === true, _open: false }));
     renderQuestions();
     renderRubric();
     renderSubsTable();
@@ -736,7 +771,7 @@
       const r = await fetch(`${API}/oral/questions/${it.id}/rubric/generate`, { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { alert('Falha: ' + (j.error || r.status)); return; }
-      it.rubric = j.question.rubric; it.weight = Number(j.question.weight) > 0 ? Number(j.question.weight) : it.weight; it.rubric_stale = false;
+      it.rubric = ''; it.rubric_levels = j.question.rubric_levels || []; it.weight = Number(j.question.weight) > 0 ? Number(j.question.weight) : it.weight; it.rubric_stale = false;
       renderRubric();
     } catch (e) { alert('Falha de comunicação.'); }
     finally { btn.disabled = false; btn.textContent = prev; }
