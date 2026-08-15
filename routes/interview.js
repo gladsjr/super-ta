@@ -1539,10 +1539,18 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
     const priorIvsIn = (currentTurn && Array.isArray(currentTurn.interventions)) ? currentTurn.interventions : [];
     const softPriorIn = priorIvsIn.filter(iv => iv?.follow_up_reason === "incomplete" || iv?.follow_up_reason === "incoherence").length;
     const contraPriorIn = priorIvsIn.filter(iv => iv?.follow_up_reason === "contradicts_work" || iv?.follow_up_reason === "contradicts_earlier_self").length;
+    // Teto TOTAL por pergunta vindo do pacote (#152): works.max_follow_ups, quando
+    // travado, limita a SOMA de follow_ups (completude + contradição) DESTA
+    // pergunta. É um teto adicional ao per-tipo acima — vale o mais apertado dos
+    // dois. NULL = não travado (só os tetos per-tipo, comportamento de sempre).
+    // 0 = pacote sem aprofundamento (todo follow_up vira ask).
+    const maxFups = Number.isInteger(req.work?.max_follow_ups) ? req.work.max_follow_ups : null;
+    const totalPriorIn = softPriorIn + contraPriorIn;
+    const totalCapExhausted = maxFups != null && totalPriorIn >= maxFups;
     // Cota no limite entrando no turno → um follow_up desse tipo será convertido
     // em ask. Desarma o early-TTS para não tocar a fala de um follow_up vetado
     // (custa só a latência do early-TTS, e só nestes turnos de exceção).
-    const hardCapArmed = softPriorIn >= 1 || contraPriorIn >= 2;
+    const hardCapArmed = softPriorIn >= 1 || contraPriorIn >= 2 || totalCapExhausted;
 
     let parsed;
     try {
@@ -1564,6 +1572,7 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             // configuração do professor.
             minTurnsBeforeFinalize: minTurnsBeforeFinalizeFor(sess),
             maxTurns,
+            maxFollowUps: maxFups,
             onFirstDelta: useSSE ? () => {
                 if (tMarks.firstToken == null) tMarks.firstToken = Date.now();
                 res.write(`event: responding\ndata: {}\n\n`);
@@ -1608,8 +1617,12 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         const r = parsed.action.follow_up_reason ?? null;
         const softExhausted = (r === "incomplete" || r === "incoherence") && softPriorIn >= 1;
         const contraExhausted = (r === "contradicts_work" || r === "contradicts_earlier_self") && contraPriorIn >= 2;
-        if (softExhausted || contraExhausted) {
-            const cota = softExhausted ? `completude(${softPriorIn}/1)` : `contradição(${contraPriorIn}/2)`;
+        // Teto do pacote (#152): esgota independentemente do tipo do follow_up.
+        const totalExhausted = totalCapExhausted;
+        if (softExhausted || contraExhausted || totalExhausted) {
+            const cota = softExhausted ? `completude(${softPriorIn}/1)`
+                : contraExhausted ? `contradição(${contraPriorIn}/2)`
+                : `teto do pacote(${totalPriorIn}/${maxFups})`;
             log.info("GUARDRAIL", `TETO DURO: follow_up "${r}" vetado — cota ${cota} esgotada; forçando avanço (ask)`);
             const directive = `A cota de follow_up DESTA pergunta está ESGOTADA (${cota}). É PROIBIDO neste retorno: follow_up, hint, ask_repeat e finalize. Você DEVE emitir action.kind="ask": avance para a PRÓXIMA pergunta do plano ainda não coberta (ou uma espontânea, se claramente melhor), com uma ponte curta e natural na voz da persona que reconheça o que ficou em aberto SEM reabrir a cobrança. Registre a lacuna não esclarecida em memory.open_threads antes de avançar. NÃO repita a pergunta que a outra ponta já não respondeu.`;
             try {

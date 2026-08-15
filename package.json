@@ -19,6 +19,7 @@
     "test:benchmark": "node --test tests/benchmark.test.mjs",
     "test:json-extract": "node --test tests/json-extract.test.mjs",
     "test:auth-policy": "node --test -r dotenv/config tests/auth-policy-inheritance.test.mjs",
+    "test:packages-locks": "node --test -r dotenv/config tests/packages-locks.test.mjs",
     "test:cost-audit": "node --test tests/cost-audit.test.mjs",
     "benchmark:work": "node -r dotenv/config scripts/create-benchmark-work.mjs",
     "predev": "npm run db:up && npm run db:migrate",
