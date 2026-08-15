@@ -53,6 +53,8 @@ alternativa descartada e o custo aceito.
 | [0010](docs/decisoes/0010-config-nao-vai-crua-ao-modelo.md) | Configuração estruturada **nunca** vai crua ao modelo: passa por template. |
 | [0011](docs/decisoes/0011-enumeracoes-em-tabela.md) | Enumeração que evolui vai em **tabela + FK**, não em `CHECK` de strings. |
 | [0012](docs/decisoes/0012-publicacao-conjunta-na-prova-oral.md) | **Na prova oral**, nota e devolutiva publicam **juntas** (um só controle). Supersede a 0009 nesse escopo. |
+| [0013](docs/decisoes/0013-resultados-de-benchmark-sao-portaveis.md) | Resultado de benchmark só é comparável **dentro do mesmo par setup + júri**. O formato do pacote portátil é contrato. |
+| [0014](docs/decisoes/0014-analytics-consulta-tabelas-base.md) | **Não construa nada que dependa de view, function ou schema alternativo** — o Publish não os propaga. Funciona em dev e falha em produção. |
 
 Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
 por NNNN"); nunca reescreva uma ADR aceita.

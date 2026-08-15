@@ -31,5 +31,18 @@ código já explica sozinho.
 | [0010](0010-config-nao-vai-crua-ao-modelo.md) | Configuração nunca vai crua ao modelo | Aceita |
 | [0011](0011-enumeracoes-em-tabela.md) | Enumerações que evoluem vão em tabela, não em CHECK | Aceita |
 | [0012](0012-publicacao-conjunta-na-prova-oral.md) | Na prova oral, nota e devolutiva publicam juntas | Aceita |
+| [0013](0013-resultados-de-benchmark-sao-portaveis.md) | Resultados de benchmark são portáveis entre ambientes | Aceita |
+| [0014](0014-analytics-consulta-tabelas-base.md) | O endpoint de análise consulta tabelas-base, não views | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.
+
+## Colisão de número entre branches
+
+Duas branches podem criar a `NNNN` ao mesmo tempo — já aconteceu com a 0012.
+Regra igual à das migrations: **se a `main` já tem esse número, renumere a sua**
+antes de integrar, e corrija o título dentro do arquivo e as referências que
+apontam para ele. Quem chega depois renumera.
+
+Vale conferir também se a ADR que chegou primeiro **supersede** alguma antiga: em
+caso afirmativo, o estado da antiga muda no índice e as páginas de capacidade que
+a citavam precisam ganhar a ressalva.

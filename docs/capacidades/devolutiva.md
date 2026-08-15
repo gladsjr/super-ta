@@ -20,7 +20,10 @@ bastidores e de suspeitas, que o professor revisa e publica quando quiser.
 - Pode, opcionalmente, incorporar uma nota **suave e não acusatória** sobre a
   fiscalização por vídeo.
 - Existe nas três formas de arguição; na prova oral, reaproveita o mesmo gerador.
-- É **publicada à parte da nota** — ver [ADR 0009](../decisoes/0009-nota-e-devolutiva-publicam-separado.md).
+- A publicação difere por forma: na **entrevista** ela é independente da nota
+  ([ADR 0009](../decisoes/0009-nota-e-devolutiva-publicam-separado.md)); na
+  **prova oral**, as duas publicam juntas
+  ([ADR 0012](../decisoes/0012-publicacao-conjunta-na-prova-oral.md)).
 
 ## O que esta capacidade NÃO faz
 
