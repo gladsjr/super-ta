@@ -180,9 +180,12 @@
     const el = document.getElementById('transcript');
     if (!turns || !turns.length) { el.innerHTML = '<p class="hint">Sem transcrição — o aluno ainda não realizou a prova.</p>'; return; }
     // Alertas de transcrição (#137): trechos prováveis de ruído/eco/silêncio. Índice → rótulo.
+    // Guarda (#218): só destaca se os alertas correspondem à transcrição ATUAL (mesmo nº
+    // de turnos) — evita índices obsoletos caírem sobre turnos errados numa prova refeita.
+    const alertsOk = alerts && Number(alerts.turn_count) === turns.length;
     const flagged = {};
-    (alerts && Array.isArray(alerts.turns) ? alerts.turns : []).forEach(a => { flagged[a.index] = a.label; });
-    const banner = (alerts && alerts.count > 0)
+    (alertsOk && Array.isArray(alerts.turns) ? alerts.turns : []).forEach(a => { flagged[a.index] = a.label; });
+    const banner = (alertsOk && alerts.count > 0)
       ? `<p class="hint" style="margin-bottom:var(--sp-2); color:var(--ink-700)">⚠️ ${alerts.count} trecho(s) da fala do aluno destacado(s) abaixo — provável ruído, eco ou silêncio transcrito (idioma não reconhecido/ininteligível). É indício para conferência, não altera a nota.</p>`
       : '';
     el.innerHTML = banner + turns.map((t, i) => {
