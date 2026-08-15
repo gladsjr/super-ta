@@ -49,9 +49,10 @@ alternativa descartada e o custo aceito.
 | [0006](docs/decisoes/0006-um-raciocinio-por-turno.md) | Guardas (teto de turnos, encerramento, validação) ficam **no código**, nunca no prompt. |
 | [0007](docs/decisoes/0007-gabarito-nunca-sai-do-servidor.md) | O gabarito da prova oral **não** chega ao navegador nem à sessão de voz. |
 | [0008](docs/decisoes/0008-voz-realtime-nao-e-mais-barata.md) | Voz em tempo real **não** é mais barata que mensagens. Hipótese medida e refutada. |
-| [0009](docs/decisoes/0009-nota-e-devolutiva-publicam-separado.md) | Nota e devolutiva têm publicações **independentes**; nenhuma sai sem ação do professor. |
+| [0009](docs/decisoes/0009-nota-e-devolutiva-publicam-separado.md) | **Na entrevista**, nota e devolutiva têm publicações **independentes** (na prova oral, ver 0012). Nenhuma sai sem ação do professor. |
 | [0010](docs/decisoes/0010-config-nao-vai-crua-ao-modelo.md) | Configuração estruturada **nunca** vai crua ao modelo: passa por template. |
 | [0011](docs/decisoes/0011-enumeracoes-em-tabela.md) | Enumeração que evolui vai em **tabela + FK**, não em `CHECK` de strings. |
+| [0012](docs/decisoes/0012-publicacao-conjunta-na-prova-oral.md) | **Na prova oral**, nota e devolutiva publicam **juntas** (um só controle). Supersede a 0009 nesse escopo. |
 
 Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
 por NNNN"); nunca reescreva uma ADR aceita.
