@@ -1,0 +1,65 @@
+# Site de documentação (opcional) — gera HTML navegável a partir dos MESMOS
+# markdowns de docs/. Não faz parte do runtime da aplicação.
+#
+#   pip install mkdocs-material
+#   mkdocs serve     # http://127.0.0.1:8000
+#   mkdocs build     # site estático em site/
+#
+# A fonte é sempre o markdown. Nunca edite o HTML gerado.
+
+site_name: ORATIA — Documentação
+site_description: Arguição oral por IA — capacidades, decisões e referência técnica
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: pt-BR
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: { icon: material/weather-night, name: Tema escuro }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: { icon: material/weather-sunny, name: Tema claro }
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Início: README.md
+  - Capacidades:
+      - Visão geral: capacidades/README.md
+      - Configuração do trabalho: capacidades/configuracao-do-trabalho.md
+      - Prova oral: capacidades/prova-oral.md
+      - Entrevista simplificada: capacidades/entrevista-simplificada.md
+      - Entrevista profunda: capacidades/entrevista-profunda.md
+      - Fiscalização por vídeo: capacidades/fiscalizacao-por-video.md
+      - Avaliação e nota: capacidades/avaliacao-e-nota.md
+      - Devolutiva: capacidades/devolutiva.md
+      - Controle de uso e custo: capacidades/controle-de-uso-e-custo.md
+      - Camada institucional: capacidades/camada-institucional.md
+      - Cenários multiagente: capacidades/cenarios-multiagente.md
+  - Decisões: decisoes/README.md
+  - Referência técnica:
+      - Arquitetura e prompts: architecture.md
+      - Prova oral: oral-exam.md
+      - Fiscalização por vídeo: video-proctoring.md
+      - Modelo de acesso: access-model.md
+      - Cenários: scenarios.md
+      - Orquestrador de turno: super-orchestrator-plan.md
+  - Histórico: historico/README.md

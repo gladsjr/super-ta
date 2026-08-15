@@ -7,7 +7,12 @@ The interview kind has two variants (`works.interview_variant`, migration 050): 
 
 Per-turn orchestration is **delegated to a single reasoning-model call** (`SuperOrchestratorAgent`) that receives full context and returns a JSON action; the code is a dispatcher around that decision with hard guardrails (turn cap, early-finalize block). This replaced an earlier triage×3 + sufficiency + relevance fleet.
 
-**Keep this file lean.** Subsystem detail lives in `docs/` — update THERE when a subsystem changes:
+**Keep this file lean.** Start at [`docs/README.md`](docs/README.md) — it maps every
+genre of documentation and its lifecycle. What the product *does*, in business
+terms, lives in [`docs/capacidades/`](docs/capacidades/README.md); *why* things are
+the way they are lives in [`docs/decisoes/`](docs/decisoes/README.md) (ADRs).
+
+Subsystem detail lives in `docs/` — update THERE when a subsystem changes:
 - `docs/architecture.md` — `/chat` cycle + prompt map (mermaid)
 - `docs/super-orchestrator-plan.md` — rationale + action schema
 - `docs/oral-exam.md` — oral exam (Realtime): relay, guaranteed ending, setup gate, calibration, proctoring, oral agents, schema

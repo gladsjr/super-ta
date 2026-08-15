@@ -16,6 +16,19 @@
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/install_pkgs.sh" }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/migrations-guard.mjs\"",
+            "statusMessage": "Checando regras de migration...",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

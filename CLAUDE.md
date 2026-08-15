@@ -1,96 +1,25 @@
-#Contexto arquitetural e features
-Leia o @replit.md para uma visão geral arquitetural e das features do sistema
+# CLAUDE.md
 
-# Divisão de ambientes (Claude / Codex / Replit) — regra dura
+As convenções deste projeto valem para **qualquer** agente e vivem num arquivo
+só, no padrão aberto que os demais agentes também leem:
 
-Três agentes mexem neste projeto. Cada um trabalha no SEU clone, com o SEU banco e a SUA porta. **Nenhum agente toca no ambiente do outro** — não troca a branch do outro, não recria/migra o banco do outro, não sobe servidor na porta do outro.
+@AGENTS.md
 
-| Agente | Working tree (clone) | Banco (no container `superta-db`) | Porta | Branch de trabalho |
-|---|---|---|---|---|
-| **Claude** (este) | `C:\Users\glads\Dropbox\Projetos\ORATIA\super-ta-repo` | `oratia_claude` | `:5000` | a feature em andamento (ex.: `feat/prova-oral-realtime`) |
-| **Codex** | `C:\Users\glads\Dropbox\Projetos\ORATIA\super-ta-codex` | `oratia_codex` | `:5001` | `feat/multiagent-scenarios-mock` |
-| **Replit** | ambiente próprio (Reserved VM) | banco próprio do Replit (dev/prod) | — | `main` |
+Panorama do sistema: @replit.md
 
-- O **container Postgres `superta-db`** é compartilhado, mas cada agente usa SÓ o seu database (`oratia_claude` / `oratia_codex`). Nunca o do outro.
-- A `.env` de cada clone aponta para o seu banco + sua porta. A do Codex tem `DATABASE_URL=.../oratia_codex` e `PORT=5001`.
-- **Working tree VIVO do usuário** (`C:\Users\glads\src\super-ta`): NENHUM agente toca — nem Claude, nem Codex.
-- **`main` é a fonte única** que vai a produção. O Replit puxa a `main` e publica (ver regras de migration/Publish abaixo). Cada agente dá push só na SUA branch; integração para a `main` é via PR.
-- Bancos legados (`superta`, `superta_oral`, `superta_codex`, `superta_claude*`) são lixo de migração anterior — ignorar; limpar quando o usuário autorizar.
+Não duplique aqui nada que esteja no `AGENTS.md` — este arquivo existe apenas
+porque o Claude Code carrega `CLAUDE.md` por convenção própria. Se precisar
+mudar uma convenção do projeto, mude no `AGENTS.md`.
 
-Diretriz permanente:
-- evite fallback arquitetural e hierarquia de opções de configuração quando isso obscurecer o comportamento do sistema;
-- para seleção de modelo, use apenas `config/policy.yaml` como fonte de verdade;
-- se uma configuração obrigatória estiver ausente, prefira falhar explicitamente.
+## Específico do Claude Code
 
-Convenções de prompt para agentes:
-- YAMLs de configuração (hoje o `interviewer.yaml`; no futuro outros) nunca vão ao LLM crus. Sempre rodam por um template que explica o significado de cada campo. Veja `config/interviewer_agenda_template.txt` + `lib/interviewerAgenda.js`.
-- Qualquer agente novo que precise da agenda do entrevistador usa `renderInterviewerAgenda(yamlText)`. Não recrie a estrutura.
-- Contexto de conversa curto e bem-delimitado (ex.: turno corrente + intervenções) vem do estado local em `SESSIONS` (`sess.turnLog`), não da Conversations API. O parâmetro `conversation:` das Responses polui o `conv_chat` remoto com turnos internos; evite.
-
-Helpers compartilhados — diretriz permanente:
-- **Agente de saída ESTRUTURADA (json_schema, não-streaming)** usa `lib/agentRun.js#runStructured` — ele concentra o esqueleto repetido (montar payload Responses+json_schema → `log.prompt` → `log.span`+`meteredResponses` → extrair/parsear o JSON → `validate` → retry). Passe só o que varia: `instructions`, `input`, `schema`/`schemaName` e um `validate(parsed)` que mapeia/valida e LANÇA p/ forçar retry. NÃO recrie o loop de `responses.create`+parse à mão. Exceções legítimas (não encaixam): `SuperOrchestratorAgent` (`stream:true` por turno), `StudentFeedbackAgent` (muta o payload no retry p/ apontar vazamento de `FORBIDDEN_PATTERNS`), `EnunciadoCoherenceAgent` (saída livre, sem json_schema).
-- **Lote com concorrência limitada** (avaliar N alunos, etc.) usa `lib/concurrency.js#mapPool(items, limit, fn)` — pool de workers que preserva ordem e captura erro por item. NÃO escreva pool de workers/`Promise.all(Array.from(...))` à mão.
-
-Modo de interação (texto vs áudio) — diretriz permanente:
-- Análise é sempre em texto. Áudio existe apenas como última-milha da interface com o aluno (STT na entrada, TTS na saída). Agentes, evaluators, document map, vector store, log da conversa e relatório final operam só em texto. Nunca passar áudio para um agente.
-- Áudio não é persistido. TTS vai num cache LRU em memória de sessão (`sess.audioCache`, `lib/audio.js#AudioCache`) e é servido por `GET /s/:t/audio/:turnId`. Se o cache evict ou o servidor reiniciar, o frontend degrada para texto.
-- Modo de interação é re-sincronizado com a configuração atual do trabalho em **dois momentos**: (1) quando uma sessão nova é criada em `/s/:t/start`, e (2) a cada `/s/:t/upload` (cada upload é uma nova tentativa de entrevista — reset do turnLog, etc.). Entre esses dois pontos, o modo fica imutável durante a entrevista em andamento. Mudanças no painel do professor afetam: novos alunos abrindo o link, alunos que ainda não enviaram PDF, ou alunos que reenviarem o PDF.
-- Modelos STT e TTS vivem em `config/policy.yaml` (`stt_model`, `tts_model`). Fail-fast no boot se ausentes, igual aos outros.
-- Vozes ficam em `config/voices.js`. Adicionar uma voz nova = editar o array. Validação via `isValidVoice()` em qualquer ponto que aceite voiceId.
-
-Schema do banco — diretriz permanente:
-
-Migrations file-per-change. Toda mudança de schema vai num arquivo novo em `migrations/`, nunca em arquivo já aplicado.
-
-Mecânica:
-- Arquivos: `migrations/NNN_descricao.sql`, NNN com zero-padding em 3 dígitos (`001`, `002`, ..., `999`). Aplicados em ordem alfabética = ordem numérica.
-- Runner: `lib/migrations.js#runMigrations()`, invocado pelo CLI `scripts/migrate.mjs` — NÃO mais no boot do servidor. Cada arquivo roda em sua própria transação. Falha em qualquer migration = rollback dela + o CLI sai com código 1.
-- Tabela de controle: `schema_migrations(version, filename, applied_at)`. Criada automaticamente. Cada migration aplicada com sucesso é registrada com sua versão.
-- CLI: `npm run db:migrate` aplica pendentes; `npm run db:migrate -- status` lista status sem aplicar.
-- Onde rodam (só em dev): no Replit o comando do workflow é `npm run db:migrate && node server.js`; localmente o `predev` roda `db:up && db:migrate`. O `server.js` NÃO roda migrations.
-- Produção: o boot não toca no schema. O fluxo de **Publish** do Replit faz o diff dev→prod e aplica em prod. As migrations seguem sendo a fonte versionada do schema (histórico em git) e o jeito de evoluir o dev.
-
-Por que migrations NÃO rodam no boot (decisão, não acidente — não reverta sem ler):
-- Antes, `server.js` rodava `runMigrations()` no boot. O **Publish** do Replit, porém, aplica o diff de schema dev→prod **sem** registrar nada na `schema_migrations` do prod. Resultado: o boot do prod tentava reaplicar uma migration que o Publish já tinha materializado e quebrava (ex.: `column already exists`), travando o boot a cada reinício até alguém corrigir o ledger na mão.
-- Correção estrutural: o boot nunca roda DDL. Dev evolui via `npm run db:migrate`; prod é materializado pelo Publish. A `schema_migrations` é o ledger do **dev**; em prod ela existe mas ninguém a lê no boot.
-- Consequência operacional: uma migration precisa estar aplicada/testada no dev **antes** do Publish, senão o diff não a leva pro prod.
-
-Workflow para qualquer mudança de schema (aditiva ou destrutiva):
-1. Olhar último número em `migrations/`. Criar `migrations/NNN+1_descricao.sql`.
-2. Escrever SQL direto, SEM `IF NOT EXISTS` ou guards de idempotência — cada migration roda exatamente uma vez por banco.
-3. Aplicar no dev: `npm run db:migrate` (ou reiniciar o workflow do Replit, que migra antes de subir) → testar.
-4. Commit + push. Para levar a prod: **Publish** no Replit (diff dev→prod). O boot do prod NÃO reaplica migrations.
-
-Regras duras (Claude deve respeitar e avisar o usuário se ele propor o contrário):
-- **Nunca editar uma migration depois de qualquer deploy.** Mesmo um typo em comentário. A tabela `schema_migrations` confia em "filename já aplicado"; editar quebra reproducibilidade entre ambientes.
-- **Para corrigir bug em migration JÁ aplicada**: criar uma migration corretiva (NNN+1). Nunca editar a anterior.
-- **Para corrigir bug em migration que falhou (rollback, não registrada)**: editar é OK — não foi aplicada em lugar nenhum ainda.
-- **Migrations só rodam em dev.** Em prod, quem aplica schema é o Publish do Replit (o boot não roda DDL). Logo, uma migration precisa estar aplicada e testada no dev ANTES do Publish, pra que o diff a leve pro prod. Migration que falha no dev = bug bloqueante: corrigir antes de publicar.
-- **Seeds são separados de migrations.** `seedInitialUsers()`, `seedRoles()` (sincroniza `ROLE_DEFS` de lib/rbac.js → tabela `roles`), `seedAuthProviders()` (provedores base 'local'/'google'), `seedBootstrapAdmin()` (garante 1 admin_global), `seedInterviewerTemplates()` e `seedPackageTemplates()` (sincroniza `config/packages/*.yaml` → `package_templates`, mesmo padrão dos interviewers) continuam em `auth.js` e rodam DEPOIS das migrations. Migrations cuidam de schema; seeds cuidam de dados de bootstrap. Não misturar.
-- **Enumerações que podem evoluir vão em TABELA + FK, não em CHECK de strings** (decisão de 04/08/2026; exemplo: `roles`). Formato: id numérico interno (PK) + `key` TEXT estável que o código referencia + `name` de exibição (traduzível), linhas sincronizadas por seed a partir de uma constante no código. Motivo: evoluir a enumeração vira DML — mudar a definição de um CHECK mantendo o nome NÃO propaga no Publish do Replit (pegadinha conhecida) e id numérico cru espalhado no código mata a legibilidade. CHECKs continuam OK para invariantes estruturais estáveis (ex.: par tipo/valor andarem juntos).
-- **Camada institucional** (migrations 055–066): unidades (árvore recursiva + flag de turma `is_class`), RBAC por unidade (herança só p/ admin; professor/aluno locais ao nó), identidade/SSO (pessoa ≠ identidades de login; `auth_providers`/`user_identities`/`unit_auth_policies`; id civil cpf), e os dois portões de uso como RESERVA (US$ reservado do saldo do pai + pacotes, ambos com devolução). Aditiva e opcional — não quebra o modelo por token. Detalhe em `docs/access-model.md`. A DSL de pacotes (`config/packages/*.yaml`) é config pura (nunca vai ao LLM) — segue o princípio single-source-of-truth + fail-fast, não a regra de template do `renderInterviewerAgenda`.
-- **`001_init.sql` é o snapshot bootstrap** — escrito com `IF NOT EXISTS` em tudo, justamente porque pode rodar contra um banco legado que veio do antigo `schema.sql`. Migrations a partir da 002 são deltas puros.
-
-Operações que migrations habilitam (que o esquema antigo não suportava):
-- `DROP COLUMN`, `DROP TABLE`
-- `ALTER COLUMN ... TYPE ...`
-- `RENAME COLUMN`, `RENAME TABLE`
-- `ALTER COLUMN ... SET NOT NULL` (após backfill)
-- Adição de constraint com possível conflito em dados existentes (`UNIQUE`, `CHECK`, `FOREIGN KEY`)
-- Data migrations (`UPDATE`/`INSERT` para backfill ou correção)
-
-Limites:
-- Migrations zero-padded em 3 dígitos cobrem 999 mudanças. Se chegar perto, expandir para 4 dígitos via migration corretiva (renomear arquivos antigos exige cuidado — ver "nunca editar"). Improvável precisar.
-- O runner é serial e simples — não suporta migrations em paralelo nem rollback automático de uma migration aplicada com sucesso (se precisar reverter, criar a migration inversa).
-
-Mapa de prompts — regra permanente:
-- Todo prompt enviado à LLM deve ser alcançável a partir do diagrama em `docs/architecture.md`. Sem exceção.
-- Quando criar/mover/renomear um prompt (seja `systemPrompt` em agente, template `.txt` em `config/` ou string inline em `server.js`), atualize na mesma mudança:
-  (a) o `click` do nó correspondente no diagrama Mermaid de `docs/architecture.md`,
-  (b) a coluna "Prompt enviado à LLM" da tabela de navegação do mesmo arquivo, e
-  (c) o "Índice completo de prompts" na mesma página.
-- Ao adicionar um agente novo: incluir o nó no diagrama com `click` apontando para a linha do `systemPrompt` (não para o topo do arquivo), e listar o agente no índice.
-- Strings inline de prompt em `server.js` são toleradas, mas devem aparecer no índice com link `arquivo#Llinha`. Se virarem mais que duas-três linhas, prefira extrair para arquivo dedicado em `config/` e linkar o `.txt`.
-- O diagrama é o ponto único de descoberta. Não criar índices paralelos em outros docs.
-
-#
+- **Skills** do projeto ficam em `.claude/skills/` (ex.: `testar-modo-audio`,
+  que roda a entrevista por voz ponta a ponta no navegador).
+- **Memória operacional** em `.agents/memory/`: lições de infraestrutura e
+  armadilhas de ambiente descobertas na prática (Replit, Docker, binários
+  nativos). São notas de campo, não decisões de arquitetura — decisão com
+  consequência duradoura vira ADR em `docs/decisoes/`.
+- Este clone (`super-ta-repo`) é o ambiente do Claude: banco `oratia_claude`,
+  porta `:5000`. A tabela completa está no `AGENTS.md`.
+- Se houver outra sessão do Claude no mesmo clone, **não troque de branch** —
+  crie um worktree (`git worktree add`) para o trabalho paralelo.
