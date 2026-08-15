@@ -205,15 +205,15 @@
       <details class="card card-collapsible" open>
         <summary><span class="card-title">Alunos</span></summary>
         <div class="card-collapsible-body">
-          <p class="card-sub">Clique em <strong>gerenciar</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo) e atribuir a nota.</p>
+          <p class="card-sub">Clique em <strong>Avaliação</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo) e atribuir a nota.</p>
           <p class="card-sub" data-help="Os alertas de vídeo (ausência, celular, outra pessoa, mãos fora) aparecem na coluna Alertas abaixo e no card de fiscalização de cada aluno, com os trechos do vídeo. Eles NÃO mexem na nota automaticamente — servem para você revisar e, se julgar necessário, ajustar a nota à mão.">Os alertas de <strong>fiscalização por vídeo</strong> (coluna <strong>Alertas</strong>) são indícios para a sua revisão — não alteram a nota automaticamente. Se algo justificar, ajuste a nota à mão na tela de cada aluno.</p>
           <!-- Ações EM LOTE sobre os alunos (issue #189): analisar vídeos, calcular e publicar notas. -->
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
             <button id="proctor-all-btn" class="btn" type="button" title="Analisa (visão computacional local) os vídeos ainda não analisados; alimenta a coluna Alertas">Analisar vídeos</button>
             <button id="eval-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das provas realizadas que ainda não têm relatório (compara a transcrição ao gabarito)">Calcular Notas</button>
             <button id="eval-all-force-btn" class="btn" type="button" title="Recalcula as notas de TODAS as provas realizadas">Reavaliar todas</button>
-            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas já atribuídas">Publicar notas</button>
-            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar notas</button>
+            <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas e devolutivas já atribuídas">Publicar notas e devolutivas</button>
+            <button id="unpub-grade-btn" class="btn btn-ghost btn-sm" type="button">Despublicar</button>
           </div>
           <div id="eval-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
           <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
@@ -463,7 +463,7 @@
       // + devolutiva + nota, na página de gerenciamento. Antes só linkava o vídeo cru.
       const canView = s.has_oral_video || s.status === 'completed' || s.status === 'gave_up';
       const vid = canView
-        ? `<a href="${API}/oral/s/${s.submission_token}" target="_blank" title="Ver a prova: transcrição, vídeo, alertas, devolutiva e nota">${s.has_oral_video ? '🎥 ' : ''}ver prova ▸</a>`
+        ? `<a href="${API}/oral/s/${s.submission_token}" target="_blank" title="Avaliação: transcrição, vídeo, alertas, devolutiva e nota">${s.has_oral_video ? '🎥 ' : ''}Avaliação ▸</a>`
         : '<span class="hint">—</span>';
       const abrir = s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : '';
       const blockBtn = s.is_blocked
@@ -524,10 +524,8 @@
         : (s.has_oral_eval ? '<span class="pill pill-done">avaliada</span>' : '<span class="hint">—</span>');
       const grade = s._evalPending ? SPIN
         : ((s.grade ?? null) === null ? '<span class="hint">—</span>' : `<strong>${Number(s.grade).toFixed(1)}</strong>`);
-      const pub = [
-        s.devolutiva_published ? '<span class="pill pill-pub">devolutiva</span>' : '',
-        s.grade_published ? '<span class="pill pill-pub">nota</span>' : '',
-      ].filter(Boolean).join(' ') || '<span class="hint">—</span>';
+      // Nota e devolutiva são publicadas juntas (#207) → um único indicador.
+      const pub = s.grade_published ? '<span class="pill pill-pub">publicado</span>' : '<span class="hint">—</span>';
       const alertPills = (s.proctor_alerts || []).map(a => `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">${esc(a)}</span>`);
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
       if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
@@ -542,7 +540,7 @@
         <td class="cell-grade" style="text-align:right">${grade}</td>
         <td class="cell-alerts">${alerts}</td>
         <td>${pub}</td>
-        <td><a href="${API}/oral/s/${s.submission_token}">gerenciar ▸</a></td>
+        <td><a href="${API}/oral/s/${s.submission_token}">Avaliação ▸</a></td>
       </tr>`;
     }).join('');
   }

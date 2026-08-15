@@ -573,11 +573,35 @@ router.put("/w/:workToken/oral/submissions/:subToken/grades", requireWorkToken, 
 router.post("/w/:workToken/oral/submissions/:subToken/publish", requireWorkToken, requireProfessorSubmission, express.json({ limit: "8kb" }), async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
-        if (typeof req.body?.devolutiva === "boolean") await db.publishOralDevolutiva(req.submission.id, req.body.devolutiva);
-        if (typeof req.body?.grade === "boolean") await db.publishOralGrade(req.submission.id, req.body.grade);
+        // A devolutiva é publicada/despublicada JUNTO com a nota (#207): a flag `grade`
+        // move as duas colunas. `devolutiva` isolada foi mantida por compat, mas a UI
+        // não a envia mais.
+        if (typeof req.body?.grade === "boolean") {
+            await db.publishOralGrade(req.submission.id, req.body.grade);
+            await db.publishOralDevolutiva(req.submission.id, req.body.grade);
+        } else if (typeof req.body?.devolutiva === "boolean") {
+            await db.publishOralDevolutiva(req.submission.id, req.body.devolutiva);
+        }
         res.json({ ok: true });
     } catch (err) { log.error("ORAL", `publish failed: ${err.message}`); res.status(500).json({ error: "falha ao publicar" }); }
 });
+
+// Dispara a análise de vídeo (proctoring) em BACKGROUND para uma submissão
+// (#209). Fire-and-forget: usado pelo disparo automático pós-upload — analisa
+// todas as partes atuais e grava oral_proctor_json. Nunca lança para o caller.
+function runOralProctorAuto(submissionId, tokenForLog) {
+    (async () => {
+        try {
+            const parts = await db.getOralVideoParts(submissionId);
+            if (!parts.length) return;
+            const report = await analyzeOralVideoParts(parts);
+            await db.setOralProctor(submissionId, report);
+            log.info("ORAL", `proctoring automático ok submission=${tokenForLog} frames=${report.frames} ms=${report.ms}`);
+        } catch (e) {
+            log.error("ORAL", `proctoring automático falhou submission=${tokenForLog}: ${e.message}`);
+        }
+    })();
+}
 
 // Proctoring local por vídeo (pós-prova): amostra frames e gera flags para
 // revisão humana (ausência / mais de uma pessoa / celular / mãos não visíveis).
@@ -705,15 +729,20 @@ router.post("/w/:workToken/oral/evaluations/student-versions", requireWorkToken,
     }
 });
 
-// Publica/despublica devolutivas ou notas em massa. Corpo: {target:'devolutiva'|'grade', on:bool}.
+// Publica/despublica notas em massa — a devolutiva vai JUNTO (#207). Corpo:
+// {target:'grade', on:bool}. 'devolutiva' isolado mantido por compat (a UI só usa 'grade').
 router.post("/w/:workToken/oral/publish-all", requireWorkToken, requireOral, express.json({ limit: "8kb" }), async (req, res) => {
     const target = req.body?.target;
     const on = req.body?.on === true;
     if (target !== "devolutiva" && target !== "grade") return res.status(400).json({ error: "target inválido (devolutiva|grade)" });
     try {
-        const affected = target === "devolutiva"
-            ? await db.publishAllOralDevolutiva(req.work.id, on)
-            : await db.publishAllOralGrade(req.work.id, on);
+        let affected;
+        if (target === "grade") {
+            affected = await db.publishAllOralGrade(req.work.id, on);
+            await db.publishAllOralDevolutiva(req.work.id, on); // devolutiva acompanha a nota
+        } else {
+            affected = await db.publishAllOralDevolutiva(req.work.id, on);
+        }
         log.info("ORAL", `publish-all work=${req.work.work_token} target=${target} on=${on} affected=${affected}`);
         res.json({ ok: true, affected });
     } catch (err) {
@@ -924,9 +953,11 @@ router.get("/s/:submissionToken/oral/result", requireSubmissionToken, async (req
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
         const d = await db.getOralSubmissionDetail(req.submission.id);
+        // A devolutiva é publicada JUNTO com a nota (#207): ambas seguem grade_published_at.
+        const published = !!d?.grade_published_at;
         res.json({
-            devolutiva: d?.evaluation_published_at ? (d.oral_devolutiva || "") : null,
-            grade: d?.grade_published_at ? (d.grade_final ?? null) : null,
+            devolutiva: published ? (d.oral_devolutiva || "") : null,
+            grade: published ? (d.grade_final ?? null) : null,
         });
     } catch (err) { log.error("ORAL", `result failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
@@ -1033,6 +1064,12 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUploa
         // promove para concluída agora que o segmento chegou.
         const promoted = await db.promoteAwaitingVideo(req.submission.id);
         log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
+        // Análise de vídeo (proctoring) AUTOMÁTICA (#209): dispara em background,
+        // sem bloquear a resposta (o aluno já encerrou). Analisa TODAS as partes
+        // atuais; se uma retomada chegar depois, o novo upload reanalisa e
+        // sobrescreve. Falha é silenciosa (log) — o lote /proctor-all continua como
+        // reprocessamento manual de backstop.
+        runOralProctorAuto(req.submission.id, req.submission.submission_token);
         res.json({ ok: true });
     } catch (err) {
         log.error("ORAL", `video upload failed: ${err.message}`);
