@@ -32,16 +32,29 @@ outro.
   working tree só tem um checkout, e trocar puxa os arquivos debaixo da outra
   sessão. Use `git worktree add` para trabalho paralelo.
 
-## Diretrizes permanentes
+## Decisões travadas — não reverta sem ler a ADR
 
-- **Falhe explícito, sem fallback arquitetural.** Configuração obrigatória
-  ausente derruba o boot; não adivinhe padrão. Seleção de modelo vem só de
-  `config/policy.yaml`. → [ADR 0002](docs/decisoes/0002-falhar-explicito-sem-fallback.md)
-- **Análise é sempre em texto.** Áudio existe só como última milha com o aluno
-  (transcrição na entrada, síntese na saída). Nunca passe áudio a um agente.
-  → [ADR 0003](docs/decisoes/0003-analise-sempre-em-texto.md)
-- **Guardas ficam no código, não no prompt.** Teto de turnos, bloqueio de
-  encerramento antecipado, validação de saída. → [ADR 0006](docs/decisoes/0006-um-raciocinio-por-turno.md)
+Cada linha abaixo **parece um bug ou um descuido e não é**. Todas foram tomadas
+depois de um problema real; várias já custaram produção. Se uma tarefa levar você
+a mexer numa delas, **abra a ADR primeiro** — o arquivo tem o contexto, a
+alternativa descartada e o custo aceito.
+
+| # | O que está travado |
+|---|---|
+| [0001](docs/decisoes/0001-migrations-nao-rodam-no-boot.md) | O boot **não** roda DDL. Migrations só em dev; produção é materializada pelo Publish. |
+| [0002](docs/decisoes/0002-falhar-explicito-sem-fallback.md) | Configuração obrigatória ausente **derruba o boot**. Nada de padrão silencioso, inclusive preço de modelo. |
+| [0003](docs/decisoes/0003-analise-sempre-em-texto.md) | **Nunca** passe áudio a um agente. Áudio é só última milha com o aluno. |
+| [0004](docs/decisoes/0004-proctoring-nao-acusa-automaticamente.md) | Fiscalização **não** penaliza nota nem acusa automaticamente. A penalidade automática foi removida de propósito. |
+| [0005](docs/decisoes/0005-video-obrigatorio-e-bloqueante.md) | Com fiscalização ligada, vídeo é **bloqueante** nos três fluxos. Falhar em aberto foi o bug anterior. |
+| [0006](docs/decisoes/0006-um-raciocinio-por-turno.md) | Guardas (teto de turnos, encerramento, validação) ficam **no código**, nunca no prompt. |
+| [0007](docs/decisoes/0007-gabarito-nunca-sai-do-servidor.md) | O gabarito da prova oral **não** chega ao navegador nem à sessão de voz. |
+| [0008](docs/decisoes/0008-voz-realtime-nao-e-mais-barata.md) | Voz em tempo real **não** é mais barata que mensagens. Hipótese medida e refutada. |
+| [0009](docs/decisoes/0009-nota-e-devolutiva-publicam-separado.md) | Nota e devolutiva têm publicações **independentes**; nenhuma sai sem ação do professor. |
+| [0010](docs/decisoes/0010-config-nao-vai-crua-ao-modelo.md) | Configuração estruturada **nunca** vai crua ao modelo: passa por template. |
+| [0011](docs/decisoes/0011-enumeracoes-em-tabela.md) | Enumeração que evolui vai em **tabela + FK**, não em `CHECK` de strings. |
+
+Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
+por NNNN"); nunca reescreva uma ADR aceita.
 
 ## Invariantes de privacidade — não negociáveis
 
