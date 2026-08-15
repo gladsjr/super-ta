@@ -489,6 +489,7 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
         res.set("Cache-Control", "no-store");
         res.json({
             question_numbers,
+            work_name: req.work.name,
             student_label: req.submission.student_label,
             completion_reason: d?.completion_reason || null,
             has_oral_video: !!d?.has_oral_video,
