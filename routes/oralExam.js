@@ -169,6 +169,7 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 devolutiva_published: !!s.evaluation_published_at,
                 grade_published: !!s.grade_published_at,
                 has_oral_proctor: !!s.has_oral_proctor,
+                proctor_running: proctorRunning.has(s.submission_token),
                 proctor_alerts: proctorAlerts(s.oral_proctor_json),
                 voice_alert: voiceAlert(s.oral_voice_json),
                 calibration_alert: calibrationAlert(s.oral_calibration_json),
@@ -586,19 +587,29 @@ router.post("/w/:workToken/oral/submissions/:subToken/publish", requireWorkToken
     } catch (err) { log.error("ORAL", `publish failed: ${err.message}`); res.status(500).json({ error: "falha ao publicar" }); }
 });
 
+// Submissões cuja análise de proctoring está EM ANDAMENTO agora (in-memory, por
+// token). Alimenta a ampulheta do batch: distingue "analisando agora" de "tem
+// vídeo mas sem análise" — este último (prova antiga cujo upload foi antes do
+// disparo automático, ou análise que falhou) NÃO deve ficar com spinner eterno.
+const proctorRunning = new Set();
+
 // Dispara a análise de vídeo (proctoring) em BACKGROUND para uma submissão
 // (#209). Fire-and-forget: usado pelo disparo automático pós-upload — analisa
 // todas as partes atuais e grava oral_proctor_json. Nunca lança para o caller.
-function runOralProctorAuto(submissionId, tokenForLog) {
+function runOralProctorAuto(submissionId, token) {
+    if (proctorRunning.has(token)) return; // já em andamento
+    proctorRunning.add(token);
     (async () => {
         try {
             const parts = await db.getOralVideoParts(submissionId);
             if (!parts.length) return;
             const report = await analyzeOralVideoParts(parts);
             await db.setOralProctor(submissionId, report);
-            log.info("ORAL", `proctoring automático ok submission=${tokenForLog} frames=${report.frames} ms=${report.ms}`);
+            log.info("ORAL", `proctoring automático ok submission=${token} frames=${report.frames} ms=${report.ms}`);
         } catch (e) {
-            log.error("ORAL", `proctoring automático falhou submission=${tokenForLog}: ${e.message}`);
+            log.error("ORAL", `proctoring automático falhou submission=${token}: ${e.message}`);
+        } finally {
+            proctorRunning.delete(token);
         }
     })();
 }
