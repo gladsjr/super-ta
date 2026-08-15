@@ -17,6 +17,7 @@ import * as db from "../lib/db.js";
 import { openai, clientForWork, apiKeyForWork } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
+import { ensureConsolidatedVideo } from "../lib/videoConsolidate.js";
 import { transcribeAudio } from "../lib/audio.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
@@ -1031,35 +1032,48 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUploa
 
 // Professor assiste ao vídeo gravado (avaliação posterior). Auth por token do
 // trabalho + submissão pertencente a ele.
+// Serve UMA key de vídeo do storage, com suporte a HTTP Range (seek). Backend
+// local usa sendFile (Range nativo); backends remotos leem o buffer e fatiam.
+async function serveVideoKey(req, res, key) {
+    const ext = key.split(".").pop();
+    const type = (ext === "mp4" || ext === "m4a") ? "video/mp4" : "video/webm";
+    const local = await localFilePath(key);
+    if (local) { res.type(type); return res.sendFile(local); }
+    const buf = await readAllBytes(key);
+    if (!buf) return res.status(404).json({ error: "vídeo indisponível no armazenamento" });
+    const total = buf.length;
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Type", type);
+    const range = req.headers.range;
+    if (!range) { res.setHeader("Content-Length", total); return res.end(buf); }
+    const m = /bytes=(\d*)-(\d*)/.exec(range);
+    let start = m && m[1] ? parseInt(m[1], 10) : 0;
+    let end = m && m[2] ? parseInt(m[2], 10) : total - 1;
+    if (!Number.isFinite(start) || start < 0) start = 0;
+    if (!Number.isFinite(end) || end >= total) end = total - 1;
+    if (start > end) { res.status(416).setHeader("Content-Range", `bytes */${total}`); return res.end(); }
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+    res.setHeader("Content-Length", end - start + 1);
+    return res.end(buf.subarray(start, end + 1));
+}
+
 router.get("/w/:workToken/oral/video/:subToken/:idx?", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     try {
         const parts = await db.getOralVideoParts(req.submission.id);
-        const idx = req.params.idx != null ? parseInt(req.params.idx, 10) : 0;
-        const key = parts[Number.isFinite(idx) ? idx : 0];
-        if (!key) return res.status(404).json({ error: "sem vídeo para esta submissão" });
-        const ext = key.split(".").pop();
-        const type = (ext === "mp4" || ext === "m4a") ? "video/mp4" : "video/webm";
-        // Backend local: sendFile resolve HTTP Range / seek do vídeo nativamente.
-        const local = await localFilePath(key);
-        if (local) { res.type(type); return res.sendFile(local); }
-        // Fallback (ex.: replit): Range manual sobre o buffer, para permitir seek.
-        const buf = await readAllBytes(key);
-        if (!buf) return res.status(404).json({ error: "vídeo indisponível no armazenamento" });
-        const total = buf.length;
-        res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("Content-Type", type);
-        const range = req.headers.range;
-        if (!range) { res.setHeader("Content-Length", total); return res.end(buf); }
-        const m = /bytes=(\d*)-(\d*)/.exec(range);
-        let start = m && m[1] ? parseInt(m[1], 10) : 0;
-        let end = m && m[2] ? parseInt(m[2], 10) : total - 1;
-        if (!Number.isFinite(start) || start < 0) start = 0;
-        if (!Number.isFinite(end) || end >= total) end = total - 1;
-        if (start > end) { res.status(416).setHeader("Content-Range", `bytes */${total}`); return res.end(); }
-        res.status(206);
-        res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
-        res.setHeader("Content-Length", end - start + 1);
-        return res.end(buf.subarray(start, end + 1));
+        if (!parts.length) return res.status(404).json({ error: "sem vídeo para esta submissão" });
+        // Com :idx explícito, serve a PARTE crua indicada (compat/depuração). Sem idx
+        // (caso do player), serve o CONSOLIDADO seekable — todas as partes numa faixa
+        // única cuja timeline bate com os trechos do proctoring. Se a consolidação
+        // falhar (ex.: ffmpeg ausente), cai na parte 0 crua (comportamento antigo).
+        if (req.params.idx != null) {
+            const idx = parseInt(req.params.idx, 10);
+            const key = parts[Number.isFinite(idx) ? idx : 0];
+            if (!key) return res.status(404).json({ error: "parte de vídeo inexistente" });
+            return await serveVideoKey(req, res, key);
+        }
+        const consolidated = await ensureConsolidatedVideo(req.submission.submission_token, parts);
+        return await serveVideoKey(req, res, consolidated || parts[0]);
     } catch (err) {
         log.error("ORAL", `video serve failed: ${err.message}`);
         res.status(500).json({ error: "falha ao servir o vídeo" });
