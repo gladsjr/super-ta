@@ -9,7 +9,20 @@ Esta é a camada que responde "se eu mudar isso, o que é afetado?". Se uma muda
 altera qualquer resposta de alguma página aqui, ela é uma mudança de produto,
 não de implementação — e a página tem que ser atualizada no mesmo PR.
 
-## Mapa
+## Dois públicos, mesmo tratamento
+
+As capacidades se dividem por **quem é o usuário**, não por importância:
+
+- **Capacidades do produto** — usuário é professor, aluno ou instituição.
+- **Capacidades de engenharia e evidência** — usuário é a equipe que constrói.
+  Todas produzem *evidência sobre o próprio sistema* (em oposição à evidência
+  sobre o aluno, que é o que o produto faz).
+
+As duas seguem o mesmo modelo de página e a mesma regra de manutenção. A segunda
+seção não é documentação de segunda classe: são justamente as capacidades que
+falham em silêncio, e por isso o campo "o que NÃO faz" importa ainda mais ali.
+
+## Mapa — capacidades do produto
 
 | Capacidade | Uma frase | Estado |
 |---|---|---|
@@ -23,6 +36,14 @@ não de implementação — e a página tem que ser atualizada no mesmo PR.
 | [Controle de uso e custo](controle-de-uso-e-custo.md) | Teto de gasto por trabalho e cotas por unidade, com reserva e devolução. | em produção |
 | [Camada institucional](camada-institucional.md) | Unidades em árvore, papéis por unidade e login multi-instituição. | parcial |
 | [Cenários multiagente](cenarios-multiagente.md) | O aluno interage com várias personas numa sequência de encontros. | experimental |
+
+## Mapa — capacidades de engenharia e evidência
+
+| Capacidade | Uma frase | Estado |
+|---|---|---|
+| [Banco de casos e benchmark](banco-de-casos-e-benchmark.md) | Casos congelados e versionados que medem os modelos, mais os testes cegos por fora. | em produção |
+| [Harness de teste ponta a ponta](harness-de-teste.md) | Conduz uma arguição inteira no sistema real, com aluno simulado e microfone falso. | em produção |
+| [Acesso analítico à produção](acesso-analitico-a-producao.md) | Consulta somente-leitura aos dados reais, sem passar pelo Replit. | em produção |
 
 ## Como as três formas de arguição se relacionam
 

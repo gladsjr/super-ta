@@ -30,6 +30,12 @@ OpenAI (Responses, Realtime, transcrição e síntese de voz).
 - [Camada institucional](docs/capacidades/camada-institucional.md): unidades em árvore, papéis por unidade, login multi-instituição.
 - [Cenários multiagente](docs/capacidades/cenarios-multiagente.md): experimental, sequência de encontros com várias personas.
 
+## Capacidades de engenharia e evidência
+
+- [Banco de casos e benchmark](docs/capacidades/banco-de-casos-e-benchmark.md): casos congelados por área, versionamento de setup/júri/release, pacote portátil entre ambientes, adaptadores por provedor e os testes cegos avaliados por juízes externos.
+- [Harness de teste ponta a ponta](docs/capacidades/harness-de-teste.md): conduz uma arguição inteira no navegador real com microfone falso e aluno simulado; inclui o A/B do orquestrador.
+- [Acesso analítico à produção](docs/capacidades/acesso-analitico-a-producao.md): endpoint somente-leitura sobre os dados reais, com token do admin, transação READ ONLY e auditoria.
+
 ## Por que é assim
 
 - [Índice de decisões (ADR)](docs/decisoes/README.md): decisões com consequência, imutáveis e numeradas.

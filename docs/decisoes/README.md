@@ -30,5 +30,7 @@ código já explica sozinho.
 | [0009](0009-nota-e-devolutiva-publicam-separado.md) | Nota e devolutiva têm publicações independentes | Aceita |
 | [0010](0010-config-nao-vai-crua-ao-modelo.md) | Configuração nunca vai crua ao modelo | Aceita |
 | [0011](0011-enumeracoes-em-tabela.md) | Enumerações que evoluem vão em tabela, não em CHECK | Aceita |
+| [0012](0012-resultados-de-benchmark-sao-portaveis.md) | Resultados de benchmark são portáveis entre ambientes | Aceita |
+| [0013](0013-analytics-consulta-tabelas-base.md) | O endpoint de análise consulta tabelas-base, não views | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.

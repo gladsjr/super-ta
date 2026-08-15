@@ -54,6 +54,10 @@ nav:
       - Controle de uso e custo: capacidades/controle-de-uso-e-custo.md
       - Camada institucional: capacidades/camada-institucional.md
       - Cenários multiagente: capacidades/cenarios-multiagente.md
+  - Engenharia e evidência:
+      - Banco de casos e benchmark: capacidades/banco-de-casos-e-benchmark.md
+      - Harness de teste ponta a ponta: capacidades/harness-de-teste.md
+      - Acesso analítico à produção: capacidades/acesso-analitico-a-producao.md
   - Decisões: decisoes/README.md
   - Referência técnica:
       - Arquitetura e prompts: architecture.md
