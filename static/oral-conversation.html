@@ -44,7 +44,8 @@
   <div id="main" class="hidden">
     <div class="page-header">
       <a class="hint" id="back-link" href="#">← voltar à lista de alunos</a>
-      <h1 id="student-name" style="margin: var(--sp-2) 0 0">—</h1>
+      <div class="hint" id="work-context" style="margin-top: var(--sp-2)"></div>
+      <h1 id="student-name" style="margin: var(--sp-1) 0 0">—</h1>
       <div class="meta-row" id="meta"></div>
     </div>
 
@@ -55,7 +56,7 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">Avaliação e notas</h3>
+      <h3 class="card-title">Notas</h3>
       <p class="card-sub">Compara cada resposta do aluno ao gabarito e dá uma nota 0–10 por questão; a final é a <strong>média ponderada</strong> pelos pesos. A comparação com o gabarito é interna (o aluno não a vê); edite as notas se quiser e salve.</p>
       <div class="row">
         <button class="btn btn-primary" id="eval-btn" type="button">Avaliar / reavaliar</button>
@@ -69,6 +70,18 @@
         </label>
         <span class="hint" id="grade-msg"></span>
       </div>
+    </div>
+
+    <div class="card" id="video-card">
+      <h3 class="card-title">Vídeo da prova</h3>
+      <div id="video-wrap"></div>
+    </div>
+
+    <div class="card" id="proctor-card">
+      <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo). Sinaliza indícios para a SUA revisão — ausência, mais de uma pessoa, celular à vista, mãos fora do quadro. Nunca é acusação automática; a câmera não vê a tela do aluno nem prova uso de IA.">Análise do vídeo (proctoring)</h3>
+      <p class="card-sub">Sinais para revisão humana, gerados localmente. Não é prova de irregularidade — apenas indícios para você assistir aos trechos marcados. A análise roda automaticamente ao fim da prova.</p>
+      <span class="hint" id="proctor-msg"></span>
+      <div id="proctor-result" style="margin-top: var(--sp-3)"></div>
     </div>
 
     <div class="card">
@@ -90,24 +103,6 @@
       <h3 class="card-title">Comentário do aluno</h3>
       <p class="card-sub">Deixado pelo aluno após a prova, na janela de revisão.</p>
       <div id="student-comment" style="white-space:pre-wrap"></div>
-    </div>
-
-    <div class="card" id="video-card">
-      <h3 class="card-title">Vídeo da prova</h3>
-      <div id="video-wrap"></div>
-    </div>
-
-    <div class="card" id="proctor-card">
-      <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo). Sinaliza indícios para a SUA revisão — ausência, mais de uma pessoa, celular à vista, mãos fora do quadro. Nunca é acusação automática; a câmera não vê a tela do aluno nem prova uso de IA.">Análise do vídeo (proctoring)</h3>
-      <p class="card-sub">Sinais para revisão humana, gerados localmente. Não é prova de irregularidade — apenas indícios para você assistir aos trechos marcados. A análise roda automaticamente ao fim da prova.</p>
-      <span class="hint" id="proctor-msg"></span>
-      <div id="proctor-result" style="margin-top: var(--sp-3)"></div>
-    </div>
-
-    <div class="card" id="voice-card">
-      <h3 class="card-title" data-help="Sinais extraídos da conversa, para SUA revisão — nunca acusação. Latência: pausa entre a pergunta e o início da resposta (capturada ao vivo). Pausa longa antes de resposta substancial pode indicar consulta. A câmera/áudio não provam uso de IA.">Análise da voz</h3>
-      <p class="card-sub">Sinais de "cola" por voz, para revisão humana. A latência é capturada automaticamente durante a prova.</p>
-      <div id="voice-result"></div>
     </div>
 
     <div class="card" id="calib-card" style="display:none">
@@ -205,6 +200,8 @@
     const d = await r.json();
     document.getElementById('main').classList.remove('hidden');
     document.getElementById('student-name').textContent = d.student_label || SUB;
+    // Referência ao trabalho no cabeçalho (#216): nome + token, para não ficar só o aluno.
+    document.getElementById('work-context').textContent = `Prova oral · ${d.work_name || '—'} · ${WORK}`;
     const pills = [];
     pills.push(d.completion_reason ? '<span class="pill pill-done">prova concluída</span>' : '<span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)">não concluída</span>');
     if (d.evaluation) pills.push('<span class="pill pill-done">avaliada</span>');
@@ -235,7 +232,6 @@
       vw.innerHTML = '<p class="hint">Sem vídeo gravado para esta prova.</p>';
     }
     renderProctor(d.proctor, d.has_oral_video, d.voice?.proctor_status?.state);
-    renderVoice(d.voice);
     renderCalibration(d.calibration);
     setupOralCockpit();
   }
@@ -271,31 +267,6 @@
     if (e.key === 'ArrowLeft') gotoSubmission(cockpitPrev);
     else if (e.key === 'ArrowRight') gotoSubmission(cockpitNext);
   });
-
-  function renderVoice(v) {
-    const el = document.getElementById('voice-result');
-    if (!v || !v.latency) { el.innerHTML = '<p class="hint">Sem sinais de voz ainda (capturados automaticamente durante a prova).</p>'; return; }
-    const L = v.latency;
-    let html = '';
-    if (!L.turns || !L.turns.length) {
-      html += '<p class="hint">Nenhuma resposta substancial medida.</p>';
-    } else {
-      const head = L.flagged_count
-        ? `<strong style="color:#8a1c1c">${L.flagged_count}</strong> de ${L.turns.length} respostas começaram após espera longa (≥ ${L.threshold_sec}s; maior: ${L.max_gap_sec}s)`
-        : `nenhuma espera longa (≥ ${L.threshold_sec}s; maior: ${L.max_gap_sec}s)`;
-      html += `<p style="margin:0 0 var(--sp-1)"><strong>Tempo até começar a responder</strong> — ${head}</p>`;
-      html += `<p class="hint" style="margin:0 0 var(--sp-2)">Apenas tempo, para você interpretar — pode ser reflexão, nervosismo ou barulho ambiente, não necessariamente consulta. Conta só respostas substanciais (≥ ${L.min_words || 8} palavras).</p>`;
-      html += L.turns.map((t, i) => {
-        const flag = t.gap_sec >= L.threshold_sec;
-        const bg = flag ? '#fdeaea' : 'var(--bg-muted)', bd = flag ? '#e7b3b3' : 'var(--ink-200)';
-        return `<div style="display:flex;align-items:baseline;gap:var(--sp-2);padding:6px 10px;border:1px solid ${bd};background:${bg};border-radius:var(--r-sm);margin-bottom:4px">
-          <span style="flex:1">Resposta ${i + 1} — começou após <strong>${t.gap_sec}s</strong></span>
-          <span class="hint" style="margin:0">${t.answer_words} palavra(s)</span>
-        </div>`;
-      }).join('');
-    }
-    el.innerHTML = html;
-  }
 
   function renderCalibration(c) {
     const card = document.getElementById('calib-card'), el = document.getElementById('calib-result');
