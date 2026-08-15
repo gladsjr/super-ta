@@ -1,60 +1,143 @@
-# AGENTS.md — guia para agentes não-Claude (Codex) no super-ta
+# AGENTS.md — convenções do super-ta (ORATIA)
 
-Este arquivo é o equivalente, para você (Codex), do `CLAUDE.md`. As convenções
-do projeto valem para QUALQUER agente que mexa no código — então **leia também
-`CLAUDE.md` e `replit.md`**: a arquitetura, o mapa de prompts e as regras de
-migration descritas lá se aplicam igualmente a você. Este arquivo resume o que é
-crítico e fixa a **divisão de ambientes** entre os três agentes.
+**Este é o arquivo canônico de convenções para qualquer agente que mexa neste
+repositório** — Claude Code, Codex, Cursor, Copilot ou humano. `CLAUDE.md` aponta
+para cá e só acrescenta o que é específico do Claude Code. Não duplique regra
+aqui em outro arquivo: se precisar mudar uma convenção, mude **neste** arquivo.
 
-## Divisão de ambientes (Claude / Codex / Replit) — regra dura
+Panorama do sistema: [`replit.md`](replit.md).
+O que o produto faz: [`docs/capacidades/`](docs/capacidades/README.md).
+Por que as escolhas são estas: [`docs/decisoes/`](docs/decisoes/README.md).
+
+## Divisão de ambientes — regra dura
 
 Três agentes mexem neste projeto. Cada um trabalha no SEU clone, com o SEU banco
-e a SUA porta. **Você (Codex) nunca toca no ambiente dos outros** — não troca a
-branch do Claude, não usa a `:5000`, não recria/migra o banco `oratia_claude`,
-não mexe no clone `super-ta-repo`.
+e a SUA porta. **Nenhum agente toca no ambiente do outro** — não troca a branch
+do outro, não recria nem migra o banco do outro, não sobe servidor na porta do
+outro.
 
-| Agente | Working tree (clone) | Banco (no container `superta-db`) | Porta | Branch de trabalho |
+| Agente | Working tree | Banco (no container `superta-db`) | Porta | Branch |
 |---|---|---|---|---|
-| Claude | `C:\Users\glads\Dropbox\Projetos\ORATIA\super-ta-repo` | `oratia_claude` | `:5000` | a feature em andamento |
-| **Codex (você)** | `C:\Users\glads\Dropbox\Projetos\ORATIA\super-ta-codex` | `oratia_codex` | `:5001` | `feat/multiagent-scenarios-mock` |
+| Claude | `…/ORATIA/super-ta-repo` | `oratia_claude` | `:5000` | a feature em andamento |
+| Codex | `…/ORATIA/super-ta-codex` | `oratia_codex` | `:5001` | `feat/multiagent-scenarios-mock` |
 | Replit | ambiente próprio (Reserved VM) | banco próprio (dev/prod) | — | `main` |
 
-- O **container Postgres `superta-db`** é compartilhado, mas cada agente usa SÓ o
-  seu database. O seu é `oratia_codex`. Sua `.env` já aponta para ele e para a
-  `PORT=5001`.
-- **Working tree VIVO do usuário** (`C:\Users\glads\src\super-ta`): não toque.
-- **`main` é a fonte única** que vai a produção (Replit). Dê push só na SUA
-  branch (`feat/multiagent-scenarios-mock`); integração para a `main` é via PR.
+- O container Postgres é compartilhado, mas cada agente usa **só o seu database**.
+- **Working tree vivo do usuário** (`C:\Users\glads\src\super-ta`): ninguém toca.
+- **`main` é a fonte única** que vai a produção. Cada agente dá push só na sua
+  branch; integração via PR.
+- Bancos legados (`superta`, `superta_oral`, `superta_codex`, `superta_claude*`)
+  são lixo de migração antiga — ignorar até o usuário autorizar limpeza.
+- **Se houver mais de uma sessão no mesmo clone**, não troque de branch: uma
+  working tree só tem um checkout, e trocar puxa os arquivos debaixo da outra
+  sessão. Use `git worktree add` para trabalho paralelo.
 
-## Convenções de código (resumo — detalhe em `CLAUDE.md`)
+## Diretrizes permanentes
 
-- **Falhe explícito, sem fallback arquitetural.** Seleção de modelo vem só de
-  `config/policy.yaml`. Config obrigatória ausente = falhar no boot, não adivinhar.
-- **Migrations file-per-change.** Toda mudança de schema é um arquivo novo
-  `migrations/NNN_descricao.sql` (3 dígitos). NUNCA edite uma migration já
-  aplicada — crie uma corretiva. Aplique no dev com `npm run db:migrate`. O boot
-  NÃO roda migrations; produção é materializada pelo Publish do Replit (que faz
-  diff dev→prod). Detalhe e as regras duras estão em `CLAUDE.md`. Atenção a
-  colisão de números entre branches: se a `main` já tem `NNN`, renumere a sua.
-- **Helpers compartilhados.** Agente de saída estruturada (json_schema,
-  não-streaming) usa `lib/agentRun.js#runStructured`. Lote com concorrência
-  limitada usa `lib/concurrency.js#mapPool`. Não recrie esses esqueletos à mão.
-- **Mapa de prompts.** Todo prompt enviado à LLM deve ser alcançável pelo
-  diagrama em `docs/architecture.md`. Ao criar/mover/renomear um prompt ou
-  agente, atualize o diagrama, a tabela de navegação e o índice na mesma mudança.
-- **Texto vs áudio / Realtime.** Análise é sempre em texto; áudio é só
-  última-milha. Nunca passe áudio para um agente.
+- **Falhe explícito, sem fallback arquitetural.** Configuração obrigatória
+  ausente derruba o boot; não adivinhe padrão. Seleção de modelo vem só de
+  `config/policy.yaml`. → [ADR 0002](docs/decisoes/0002-falhar-explicito-sem-fallback.md)
+- **Análise é sempre em texto.** Áudio existe só como última milha com o aluno
+  (transcrição na entrada, síntese na saída). Nunca passe áudio a um agente.
+  → [ADR 0003](docs/decisoes/0003-analise-sempre-em-texto.md)
+- **Guardas ficam no código, não no prompt.** Teto de turnos, bloqueio de
+  encerramento antecipado, validação de saída. → [ADR 0006](docs/decisoes/0006-um-raciocinio-por-turno.md)
 
-## Invariantes de privacidade (não negociáveis)
+## Invariantes de privacidade — não negociáveis
 
-- O **gabarito**/critério da prova oral nunca chega ao browser nem à sessão
-  Realtime — só as perguntas. O 2º campo de cada questão fica no servidor.
-- O **vídeo** da prova oral nunca vai para a OpenAI. Proctoring é pós-prova e
-  local (`lib/proctor.js`, YOLO via onnxruntime + sidecar Python).
-- Consentimento (câmera/gravação) é obrigatório antes da prova.
+- O **gabarito** da prova oral nunca chega ao navegador nem à sessão de voz. Só
+  as perguntas saem do servidor. → [ADR 0007](docs/decisoes/0007-gabarito-nunca-sai-do-servidor.md)
+- O **vídeo** da fiscalização nunca vai para a OpenAI. A análise é local.
+- **Consentimento** (câmera e gravação) é obrigatório antes da arguição.
+- Fiscalização **nunca** vira acusação nem penalidade automática.
+  → [ADR 0004](docs/decisoes/0004-proctoring-nao-acusa-automaticamente.md)
+
+## Convenções de prompt
+
+- **Configuração estruturada nunca vai crua ao modelo**: passa por um template
+  que explica cada campo (`config/interviewer_agenda_template.txt` +
+  `lib/interviewerAgenda.js`). Quem precisa da agenda do arguidor usa
+  `renderInterviewerAgenda(yamlText)` — não recrie a estrutura.
+  → [ADR 0010](docs/decisoes/0010-config-nao-vai-crua-ao-modelo.md)
+- Contexto curto e delimitado (turno corrente, intervenções) vem do estado local
+  em `SESSIONS` (`sess.turnLog`), **não** da Conversations API — o parâmetro
+  `conversation:` polui o `conv_chat` remoto com turnos internos.
+
+## Helpers compartilhados
+
+- **Saída estruturada** (`json_schema`, não-streaming): use
+  `lib/agentRun.js#runStructured`. Ele concentra montar o payload, registrar o
+  prompt, medir custo, extrair e validar o JSON, e repetir em caso de falha.
+  Passe só o que varia. Exceções legítimas: `SuperOrchestratorAgent` (streaming),
+  `StudentFeedbackAgent` (muta o payload no retry) e `EnunciadoCoherenceAgent`
+  (saída livre).
+- **Lote com concorrência limitada**: use `lib/concurrency.js#mapPool`. Não
+  escreva pool de workers à mão.
+
+## Migrations — file-per-change
+
+Toda mudança de schema vai num arquivo novo em `migrations/`, nunca num já
+aplicado. **O boot não roda DDL** — entenda o porquê antes de mexer:
+→ [ADR 0001](docs/decisoes/0001-migrations-nao-rodam-no-boot.md)
+
+Mecânica: arquivos `migrations/NNN_descricao.sql` (3 dígitos, ordem alfabética =
+numérica); cada um roda em sua própria transação; `npm run db:migrate` aplica
+pendentes e `npm run db:migrate -- status` lista sem aplicar. Em dev o `predev`
+migra antes de subir; em produção quem materializa é o **Publish** do Replit
+(diff dev→prod).
+
+Fluxo: veja o último número → crie `NNN+1` → escreva SQL direto, **sem**
+`IF NOT EXISTS` ou guardas de idempotência → aplique em dev → teste → commit.
+
+**Regras duras** (avise o usuário se ele propuser o contrário):
+
+- **Nunca edite uma migration depois de qualquer deploy**, nem um typo em
+  comentário. Para corrigir, crie uma corretiva `NNN+1`.
+- Editar migration que **falhou** (rollback, não registrada) é OK — não foi
+  aplicada em lugar nenhum.
+- Migration precisa estar aplicada e testada em **dev antes do Publish**, senão o
+  diff não a leva para produção.
+- **Seeds são separados de migrations** e rodam depois delas (`auth.js`).
+  Migrations cuidam de schema; seeds, de dados de bootstrap.
+- **Enumerações que evoluem vão em tabela + FK**, não em `CHECK` de strings.
+  → [ADR 0011](docs/decisoes/0011-enumeracoes-em-tabela.md)
+- **Colisão de números entre branches:** se a `main` já tem `NNN`, renumere a sua.
+- `001_init.sql` é o snapshot de bootstrap (escrito com `IF NOT EXISTS` de
+  propósito). Da `002` em diante são deltas puros.
+
+Limites conhecidos: o runner é serial, sem paralelismo e sem rollback automático
+de migration bem-sucedida (para reverter, crie a inversa).
+
+## Mapa de prompts — regra permanente
+
+Todo prompt enviado à LLM deve ser alcançável a partir do diagrama em
+[`docs/architecture.md`](docs/architecture.md). Sem exceção.
+
+Ao criar, mover ou renomear um prompt, atualize **na mesma mudança**: (a) o
+`click` do nó no diagrama, (b) a coluna "Prompt enviado à LLM" da tabela de
+navegação, e (c) o índice completo de prompts. Agente novo entra no diagrama com
+`click` apontando para a linha do `systemPrompt`, não para o topo do arquivo.
+O diagrama é o ponto único de descoberta — não crie índices paralelos.
+
+## Documentação — o que atualizar junto com o código
+
+| Se você mudou… | Atualize |
+|---|---|
+| o comportamento que o professor ou o aluno percebe | a página em [`docs/capacidades/`](docs/capacidades/README.md) |
+| como um subsistema funciona por dentro | o arquivo de referência em `docs/` |
+| um prompt ou um agente | o mapa em `docs/architecture.md` (as três partes) |
+| uma escolha com consequência duradoura | uma ADR nova em [`docs/decisoes/`](docs/decisoes/README.md) |
+| a lista de documentos importantes | [`llms.txt`](llms.txt) |
+
+ADR aceita é **imutável**: decisão nova supersede a antiga, não a reescreve.
+Plano de trabalho em aberto não é documentação — vive em issue e na descrição do
+PR. Artefato de execução (transcrição, saída de bench, relatório gerado) também
+não: vive em `tests/`, `bench/`, `reports/`.
 
 ## Idioma
 
 Responda ao usuário em português brasileiro. Evite verbos aportuguesados de
 termos em inglês ("deployar", "buildar", "commitar", "mergear"). Termos técnicos
 consagrados (commit, deploy, branch, pipeline) podem ficar em inglês.
+Documentação funcional e ADRs em português; referência técnica pode seguir em
+inglês por herança.

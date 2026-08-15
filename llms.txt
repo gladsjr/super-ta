@@ -1,0 +1,55 @@
+# ORATIA (super-ta)
+
+> Plataforma de arguição oral por IA para o ensino superior. O aluno não apenas
+> entrega um trabalho: ele é arguido individualmente sobre o que entregou, em voz
+> ou por mensagens, com câmera aberta, e o professor recebe evidência auditável.
+> O julgamento permanece docente — o sistema não dá nota sozinho nem acusa.
+
+Três formas de arguição, um mesmo motor de avaliação: **prova oral** (perguntas
+do gabarito do professor), **entrevista simplificada** (voz em tempo real,
+perguntas preparadas do trabalho do aluno) e **entrevista profunda** (mensagens,
+com raciocínio a cada turno e aprofundamento). Node.js + PostgreSQL, API da
+OpenAI (Responses, Realtime, transcrição e síntese de voz).
+
+## Comece por aqui
+
+- [Convenções obrigatórias para agentes](AGENTS.md): divisão de ambientes entre agentes, regras de migration, helpers compartilhados, invariantes de privacidade. Leia antes de escrever qualquer código.
+- [Mapa da documentação](docs/README.md): que gênero de documento vive onde e com que ciclo de vida.
+- [Visão de arquitetura](replit.md): panorama do sistema, estrutura de pastas, agentes cognitivos.
+
+## O que o produto faz
+
+- [Índice de capacidades](docs/capacidades/README.md): uma página por capacidade, com o que ela faz, o que não faz e cenários. Comece aqui para entender o impacto conceitual de uma mudança.
+- [Prova oral](docs/capacidades/prova-oral.md): arguição falada contra gabarito, perguntas sorteadas por aluno, nota por rubrica de cinco níveis.
+- [Entrevista simplificada](docs/capacidades/entrevista-simplificada.md): voz em tempo real sobre o trabalho do aluno, roteiro fixo.
+- [Entrevista profunda](docs/capacidades/entrevista-profunda.md): raciocínio por turno, aprofundamento quando a resposta não fecha.
+- [Fiscalização por vídeo](docs/capacidades/fiscalizacao-por-video.md): câmera obrigatória, gate em três camadas, sinais para revisão humana.
+- [Avaliação e nota](docs/capacidades/avaliacao-e-nota.md): avaliação interna, nota por rubrica, publicações independentes.
+- [Devolutiva](docs/capacidades/devolutiva.md): texto formativo ao aluno — EM REVISÃO, há decisão pendente de retirá-la.
+- [Controle de uso e custo](docs/capacidades/controle-de-uso-e-custo.md): teto por trabalho, medição por chamada, cotas por unidade.
+- [Camada institucional](docs/capacidades/camada-institucional.md): unidades em árvore, papéis por unidade, login multi-instituição.
+- [Cenários multiagente](docs/capacidades/cenarios-multiagente.md): experimental, sequência de encontros com várias personas.
+
+## Por que é assim
+
+- [Índice de decisões (ADR)](docs/decisoes/README.md): decisões com consequência, imutáveis e numeradas.
+- [Migrations não rodam no boot](docs/decisoes/0001-migrations-nao-rodam-no-boot.md): armadilha do Publish; não reverta sem ler.
+- [Falhar explícito, sem fallback](docs/decisoes/0002-falhar-explicito-sem-fallback.md): configuração ausente derruba o boot.
+- [Análise sempre em texto](docs/decisoes/0003-analise-sempre-em-texto.md): áudio é só última milha; nunca passe áudio a um agente.
+- [Fiscalização não acusa automaticamente](docs/decisoes/0004-proctoring-nao-acusa-automaticamente.md): penalidade automática foi removida.
+- [Um raciocínio por turno](docs/decisoes/0006-um-raciocinio-por-turno.md): guardas ficam no código, não no prompt.
+- [O gabarito nunca sai do servidor](docs/decisoes/0007-gabarito-nunca-sai-do-servidor.md): invariante de privacidade da prova oral.
+
+## Referência técnica
+
+- [Ciclo /chat e mapa de prompts](docs/architecture.md): todo prompt enviado à LLM é alcançável a partir deste diagrama.
+- [Prova oral em detalhe](docs/oral-exam.md): relay Realtime, encerramento garantido, calibração, agentes, schema.
+- [Fiscalização em detalhe](docs/video-proctoring.md): áreas de comando, gate de vídeo, schema.
+- [Modelo de acesso](docs/access-model.md): unidades, RBAC, identidade, portões de uso.
+- [Cenários](docs/scenarios.md): subsistema multiagente experimental.
+
+## Optional
+
+- [Histórico](docs/historico/README.md): planos executados e relatórios de experimento. Congelado — não descreve o sistema atual.
+- [Racional do orquestrador](docs/super-orchestrator-plan.md): schema da ação por turno.
+- [Plano de autenticação multi-instituição](docs/auth-multitenant-plan.md): parcialmente implementado.
