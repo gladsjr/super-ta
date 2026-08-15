@@ -28,7 +28,7 @@ import {
     createPersonWithInvite, issueInvite, cancelInvite, listUnitInvites,
     buildInviteEmailsText,
 } from "../lib/invites.js";
-import { acceptedProviderMap, unitAcceptsProvider } from "../lib/tenants.js";
+import { loadAuthPolicy, unitAcceptsProvider } from "../lib/tenants.js";
 import { publicBaseUrl } from "../lib/publicUrl.js";
 import log from "../lib/logger.js";
 
@@ -60,9 +60,9 @@ async function canAdminUnitVerified(req, unitId) {
     const userId = uid(req);
     if (await isGlobalAdmin(userId)) return true;
     if (!(await canAdminUnit(userId, unitId))) return false;
-    const acceptMap = await acceptedProviderMap();
+    const authPolicy = await loadAuthPolicy();
     const p = req.session.authProvider || { key: "local", kind: "local" };
-    return unitAcceptsProvider(acceptMap, unitId, p.key, p.kind);
+    return unitAcceptsProvider(authPolicy, unitId, p.key, p.kind);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,14 +271,14 @@ async function resolveContexts(userId, prov = { key: "local", kind: "local" }) {
         while (cur && cur.parent_id != null && byId.has(cur.parent_id)) cur = byId.get(cur.parent_id);
         return cur?.id ?? id;
     };
-    const acceptMap = await acceptedProviderMap();
+    const authPolicy = await loadAuthPolicy();
     const raw = await pool.query(
         `SELECT m.unit_id, r.key FROM memberships m JOIN roles r ON r.id = m.role_id
           WHERE m.user_id = $1 AND m.unit_id IS NOT NULL`,
         [userId]
     );
     const memberships = raw.rows.filter((m) =>
-        unitAcceptsProvider(acceptMap, m.unit_id, prov.key, prov.kind)
+        unitAcceptsProvider(authPolicy, m.unit_id, prov.key, prov.kind)
     );
     const contexts = new Map(); // rootId → Set(roles em toda a árvore)
     for (const m of memberships) {
@@ -394,9 +394,9 @@ router.get("/admin/units/:unitId/works", requireAuth, async (req, res) => {
         const isGlobal = await isGlobalAdmin(userId);
         // A unidade tem de aceitar o provedor do login (mesma trava do my-units).
         if (!isGlobal) {
-            const acceptMap = await acceptedProviderMap();
+            const authPolicy = await loadAuthPolicy();
             const p = req.session.authProvider || { key: "local", kind: "local" };
-            if (!unitAcceptsProvider(acceptMap, unitId, p.key, p.kind)) return res.status(403).json({ error: "forbidden" });
+            if (!unitAcceptsProvider(authPolicy, unitId, p.key, p.kind)) return res.status(403).json({ error: "forbidden" });
         }
         const roles = await resolveEffectiveRoles(userId, unitId);
         // VER a lista: qualquer vínculo com a unidade (admin/professor/aluno) ou global.
