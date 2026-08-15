@@ -530,7 +530,12 @@
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
       if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
       if (s.transcript_alerts > 0) alertPills.push(`<span class="pill" style="background:#eae6fb;border:1px solid #b9adec" title="Trechos da transcrição prováveis de ruído/eco/silêncio (idioma não reconhecido, ininteligível). Confira no detalhe do aluno.">transcrição (${s.transcript_alerts})</span>`);
-      const alerts = s._proctorPending ? SPIN
+      // Ampulheta quando a análise de vídeo está em andamento: manual em lote
+      // (_proctorPending) OU automática ao fim da prova (#209) — há vídeo mas ainda
+      // não há relatório de proctoring.
+      const analysisPending = s._proctorPending || (s.has_oral_video && !s.has_oral_proctor);
+      const alerts = analysisPending
+        ? `${SPIN} <span class="hint">analisando vídeo…</span>`
         : (alertPills.length ? alertPills.join(' ')
           : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>' : '<span class="hint">—</span>'));
       return `<tr data-sub="${s.submission_token}">
