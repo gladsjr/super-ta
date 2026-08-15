@@ -55,23 +55,10 @@
       <button class="btn btn-sm" id="nav-next" title="Próximo aluno (→)">Próximo ▶</button>
     </div>
 
-    <div class="card">
-      <h3 class="card-title">Notas</h3>
-      <p class="card-sub">Compara cada resposta do aluno ao gabarito e dá uma nota 0–10 por questão; a final é a <strong>média ponderada</strong> pelos pesos. A comparação com o gabarito é interna (o aluno não a vê); edite as notas se quiser e salve.</p>
-      <div class="row">
-        <button class="btn btn-primary" id="eval-btn" type="button">Avaliar / reavaliar</button>
-        <span class="hint" id="eval-msg"></span>
-      </div>
-      <div id="assessment-body" style="margin-top: var(--sp-3)"></div>
-      <div class="row" style="margin-top: var(--sp-3)">
-        <button class="btn" id="grade-save" type="button">Salvar notas</button>
-        <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
-          <input type="checkbox" id="grade-pub"/> publicar nota e devolutiva
-        </label>
-        <span class="hint" id="grade-msg"></span>
-      </div>
-    </div>
-
+    <!-- Ordem dos cards (#239): segue o fluxo de revisão do professor —
+         assistir → conferir indícios → ler o que foi dito → pontuar → escrever
+         ao aluno. Cards fora dessa sequência (comentário do aluno, calibração)
+         ficam ao final. -->
     <div class="card" id="video-card">
       <h3 class="card-title">Vídeo da prova</h3>
       <div id="video-wrap"></div>
@@ -85,6 +72,28 @@
     </div>
 
     <div class="card">
+      <h3 class="card-title">Transcrição da prova</h3>
+      <div id="transcript" class="transcript"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Notas</h3>
+      <p class="card-sub">Compara cada resposta do aluno ao gabarito e dá uma nota 0–10 por questão; a final é a <strong>média ponderada</strong> pelos pesos. A comparação com o gabarito é interna (o aluno não a vê); edite as notas se quiser e salve.</p>
+      <div class="row">
+        <button class="btn btn-primary" id="eval-btn" type="button">Avaliar / reavaliar</button>
+        <span class="hint" id="eval-msg"></span>
+      </div>
+      <div id="assessment-body" style="margin-top: var(--sp-3)"></div>
+      <!-- Publicar é ação EXPLÍCITA e separada de salvar (#238): o botão reflete o
+           estado atual e leva a devolutiva junto com a nota, mesmo vazia (ADR 0012). -->
+      <div class="row" style="margin-top: var(--sp-3)">
+        <button class="btn" id="grade-save" type="button">Salvar notas</button>
+        <button class="btn btn-primary" id="grade-pub-btn" type="button">Publicar nota e devolutiva</button>
+        <span class="hint" id="grade-msg"></span>
+      </div>
+    </div>
+
+    <div class="card">
       <h3 class="card-title">Devolutiva (opcional)</h3>
       <p class="card-sub">Campo livre para você escrever ao aluno o que quiser — só aparece para ele quando a nota é publicada (a devolutiva é publicada/despublicada <strong>junto com a nota</strong>, no botão acima).</p>
       <textarea id="devolutiva" class="textarea" rows="6" placeholder="Escreva aqui a devolutiva ao aluno (opcional)…"></textarea>
@@ -92,11 +101,6 @@
         <button class="btn" id="dev-save" type="button">Salvar devolutiva</button>
         <span class="hint" id="dev-msg"></span>
       </div>
-    </div>
-
-    <div class="card">
-      <h3 class="card-title">Transcrição da prova</h3>
-      <div id="transcript" class="transcript"></div>
     </div>
 
     <div class="card" id="student-comment-card" style="display:none">
@@ -122,6 +126,15 @@
 
   let QNUMS = {}; // id da questão → número de exibição (posição na lista completa)
   let CUR_EVAL = null; // última avaliação carregada (p/ re-render das notas sem reload)
+  // Estado de publicação desta submissão (#238). O botão é o ÚNICO controle: rotula
+  // a ação que fará (publicar/despublicar), não o estado em que está.
+  let PUBLISHED = false;
+  function setPubBtn(published) {
+    PUBLISHED = !!published;
+    const b = document.getElementById('grade-pub-btn');
+    b.textContent = PUBLISHED ? 'Despublicar nota e devolutiva' : 'Publicar nota e devolutiva';
+    b.classList.toggle('btn-primary', !PUBLISHED);
+  }
   // Card único "Avaliação e notas": um bloco por questão com a comparação ao
   // gabarito (resposta do aluno + comentário do avaliador) E a nota editável +
   // peso juntos. Funde o antigo relatório com o grid de notas.
@@ -214,7 +227,7 @@
     CUR_EVAL = d.evaluation || null;
     renderAssessment(d.evaluation, d.grades, CUR_QUESTIONS);
     document.getElementById('devolutiva').value = d.devolutiva || '';
-    document.getElementById('grade-pub').checked = !!d.grade_published;
+    setPubBtn(d.grade_published);
     renderTranscript(d.transcript, d.voice?.transcript_alerts);
 
     const scCard = document.getElementById('student-comment-card');
@@ -384,7 +397,7 @@
     const msg = document.getElementById('dev-msg'); msg.textContent = 'Salvando…';
     try {
       await fetch(`${API}/oral/submissions/${SUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('devolutiva').value }) });
-      msg.textContent = document.getElementById('grade-pub').checked ? 'Salva (publica junto com a nota).' : 'Salva.';
+      msg.textContent = PUBLISHED ? 'Salva (já publicada, junto com a nota).' : 'Salva (publica junto com a nota).';
     } catch { msg.textContent = 'Falha de comunicação.'; }
   };
   function recomputeFinalOral() {
@@ -421,13 +434,36 @@
         if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
         renderAssessment(CUR_EVAL, j.grades, CUR_QUESTIONS);
       }
-      const pub = document.getElementById('grade-pub').checked;
-      // A devolutiva vai junto com a nota: persiste o texto atual antes de publicar,
-      // e o /publish com { grade } move nota E devolutiva juntas (#207).
+      // Salvar NÃO mexe na publicação (#238) — só persiste notas e o texto da
+      // devolutiva. Publicar/despublicar é o botão ao lado, ação explícita.
       await fetch(`${API}/oral/submissions/${SUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('devolutiva').value }) });
-      await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: pub }) });
-      msg.textContent = pub ? 'Salvas e publicadas (nota + devolutiva).' : 'Salvas (não publicadas).';
+      msg.textContent = PUBLISHED ? 'Salvas (já publicadas).' : 'Salvas (não publicadas).';
     } catch { msg.textContent = 'Falha de comunicação.'; }
+  };
+
+  // Publicação por aluno (#238): um botão que reflete o estado, no lugar do antigo
+  // checkbox. A devolutiva vai SEMPRE junto com a nota, mesmo vazia (ADR 0012) —
+  // por isso o texto atual é persistido antes de publicar.
+  document.getElementById('grade-pub-btn').onclick = async () => {
+    const btn = document.getElementById('grade-pub-btn');
+    const msg = document.getElementById('grade-msg');
+    const target = !PUBLISHED;
+    btn.disabled = true;
+    msg.textContent = target ? 'Publicando…' : 'Despublicando…';
+    try {
+      if (target) {
+        await fetch(`${API}/oral/submissions/${SUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('devolutiva').value }) });
+      }
+      const r = await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: target }) });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        msg.textContent = 'Falha: ' + (j.error || r.status);
+        return;
+      }
+      await load(); // reflete pills + rótulo do botão
+      msg.textContent = target ? 'Publicadas (nota + devolutiva).' : 'Despublicadas.';
+    } catch { msg.textContent = 'Falha de comunicação.'; }
+    finally { btn.disabled = false; }
   };
 
   load();
