@@ -1236,6 +1236,9 @@
         if (acknowledged || !cb.checked) return;
         acknowledged = true;
         cb.disabled = true;
+        // Ao dar "Ciente", para e remove o player do áudio de orientação — senão
+        // sobra um player "quebrado" (não dá play) enquanto a entrevista começa (#135).
+        if (a) { try { a.pause(); } catch {} const row = wrap.querySelector('.audio-row'); if (row) row.remove(); }
         if (typeof onAcknowledge === 'function') onAcknowledge();
       });
       return wrap;

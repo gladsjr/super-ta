@@ -195,11 +195,11 @@
       <div class="row" style="gap: var(--sp-4); margin-bottom: var(--sp-2); align-items:flex-start; flex-direction:column">
         <label style="display:flex; align-items:flex-start; gap: var(--sp-2)">
           <input type="radio" name="interview-variant" value="messages" id="variant-messages" checked style="margin-top:3px"/>
-          <span><strong>Profunda</strong> (por mensagens) — o entrevistador analisa cada resposta com raciocínio profundo e aprofunda com follow-ups.</span>
+          <span><strong>Profunda</strong> (por mensagens) — o entrevistador analisa cada resposta do aluno, por mensagem, com raciocínio profundo, e aprofunda com follow-ups.</span>
         </label>
         <label style="display:flex; align-items:flex-start; gap: var(--sp-2)">
           <input type="radio" name="interview-variant" value="realtime" id="variant-realtime" style="margin-top:3px"/>
-          <span><strong>Simplificada</strong> (tempo real) — conversa por <strong>voz</strong> ao vivo, fluida e de menor custo; faz apenas as perguntas planejadas, sem raciocínio profundo por resposta. Câmera ligada, vídeo gravado.</span>
+          <span><strong>Simplificada</strong> (tempo real) — conversa por <strong>voz</strong> ao vivo, fluida; faz apenas as perguntas planejadas, sem raciocínio profundo por resposta. Câmera ligada, vídeo gravado.</span>
         </label>
       </div>
       <div id="variant-realtime-note" class="hint hidden">Na entrevista em tempo real a interação é sempre por <strong>voz</strong> — escolha a voz do entrevistador no card abaixo. A câmera fica ligada e o vídeo é gravado e analisado, como na prova oral.</div>
@@ -483,7 +483,7 @@ async function load() {
     : 'Envie o enunciado do trabalho antes de ajustar';
 
   applyInteractionStateToUI(j.work.interaction_mode || 'audio', j.work.voice);
-  applyVariantStateToUI(j.work.interview_variant || 'messages');
+  applyVariantStateToUI(window.WORK_VARIANT = (j.work.interview_variant || 'messages'));
   document.getElementById('question-count').value = j.work.question_count ?? 5;
   // A sugestão de identidade é cosmética. Ela NUNCA pode derrubar o load() e
   // impedir a renderização da lista de alunos (que vem logo abaixo) — foi
@@ -592,7 +592,10 @@ function renderGradesTable() {
   }
   const body = rows.map(s => {
     const convUrl = '/w/' + encodeURIComponent(workToken) + '/s/' + encodeURIComponent(s.submission_token) + '?view=avaliacao';
-    const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
+    // Badge de teste indica a VARIANTE (#135): o professor sabe se ao "abrir" vai
+    // simular a entrevista simplificada (tempo real) ou a profunda (por mensagens).
+    const variantLabel = window.WORK_VARIANT === 'realtime' ? 'tempo real' : 'profunda';
+    const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste — variante ${variantLabel}">teste · ${variantLabel}</span>` : '';
     const statusPill = `<span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>`;
     const pub = s.evaluation_published_at ? '<span class="badge badge-accent" title="Devolutiva visível ao aluno">devolutiva</span>' : '<span class="muted">—</span>';
     return `<tr>
@@ -657,7 +660,10 @@ function renderSubmissionsTable() {
     const deleteBtn = s.status === 'pending'
       ? ` · <button class="btn btn-sm" onclick="deleteToken('${s.submission_token}')" title="Apagar este envio (o aluno ainda não começou). Devolve a cota do pacote, se houver.">apagar</button>`
       : '';
-    const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste">teste</span>` : '';
+    // Badge de teste indica a VARIANTE (#135): o professor sabe se ao "abrir" vai
+    // simular a entrevista simplificada (tempo real) ou a profunda (por mensagens).
+    const variantLabel = window.WORK_VARIANT === 'realtime' ? 'tempo real' : 'profunda';
+    const testBadge = s.is_test ? ` <span class="badge badge-accent" title="Entrevista de teste — variante ${variantLabel}">teste · ${variantLabel}</span>` : '';
     // #132: estado de AVALIAÇÃO visível já na aba Alunos & progresso (não só na de
     // Notas) — o professor vê daqui o que ainda falta avaliar/publicar.
     const evalBadge = s.grade_published_at ? '<span class="badge badge-accent" title="Nota publicada ao aluno">nota publicada</span>'

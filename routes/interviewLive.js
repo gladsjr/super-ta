@@ -63,6 +63,7 @@ router.get("/s/:submissionToken/live/status", requireSubmissionToken, requireLiv
         res.set("Cache-Control", "no-store");
         res.json({
             work_name: req.work.name,
+            student_label: req.submission.student_label || null,
             done: !!req.submission.completion_reason && !req.submission.is_test,
             is_test: !!req.submission.is_test,
             consented: !!req.submission.consent_version,

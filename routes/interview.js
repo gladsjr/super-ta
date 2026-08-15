@@ -552,7 +552,7 @@ router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload
     try {
         const calib = await db.getOralCalibration(req.work.id);
         if (!calib) return res.status(409).json({ error: "sem frase de calibração" });
-        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "envie um arquivo" });
         let attempt = Number(req.body?.attempt);
         if (!Number.isInteger(attempt) || attempt < 1) attempt = 1;
         if (attempt > MAX_CALIB_ATTEMPTS) attempt = MAX_CALIB_ATTEMPTS;
@@ -592,7 +592,7 @@ router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload
 router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
     try {
         if (req.work.proctoring_enabled !== true) return res.status(400).json({ error: "proctoring desligado" });
-        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "envie um arquivo" });
         const ext = extFromMimetype(req.file.mimetype) || "webm";
         const key = `proctor-video/${req.submission.submission_token}-${Date.now()}.${ext}`;
         const r = await putAudio({ key, buffer: req.file.buffer, mimetype: req.file.mimetype });
@@ -645,8 +645,8 @@ router.get("/s/:submissionToken/setup-audio", requireSubmissionToken, async (req
 router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFinalized, requireWithinBudget, studentUpload.single("file"), async (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
-    if (!sess) return res.status(400).json({ error: "call /start first" });
-    if (!req.file) return res.status(400).json({ error: "file required" });
+    if (!sess) return res.status(400).json({ error: "sessão não iniciada — recarregue a página" });
+    if (!req.file) return res.status(400).json({ error: "envie um arquivo" });
     if (exceedsPageLimit(req.file.buffer)) {
         return res.status(400).json({ error: `o PDF tem mais de ${MAX_PDF_PAGES} páginas — envie um arquivo menor (limite ${MAX_PDF_PAGES})` });
     }
@@ -853,7 +853,7 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
 router.get("/s/:submissionToken/narrator-audio", requireSubmissionToken, requireNotFinalized, (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
-    if (!sess || !sess.narratorAudio?.buffer) return res.status(404).json({ error: "no narrator audio" });
+    if (!sess || !sess.narratorAudio?.buffer) return res.status(404).json({ error: "sem áudio de narração" });
     res.type("audio/mpeg");
     res.send(sess.narratorAudio.buffer);
 });
@@ -871,7 +871,7 @@ router.get("/s/:submissionToken/narrator-audio", requireSubmissionToken, require
 router.get("/s/:submissionToken/audio/:turnId", requireSubmissionToken, (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
-    if (!sess) return res.status(404).json({ error: "session not found" });
+    if (!sess) return res.status(404).json({ error: "sessão não encontrada" });
     const buffer = sess.audioCache?.get(String(req.params.turnId));
     if (!buffer) return res.status(404).json({ error: "audio expired or not found" });
     res.type("audio/mpeg");
@@ -910,7 +910,7 @@ function recordTurnTimings(sess, m, kind) {
 router.post("/s/:submissionToken/suggest-answer", requireSubmissionToken, requireNotFinalized, async (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
-    if (!sess) return res.status(400).json({ error: "call /start first" });
+    if (!sess) return res.status(400).json({ error: "sessão não iniciada — recarregue a página" });
     if (!sess.isTest) {
         return res.status(403).json({ error: "not_a_test", message: "Sugestão de resposta disponível apenas em conversas de teste." });
     }
@@ -989,7 +989,7 @@ router.post("/s/:submissionToken/suggest-answer", requireSubmissionToken, requir
 router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinalized, requireWithinBudget, audioUpload.single("audio"), async (req, res) => {
     const token = req.submission.submission_token;
     const sess = SESSIONS.get(token);
-    if (!sess) return res.status(400).json({ error: "call /start first" });
+    if (!sess) return res.status(400).json({ error: "sessão não iniciada — recarregue a página" });
     // O aluno respondeu — para os pings de keep-alive do gap anterior.
     cancelKeepalive(sess);
     // O /upload move a sessão de "awaiting_upload" para "intro" e dispara
