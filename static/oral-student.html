@@ -211,7 +211,7 @@
         const rr = await (await fetch(`/s/${SUB}/oral/result`)).json();
         const parts = [];
         if (rr.grade != null) parts.push(`<div class="big">Nota: ${esc(rr.grade)}</div>`);
-        if (rr.devolutiva) parts.push(`<div class="card" style="margin-top:10px; text-align:left; white-space:pre-wrap">${esc(rr.devolutiva)}</div>`);
+        if (rr.devolutiva) parts.push(`<div class="card" style="margin-top:10px; text-align:left"><div style="font-weight:600; margin-bottom:6px">Devolutiva do professor</div><div style="white-space:pre-wrap">${esc(rr.devolutiva)}</div></div>`);
         $('result').innerHTML = parts.length ? '<h3 style="text-align:center">Resultado</h3>' + parts.join('') : '';
       } catch {}
     }

@@ -65,24 +65,18 @@
       <div class="row" style="margin-top: var(--sp-3)">
         <button class="btn" id="grade-save" type="button">Salvar notas</button>
         <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
-          <input type="checkbox" id="grade-pub"/> publicar notas
+          <input type="checkbox" id="grade-pub"/> publicar nota e devolutiva
         </label>
         <span class="hint" id="grade-msg"></span>
       </div>
     </div>
 
     <div class="card">
-      <h3 class="card-title">Devolutiva</h3>
-      <p class="card-sub">Texto que o aluno verá quando publicado. Gere com IA a partir da avaliação e edite à vontade.</p>
-      <label class="label" for="dev-guidelines" style="margin-top: var(--sp-2)">Diretrizes para a devolutiva — tom, formato, o que destacar (vale só para esta geração; o padrão do trabalho fica na aba Avaliação do painel)</label>
-      <textarea id="dev-guidelines" class="textarea" rows="2" placeholder="Ex.: tom acolhedor e direto; destaque o domínio dos conceitos e termine com um encorajamento."></textarea>
-      <textarea id="devolutiva" class="textarea" rows="6" style="margin-top: var(--sp-2)" placeholder="Gere a devolutiva ou escreva à mão…"></textarea>
+      <h3 class="card-title">Devolutiva (opcional)</h3>
+      <p class="card-sub">Campo livre para você escrever ao aluno o que quiser — só aparece para ele quando a nota é publicada (a devolutiva é publicada/despublicada <strong>junto com a nota</strong>, no botão acima).</p>
+      <textarea id="devolutiva" class="textarea" rows="6" placeholder="Escreva aqui a devolutiva ao aluno (opcional)…"></textarea>
       <div class="row" style="margin-top: var(--sp-2)">
-        <button class="btn" id="dev-gen" type="button" title="Gera a devolutiva a partir da avaliação (sobrescreve o texto atual)">Gerar devolutiva</button>
         <button class="btn" id="dev-save" type="button">Salvar devolutiva</button>
-        <label style="display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink-700)">
-          <input type="checkbox" id="dev-pub"/> publicar devolutiva
-        </label>
         <span class="hint" id="dev-msg"></span>
       </div>
     </div>
@@ -105,11 +99,8 @@
 
     <div class="card" id="proctor-card">
       <h3 class="card-title" data-help="Análise local do vídeo (não vai a serviço externo). Sinaliza indícios para a SUA revisão — ausência, mais de uma pessoa, celular à vista, mãos fora do quadro. Nunca é acusação automática; a câmera não vê a tela do aluno nem prova uso de IA.">Análise do vídeo (proctoring)</h3>
-      <p class="card-sub">Sinais para revisão humana, gerados localmente. Não é prova de irregularidade — apenas indícios para você assistir aos trechos marcados.</p>
-      <div class="row">
-        <button class="btn btn-primary" id="proctor-btn" type="button">Analisar vídeo</button>
-        <span class="hint" id="proctor-msg"></span>
-      </div>
+      <p class="card-sub">Sinais para revisão humana, gerados localmente. Não é prova de irregularidade — apenas indícios para você assistir aos trechos marcados. A análise roda automaticamente ao fim da prova.</p>
+      <span class="hint" id="proctor-msg"></span>
       <div id="proctor-result" style="margin-top: var(--sp-3)"></div>
     </div>
 
@@ -135,7 +126,6 @@
   document.getElementById('back-link').href = `${API}/oral#avaliacao`;
 
   let QNUMS = {}; // id da questão → número de exibição (posição na lista completa)
-  let GUIDE_INIT = false; // diretrizes da devolutiva pré-preenchidas só na 1ª carga
   let CUR_EVAL = null; // última avaliação carregada (p/ re-render das notas sem reload)
   // Card único "Avaliação e notas": um bloco por questão com a comparação ao
   // gabarito (resposta do aluno + comentário do avaliador) E a nota editável +
@@ -224,10 +214,6 @@
     CUR_EVAL = d.evaluation || null;
     renderAssessment(d.evaluation, d.grades, CUR_QUESTIONS);
     document.getElementById('devolutiva').value = d.devolutiva || '';
-    // Diretrizes pré-preenchidas com o padrão do trabalho UMA vez (não sobrescreve
-    // o que o professor digitar em recargas, ex.: após avaliar).
-    if (!GUIDE_INIT) { document.getElementById('dev-guidelines').value = d.feedback_guidelines || ''; GUIDE_INIT = true; }
-    document.getElementById('dev-pub').checked = !!d.devolutiva_published;
     document.getElementById('grade-pub').checked = !!d.grade_published;
     renderTranscript(d.transcript, d.voice?.transcript_alerts);
 
@@ -245,8 +231,7 @@
     } else {
       vw.innerHTML = '<p class="hint">Sem vídeo gravado para esta prova.</p>';
     }
-    document.getElementById('proctor-btn').disabled = !d.has_oral_video;
-    renderProctor(d.proctor);
+    renderProctor(d.proctor, d.has_oral_video);
     renderVoice(d.voice);
     renderCalibration(d.calibration);
     setupOralCockpit();
@@ -348,9 +333,14 @@
     else { vid.addEventListener('loadedmetadata', go, { once: true }); vid.load(); }
     vid.scrollIntoView({ block: 'center' });
   };
-  function renderProctor(p) {
+  function renderProctor(p, hasVideo) {
     const el = document.getElementById('proctor-result');
-    if (!p || !p.flags) { el.innerHTML = '<p class="hint">Ainda não analisado.</p>'; return; }
+    if (!p || !p.flags) {
+      el.innerHTML = hasVideo
+        ? '<p class="hint">Processando a análise do vídeo… (roda automaticamente ao fim da prova; recarregue em instantes)</p>'
+        : '<p class="hint">Ainda sem vídeo para analisar.</p>';
+      return;
+    }
     const rows = Object.keys(FLAG_LABELS).map(k => {
       const f = p.flags[k] || { count: 0, pct: 0, at: [] };
       const fired = f.count > 0;
@@ -410,30 +400,13 @@
     } catch { msg.textContent = 'Falha de comunicação.'; }
     finally { btn.disabled = false; }
   };
-  document.getElementById('dev-gen').onclick = async () => {
-    const msg = document.getElementById('dev-msg'); const btn = document.getElementById('dev-gen');
-    const ta = document.getElementById('devolutiva');
-    if (ta.value.trim() && !confirm('Isto vai sobrescrever a devolutiva atual. Continuar?')) return;
-    btn.disabled = true; msg.textContent = 'Gerando devolutiva…';
-    try {
-      // Diretrizes do campo = override ad-hoc SÓ desta geração (espelha a entrevista).
-      const guidelines = document.getElementById('dev-guidelines').value.trim() || null;
-      const r = await fetch(`${API}/oral/submissions/${SUB}/devolutiva/derive?force=1`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guidelines }),
-      });
-      const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
-      ta.value = j.devolutiva || '';
-      msg.textContent = 'Devolutiva gerada — revise e salve.';
-    } catch { msg.textContent = 'Falha de comunicação.'; }
-    finally { btn.disabled = false; }
-  };
+  // Devolutiva: campo livre, salvo com o texto atual. A PUBLICAÇÃO não é feita aqui
+  // — a devolutiva é publicada/despublicada junto com a nota (#207).
   document.getElementById('dev-save').onclick = async () => {
     const msg = document.getElementById('dev-msg'); msg.textContent = 'Salvando…';
     try {
       await fetch(`${API}/oral/submissions/${SUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('devolutiva').value }) });
-      await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ devolutiva: document.getElementById('dev-pub').checked }) });
-      msg.textContent = document.getElementById('dev-pub').checked ? 'Salva e publicada.' : 'Salva (não publicada).';
+      msg.textContent = document.getElementById('grade-pub').checked ? 'Salva (publica junto com a nota).' : 'Salva.';
     } catch { msg.textContent = 'Falha de comunicação.'; }
   };
   function recomputeFinalOral() {
@@ -470,22 +443,13 @@
         if (!r.ok) { msg.textContent = 'Falha: ' + (j.error || r.status); return; }
         renderAssessment(CUR_EVAL, j.grades, CUR_QUESTIONS);
       }
-      await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: document.getElementById('grade-pub').checked }) });
-      msg.textContent = document.getElementById('grade-pub').checked ? 'Salvas e publicadas.' : 'Salvas (não publicadas).';
+      const pub = document.getElementById('grade-pub').checked;
+      // A devolutiva vai junto com a nota: persiste o texto atual antes de publicar,
+      // e o /publish com { grade } move nota E devolutiva juntas (#207).
+      await fetch(`${API}/oral/submissions/${SUB}/devolutiva`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: document.getElementById('devolutiva').value }) });
+      await fetch(`${API}/oral/submissions/${SUB}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grade: pub }) });
+      msg.textContent = pub ? 'Salvas e publicadas (nota + devolutiva).' : 'Salvas (não publicadas).';
     } catch { msg.textContent = 'Falha de comunicação.'; }
-  };
-
-  document.getElementById('proctor-btn').onclick = async () => {
-    const msg = document.getElementById('proctor-msg'); const btn = document.getElementById('proctor-btn');
-    btn.disabled = true; msg.textContent = 'Analisando o vídeo (pode levar alguns segundos)…';
-    try {
-      const r = await fetch(`${API}/oral/submissions/${SUB}/proctor`, { method: 'POST' });
-      const j = await r.json();
-      if (!r.ok) { msg.textContent = 'Falha: ' + (j.detail || j.error || r.status); return; }
-      msg.textContent = `Analisado (${j.proctor.frames} frames, ${j.proctor.ms} ms).`;
-      renderProctor(j.proctor);
-    } catch { msg.textContent = 'Falha de comunicação.'; }
-    finally { btn.disabled = false; }
   };
 
   load();
