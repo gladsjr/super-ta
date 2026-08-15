@@ -220,9 +220,11 @@
       const el = $('review-transcript');
       if (!turns.length) { el.innerHTML = ''; return; }
       // Alertas de transcrição (#137): destaca trechos da SUA fala prováveis de ruído/
-      // eco/silêncio, para você conferir se algo foi captado errado.
+      // eco/silêncio, para você conferir se algo foi captado errado. Guarda (#218): só
+      // usa se os alertas correspondem à transcrição atual (mesmo nº de turnos).
+      const alertsOk = alerts && Number(alerts.turn_count) === turns.length;
       const flagged = {};
-      (alerts && Array.isArray(alerts.turns) ? alerts.turns : []).forEach(a => { flagged[a.index] = a.label; });
+      (alertsOk && Array.isArray(alerts.turns) ? alerts.turns : []).forEach(a => { flagged[a.index] = a.label; });
       const rows = turns.map((t, i) => {
         const who = t.role === 'examiner' ? 'Examinador' : 'Aluno';
         const color = t.role === 'examiner' ? '#9a7b1f' : '#5a6b80';
@@ -230,7 +232,7 @@
         const box = flagged[i] ? 'background:#f6f3fe;border-radius:8px;padding:6px 8px;' : '';
         return `<div style="margin-bottom:10px;${box}"><div style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${color}">${who}${flag}</div><div style="white-space:pre-wrap">${esc(t.text)}</div></div>`;
       }).join('');
-      const note = (alerts && alerts.count > 0)
+      const note = (alertsOk && alerts.count > 0)
         ? `<p class="sub" style="text-align:left;margin:0 0 8px">⚠️ Destacamos ${alerts.count} trecho(s) da sua fala que podem ter sido captados com ruído, eco ou silêncio (idioma não reconhecido/ininteligível). Se algo importante foi transcrito errado, avise o professor no comentário.</p>`
         : '';
       el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${note}${rows}</div>`;
