@@ -183,7 +183,7 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
      * @param {boolean} p.expectSpontaneous - o trabalho declarou exigir "resposta de cabeça"
      * @param {object|null} p.meterCtx   - contexto de billing
      */
-    async evaluate({ enunciadoFileId, studentFileId, interviewerYamlText, conversation, audioArtifacts = [], expectSpontaneous = false, meterCtx = null }) {
+    async evaluate({ enunciadoFileId, studentFileId, interviewerYamlText, conversation, audioArtifacts = [], expectSpontaneous = false, proctorReview = null, meterCtx = null }) {
         if (!enunciadoFileId) throw new Error("InterviewEvaluator: missing enunciadoFileId");
         if (!studentFileId) throw new Error("InterviewEvaluator: missing studentFileId");
         if (!interviewerYamlText) throw new Error("InterviewEvaluator: missing interviewerYamlText");
@@ -205,11 +205,17 @@ ${this.systemPromptBody}`;
 **PONTOS NÃO RESOLVIDOS (registrados pelo entrevistador ao avançar, em vez de insistir)**
 ${openThreads.map(t => `- ${t}`).join("\n")}
 Trate cada item acima como lacuna JÁ CARACTERIZADA na entrevista: o entrevistador deu a oportunidade, a resposta não sanou o ponto, e ele avançou por disciplina de condução (não por aceitação do conteúdo). Pese-os na avaliação como pontos não demonstrados.` : "";
+        // Triagem HUMANA do professor sobre os indícios de vídeo (#246). Entra como
+        // CONTEXTO para ler os sinais — a ADR 0004 proíbe acusação/penalidade
+        // automática, e aqui quem classificou foi uma pessoa, não o modelo.
+        const reviewBlock = proctorReview ? `
+
+**${proctorReview}**` : "";
         const userText = `**AGENDA DO ENTREVISTADOR**
 ${agendaBlock}
 
 **TRANSCRIÇÃO DA ENTREVISTA**
-${transcript}${openThreadsBlock}
+${transcript}${openThreadsBlock}${reviewBlock}
 
 Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a perspectiva do entrevistador da agenda e produza o relatório JSON conforme o contrato.`;
 

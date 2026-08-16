@@ -33,6 +33,13 @@ código já explica sozinho.
 | [0012](0012-publicacao-conjunta-na-prova-oral.md) | Na prova oral, nota e devolutiva publicam juntas | Aceita |
 | [0013](0013-resultados-de-benchmark-sao-portaveis.md) | Resultados de benchmark são portáveis entre ambientes | Aceita |
 | [0014](0014-analytics-consulta-tabelas-base.md) | O endpoint de análise consulta tabelas-base, não views | Aceita |
+| [0015](0015-devolutiva-uniforme-na-turma.md) | O formato da devolutiva é uniforme na turma | Aceita |
+| [0016](0016-turno-e-pergunta-do-plano.md) | Na entrevista em tempo real, turno é pergunta do plano | Aceita |
+| [0017](0017-triagem-humana-da-fiscalizacao.md) | A triagem da fiscalização é humana e alimenta o pipeline | Aceita |
+| [0018](0018-limiar-destaca-nao-oculta.md) | O limiar destaca, não oculta; celular mede segundos | Aceita |
+| [0019](0019-lote-avalia-quem-concluiu.md) | O lote avalia quem concluiu; o resto é individual | Aceita |
+| [0020](0020-queda-de-gravacao-pausa-na-primeira.md) | Queda de gravação pausa na primeira; retomada exige liberação | Aceita |
+| [0021](0021-vigilancia-fala-pela-interface.md) | Vigilância ao vivo fala pela interface; gravação > detecção | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.
 

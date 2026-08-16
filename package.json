@@ -12,6 +12,11 @@
     "test:audio": "node tests/audio-e2e/run.mjs",
     "test:ab-orchestrator": "node -r dotenv/config tests/ab-orchestrator/run.mjs",
     "test:chat-dedup": "node --test tests/chat-dedup.test.mjs",
+    "test:live-turns": "node --test tests/live-conversation-turns.test.mjs",
+    "test:feedback-pq": "node --test tests/student-feedback-per-question.test.mjs",
+    "test:batch-elig": "node --test tests/batch-eligibility.test.mjs",
+    "test:proctor-axes": "node --test tests/proctor-axes.test.mjs",
+    "test:proctor-review": "node --test tests/proctor-review.test.mjs",
     "bench": "node scripts/bench-run.mjs",
     "bench:validate": "node scripts/bench-run.mjs --dry-run",
     "bench:export": "node scripts/bench-export.mjs",
@@ -23,7 +28,9 @@
     "test:cost-audit": "node --test tests/cost-audit.test.mjs",
     "benchmark:work": "node -r dotenv/config scripts/create-benchmark-work.mjs",
     "predev": "npm run db:up && npm run db:migrate",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test:resume-gate": "node --test tests/resume-gate.test.mjs",
+    "test:live-nudge": "node --test tests/live-nudge.test.mjs"
   },
   "dependencies": {
     "@replit/object-storage": "^1.0.0",

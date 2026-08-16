@@ -41,6 +41,8 @@ import { workMarkdown } from "../lib/exportMarkdown.js";
 import { mapPool } from "../lib/concurrency.js";
 import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
 import { enqueueProctor } from "../lib/proctorQueue.js";
+import { isBatchEligible, summarizeIneligible } from "../lib/batchEligibility.js";
+import { PROCTOR_REVIEW_DEFS, isValidProctorReview, PROCTOR_REVIEW_DEFAULT } from "../lib/proctorReview.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import {
     PRINCIPAL_REASONING_MODEL,
@@ -429,7 +431,17 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
                 db.getOralSubmissionDetail(found.id),
                 db.getOralVideoParts(found.id),
             ]);
-            proctoring = { enabled: true, report: detail?.oral_proctor_json || null, video_parts: parts.length, status: detail?.oral_voice_json?.proctor_status?.state || null };
+            const review = await db.getProctorReview(found.id);
+            proctoring = {
+                enabled: true,
+                report: detail?.oral_proctor_json || null,
+                video_parts: parts.length,
+                status: detail?.oral_voice_json?.proctor_status?.state || null,
+                // Triagem do professor (#246) + o catálogo de níveis, para a tela
+                // montar o seletor sem duplicar a enumeração.
+                review: review || { level: PROCTOR_REVIEW_DEFAULT, note: null, reviewed_at: null },
+                review_levels: PROCTOR_REVIEW_DEFS.map(d => ({ key: d.key, name: d.name })),
+            };
         }
         res.json({
             work: { work_token: req.work.work_token, name: req.work.name },
@@ -458,6 +470,25 @@ router.post("/w/:workToken/submissions/:subToken/proctor", requireWorkToken, req
     } catch (err) {
         log.error("WORK", `proctor (interview) enqueue failed: ${err.message}`);
         res.status(500).json({ error: "falha ao enfileirar a análise", detail: err.message });
+    }
+});
+
+// Triagem do professor sobre os indícios de fiscalização (#246). A classificação
+// é HUMANA — compatível com a ADR 0004, que proíbe acusação/penalidade
+// AUTOMÁTICA. A nota NÃO muda por causa deste campo: quem ajusta é o professor.
+router.put("/w/:workToken/submissions/:subToken/proctor-review", requireWorkToken, requireProfessorSubmission, express.json({ limit: "8kb" }), async (req, res) => {
+    try {
+        const level = String(req.body?.level ?? "").trim();
+        if (!isValidProctorReview(level)) {
+            return res.status(400).json({ error: "nível de triagem inválido" });
+        }
+        const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 2000) : null;
+        const saved = await db.setProctorReview(req.submission.id, level, note || null);
+        log.info("WORK", `triagem de fiscalização submission=${req.submission.submission_token} nivel=${level}${note ? " (com observação)" : ""}`);
+        res.json({ ok: true, review: saved });
+    } catch (err) {
+        log.error("WORK", `proctor-review failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao salvar a triagem" });
     }
 });
 
@@ -853,6 +884,7 @@ function publicBatchState(state) {
         skipped: state.skipped,
         failed: state.failed,
         stopped_reason: state.stopped_reason,
+        ineligible: state.ineligible || {},
         started_at: state.started_at,
         finished_at: state.finished_at,
     };
@@ -872,7 +904,7 @@ function publicBatchState(state) {
 router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), startBatchRoute({
     map: batchEvalRuns,
     scope: "EVALUATION",
-    queueFilter: (s, force) => s.status !== "pending" && (force || !s.has_student_version),
+    queueFilter: (s, force) => force || !s.has_student_version, // elegibilidade já filtrada (#258)
     emptyError: force => force
         ? "nenhuma entrevista com conversa para avaliar"
         : "nenhuma entrevista nova para avaliar — todas as elegíveis já foram avaliadas",
@@ -982,11 +1014,17 @@ function startBatchRoute({ map, scope, queueFilter, emptyError, itemFn, checkBud
                 return res.status(409).json({ error: "já existe um lote em andamento para este trabalho" });
             }
             const subs = await db.listSubmissionsForWork(req.work.id);
-            const queue = subs.filter(s => queueFilter(s, force));
+            // Elegibilidade de LOTE vem primeiro e `force` NÃO a fura (#258):
+            // refazer o que já foi feito é uma coisa; arrastar teste, arguição em
+            // andamento e desistência para dentro do lote é outra.
+            const eligible = subs.filter(isBatchEligible);
+            const ineligible = summarizeIneligible(subs);
+            const queue = eligible.filter(s => queueFilter(s, force));
             if (queue.length === 0) {
-                return res.status(400).json({ error: emptyError(force) });
+                return res.status(400).json({ error: emptyError(force), ineligible });
             }
             const state = newBatchState(force, queue.length);
+            state.ineligible = ineligible;
             map.set(req.work.id, state);
             runBatchOver(scope, req.work, queue, state, found => itemFn(req.work, found, force), { checkBudget })
                 .catch(err => {
@@ -995,7 +1033,7 @@ function startBatchRoute({ map, scope, queueFilter, emptyError, itemFn, checkBud
                     state.finished_at = new Date().toISOString();
                     state.stopped_reason = "internal_error";
                 });
-            res.json({ started: true, total: queue.length, force });
+            res.json({ started: true, total: queue.length, force, ineligible });
         } catch (err) {
             log.error(scope, `batch start failed: ${err.message}`);
             res.status(500).json({ error: "falha ao iniciar o lote", detail: err.message });
@@ -1504,6 +1542,24 @@ router.post("/w/:workToken/submissions/:subToken/waive-video", requireWorkToken,
     } catch (err) {
         log.error("SUBMISSION", `waive-video failed submission=${found.submission_token}: ${err.message}`);
         res.status(500).json({ error: "falha ao liberar sem vídeo" });
+    }
+});
+
+// Liberar a RETOMADA de uma sessão de voz que caiu (#260). A queda pausa o
+// aluno (lib/resumeGate.js); aqui o professor autoriza UMA retomada — a
+// liberação é consumida na próxima conexão (nova queda → novo bloqueio).
+// Alternativa que não precisa de rota: avaliar individualmente o que já foi
+// gravado (a transcrição parcial e o vídeo existem).
+router.post("/w/:workToken/submissions/:subToken/allow-resume", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    try {
+        if (found.completion_reason) return res.status(409).json({ error: "a arguição já foi concluída" });
+        await db.allowResume(found.id);
+        log.info("SUBMISSION", `retomada liberada submission=${found.submission_token} work=${req.work.work_token}`);
+        res.json({ ok: true, submission_token: found.submission_token, resume_allowed: true });
+    } catch (err) {
+        log.error("SUBMISSION", `allow-resume failed submission=${found.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "falha ao liberar a retomada" });
     }
 });
 

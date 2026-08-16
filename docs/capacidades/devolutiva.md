@@ -17,6 +17,10 @@ bastidores e de suspeitas, que o professor revisa e publica quando quiser.
   investigativa da avaliação interna.
 - Tem **seções que o professor liga e desliga** por trabalho: pontos fortes,
   áreas de melhoria, sugestões de estudo e opinião do entrevistador.
+- A seção **pergunta a pergunta é obrigatória** quando a avaliação interna tem
+  comentários por turno — deixou de ser escolha do modelo, porque colegas da
+  mesma turma recebiam estruturas diferentes por sorteio. Ver
+  [ADR 0015](../decisoes/0015-devolutiva-uniforme-na-turma.md).
 - Pode, opcionalmente, incorporar uma nota **suave e não acusatória** sobre a
   fiscalização por vídeo.
 - Existe nas três formas de arguição; na prova oral, reaproveita o mesmo gerador.

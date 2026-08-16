@@ -32,6 +32,9 @@ que o aluno entregou — todos são arguidos sobre o mesmo conteúdo.
    posição diante da câmera, mãos à vista, ausência de celular, ruído ambiente e
    teste de conexão. Posição e ruído apenas orientam; **a captura de vídeo é
    bloqueante** — sem gravação, a prova não começa.
+   O botão de continuar fica sempre ativo: se faltar confirmar os fones, o
+   clique é bloqueado com explicação; conexão ruim e ruído avisam mas deixam
+   passar, porque são condições do ambiente que o aluno pode assumir.
 2. Se o trabalho tem frase de calibração, lê a frase em voz alta. O resultado
    nunca impede a prova (duas tentativas e segue): serve para avisar sobre volume
    e ritmo, e para sinalizar ao professor problemas de captação.

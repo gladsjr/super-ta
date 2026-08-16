@@ -17,6 +17,7 @@ import fs from "fs";
 import os from "os";
 import { requireSubmissionToken, requireNotFinalized, requireWithinBudget } from "../lib/middleware.js";
 import * as db from "../lib/db.js";
+import { wouldResume } from "../lib/resumeGate.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
 import { clientForWork } from "../lib/openaiClient.js";
 import { prepBuilderAgent } from "../lib/agents.js";
@@ -61,14 +62,26 @@ router.get("/s/:submissionToken/live/status", requireSubmissionToken, requireLiv
         else if (inFlight && !inFlight.error) prepStatus = "preparing";
         else if (inFlight?.error) prepStatus = "error";
         res.set("Cache-Control", "no-store");
+        const done = !!req.submission.completion_reason && !req.submission.is_test;
+        // resume_blocked (#260): sessão anterior caiu com fala do aluno e o
+        // professor ainda não liberou — a página mostra a tela de pausa.
+        let resumeBlocked = false;
+        if (!done && !req.submission.is_test) {
+            try {
+                const prior = (await db.getOralTranscript(req.submission.id)) || [];
+                resumeBlocked = wouldResume({ isTest: false, priorTranscript: prior })
+                    && !(await db.hasResumeAllowance(req.submission.id));
+            } catch {}
+        }
         res.json({
             work_name: req.work.name,
             student_label: req.submission.student_label || null,
-            done: !!req.submission.completion_reason && !req.submission.is_test,
+            done,
             is_test: !!req.submission.is_test,
             consented: !!req.submission.consent_version,
             prep_status: prepStatus,
             question_count: prep?.plan?.questions?.length ?? null,
+            resume_blocked: resumeBlocked,
         });
     } catch (err) {
         log.error("LIVE", `status failed: ${err.message}`);

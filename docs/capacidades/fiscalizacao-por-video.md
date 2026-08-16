@@ -44,21 +44,68 @@ Vídeo é **obrigatório e bloqueante**. A regra vale nos três fluxos:
 
 A válvula de escape é o professor liberar o aluno individualmente.
 
+## Cobertura da análise
+
+A análise gasta um **orçamento fixo de quadros** (proteção de CPU) distribuído
+ao longo do vídeo **inteiro**: prova curta é amostrada a cada segundo; prova
+longa estica o passo. Até 2026-08-16 esse orçamento era um teto que truncava
+em 20 minutos **sem registrar nada** — uma prova de 44 minutos era analisada
+até a metade e o relatório parecia completo. O relatório agora traz duração
+real, janela coberta e marca de truncamento, e o painel avisa quando a
+cobertura é parcial. Atenção ao ler: com passo esticado, `count` está em
+quadros, não em segundos — use `count_sec`.
+
 ## O que sai no fim
 
 Alertas por categoria — ausência, mais de uma pessoa, celular, mãos — como
-**pastilhas para revisão humana**, com o vídeo disponível para o professor
-assistir e navegar. Detecção de celular passa por uma segunda checagem com
+**pastilhas para revisão humana**. **A gravação em várias partes é, ela mesma,
+um alerta**: significa que a câmera caiu durante a arguição. Desde a
+[ADR 0020](../decisoes/0020-queda-de-gravacao-pausa-na-primeira.md), a PRIMEIRA
+queda pausa a arguição — o aluno vê uma tela de pausa (sem acusação: é
+infraestrutura) e o professor decide, no painel, entre **liberar uma retomada**
+(consumida na reconexão; nova queda re-pausa) ou avaliar individualmente o que
+já foi gravado, vendo quantas respostas o aluno deu antes de parar. O player
+navega entre as partes e emenda sozinho; clicar num trecho encontra a parte
+certa, com o vídeo disponível para o professor assistir e navegar. Nos fluxos de
+voz há ainda a **vigilância de posição ao vivo**
+([ADR 0021](../decisoes/0021-vigilancia-fala-pela-interface.md)): posição
+inadequada sustentada (10 s) pausa a conversa e abre um modal com a câmera do
+aluno ao lado das fotos canônicas de posição — sem nenhum clique, a conversa
+continua quando ele se ajusta. As pausas e o estado da vigilância (inclusive
+"desligada por desempenho" em máquinas fracas) viram pastilhas no painel. Detecção de celular passa por uma segunda checagem com
 recorte ampliado, porque mão gesticulando perto do rosto é o falso positivo
 dominante; para "mais de uma pessoa", registra-se a maior sequência contínua,
 já que uma segunda pessoa real persiste e o próprio braço do aluno na borda dura
 um ou dois segundos.
 
+## A triagem do professor
+
+Depois de assistir aos trechos, o professor registra o que concluiu: **não
+revisado** (o padrão — é a fila do que falta olhar), **sem problema**, **em
+aberto**, ou **confirmado** em três graus, com um campo livre de observação.
+
+Esse veredito alimenta a avaliação e a devolutiva, com guardas: a nota **não**
+muda sozinha; **sem problema suprime** o alerta automático na devolutiva (um
+humano já descartou); e **não revisado** e **em aberto** não chegam ao aluno,
+porque inconclusivo não é achado. Ver
+[ADR 0017](../decisoes/0017-triagem-humana-da-fiscalizacao.md).
+
+## Como os indícios são exibidos
+
+Todo eixo analisado **aparece sempre**, com seus números — o limiar decide a cor,
+não a existência da linha. Antes o limiar ocultava, e indício real sumia da tela.
+"Não analisado" é um terceiro estado, distinto de "ok". Celular é medido em
+**segundos** (sequência contígua ou total), não em percentual, porque o uso dura
+poucos segundos e o percentual o dilui numa prova longa. Ver
+[ADR 0018](../decisoes/0018-limiar-destaca-nao-oculta.md).
+
 ## O que esta capacidade NÃO faz
 
 - **Não** rebaixa nota automaticamente. A penalidade automática existiu e foi
   **removida em 2026-08-13** — ver [ADR 0004](../decisoes/0004-proctoring-nao-acusa-automaticamente.md).
-- **Não** interrompe a arguição por posicionamento ou ruído.
+- **Não** interrompe por ruído. Por POSIÇÃO, interrompe de leve nos fluxos de
+  voz (pausa silenciosa autoresolvida, ADR 0021) — nunca pela voz do arguidor,
+  nunca como acusação.
 - **Não** manda o vídeo para a OpenAI. A análise é local, no servidor.
 - **Não** entra no raciocínio da avaliação de conteúdo — integridade e conteúdo
   são mantidos separados de propósito.
@@ -76,6 +123,14 @@ um ou dois segundos.
   checagem.
 - **Dado** alertas de vídeo em um aluno, **quando** o professor calcula a nota,
   **então** a nota é a média ponderada da rubrica, sem desconto automático.
+- **Dado** que a gravação caiu no meio de uma prova de voz, **quando** o aluno
+  recarrega a página, **então** vê a tela de pausa ("procure o professor") e o
+  professor vê "gravação caiu — pausada (N respostas)" com o botão de liberar
+  a retomada.
+- **Dado** um aluno que escorregou da posição numa prova de voz, **quando**
+  completa 10 s fora do enquadramento, **então** a conversa pausa em silêncio,
+  um modal mostra a câmera dele ao lado das fotos de posição, e tudo continua
+  sozinho quando ele se ajusta.
 
 ## Referência técnica
 
@@ -86,3 +141,5 @@ schema. [`docs/oral-exam.md`](../oral-exam.md) — o núcleo de proctoring nasce
 
 - [ADR 0004 — Fiscalização não acusa automaticamente](../decisoes/0004-proctoring-nao-acusa-automaticamente.md)
 - [ADR 0005 — Vídeo obrigatório e bloqueante](../decisoes/0005-video-obrigatorio-e-bloqueante.md)
+- [ADR 0020 — Queda de gravação pausa na primeira](../decisoes/0020-queda-de-gravacao-pausa-na-primeira.md)
+- [ADR 0021 — Vigilância ao vivo fala pela interface](../decisoes/0021-vigilancia-fala-pela-interface.md)

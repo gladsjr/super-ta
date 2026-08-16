@@ -55,6 +55,13 @@ alternativa descartada e o custo aceito.
 | [0012](docs/decisoes/0012-publicacao-conjunta-na-prova-oral.md) | **Na prova oral**, nota e devolutiva publicam **juntas** (um só controle). Supersede a 0009 nesse escopo. |
 | [0013](docs/decisoes/0013-resultados-de-benchmark-sao-portaveis.md) | Resultado de benchmark só é comparável **dentro do mesmo par setup + júri**. O formato do pacote portátil é contrato. |
 | [0014](docs/decisoes/0014-analytics-consulta-tabelas-base.md) | **Não construa nada que dependa de view, function ou schema alternativo** — o Publish não os propaga. Funciona em dev e falha em produção. |
+| [0015](docs/decisoes/0015-devolutiva-uniforme-na-turma.md) | `per_question` da devolutiva **não é escolha do modelo**: cobertura completa é obrigatória quando o relatório interno tem entradas. |
+| [0016](docs/decisoes/0016-turno-e-pergunta-do-plano.md) | Na entrevista em tempo real, **turno = pergunta do plano**; o resto da conversa é intervenção do turno. |
+| [0017](docs/decisoes/0017-triagem-humana-da-fiscalizacao.md) | A triagem da fiscalização é **humana**. `sem problema` SUPRIME o alerta na devolutiva; `não revisado` e `em aberto` não entram. A nota nunca muda sozinha. |
+| [0018](docs/decisoes/0018-limiar-destaca-nao-oculta.md) | O limiar **destaca, não oculta**: todo eixo analisado aparece. Limiares em fonte única (`static/js/proctorAxes.js`); celular em SEGUNDOS. |
+| [0019](docs/decisoes/0019-lote-avalia-quem-concluiu.md) | Lote só pega quem **concluiu e não é teste**; `force` não fura a regra. Teste, em andamento e desistência: só individualmente. |
+| [0020](docs/decisoes/0020-queda-de-gravacao-pausa-na-primeira.md) | Queda de gravação pausa na **primeira**; retomada exige **liberação do professor** (consumida a cada uso). Retomada automática era falhar em aberto. |
+| [0021](docs/decisoes/0021-vigilancia-fala-pela-interface.md) | Vigilância de posição ao vivo fala pela **interface** (pausa + modal), nunca pela voz; sob carga a detecção **morre primeiro**, a gravação nunca; desligada vira sinal. |
 
 Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
 por NNNN"); nunca reescreva uma ADR aceita.

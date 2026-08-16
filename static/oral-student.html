@@ -54,6 +54,8 @@
     .poses figure { margin: 0; flex: 1; }
   </style>
   <script src="/static/js/proctorGate.js"></script>
+  <script src="/static/js/setupGate.js"></script>
+  <script src="/static/js/liveNudge.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -74,8 +76,8 @@
         <!-- Fones: requisito em DESTAQUE + checkbox obrigatório. Sem fones, o
              microfone capta a voz do avaliador (eco/feedback) e degrada a prova. -->
         <div style="background:#eef4ff; border:2px solid #3b6fd4; border-radius:10px; padding:14px 16px; margin:0 0 14px">
-          <div style="font-size:18px; font-weight:700">🎧 Use fones de ouvido</div>
-          <p style="margin:6px 0 12px; font-size:14px; line-height:1.4">A prova é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do avaliador — isso causa eco, pode te cortar e atrapalha a sua nota.</p>
+          <div style="font-size:22px; font-weight:700; line-height:1.25">🎧 Use fones de ouvido</div>
+          <p style="margin:8px 0 12px; font-size:15.5px; line-height:1.5; text-wrap:pretty">A prova é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do avaliador — isso causa eco, pode cortar a sua fala e prejudicar a sua nota.</p>
           <label class="accept" style="font-size:15px"><input type="checkbox" id="hp-check"/> <span><strong>Estou usando fones de ouvido</strong></span></label>
         </div>
         <!-- Conexão -->
@@ -94,7 +96,8 @@
           <div style="text-align:center"><button class="btn" id="calib-rec-btn">🎤 Gravar e ler a frase</button></div>
           <div class="banner wait" id="calib-status" style="margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
         </div>
-        <div style="margin-top:18px"><button class="btn" id="to-check-btn" disabled>Continuar</button></div>
+        <!-- Sempre habilitado: o bloqueio acontece no clique, com explicação (#255). -->
+        <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
       </div>
 
       <!-- Página 2: posicionamento na câmera (a prova começa sozinha quando ok).
@@ -116,7 +119,7 @@
               <figure><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
               <figure><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
             </div>
-            <div class="note-warn"><strong>Importante:</strong> a prova não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
+            <div class="note-warn"><strong>Importante:</strong> mantenha a posição das fotos durante toda a prova. Se você sair da posição por mais de alguns segundos, a prova <strong>pausa sozinha</strong> e continua quando você se ajustar. O vídeo fica gravado e é analisado.</div>
             <button class="btn" id="pos-begin-btn" disabled>Começar a prova</button>
             <div class="err" id="setup-err"></div>
           </div>
@@ -175,8 +178,20 @@
       try {
         const st = await (await fetch(`/s/${SUB}/oral/status`)).json();
         if (st.done) { blocked = true; enterPostExam({}); }
+        // #260: a gravação caiu na sessão anterior e o professor ainda não
+        // liberou a retomada — pausa aqui, antes de qualquer setup.
+        else if (st.resume_blocked) { blocked = true; showResumeBlocked(); }
       } catch {}
     })();
+
+    // Tela de PAUSA pós-queda (#260): sem acusação — é infraestrutura, não
+    // conduta. O professor libera (ou avalia o que já foi gravado).
+    function showResumeBlocked() {
+      const o = document.createElement('div');
+      o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#fdfaf4);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
+      o.innerHTML = '<div style="font-size:40px">⏸️</div><h2 style="margin:10px 0">Prova pausada</h2><p style="max-width:460px;line-height:1.6">A gravação de vídeo foi interrompida durante a sua prova. O que você já respondeu está <strong>salvo</strong> — nada foi perdido.</p><p style="max-width:460px;line-height:1.6"><strong>Procure o professor</strong> para continuar: ele pode liberar a retomada de onde você parou. Quando ele liberar, basta recarregar esta página.</p>';
+      document.body.appendChild(o);
+    }
 
     // Tela de pós-prova. Espelha a revisão da entrevista: dentro da janela de 7
     // dias o aluno vê a transcrição e pode deixar UM comentário; a devolutiva/nota
@@ -398,10 +413,11 @@
         } catch { fails++; }
         await new Promise(res => setTimeout(res, 120));
       }
-      if (!times.length) { bn.className = 'banner adjust'; bn.textContent = '⚠ Não consegui testar a conexão. Se a internet estiver instável, a prova por voz pode falhar — prefira uma rede melhor.'; return; }
+      if (!times.length) { connWarn = true; bn.className = 'banner adjust'; bn.textContent = '⚠ Não consegui testar a conexão. Se a internet estiver instável, a prova por voz pode falhar — prefira uma rede melhor.'; return; }
       times.sort((a, b) => a - b);
       const med = Math.round(times[Math.floor(times.length / 2)]);
-      if (fails >= 2 || med >= 450) {
+      connWarn = (fails >= 2 || med >= 450);
+      if (connWarn) {
         bn.className = 'banner adjust';
         bn.textContent = `⚠ Conexão instável/lenta (~${med} ms${fails ? `, ${fails} falha(s)` : ''}). A prova é por voz em tempo real e pode ficar difícil — cortes e atrasos. Se puder, use uma rede melhor (Wi-Fi estável). Você ainda pode continuar.`;
       } else {
@@ -498,6 +514,7 @@
     const NOISE_MAX_RMS = 0.035; // limiar de "barulhento" — mais sensível que antes (0.05),
                                  // p/ aproximar da sensibilidade do examinador na prova (ajustável)
     let noiseOk = false, calibRecording = false, noiseStream = null, noiseCtx = null, noiseRAF = 0;
+    let connWarn = false; // conexão instável/lenta: AVISA no gate, não bloqueia (#255)
     async function startNoiseMeter() {
       try { noiseStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
       catch { $('noise-verdict').textContent = 'Não foi possível medir o ruído.'; noiseOk = true; return; } // não bloqueia se falhar
@@ -592,32 +609,25 @@
     // ausente (saiu do quadro) = age mais rápido. Libera mãos+objetos (não precisa
     // ao vivo) e mantém só a pose. Sem visão → nenhum sinal, e o servidor assume
     // "presente" (degradação segura). Só envia quando o estado MUDA.
-    let presenceTimer = 0, lastPresent = null;
+    // A partir da #267, o MESMO tick também roda a vigilância de posição
+    // (window.liveNudge.attachWatch): nenhuma inferência extra — os marcos que a
+    // pose já devolve alimentam presença E posição. A pausa por posição fala
+    // pela interface (modal + posture_lost/ok ao relay), nunca pela voz.
+    let nudgeWatch = null;
     function startPresenceWatch() {
       try { handLm && handLm.close(); } catch {}
       try { objDet && objDet.close(); } catch {}
       handLm = objDet = null;
-      if (!poseLm) return;
-      const vid = $('selfview');
-      const tick = () => {
-        if (ended) return;
-        let present = lastPresent == null ? true : lastPresent;
-        try {
-          if (vid.videoWidth && vid.readyState >= 2) {
-            const pr = poseLm.detectForVideo(vid, performance.now());
-            present = !!(pr.landmarks && pr.landmarks[0]); // pose detectada = pessoa no quadro
-          }
-        } catch {}
-        if (present !== lastPresent) {
-          lastPresent = present;
-          try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'presence', present })); } catch {}
-        }
-        presenceTimer = setTimeout(tick, 2500);
-      };
-      tick();
+      if (!window.liveNudge) return; // sem o helper: sem sinal (servidor assume presente)
+      nudgeWatch = window.liveNudge.attachWatch({
+        video: $('selfview'), stream: micStream, poseLm,
+        getWs: () => ws, isEnded: () => ended,
+        faceMin: FACE_MIN, faceMax: FACE_MAX,
+        exampleSrcs: [($('pose-a2') || {}).src, ($('pose-b2') || {}).src],
+      });
     }
     function stopPresenceWatch() {
-      if (presenceTimer) { clearTimeout(presenceTimer); presenceTimer = 0; }
+      if (nudgeWatch) { nudgeWatch.stop(); nudgeWatch = null; }
       try { poseLm && poseLm.close(); } catch {}
       poseLm = null;
     }
@@ -701,7 +711,7 @@
       if (document.getElementById('cap-lost')) return;
       const o = document.createElement('div'); o.id = 'cap-lost';
       o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,12,.93);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
-      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A prova está <strong>pausada</strong>. Reative a câmera; se não voltar sozinha, recarregue esta página para continuar de onde você parou.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
+      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A prova está <strong>pausada</strong>. Reative a câmera — se ela voltar, a prova continua sozinha. Se a gravação não voltar, o que você já respondeu fica salvo e a prova permanece pausada: <strong>procure o professor</strong> para liberar a continuação.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
       document.body.appendChild(o);
       document.getElementById('cap-reload').onclick = () => location.reload();
     }
@@ -765,13 +775,25 @@
       // revogada, webcam desconectada) ou o recorder morre, pausa a prova no
       // servidor e mostra o overlay; se a câmera volta (unmute), retoma.
       if (window.proctorGate) captureGuard = window.proctorGate.attachTrackLossGuard(micStream, recorder, {
-        onLost: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_lost' })); } catch {} showCaptureLost(); },
+        onLost: () => {
+          // A gravação é o ativo: a vigilância de posição morre primeiro (#267)
+          // — e ANTES do capture_lost, para uma pausa de postura aberta ser
+          // liberada (posture_ok) antes de o motivo da pausa virar 'captura'.
+          if (nudgeWatch) nudgeWatch.disable('desligado_apos_queda');
+          try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_lost' })); } catch {}
+          showCaptureLost();
+        },
         onRegained: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_ok' })); } catch {} hideCaptureLost(); },
       });
     }
-    $('to-check-btn').onclick = continueToCheck;
-    // Fones obrigatórios: só libera o "Continuar" com o checkbox marcado.
-    $('hp-check').addEventListener('change', (e) => { $('to-check-btn').disabled = !e.target.checked; });
+    // "Continuar" nasce HABILITADO; o bloqueio é no clique, com explicação (#255).
+    // Fones: impedimento (sem eles a prova degrada para todo mundo). Conexão e
+    // ruído: aviso que deixa passar — é o ambiente do aluno, ele decide assumir.
+    $('to-check-btn').onclick = () => {
+      const estado = { fonesOk: !!$('hp-check').checked, conexaoRuim: connWarn, ruidoAlto: !noiseOk };
+      if (!window.setupGate) return continueToCheck(); // fail-open: sem o helper, não trava o aluno
+      if (window.setupGate.avaliar(estado, continueToCheck)) continueToCheck();
+    };
     $('pos-begin-btn').onclick = beginExam;
 
     async function uploadVideo() {
