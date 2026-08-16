@@ -337,6 +337,9 @@
         <button id="eval-new-btn" class="btn btn-primary" type="button" title="Processo em lote: analisa o vídeo, avalia e gera o rascunho da devolutiva de cada entrevista ainda não avaliada">Avaliar entrevistas</button>
         <button id="publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas">Publicar devolutivas</button>
         <button id="unpublish-all-btn" class="btn" type="button" title="Retira das páginas dos alunos todas as devolutivas publicadas (ficam guardadas)">Despublicar devolutivas</button>
+        <!-- Exportação para leitura fora da tela (#247): tudo o que a tela
+             individual mostra, de todos os alunos, num .md — menos o vídeo. -->
+        <button id="download-md" class="btn" type="button" title="Baixa um arquivo .md com as avaliações de TODOS os alunos: devolutiva, avaliação interna, fiscalização, conversa e encerramento (sem o vídeo)">⬇ Baixar avaliações (.md)</button>
       </div>
       <div id="eval-batch-status" class="hint hidden" style="margin-top: var(--sp-2)"></div>
       </div>
@@ -1276,6 +1279,12 @@ document.getElementById('sub-filter').addEventListener('change', renderSubmissio
 
 document.getElementById('download-csv').onclick = () => {
   window.location.href = `/w/${encodeURIComponent(workToken)}/submissions.csv`;
+};
+
+// Exportação das avaliações em Markdown (#247). Download direto pela navegação:
+// a rota responde com Content-Disposition: attachment.
+document.getElementById('download-md').onclick = () => {
+  window.location.href = `/w/${encodeURIComponent(workToken)}/avaliacoes.md`;
 };
 
 // ---- Avaliação em lote das entrevistas ----

@@ -37,6 +37,8 @@ import {
     studentEvaluationPayload,
     SECTION_KEYS,
 } from "../lib/evaluationOps.js";
+import { workMarkdown } from "../lib/exportMarkdown.js";
+import { mapPool } from "../lib/concurrency.js";
 import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
 import { analyzeOralVideoParts } from "../lib/proctor.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
@@ -1563,6 +1565,74 @@ router.get("/w/:workToken/submissions.csv", requireWorkToken, async (req, res) =
     } catch (err) {
         log.error("WORK", `csv export failed: ${err.message}`);
         res.status(500).json({ error: "failed to export csv" });
+    }
+});
+
+// Exportação das avaliações de TODOS os alunos num único .md (issue #247). Mesmo
+// padrão do CSV acima: capacidade pelo work token, resposta como anexo. O
+// conteúdo espelha a tela individual (static/conversation.html) menos os
+// binários — vídeo e áudios não cabem em texto (os TRECHOS dos indícios entram).
+router.get("/w/:workToken/avaliacoes.md", requireWorkToken, async (req, res) => {
+    try {
+        const rows = await db.listSubmissionsForWork(req.work.id);
+        // Leitura por aluno em pool pequeno: são 4 SELECTs cada, e uma turma
+        // grande em série ficaria lenta sem necessidade (lib/concurrency.js).
+        const results = await mapPool(rows, 4, async (s) => {
+            const found = await db.findSubmissionByToken(s.submission_token);
+            if (!found) return null;
+            const [text, cached, student, finalization, runtime] = await Promise.all([
+                db.getConversationJson(found.id),
+                db.getEvaluationCache(found.id),
+                db.getStudentEvaluation(found.id),
+                db.getSubmissionFinalization(found.id),
+                db.getSubmissionRuntimeState(found.id),
+            ]);
+            let conversation = null;
+            if (text) {
+                try { conversation = JSON.parse(text); }
+                catch (err) { log.error("WORK", `export md: conversation parse failed sub=${s.submission_token}: ${err.message}`); }
+            }
+            // Mesma composição da tela: a finalização autoritativa é a da linha da
+            // submission; a despedida durável vem do conversation_json.
+            if (conversation && finalization?.completion_reason) {
+                const closingMessage = typeof conversation.finalization?.message === "string" ? conversation.finalization.message : null;
+                conversation.finalization = {
+                    completion_reason: finalization.completion_reason,
+                    completed_at: finalization.completed_at,
+                    student_comment: finalization.student_comment,
+                    message: closingMessage,
+                };
+            }
+            const planQuestions = runtime?.runtime_state?.interview_plan?.questions;
+            if (conversation && Array.isArray(planQuestions)) {
+                const cursor = typeof runtime.question_index === "number" ? runtime.question_index : 0;
+                conversation.pending_questions = planQuestions.slice(cursor).map(q => ({ question: q?.question ?? "" }));
+            }
+            return {
+                submission: s,
+                conversation,
+                evaluation: cached,
+                studentEvaluation: studentEvaluationPayload(student),
+                proctorReport: s.oral_proctor_json || null,
+                videoParts: Number(s.oral_video_parts_count ?? 0),
+                personaName: req.work.interviewer_name || null,
+            };
+        });
+        const submissions = results.filter(r => r.ok && r.value).map(r => r.value);
+        const failed = results.filter(r => !r.ok).length;
+        if (failed) log.error("WORK", `export md: ${failed} aluno(s) falharam work=${req.work.work_token}`);
+        const md = workMarkdown({
+            workName: req.work.name,
+            generatedAt: new Date().toISOString(),
+            submissions,
+        });
+        log.info("WORK", `export md work=${req.work.work_token} alunos=${submissions.length}`);
+        res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="avaliacoes-${req.work.work_token}.md"`);
+        res.send(md);
+    } catch (err) {
+        log.error("WORK", `export md failed: ${err.message}`);
+        res.status(500).json({ error: "failed to export markdown" });
     }
 });
 
