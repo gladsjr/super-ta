@@ -125,7 +125,10 @@ router.post("/s/:submissionToken/live/upload", requireSubmissionToken, requireLi
         const studentFilename = req.file.originalname || "trabalho.pdf";
         const submissionId = req.submission.id;
         const questionCount = req.work.question_count;
-        const meterCtx = { workId: req.work.id };
+        // submissionId junto: sem ele a prep da simplificada entrava no total do
+        // trabalho SEM etiqueta de aluno (a via por mensagem já mandava, via
+        // sessionMeterCtx) — e o custo por aluno saía subestimado (issue #253).
+        const meterCtx = { workId: req.work.id, submissionId };
         const cli = clientForWork(req.work);
 
         // REENVIO substitui a preparação anterior: limpa o plano persistido ANTES
