@@ -14,6 +14,8 @@ import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
 import log from "../lib/logger.js";
 import { getProctorQueueSnapshot, setProctorConcurrency, enqueueProctor, cancelProctor, MAX_CONCURRENCY } from "../lib/proctorQueue.js";
+import { getActiveRealtimeSessions } from "../lib/realtimeBridge.js";
+import { getMemoryStats } from "../lib/opsStats.js";
 
 const router = express.Router();
 
@@ -354,6 +356,31 @@ router.post("/admin/proctor/:submissionId/reprocess", requireAdmin, async (req, 
     } catch (err) {
         log.error("ADMIN", `proctor reprocess failed: ${err.message}`);
         res.status(500).json({ error: "falha ao enfileirar" });
+    }
+});
+
+// Dashboard de Operações (issue #265): alunos ativos por tipo + memória.
+// Voz ao vivo vem do registro de sessões do relay (exato); entrevista por
+// mensagens não tem sessão — definição operacional: atividade nos últimos
+// 10 min (a tela exibe a definição para o número não parecer errado).
+router.get("/admin/ops/dashboard", requireAdmin, async (_req, res) => {
+    try {
+        const voice = getActiveRealtimeSessions(); // { ORAL_RELAY: n, LIVE_RELAY: n }
+        const messages = await db.countActiveMessageInterviews(10);
+        const snap = getProctorQueueSnapshot();
+        res.json({
+            active: {
+                oral_realtime: voice.ORAL_RELAY || 0,
+                interview_realtime: voice.LIVE_RELAY || 0,
+                interview_messages: messages,
+                messages_window_min: 10,
+            },
+            memory: getMemoryStats(),
+            analyses: { running: snap.running.length, queued: snap.queued.length },
+        });
+    } catch (err) {
+        log.error("ADMIN", `ops dashboard failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao ler o dashboard" });
     }
 });
 
