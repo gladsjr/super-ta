@@ -51,6 +51,7 @@
   </style>
   <script src="/static/js/proctorGate.js"></script>
   <script src="/static/js/setupGate.js"></script>
+  <script src="/static/js/liveNudge.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -121,7 +122,7 @@
               <figure><img id="pose-a2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-a2-cap"></figcaption></figure>
               <figure><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
             </div>
-            <div class="note-warn"><strong>Importante:</strong> a entrevista não será interrompida por conta de posicionamento inadequado, porém o vídeo fica gravado e é analisado.</div>
+            <div class="note-warn"><strong>Importante:</strong> mantenha a posição das fotos durante toda a entrevista. Se você sair da posição por mais de alguns segundos, a entrevista <strong>pausa sozinha</strong> e continua quando você se ajustar. O vídeo fica gravado e é analisado.</div>
             <button class="btn" id="pos-begin-btn" disabled>Começar a entrevista</button>
             <div class="err" id="setup-err"></div>
           </div>
@@ -186,6 +187,9 @@
         const wc = document.getElementById('work-context');
         if (wc) wc.textContent = [st.work_name, st.student_label].filter(Boolean).join(' · ');
         if (st.done) { blocked = true; enterPostInterview({}); return; }
+        // #260: a gravação caiu na sessão anterior e o professor ainda não
+        // liberou a retomada — pausa aqui, antes de qualquer setup.
+        if (st.resume_blocked) { blocked = true; showResumeBlocked(); return; }
         if (st.prep_status === 'ready' || st.prep_status === 'preparing') {
           resumeMode = true;
           prepReady = st.prep_status === 'ready';
@@ -196,6 +200,15 @@
         }
       } catch {}
     })();
+
+    // Tela de PAUSA pós-queda (#260): sem acusação — é infraestrutura, não
+    // conduta. O professor libera (ou avalia o que já foi gravado).
+    function showResumeBlocked() {
+      const o = document.createElement('div');
+      o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#fdfaf4);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
+      o.innerHTML = '<div style="font-size:40px">⏸️</div><h2 style="margin:10px 0">Entrevista pausada</h2><p style="max-width:460px;line-height:1.6">A gravação de vídeo foi interrompida durante a sua entrevista. O que você já respondeu está <strong>salvo</strong> — nada foi perdido.</p><p style="max-width:460px;line-height:1.6"><strong>Procure o professor</strong> para continuar: ele pode liberar a retomada de onde você parou. Quando ele liberar, basta recarregar esta página.</p>';
+      document.body.appendChild(o);
+    }
 
     // Tela de pós-entrevista: espelha a revisão da entrevista por mensagens —
     // dentro da janela de 7 dias o aluno revê a conversa e pode deixar UM
@@ -642,32 +655,25 @@
 
     // Layer 2: durante a entrevista, checagem LEVE de presença (só a pose,
     // ~1x/2,5s) alimenta o vigia de silêncio do servidor. Só envia quando muda.
-    let presenceTimer = 0, lastPresent = null;
+    // A partir da #267, o MESMO tick também roda a vigilância de posição
+    // (window.liveNudge.attachWatch): nenhuma inferência extra — os marcos que a
+    // pose já devolve alimentam presença E posição. A pausa por posição fala
+    // pela interface (modal + posture_lost/ok ao relay), nunca pela voz.
+    let nudgeWatch = null;
     function startPresenceWatch() {
       try { handLm && handLm.close(); } catch {}
       try { objDet && objDet.close(); } catch {}
       handLm = objDet = null;
-      if (!poseLm) return;
-      const vid = $('selfview');
-      const tick = () => {
-        if (ended) return;
-        let present = lastPresent == null ? true : lastPresent;
-        try {
-          if (vid.videoWidth && vid.readyState >= 2) {
-            const pr = poseLm.detectForVideo(vid, performance.now());
-            present = !!(pr.landmarks && pr.landmarks[0]);
-          }
-        } catch {}
-        if (present !== lastPresent) {
-          lastPresent = present;
-          try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'presence', present })); } catch {}
-        }
-        presenceTimer = setTimeout(tick, 2500);
-      };
-      tick();
+      if (!window.liveNudge) return; // sem o helper: sem sinal (servidor assume presente)
+      nudgeWatch = window.liveNudge.attachWatch({
+        video: $('selfview'), stream: micStream, poseLm,
+        getWs: () => ws, isEnded: () => ended,
+        faceMin: FACE_MIN, faceMax: FACE_MAX,
+        exampleSrcs: [($('pose-a2') || {}).src, ($('pose-b2') || {}).src],
+      });
     }
     function stopPresenceWatch() {
-      if (presenceTimer) { clearTimeout(presenceTimer); presenceTimer = 0; }
+      if (nudgeWatch) { nudgeWatch.stop(); nudgeWatch = null; }
       try { poseLm && poseLm.close(); } catch {}
       poseLm = null;
     }
@@ -746,7 +752,7 @@
       if (document.getElementById('cap-lost')) return;
       const o = document.createElement('div'); o.id = 'cap-lost';
       o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(20,12,12,.93);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
-      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A entrevista está <strong>pausada</strong>. Reative a câmera; se não voltar sozinha, recarregue esta página para continuar de onde você parou.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
+      o.innerHTML = '<div style="font-size:40px">📷🚫</div><h2 style="margin:10px 0">Câmera interrompida</h2><p style="max-width:440px;line-height:1.5">A gravação de vídeo é obrigatória. A entrevista está <strong>pausada</strong>. Reative a câmera — se ela voltar, a entrevista continua sozinha. Se a gravação não voltar, o que você já respondeu fica salvo e a entrevista permanece pausada: <strong>procure o professor</strong> para liberar a continuação.</p><button id="cap-reload" style="margin-top:14px;padding:10px 18px;border:none;border-radius:8px;background:#2563eb;color:#fff;font:inherit;cursor:pointer">Recarregar</button>';
       document.body.appendChild(o);
       document.getElementById('cap-reload').onclick = () => location.reload();
     }
@@ -804,7 +810,14 @@
       // Vigia a CAPTURA: track de vídeo cai/recorder morre → pausa no servidor +
       // overlay; volta (unmute) → retoma.
       if (window.proctorGate) captureGuard = window.proctorGate.attachTrackLossGuard(micStream, recorder, {
-        onLost: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_lost' })); } catch {} showCaptureLost(); },
+        onLost: () => {
+          // A gravação é o ativo: a vigilância de posição morre primeiro (#267)
+          // — e ANTES do capture_lost, para uma pausa de postura aberta ser
+          // liberada (posture_ok) antes de o motivo da pausa virar 'captura'.
+          if (nudgeWatch) nudgeWatch.disable('desligado_apos_queda');
+          try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_lost' })); } catch {}
+          showCaptureLost();
+        },
         onRegained: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_ok' })); } catch {} hideCaptureLost(); },
       });
     }

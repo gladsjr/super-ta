@@ -60,6 +60,8 @@ alternativa descartada e o custo aceito.
 | [0017](docs/decisoes/0017-triagem-humana-da-fiscalizacao.md) | A triagem da fiscalização é **humana**. `sem problema` SUPRIME o alerta na devolutiva; `não revisado` e `em aberto` não entram. A nota nunca muda sozinha. |
 | [0018](docs/decisoes/0018-limiar-destaca-nao-oculta.md) | O limiar **destaca, não oculta**: todo eixo analisado aparece. Limiares em fonte única (`static/js/proctorAxes.js`); celular em SEGUNDOS. |
 | [0019](docs/decisoes/0019-lote-avalia-quem-concluiu.md) | Lote só pega quem **concluiu e não é teste**; `force` não fura a regra. Teste, em andamento e desistência: só individualmente. |
+| [0020](docs/decisoes/0020-queda-de-gravacao-pausa-na-primeira.md) | Queda de gravação pausa na **primeira**; retomada exige **liberação do professor** (consumida a cada uso). Retomada automática era falhar em aberto. |
+| [0021](docs/decisoes/0021-vigilancia-fala-pela-interface.md) | Vigilância de posição ao vivo fala pela **interface** (pausa + modal), nunca pela voz; sob carga a detecção **morre primeiro**, a gravação nunca; desligada vira sinal. |
 
 Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
 por NNNN"); nunca reescreva uma ADR aceita.

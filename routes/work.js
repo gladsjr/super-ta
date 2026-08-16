@@ -1545,6 +1545,24 @@ router.post("/w/:workToken/submissions/:subToken/waive-video", requireWorkToken,
     }
 });
 
+// Liberar a RETOMADA de uma sessão de voz que caiu (#260). A queda pausa o
+// aluno (lib/resumeGate.js); aqui o professor autoriza UMA retomada — a
+// liberação é consumida na próxima conexão (nova queda → novo bloqueio).
+// Alternativa que não precisa de rota: avaliar individualmente o que já foi
+// gravado (a transcrição parcial e o vídeo existem).
+router.post("/w/:workToken/submissions/:subToken/allow-resume", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    try {
+        if (found.completion_reason) return res.status(409).json({ error: "a arguição já foi concluída" });
+        await db.allowResume(found.id);
+        log.info("SUBMISSION", `retomada liberada submission=${found.submission_token} work=${req.work.work_token}`);
+        res.json({ ok: true, submission_token: found.submission_token, resume_allowed: true });
+    } catch (err) {
+        log.error("SUBMISSION", `allow-resume failed submission=${found.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "falha ao liberar a retomada" });
+    }
+});
+
 // Apagar um token de envio. Só quando o aluno NÃO iniciou (status pending): aí
 // devolve o assento do pacote ao pool (Gate B) e remove a submissão. Se já
 // começou, houve custo — não dá pra apagar nem devolver (bloqueie em vez disso).

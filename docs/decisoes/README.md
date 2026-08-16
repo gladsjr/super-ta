@@ -38,6 +38,8 @@ código já explica sozinho.
 | [0017](0017-triagem-humana-da-fiscalizacao.md) | A triagem da fiscalização é humana e alimenta o pipeline | Aceita |
 | [0018](0018-limiar-destaca-nao-oculta.md) | O limiar destaca, não oculta; celular mede segundos | Aceita |
 | [0019](0019-lote-avalia-quem-concluiu.md) | O lote avalia quem concluiu; o resto é individual | Aceita |
+| [0020](0020-queda-de-gravacao-pausa-na-primeira.md) | Queda de gravação pausa na primeira; retomada exige liberação | Aceita |
+| [0021](0021-vigilancia-fala-pela-interface.md) | Vigilância ao vivo fala pela interface; gravação > detecção | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.
 

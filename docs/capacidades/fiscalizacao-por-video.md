@@ -59,10 +59,20 @@ quadros, não em segundos — use `count_sec`.
 
 Alertas por categoria — ausência, mais de uma pessoa, celular, mãos — como
 **pastilhas para revisão humana**. **A gravação em várias partes é, ela mesma,
-um alerta**: significa que a câmera caiu durante a arguição e a sessão foi
-pausada e retomada a cada queda. O player navega entre as partes e emenda
-sozinho; clicar num trecho encontra a parte certa, com o vídeo disponível para o professor
-assistir e navegar. Detecção de celular passa por uma segunda checagem com
+um alerta**: significa que a câmera caiu durante a arguição. Desde a
+[ADR 0020](../decisoes/0020-queda-de-gravacao-pausa-na-primeira.md), a PRIMEIRA
+queda pausa a arguição — o aluno vê uma tela de pausa (sem acusação: é
+infraestrutura) e o professor decide, no painel, entre **liberar uma retomada**
+(consumida na reconexão; nova queda re-pausa) ou avaliar individualmente o que
+já foi gravado, vendo quantas respostas o aluno deu antes de parar. O player
+navega entre as partes e emenda sozinho; clicar num trecho encontra a parte
+certa, com o vídeo disponível para o professor assistir e navegar. Nos fluxos de
+voz há ainda a **vigilância de posição ao vivo**
+([ADR 0021](../decisoes/0021-vigilancia-fala-pela-interface.md)): posição
+inadequada sustentada (10 s) pausa a conversa e abre um modal com a câmera do
+aluno ao lado das fotos canônicas de posição — sem nenhum clique, a conversa
+continua quando ele se ajusta. As pausas e o estado da vigilância (inclusive
+"desligada por desempenho" em máquinas fracas) viram pastilhas no painel. Detecção de celular passa por uma segunda checagem com
 recorte ampliado, porque mão gesticulando perto do rosto é o falso positivo
 dominante; para "mais de uma pessoa", registra-se a maior sequência contínua,
 já que uma segunda pessoa real persiste e o próprio braço do aluno na borda dura
@@ -93,7 +103,9 @@ poucos segundos e o percentual o dilui numa prova longa. Ver
 
 - **Não** rebaixa nota automaticamente. A penalidade automática existiu e foi
   **removida em 2026-08-13** — ver [ADR 0004](../decisoes/0004-proctoring-nao-acusa-automaticamente.md).
-- **Não** interrompe a arguição por posicionamento ou ruído.
+- **Não** interrompe por ruído. Por POSIÇÃO, interrompe de leve nos fluxos de
+  voz (pausa silenciosa autoresolvida, ADR 0021) — nunca pela voz do arguidor,
+  nunca como acusação.
 - **Não** manda o vídeo para a OpenAI. A análise é local, no servidor.
 - **Não** entra no raciocínio da avaliação de conteúdo — integridade e conteúdo
   são mantidos separados de propósito.
@@ -111,6 +123,14 @@ poucos segundos e o percentual o dilui numa prova longa. Ver
   checagem.
 - **Dado** alertas de vídeo em um aluno, **quando** o professor calcula a nota,
   **então** a nota é a média ponderada da rubrica, sem desconto automático.
+- **Dado** que a gravação caiu no meio de uma prova de voz, **quando** o aluno
+  recarrega a página, **então** vê a tela de pausa ("procure o professor") e o
+  professor vê "gravação caiu — pausada (N respostas)" com o botão de liberar
+  a retomada.
+- **Dado** um aluno que escorregou da posição numa prova de voz, **quando**
+  completa 10 s fora do enquadramento, **então** a conversa pausa em silêncio,
+  um modal mostra a câmera dele ao lado das fotos de posição, e tudo continua
+  sozinho quando ele se ajusta.
 
 ## Referência técnica
 
@@ -121,3 +141,5 @@ schema. [`docs/oral-exam.md`](../oral-exam.md) — o núcleo de proctoring nasce
 
 - [ADR 0004 — Fiscalização não acusa automaticamente](../decisoes/0004-proctoring-nao-acusa-automaticamente.md)
 - [ADR 0005 — Vídeo obrigatório e bloqueante](../decisoes/0005-video-obrigatorio-e-bloqueante.md)
+- [ADR 0020 — Queda de gravação pausa na primeira](../decisoes/0020-queda-de-gravacao-pausa-na-primeira.md)
+- [ADR 0021 — Vigilância ao vivo fala pela interface](../decisoes/0021-vigilancia-fala-pela-interface.md)
