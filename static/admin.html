@@ -675,7 +675,10 @@ async function loadOps() {
   const rowHtml = (i, state, pos) => {
     const who = escapeHtml(i.student_label || i.token || String(i.submission_id)) + (i.is_test ? ' <span class="hint">(teste)</span>' : '');
     const work = i.work_token ? `<a href="/w/${encodeURIComponent(i.work_token)}${i.kind === 'oral_realtime' ? '/oral' : ''}" target="_blank" rel="noopener">${escapeHtml(i.work_name || i.work_token)}</a>` : '—';
-    const acts = state === 'na fila' ? `<button class="btn btn-sm" onclick="opsCancel(${i.submission_id})">Cancelar</button>` : '';
+    const acts = state === 'na fila'
+      ? `<button class="btn btn-sm" onclick="opsPrioritize(${i.submission_id})" title="passa à frente de tudo na fila">Priorizar</button> ` +
+        `<button class="btn btn-ghost btn-sm" onclick="opsCancel(${i.submission_id})" title="retira da fila; fica como falha (Reprocessar)">Cancelar</button>`
+      : `<button class="btn btn-ghost btn-sm" onclick="opsCancel(${i.submission_id})" title="derruba a análise em curso; fica como falha (Reprocessar)">Interromper</button>`;
     return `<tr><td>${pos}</td><td>${who}</td><td>${work}</td><td>${state}</td><td>${i.priority === 'manual' ? '<strong>manual</strong>' : 'auto'}</td>` +
       `<td>${i.attempts || '—'}</td><td>${fmtMs(i.running_ms ?? i.waiting_ms ?? 0)}</td><td style="text-align:right">${acts}</td></tr>`;
   };
@@ -703,6 +706,11 @@ async function opsReprocess(id) {
 }
 async function opsCancel(id) {
   try { const r = await fetch(`/admin/proctor/${id}/cancel`, { method: 'POST' }); if (!r.ok) throw new Error((await r.json()).error); }
+  catch (e) { document.getElementById('ops-msg').textContent = e.message; }
+  loadOps();
+}
+async function opsPrioritize(id) {
+  try { const r = await fetch(`/admin/proctor/${id}/prioritize`, { method: 'POST' }); if (!r.ok) throw new Error((await r.json()).error); }
   catch (e) { document.getElementById('ops-msg').textContent = e.message; }
   loadOps();
 }
