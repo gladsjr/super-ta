@@ -35,6 +35,9 @@ código já explica sozinho.
 | [0014](0014-analytics-consulta-tabelas-base.md) | O endpoint de análise consulta tabelas-base, não views | Aceita |
 | [0015](0015-devolutiva-uniforme-na-turma.md) | O formato da devolutiva é uniforme na turma | Aceita |
 | [0016](0016-turno-e-pergunta-do-plano.md) | Na entrevista em tempo real, turno é pergunta do plano | Aceita |
+| [0017](0017-triagem-humana-da-fiscalizacao.md) | A triagem da fiscalização é humana e alimenta o pipeline | Aceita |
+| [0018](0018-limiar-destaca-nao-oculta.md) | O limiar destaca, não oculta; celular mede segundos | Aceita |
+| [0019](0019-lote-avalia-quem-concluiu.md) | O lote avalia quem concluiu; o resto é individual | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.
 

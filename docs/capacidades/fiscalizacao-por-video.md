@@ -68,6 +68,27 @@ dominante; para "mais de uma pessoa", registra-se a maior sequência contínua,
 já que uma segunda pessoa real persiste e o próprio braço do aluno na borda dura
 um ou dois segundos.
 
+## A triagem do professor
+
+Depois de assistir aos trechos, o professor registra o que concluiu: **não
+revisado** (o padrão — é a fila do que falta olhar), **sem problema**, **em
+aberto**, ou **confirmado** em três graus, com um campo livre de observação.
+
+Esse veredito alimenta a avaliação e a devolutiva, com guardas: a nota **não**
+muda sozinha; **sem problema suprime** o alerta automático na devolutiva (um
+humano já descartou); e **não revisado** e **em aberto** não chegam ao aluno,
+porque inconclusivo não é achado. Ver
+[ADR 0017](../decisoes/0017-triagem-humana-da-fiscalizacao.md).
+
+## Como os indícios são exibidos
+
+Todo eixo analisado **aparece sempre**, com seus números — o limiar decide a cor,
+não a existência da linha. Antes o limiar ocultava, e indício real sumia da tela.
+"Não analisado" é um terceiro estado, distinto de "ok". Celular é medido em
+**segundos** (sequência contígua ou total), não em percentual, porque o uso dura
+poucos segundos e o percentual o dilui numa prova longa. Ver
+[ADR 0018](../decisoes/0018-limiar-destaca-nao-oculta.md).
+
 ## O que esta capacidade NÃO faz
 
 - **Não** rebaixa nota automaticamente. A penalidade automática existiu e foi

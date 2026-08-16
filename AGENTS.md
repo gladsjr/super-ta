@@ -57,6 +57,9 @@ alternativa descartada e o custo aceito.
 | [0014](docs/decisoes/0014-analytics-consulta-tabelas-base.md) | **Não construa nada que dependa de view, function ou schema alternativo** — o Publish não os propaga. Funciona em dev e falha em produção. |
 | [0015](docs/decisoes/0015-devolutiva-uniforme-na-turma.md) | `per_question` da devolutiva **não é escolha do modelo**: cobertura completa é obrigatória quando o relatório interno tem entradas. |
 | [0016](docs/decisoes/0016-turno-e-pergunta-do-plano.md) | Na entrevista em tempo real, **turno = pergunta do plano**; o resto da conversa é intervenção do turno. |
+| [0017](docs/decisoes/0017-triagem-humana-da-fiscalizacao.md) | A triagem da fiscalização é **humana**. `sem problema` SUPRIME o alerta na devolutiva; `não revisado` e `em aberto` não entram. A nota nunca muda sozinha. |
+| [0018](docs/decisoes/0018-limiar-destaca-nao-oculta.md) | O limiar **destaca, não oculta**: todo eixo analisado aparece. Limiares em fonte única (`static/js/proctorAxes.js`); celular em SEGUNDOS. |
+| [0019](docs/decisoes/0019-lote-avalia-quem-concluiu.md) | Lote só pega quem **concluiu e não é teste**; `force` não fura a regra. Teste, em andamento e desistência: só individualmente. |
 
 Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
 por NNNN"); nunca reescreva uma ADR aceita.

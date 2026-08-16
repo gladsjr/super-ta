@@ -36,6 +36,14 @@ a 0009 nesse escopo).
 
 A avaliação **recusa** perguntas sem rubrica em vez de improvisar um critério.
 
+## Quem entra na avaliação em lote
+
+O lote pega **quem concluiu a arguição e não é envio de teste**. Ficam de fora
+envio de teste, arguição em andamento e desistência — essas o professor avalia
+**individualmente**, se quiser, porque a decisão é pedagógica e caso a caso. O
+lote informa quantas ficaram de fora e por quê. Ver
+[ADR 0019](../decisoes/0019-lote-avalia-quem-concluiu.md).
+
 ## O que esta capacidade NÃO faz
 
 - **Não** publica nada sozinha. Nota e devolutiva só chegam ao aluno por ação
