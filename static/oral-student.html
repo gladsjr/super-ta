@@ -54,6 +54,7 @@
     .poses figure { margin: 0; flex: 1; }
   </style>
   <script src="/static/js/proctorGate.js"></script>
+  <script src="/static/js/setupGate.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -74,8 +75,8 @@
         <!-- Fones: requisito em DESTAQUE + checkbox obrigatório. Sem fones, o
              microfone capta a voz do avaliador (eco/feedback) e degrada a prova. -->
         <div style="background:#eef4ff; border:2px solid #3b6fd4; border-radius:10px; padding:14px 16px; margin:0 0 14px">
-          <div style="font-size:18px; font-weight:700">🎧 Use fones de ouvido</div>
-          <p style="margin:6px 0 12px; font-size:14px; line-height:1.4">A prova é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do avaliador — isso causa eco, pode te cortar e atrapalha a sua nota.</p>
+          <div style="font-size:22px; font-weight:700; line-height:1.25">🎧 Use fones de ouvido</div>
+          <p style="margin:8px 0 12px; font-size:15.5px; line-height:1.5; text-wrap:pretty">A prova é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do avaliador — isso causa eco, pode cortar a sua fala e prejudicar a sua nota.</p>
           <label class="accept" style="font-size:15px"><input type="checkbox" id="hp-check"/> <span><strong>Estou usando fones de ouvido</strong></span></label>
         </div>
         <!-- Conexão -->
@@ -94,7 +95,8 @@
           <div style="text-align:center"><button class="btn" id="calib-rec-btn">🎤 Gravar e ler a frase</button></div>
           <div class="banner wait" id="calib-status" style="margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
         </div>
-        <div style="margin-top:18px"><button class="btn" id="to-check-btn" disabled>Continuar</button></div>
+        <!-- Sempre habilitado: o bloqueio acontece no clique, com explicação (#255). -->
+        <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
       </div>
 
       <!-- Página 2: posicionamento na câmera (a prova começa sozinha quando ok).
@@ -398,10 +400,11 @@
         } catch { fails++; }
         await new Promise(res => setTimeout(res, 120));
       }
-      if (!times.length) { bn.className = 'banner adjust'; bn.textContent = '⚠ Não consegui testar a conexão. Se a internet estiver instável, a prova por voz pode falhar — prefira uma rede melhor.'; return; }
+      if (!times.length) { connWarn = true; bn.className = 'banner adjust'; bn.textContent = '⚠ Não consegui testar a conexão. Se a internet estiver instável, a prova por voz pode falhar — prefira uma rede melhor.'; return; }
       times.sort((a, b) => a - b);
       const med = Math.round(times[Math.floor(times.length / 2)]);
-      if (fails >= 2 || med >= 450) {
+      connWarn = (fails >= 2 || med >= 450);
+      if (connWarn) {
         bn.className = 'banner adjust';
         bn.textContent = `⚠ Conexão instável/lenta (~${med} ms${fails ? `, ${fails} falha(s)` : ''}). A prova é por voz em tempo real e pode ficar difícil — cortes e atrasos. Se puder, use uma rede melhor (Wi-Fi estável). Você ainda pode continuar.`;
       } else {
@@ -498,6 +501,7 @@
     const NOISE_MAX_RMS = 0.035; // limiar de "barulhento" — mais sensível que antes (0.05),
                                  // p/ aproximar da sensibilidade do examinador na prova (ajustável)
     let noiseOk = false, calibRecording = false, noiseStream = null, noiseCtx = null, noiseRAF = 0;
+    let connWarn = false; // conexão instável/lenta: AVISA no gate, não bloqueia (#255)
     async function startNoiseMeter() {
       try { noiseStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
       catch { $('noise-verdict').textContent = 'Não foi possível medir o ruído.'; noiseOk = true; return; } // não bloqueia se falhar
@@ -769,9 +773,14 @@
         onRegained: () => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'capture_ok' })); } catch {} hideCaptureLost(); },
       });
     }
-    $('to-check-btn').onclick = continueToCheck;
-    // Fones obrigatórios: só libera o "Continuar" com o checkbox marcado.
-    $('hp-check').addEventListener('change', (e) => { $('to-check-btn').disabled = !e.target.checked; });
+    // "Continuar" nasce HABILITADO; o bloqueio é no clique, com explicação (#255).
+    // Fones: impedimento (sem eles a prova degrada para todo mundo). Conexão e
+    // ruído: aviso que deixa passar — é o ambiente do aluno, ele decide assumir.
+    $('to-check-btn').onclick = () => {
+      const estado = { fonesOk: !!$('hp-check').checked, conexaoRuim: connWarn, ruidoAlto: !noiseOk };
+      if (!window.setupGate) return continueToCheck(); // fail-open: sem o helper, não trava o aluno
+      if (window.setupGate.avaliar(estado, continueToCheck)) continueToCheck();
+    };
     $('pos-begin-btn').onclick = beginExam;
 
     async function uploadVideo() {

@@ -34,6 +34,12 @@ configuração e o pipeline de avaliação são compartilhados. O que muda é a
 O mesmo conjunto da entrevista profunda: conversa, avaliação interna, nota por
 rubrica e sinais de fiscalização.
 
+**Um turno é uma pergunta do plano.** Confirmações, pontes e pedidos de
+complemento — inevitáveis numa conversa falada — entram como intervenções do
+turno, não como turnos novos. Antes cada um deles abria um turno, e a avaliação
+comentava ponte de transição como se fosse questão avaliável: um aluno chegou a
+14 turnos para 5 perguntas. Ver [ADR 0016](../decisoes/0016-turno-e-pergunta-do-plano.md).
+
 ## O que esta capacidade NÃO faz
 
 - **Não** aprofunda com base na resposta: o roteiro é fixo. Quem precisa de

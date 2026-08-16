@@ -44,10 +44,24 @@ Vídeo é **obrigatório e bloqueante**. A regra vale nos três fluxos:
 
 A válvula de escape é o professor liberar o aluno individualmente.
 
+## Cobertura da análise
+
+A análise gasta um **orçamento fixo de quadros** (proteção de CPU) distribuído
+ao longo do vídeo **inteiro**: prova curta é amostrada a cada segundo; prova
+longa estica o passo. Até 2026-08-16 esse orçamento era um teto que truncava
+em 20 minutos **sem registrar nada** — uma prova de 44 minutos era analisada
+até a metade e o relatório parecia completo. O relatório agora traz duração
+real, janela coberta e marca de truncamento, e o painel avisa quando a
+cobertura é parcial. Atenção ao ler: com passo esticado, `count` está em
+quadros, não em segundos — use `count_sec`.
+
 ## O que sai no fim
 
 Alertas por categoria — ausência, mais de uma pessoa, celular, mãos — como
-**pastilhas para revisão humana**, com o vídeo disponível para o professor
+**pastilhas para revisão humana**. **A gravação em várias partes é, ela mesma,
+um alerta**: significa que a câmera caiu durante a arguição e a sessão foi
+pausada e retomada a cada queda. O player navega entre as partes e emenda
+sozinho; clicar num trecho encontra a parte certa, com o vídeo disponível para o professor
 assistir e navegar. Detecção de celular passa por uma segunda checagem com
 recorte ampliado, porque mão gesticulando perto do rosto é o falso positivo
 dominante; para "mais de uma pessoa", registra-se a maior sequência contínua,

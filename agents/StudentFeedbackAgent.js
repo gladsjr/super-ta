@@ -110,7 +110,7 @@ DIRETRIZES DO PROFESSOR (quando presentes no input): orientam tom, formato, exte
 
 FORMATO:
 - summary: corpo principal autossuficiente; respeite a extensão/estilo que o professor pedir (de um parágrafo a alguns; texto corrido se pedido).
-- per_question é OPCIONAL: use só quando comentários pergunta a pergunta agregarem (ou o professor pedir esse formato); se ele pedir texto corrido/qualitativo sem citar perguntas, devolva per_question: []. turn_index, quando houver, corresponde ao turno do relatório interno.
+- per_question é OBRIGATÓRIO quando o relatório interno traz comentários por turno: devolva UMA entrada para CADA turn_index presente lá, sem pular nenhum. NÃO é sua escolha — alunos da mesma turma têm de receber devolutivas com a MESMA estrutura, e decidir isso caso a caso produziria tratamento desigual entre colegas. Se as diretrizes do professor pedirem texto corrido, isso governa o ESTILO do que você escreve em cada entrada (e do summary), não a existência da seção. Só devolva per_question: [] se o relatório interno também não tiver comentários por turno.
 
 REGRAS DE CONTEÚDO (a parte mais importante da sua função):
 - O professor é SOBERANO sobre QUE aspectos entram no summary. Por DEFAULT, sem pedido em contrário nas diretrizes, a devolutiva foca no CONTEÚDO (o que foi dito, o que sustentou, o que ficou devendo) e NÃO levanta por conta própria temas de forma/tempo/entrega/espontaneidade/autoria. MAS se as DIRETRIZES do professor pedirem para comentar um aspecto presente no relatório interno — espontaneidade, demora para responder, respostas que soaram preparadas/lidas, fluência, registro, ou qualquer dimensão de entrega —, você DEVE incluí-lo, resumindo fielmente o que o relatório interno traz sobre ele. Pedido do professor manda; não silencie um aspecto que ele pediu.
@@ -250,6 +250,11 @@ ${JSON.stringify(internalReport, null, 2)}${proctorBlock}${hiddenReminder}`;
                 return parsed;
             } catch (err) {
                 lastErr = err;
+                // Erros que sabem se explicar (ex.: per_question incompleto) levam
+                // a correção para a próxima tentativa, em vez de repetir às cegas.
+                if (err?.guidance && attempt < MAX_ATTEMPTS) {
+                    payload.input.push({ role: "user", content: [{ type: "input_text", text: err.guidance }] });
+                }
                 log.error("AGENT:StudentFeedback", `tentativa ${attempt}/${MAX_ATTEMPTS} falhou: ${err.message}`);
             }
         }
@@ -258,13 +263,32 @@ ${JSON.stringify(internalReport, null, 2)}${proctorBlock}${hiddenReminder}`;
 
     _validateReport(r, internalReport) {
         validateStudentFeedbackShape(r);
-        // per_question é OPCIONAL e pode cobrir só parte das perguntas; quando
-        // presente, cada turn_index precisa existir no relatório interno.
-        const validIdx = new Set((internalReport.per_question ?? []).map(q => q.turn_index));
+        // per_question deixou de ser escolha do modelo (#251). Quando o relatório
+        // interno tem comentários por turno, a devolutiva DEVE cobrir todos —
+        // senão colegas da mesma turma recebem estruturas diferentes por variação
+        // não determinística, sem critério pedagógico algum por trás.
+        const internas = (internalReport.per_question ?? []).map(q => q.turn_index);
+        const validIdx = new Set(internas);
         for (const q of r.per_question) {
             if (!validIdx.has(q.turn_index)) {
                 throw new Error(`StudentFeedback: per_question turn_index ${q.turn_index} não existe no relatório interno`);
             }
+        }
+        const cobertos = new Set(r.per_question.map(q => q.turn_index));
+        const faltando = internas.filter(i => !cobertos.has(i));
+        if (faltando.length) {
+            const err = new Error(
+                `StudentFeedback: per_question incompleto — faltam os turnos ${faltando.join(", ")} ` +
+                `(o relatório interno tem ${internas.length} e a devolutiva trouxe ${r.per_question.length})`
+            );
+            // Orientação para a retentativa (mesmo mecanismo do vazamento de
+            // vocabulário): dizer exatamente o que faltou é o que faz o retry valer.
+            err.guidance =
+                `A devolutiva anterior ficou com per_question INCOMPLETO: faltaram os turnos ${faltando.join(", ")}. ` +
+                `per_question NÃO é opcional — devolva UMA entrada para CADA turn_index do relatório interno ` +
+                `(${internas.join(", ")}), sem pular nenhum. Se o professor pediu texto corrido, isso governa o ESTILO ` +
+                `de cada entrada, não a existência da seção.`;
+            throw err;
         }
     }
 }
