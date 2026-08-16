@@ -256,6 +256,10 @@
   // quando a URL vem com #avaliacao — se ela fosse declarada mais abaixo, cairia na
   // TDZ do `let` e o script inteiro quebraria no load (tela em branco).
   let QUESTIONS = [];
+  // Níveis fixos da rubrica estruturada (#195) — no topo pelo MESMO motivo acima
+  // (qLevels/makeItem rodam no primeiro render quando a URL vem com #avaliacao).
+  const RUBRIC_LEVELS = [10, 7.5, 5, 2.5, 0];
+  const fmtScore = s => String(s).replace('.', ',');
   // Alterações não salvas na aba Configuração (voz, nº de perguntas, perguntas/gabarito).
   // Usado pela guarda ao trocar de aba. markConfigDirty() é chamado só em edição do
   // usuário — nunca em render/load — para não dar falso positivo.
@@ -351,8 +355,9 @@
   // pergunta/resposta marca a rubrica para revisão (rubric_stale); editar a
   // rubrica limpa a marca. Resposta e rubrica NUNCA vão ao aluno (marcado na UI).
   // Rubrica estruturada (#195): 5 níveis de nota FIXA, cada um com um critério.
-  const RUBRIC_LEVELS = [10, 7.5, 5, 2.5, 0];
-  const fmtScore = s => String(s).replace('.', ',');
+  // (RUBRIC_LEVELS e fmtScore declarados no TOPO, junto de QUESTIONS — o initTab()
+  // com #avaliacao na URL renderiza a rubrica no load; aqui embaixo caíam na TDZ
+  // e QUEBRAVAM o script inteiro: tela em branco ao "voltar à lista de alunos".)
   // Normaliza os níveis de uma questão para os 5 na ordem canônica (criteria string).
   function qLevels(q) {
     const by = {};

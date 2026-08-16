@@ -827,6 +827,15 @@
       if (ended || wrappingUp) return;
       wrappingUp = true;
       setStatus('Prova concluída', 'live');
+      // A prova acabou: para a GRAVAÇÃO aqui — o vídeo termina junto com a prova.
+      // A despedida (~8s de TTS) e a espera da cauda de áudio NÃO entram no vídeo:
+      // o status acima já diz "concluída" e o aluno legitimamente relaxa/sai do
+      // quadro, o que gerava alerta falso de "mãos fora" nos últimos segundos da
+      // análise. Câmera e self-view seguem vivas até o finish(); o upload continua
+      // acontecendo lá (recorder já inativo → cai no ramo uploadVideo() direto).
+      // onstop=null ANTES do stop: o upload não pode começar aqui, senão o
+      // enterPostExam() tiraria o aluno da tela no meio da despedida.
+      try { if (recorder && recorder.state !== 'inactive') { recorder.onstop = null; recorder.stop(); } } catch {}
       const deadline = ctx ? ctx.currentTime + 20 : 0; // teto de segurança
       (function waitTail() {
         if (ended) return;

@@ -642,17 +642,24 @@ async function loadOps() {
     const rd = await fetch('/admin/ops/dashboard');
     if (rd.ok) {
       const d = await rd.json();
-      const gb = (b) => b == null ? '?' : (b / (1024*1024*1024)).toFixed(2) + ' GiB';
-      const memPct = d.memory.limit_bytes ? Math.round(d.memory.used_bytes / d.memory.limit_bytes * 100) : null;
+      const mb = (b) => b == null ? '—' : (b >= 1024*1024*1024 ? (b/(1024*1024*1024)).toFixed(2) + ' GiB' : Math.round(b/(1024*1024)) + ' MiB');
+      const kids = d.memory.children; // null fora do Linux (dev Windows)
+      const kidsNames = kids && kids.count ? Object.entries(kids.names).map(([n,c]) => `${c}× ${n}`).join(', ') : '';
+      const appBytes = d.memory.rss_bytes + (kids ? kids.rss_bytes : 0);
+      const limit = d.memory.limit_bytes;
+      const appPct = (limit && d.memory.source !== 'os') ? Math.round(appBytes / limit * 100) : null;
       document.getElementById('ops-dash').innerHTML =
         `<span title="sessões de voz vivas no relay"><strong style="font-size:1.3em">${d.active.oral_realtime}</strong> em prova oral</span>` +
         `<span title="sessões de voz vivas no relay"><strong style="font-size:1.3em">${d.active.interview_realtime}</strong> em entrevista (tempo real)</span>` +
         `<span title="submissões com turno nos últimos ${d.active.messages_window_min} min"><strong style="font-size:1.3em">${d.active.interview_messages}</strong> em entrevista (mensagens)</span>` +
-        `<span style="margin-left:auto" title="memória usada / limite (fonte: ${d.memory.source})"><strong style="font-size:1.3em">${gb(d.memory.used_bytes)}</strong>${d.memory.limit_bytes ? ' / ' + gb(d.memory.limit_bytes) : ''}${memPct != null ? ` (${memPct}%)` : ''} memória</span>` +
-        `<span title="RSS só do processo Node (não inclui ffmpeg/Python)">${gb(d.memory.rss_bytes)} Node</span>`;
+        `<span style="margin-left:auto" title="${kids ? `processos filhos da análise (ffmpeg/Python): ${kidsNames || 'nenhum agora'}` : 'medição de filhos só no Linux (produção)'}"><strong style="font-size:1.3em">${kids ? mb(kids.rss_bytes) : '—'}</strong> análise de vídeo${kids && kids.count ? ` (${kids.count} proc.)` : ''}</span>` +
+        `<span title="RSS do processo Node (servidor)">${mb(d.memory.rss_bytes)} servidor</span>` +
+        (appPct != null ? `<span title="ORATIA inteiro (servidor + análise) frente ao limite do contêiner (${d.memory.source})"><strong>${appPct}%</strong> de ${mb(limit)}</span>` : '');
       document.getElementById('ops-dash-note').textContent =
         `Entrevista por mensagens não tem sessão: conta submissões com atividade nos últimos ${d.active.messages_window_min} min. ` +
-        (d.memory.source === 'os' ? 'Memória pela fonte "os" pode refletir o host, não o contêiner.' : `Memória via ${d.memory.source}.`);
+        (d.memory.source === 'os'
+          ? 'Sem cgroup neste ambiente (dev): o limite mostrado seria o da máquina toda, então o % é omitido — em produção aparece frente ao limite real do contêiner.'
+          : `Limite do contêiner via ${d.memory.source}.`);
     }
   } catch { /* dashboard é best-effort; a fila é o essencial */ }
   const conc = document.getElementById('ops-conc');
