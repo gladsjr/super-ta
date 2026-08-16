@@ -324,11 +324,11 @@
     const el = document.getElementById('proctor-result');
     if (!p || !p.flags) {
       el.innerHTML = procState === 'failed'
-        ? '<p class="hint" style="color:#8a1c1c">⚠ A análise do vídeo começou e não terminou (erro ou reinício do servidor). Rode “Analisar vídeos” no painel de alunos para reprocessar.</p>'
-        : (procState === 'running'
-          ? '<p class="hint">Analisando o vídeo agora… recarregue em instantes.</p>'
+        ? '<p class="hint" style="color:#8a1c1c">⚠ A análise do vídeo falhou. Use o botão <strong>Reprocessar</strong> na coluna Alertas do painel de alunos.</p>'
+        : (procState === 'running' || procState === 'queued'
+          ? '<p class="hint">Vídeo em análise (fila automática)… recarregue em instantes.</p>'
           : (hasVideo
-            ? '<p class="hint">Análise do vídeo pendente — roda automaticamente ao fim da prova; ou rode “Analisar vídeos” no painel.</p>'
+            ? '<p class="hint">Análise do vídeo pendente — roda automaticamente ao fim da prova (fila de análise).</p>'
             : '<p class="hint">Ainda sem vídeo para analisar.</p>'));
       return;
     }

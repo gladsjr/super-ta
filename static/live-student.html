@@ -879,6 +879,10 @@
       if (ended || wrappingUp) return;
       wrappingUp = true;
       setStatus('Entrevista concluída', 'live');
+      // A entrevista acabou: para a GRAVAÇÃO aqui — a despedida não entra no
+      // vídeo (o aluno já foi "liberado" pelo status e sair do quadro gerava
+      // alerta falso de "mãos fora" no fim). Espelha oral-student.html.
+      try { if (recorder && recorder.state !== 'inactive') { recorder.onstop = null; recorder.stop(); } } catch {}
       const deadline = ctx ? ctx.currentTime + 20 : 0; // teto de segurança
       (function waitTail() {
         if (ended) return;

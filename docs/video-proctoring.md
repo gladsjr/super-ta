@@ -13,3 +13,33 @@ The message interview (default kind) can run with **camera-on video proctoring**
 - **Cobertura da análise (2026-08-16, #249):** `FRAME_BUDGET = 1200` deixou de ser um teto que truncava em 20 min. `probeDurationSec` mede a duração real (remux `-c copy`, porque o WebM do MediaRecorder vem sem duração no cabeçalho) e o passo de amostragem estica para cobrir o vídeo inteiro com o mesmo orçamento. O relatório traz `video_duration_s`, `covered_s`, `truncated` e `duration_unknown`; cada flag ganhou `count_sec` (com passo > 1 s, `count` está em QUADROS). `analyzeOralVideoParts` acumula o offset pela duração coberta de cada parte (não por um intervalo único) e publica `part_spans` (parte → janela global), que o painel usa para levar o clique num trecho à parte certa.
 - **Player multi-parte (#256):** `static/conversation.html` deixou de ficar cravado em `proctor-video/0`; navega entre as partes, emenda ao fim de cada uma e mostra a fragmentação como alerta. `appendOralVideoPart` passou a guardar em `oral_video_key` a PRIMEIRA parte (antes a última).
 - **Schema**: `works.proctoring_enabled` + `works.devolutiva_proctor_prompt` (migration 041); the interview submission **reuses** the oral columns `oral_video_key`/`oral_proctor_json`/`oral_calibration_json`. The command-area scheme was validated with a standalone tuning page, `static/poc/gesture.html` (kept on the `feat/proctor-zone-poc` branch).
+
+## Fila global de análises (issues #261–#264, 2026-08-16)
+
+A análise de vídeo deixou de rodar solta e passou a ser **serializada por uma fila
+global** (`lib/proctorQueue.js`), compartilhada pelos três fluxos (prova oral,
+entrevista simplificada, entrevista com fiscalização):
+
+- **Disparo**: automático ao fim de cada sessão (`lib/proctorAuto.js` e o pós-upload
+  do vídeo oral apenas enfileiram). O lote "Analisar vídeos" do professor **foi
+  removido**; o pipeline "Avaliar entrevistas" (routes/work.js) agenda-e-aguarda
+  pela mesma fila (respeita a concorrência global, deduplica com o disparo automático).
+- **Concorrência**: configurável na tela **Operações** do admin (`app_settings.
+  proctor_concurrency`, migration 074; default **1** — protege as provas ao vivo,
+  que disputam CPU com a análise). Sem restart.
+- **Prioridade e dedup**: pedido manual (Reprocessar do professor/admin) fura fila
+  sobre o automático; enfileirar uma submissão já na fila adere ao item existente.
+- **Estado persistido** em `oral_voice_json.proctor_status` (`queued`/`running`/
+  `failed` + `attempts`); o sucesso limpa o status e grava `attempts` dentro de
+  `oral_proctor_json`. **Sem retentativa automática**: falha fica `failed` até um
+  humano clicar Reprocessar (professor, ao lado do selo "falhou ⚠"; ou admin).
+- **Reconciliação no boot**: submissões com vídeo, sem relatório e sem `failed`
+  voltam à fila (órfãs de reinício e legado) — substituiu o antigo "órfã vira
+  failed" do #220.
+- **Memória**: a extração de frames é **em streaming** (`lib/proctor.js`) — pico
+  ≈ 1 frame (1,2 MiB) por análise, qualquer que seja a duração; cobertura integral
+  a 1 fps com disjuntor de 2 h (`-frames:v`; `truncated: true` no relatório quando
+  dispara). Antes, 40 min de vídeo bufferizavam ~2,8 GiB e derrubavam o processo.
+- **Professor**: vê só "em análise" (queued+running), o resultado, ou "falhou ⚠ ·
+  Reprocessar". Admin vê a fila, cancela itens na fila, ajusta a concorrência e
+  acompanha falhas pendentes/reincidentes na seção Operações.
