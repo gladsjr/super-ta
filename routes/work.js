@@ -689,7 +689,9 @@ router.put("/w/:workToken/submissions/:subToken/evaluation/student-version", req
     const subToken = found.submission_token;
     try {
         const report = req.body?.report;
-        try { validateStudentFeedbackShape(report); }
+        // Entrevista (#274): o summary é o comentário ABERTO e OPCIONAL do
+        // professor — vazio é válido.
+        try { validateStudentFeedbackShape(report, { requireSummary: false }); }
         catch (err) { return res.status(400).json({ error: `devolutiva inválida: ${err.message}` }); }
         // A opinião do entrevistador NÃO é editável — vem sempre do relatório
         // interno na composição da efetiva. Qualquer cópia enviada é descartada.

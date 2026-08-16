@@ -381,7 +381,7 @@
         <button class="btn btn-ghost btn-sm hidden" id="eval-discard-edit-btn" title="Descarta a edição manual — a versão automática volta a valer">Restaurar automática</button>
       </div>
       <p class="eval-publish-help">
-        A devolutiva é gerada automaticamente a partir da <strong>Avaliação do entrevistador</strong> (inclui o vídeo). Revise, edite se quiser e clique em <strong>Publicar</strong> — o aluno só a vê depois disso.
+        A devolutiva é gerada automaticamente a partir da <strong>Avaliação do entrevistador</strong> (inclui o vídeo) — exceto o <strong>Comentário do professor</strong>, que é opcional e escrito por você (em “Editar”). Revise e clique em <strong>Publicar</strong> — o aluno só a vê depois disso.
       </p>
 
       <div class="eval-sections hidden" id="eval-sections">
@@ -416,8 +416,8 @@
 
       <div id="student-eval-editor" class="student-eval-editor hidden">
         <div class="sf-label">Editar devolutiva</div>
-        <label class="editor-label" for="edit-summary">Resumo</label>
-        <textarea id="edit-summary" class="editor-textarea" rows="4"></textarea>
+        <label class="editor-label" for="edit-summary">Comentário do professor (opcional — suas palavras; não é gerado)</label>
+        <textarea id="edit-summary" class="editor-textarea" rows="4" placeholder="Se quiser, escreva aqui uma mensagem sua ao aluno — aparece como “Comentário do professor” na devolutiva."></textarea>
         <div id="edit-per-question"></div>
         <label class="editor-label" for="edit-strengths">O que sustentou bem (um item por linha)</label>
         <textarea id="edit-strengths" class="editor-textarea" rows="4"></textarea>
@@ -1049,10 +1049,13 @@ function renderStudentPreview(ev) {
     <div class="sf-text">${escapeHtml(ev.interviewer_opinion)}</div>` : '';
   const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
     <div class="sf-text" style="margin-top: var(--sp-2);"><strong>Pergunta ${Number(q.turn_index) + 1}</strong> — ${escapeHtml(q.question_gist ?? '')}<br>${escapeHtml(q.feedback ?? '')}</div>`).join('');
+  // #274: o "comentário do professor" é escrito pelo PRÓPRIO professor (campo
+  // aberto, opcional) — o bloco só existe se ele escreveu algo.
+  const professorBlock = (ev.summary ?? '').trim() ? `
+    <div class="sf-label">Comentário do professor</div>
+    <div class="sf-text">${escapeHtml(ev.summary)}</div>` : '';
   return `
-    ${opinionBlock}
-    <div class="sf-label">Avaliação do professor — resumo</div>
-    <div class="sf-text">${escapeHtml(ev.summary ?? '')}</div>
+    ${opinionBlock}${professorBlock}
     ${perQuestion ? `<div class="sf-label">Pergunta a pergunta</div>${perQuestion}` : ''}
     ${list('O que sustentou bem', ev.strengths)}
     ${list('O que pode melhorar', ev.improvement_areas)}
@@ -1067,8 +1070,8 @@ function renderStudentPreviewSkeleton() {
   return `
     <div class="sf-label">Opinião do entrevistador${persona ? ` (${escapeHtml(persona)})` : ''} — não editável</div>
     ${ph}
-    <div class="sf-label">Avaliação do professor — resumo</div>
-    ${ph}`;
+    <div class="sf-label">Comentário do professor</div>
+    <div class="sf-text" style="color: var(--ink-400); font-style: italic;">(opcional — escrito por você em “Editar”, nunca gerado)</div>`;
 }
 
 // Último estado conhecido da devolutiva (payload do servidor).
@@ -1289,7 +1292,7 @@ document.getElementById('eval-cancel-edit-btn').addEventListener('click', () => 
 });
 document.getElementById('eval-save-edit-btn').addEventListener('click', async () => {
   const report = collectEditor();
-  if (!report.summary) { alert('Escreva ao menos o resumo da devolutiva.'); return; }
+  // #274: o comentário do professor é OPCIONAL — vazio é válido.
   await pubRequest('PUT', 'student-version', { report });
 });
 
