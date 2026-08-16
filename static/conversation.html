@@ -753,14 +753,51 @@ const DELIVERY_LABEL = {
 // Proctoring por vídeo (entrevista com proctoring ligado): alertas + botão de
 // análise + player. Reusa os mesmos limiares dos badges da prova oral.
 const mmss = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
-// Leva o vídeo do proctoring direto ao segundo indicado (clique nos "trechos").
-window.seekVideoProctor = function (sec) {
+// Estado do player de fiscalização: quantas partes existem, qual está tocando e
+// o mapa parte → janela global (vem do relatório, `part_spans`). Sessão com a
+// câmera caindo gera VÁRIAS partes; antes o player ficava cravado na parte 0 e o
+// professor via só o primeiro fragmento (#256).
+window.proctorVideo = { parts: 1, current: 0, spans: null, url: null };
+
+window.selectProctorPart = function (idx, seekLocalSec) {
+  const st = window.proctorVideo;
   const vid = document.querySelector('#proctoring-card video');
-  if (!vid) return;
-  const go = () => { try { vid.currentTime = sec; } catch {} const pr = vid.play && vid.play(); if (pr && pr.catch) pr.catch(() => {}); };
-  if (vid.readyState >= 1) go();
+  if (!vid || !st.url) return;
+  idx = Math.max(0, Math.min(st.parts - 1, idx | 0));
+  const trocou = idx !== st.current || !vid.src;
+  st.current = idx;
+  document.querySelectorAll('#proctor-parts [data-part]').forEach(b => {
+    const on = Number(b.dataset.part) === idx;
+    b.style.background = on ? 'var(--c-accent,#2563eb)' : '#fff';
+    b.style.color = on ? '#fff' : 'inherit';
+  });
+  const go = () => {
+    if (seekLocalSec != null) { try { vid.currentTime = seekLocalSec; } catch {} }
+    const pr = vid.play && vid.play(); if (pr && pr.catch) pr.catch(() => {});
+  };
+  if (trocou) {
+    vid.src = st.url(idx);
+    vid.addEventListener('loadedmetadata', go, { once: true });
+    vid.load();
+    fixSeekableWebm(vid);
+  } else if (vid.readyState >= 1) go();
   else { vid.addEventListener('loadedmetadata', go, { once: true }); vid.load(); }
   vid.scrollIntoView({ block: 'center' });
+};
+
+// Leva o vídeo direto ao segundo indicado (clique nos "trechos"). Os carimbos do
+// relatório são GLOBAIS; com várias partes é preciso descobrir em qual parte o
+// segundo cai e converter para o tempo local daquele arquivo.
+window.seekVideoProctor = function (sec) {
+  const st = window.proctorVideo;
+  let idx = 0, local = sec;
+  if (Array.isArray(st.spans) && st.spans.length > 1) {
+    const span = st.spans.find(s => sec >= s.offset_s && sec < s.offset_s + s.covered_s)
+      || st.spans[st.spans.length - 1];
+    idx = span.part;
+    local = Math.max(0, sec - span.offset_s);
+  }
+  window.selectProctorPart(idx, local);
 };
 function renderProctorAlertsHtml(rep) {
   const f = rep && rep.flags; if (!f) return '';
@@ -816,14 +853,49 @@ function renderProctoring(p) {
   const alerts = rep ? renderProctorAlertsHtml(rep) : '';
   // A análise do vídeo roda AUTOMATICAMENTE ao fim da entrevista (#210); o lote
   // "Avaliar entrevistas" segue como reprocessamento. Sem botão individual aqui.
-  const player = hasVideo ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-video/0"></video>` : '';
+  // Player: com UMA parte é o de sempre; com VÁRIAS, navega entre elas e emenda
+  // sozinho ao fim de cada uma (#256). A fragmentação é, ela mesma, um indício —
+  // significa que a câmera caiu durante a arguição —, então aparece em destaque.
+  const nParts = Math.max(1, Number(p.video_parts) || 0);
+  window.proctorVideo = {
+    parts: nParts,
+    current: 0,
+    spans: rep && Array.isArray(rep.part_spans) ? rep.part_spans : null,
+    url: (i) => `/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-video/${i}`,
+  };
+  const partBtns = nParts > 1
+    ? `<div id="proctor-parts" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">` +
+      Array.from({ length: nParts }, (_, i) =>
+        `<button type="button" data-part="${i}" onclick="selectProctorPart(${i})" style="font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--c-accent,#2563eb);border-radius:999px;background:#fff;cursor:pointer">Parte ${i + 1}</button>`).join('') +
+      `</div>` : '';
+  const fragAviso = nParts > 1
+    ? `<div style="margin:6px 0"><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">gravação em ${nParts} partes</span> <span class="hint">· a câmera caiu ${nParts - 1}× durante a arguição; a sessão foi pausada e retomada a cada queda</span></div>`
+    : '';
+  const cobertura = rep && rep.truncated
+    ? `<div style="margin:6px 0"><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">análise parcial</span> <span class="hint">· foram analisados ${rep.covered_s}s de ${rep.video_duration_s ?? '?'}s de vídeo</span></div>`
+    : '';
+  const player = hasVideo
+    ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="${window.proctorVideo.url(0)}"></video>${partBtns}`
+    : '';
   const head = hasVideo ? '' : '<div class="eval-meta">Sem vídeo gravado para esta submissão.</div>';
   const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>')
     : (p.status === 'failed' ? '<div class="eval-meta" style="color:#8a1c1c">⚠ A análise do vídeo começou e não terminou (erro ou reinício). Rode “Avaliar entrevistas” para reprocessar.</div>'
       : (hasVideo ? '<div class="eval-meta">Processando a análise do vídeo… (roda automaticamente ao fim da entrevista; recarregue em instantes)</div>' : ''));
   card.innerHTML = `<h2 class="card-title">Fiscalização por vídeo</h2>
-    ${head}${body}${player}`;
-  if (hasVideo) fixSeekableWebm(card.querySelector('video'));
+    ${head}${fragAviso}${cobertura}${body}${player}`;
+  if (hasVideo) {
+    const vid = card.querySelector('video');
+    fixSeekableWebm(vid);
+    // Emenda: ao terminar uma parte, segue para a próxima — assistir a sessão
+    // fragmentada deixa de exigir clique a cada fragmento.
+    if (nParts > 1) {
+      vid.addEventListener('ended', () => {
+        const prox = window.proctorVideo.current + 1;
+        if (prox < nParts) window.selectProctorPart(prox, 0);
+      });
+      window.selectProctorPart(0);
+    }
+  }
 }
 
 function renderEvalList(title, items) {

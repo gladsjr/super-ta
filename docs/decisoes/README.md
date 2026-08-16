@@ -33,6 +33,8 @@ código já explica sozinho.
 | [0012](0012-publicacao-conjunta-na-prova-oral.md) | Na prova oral, nota e devolutiva publicam juntas | Aceita |
 | [0013](0013-resultados-de-benchmark-sao-portaveis.md) | Resultados de benchmark são portáveis entre ambientes | Aceita |
 | [0014](0014-analytics-consulta-tabelas-base.md) | O endpoint de análise consulta tabelas-base, não views | Aceita |
+| [0015](0015-devolutiva-uniforme-na-turma.md) | O formato da devolutiva é uniforme na turma | Aceita |
+| [0016](0016-turno-e-pergunta-do-plano.md) | Na entrevista em tempo real, turno é pergunta do plano | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.
 

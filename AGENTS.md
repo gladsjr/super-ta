@@ -55,6 +55,8 @@ alternativa descartada e o custo aceito.
 | [0012](docs/decisoes/0012-publicacao-conjunta-na-prova-oral.md) | **Na prova oral**, nota e devolutiva publicam **juntas** (um só controle). Supersede a 0009 nesse escopo. |
 | [0013](docs/decisoes/0013-resultados-de-benchmark-sao-portaveis.md) | Resultado de benchmark só é comparável **dentro do mesmo par setup + júri**. O formato do pacote portátil é contrato. |
 | [0014](docs/decisoes/0014-analytics-consulta-tabelas-base.md) | **Não construa nada que dependa de view, function ou schema alternativo** — o Publish não os propaga. Funciona em dev e falha em produção. |
+| [0015](docs/decisoes/0015-devolutiva-uniforme-na-turma.md) | `per_question` da devolutiva **não é escolha do modelo**: cobertura completa é obrigatória quando o relatório interno tem entradas. |
+| [0016](docs/decisoes/0016-turno-e-pergunta-do-plano.md) | Na entrevista em tempo real, **turno = pergunta do plano**; o resto da conversa é intervenção do turno. |
 
 Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
 por NNNN"); nunca reescreva uma ADR aceita.
