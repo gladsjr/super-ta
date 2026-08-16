@@ -13,7 +13,7 @@ import * as db from "../lib/db.js";
 import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
 import log from "../lib/logger.js";
-import { getProctorQueueSnapshot, setProctorConcurrency, enqueueProctor, cancelProctor, MAX_CONCURRENCY } from "../lib/proctorQueue.js";
+import { getProctorQueueSnapshot, setProctorConcurrency, enqueueProctor, cancelProctor, prioritizeProctor, MAX_CONCURRENCY } from "../lib/proctorQueue.js";
 import { getActiveRealtimeSessions } from "../lib/realtimeBridge.js";
 import { getMemoryStats } from "../lib/opsStats.js";
 
@@ -389,12 +389,19 @@ router.post("/admin/proctor/:submissionId/cancel", requireAdmin, async (req, res
     try {
         const id = Number(req.params.submissionId);
         const ok = await cancelProctor(id, `admin ${req.session.user.username}`);
-        if (!ok) return res.status(409).json({ error: "item não está na fila (já rodando ou concluído)" });
+        if (!ok) return res.status(409).json({ error: "item não está na fila nem rodando (já concluído?)" });
         res.json({ ok: true });
     } catch (err) {
         log.error("ADMIN", `proctor cancel failed: ${err.message}`);
         res.status(500).json({ error: "falha ao cancelar" });
     }
+});
+
+// Fura fila (#272): item enfileirado vai para a cabeça (prioridade manual).
+router.post("/admin/proctor/:submissionId/prioritize", requireAdmin, (req, res) => {
+    const ok = prioritizeProctor(Number(req.params.submissionId));
+    if (!ok) return res.status(409).json({ error: "item não está na fila (já rodando ou concluído)" });
+    res.json({ ok: true });
 });
 
 export default router;

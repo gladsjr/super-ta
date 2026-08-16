@@ -41,5 +41,10 @@ entrevista simplificada, entrevista com fiscalização):
   a 1 fps com disjuntor de 2 h (`-frames:v`; `truncated: true` no relatório quando
   dispara). Antes, 40 min de vídeo bufferizavam ~2,8 GiB e derrubavam o processo.
 - **Professor**: vê só "em análise" (queued+running), o resultado, ou "falhou ⚠ ·
-  Reprocessar". Admin vê a fila, cancela itens na fila, ajusta a concorrência e
-  acompanha falhas pendentes/reincidentes na seção Operações.
+  Reprocessar". Admin vê a fila, ajusta a concorrência e acompanha falhas
+  pendentes/reincidentes na seção Operações; por item (#272): **Priorizar**
+  (enfileirado vai à cabeça, prioridade manual), **Cancelar** (retira da fila) e
+  **Interromper** (aborto cooperativo do que está rodando — AbortController
+  derruba ffmpeg e sidecar). Cancelado/interrompido fica `failed` com motivo
+  legível ("cancelada/interrompida pelo admin …") — nunca some em silêncio, e o
+  professor recupera com o Reprocessar.
