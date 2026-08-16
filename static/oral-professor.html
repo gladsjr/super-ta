@@ -501,6 +501,11 @@
         ? `<a href="${API}/oral/s/${s.submission_token}" target="_blank" title="Avaliação: transcrição, vídeo, alertas, devolutiva e nota">${s.has_oral_video ? '🎥 ' : ''}Avaliação ▸</a>`
         : '<span class="hint">—</span>';
       const abrir = s.is_test ? `<a href="${url}" target="_blank" title="Abre a prova de teste (recomeça do zero)">abrir ↗</a> · ` : '';
+      // Queda de gravação pausou a prova (#260): mostra ONDE parou e o botão de
+      // liberar UMA retomada (consumida na reconexão; nova queda → novo bloqueio).
+      const resumePill = s.resume_blocked
+        ? ` <span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="A gravação de vídeo caiu no meio da prova. O aluno está pausado, aguardando sua decisão.">gravação caiu — pausada (${Number(s.oral_student_turns) || 0} resposta(s))</span> <button class="btn btn-sm" onclick="allowResume('${s.submission_token}')" title="Autoriza o aluno a retomar de onde parou (uma vez). Alternativa: avaliar individualmente o que já foi gravado.">Permitir retomada</button>`
+        : '';
       const blockBtn = s.is_blocked
         ? `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', false)" title="Permitir que o aluno volte a usar esta prova">Liberar</button>`
         : `<button class="btn btn-sm" onclick="toggleBlockOral('${s.submission_token}', true)" title="Pausa a prova; o aluno perde acesso até você liberar">Bloquear</button>`;
@@ -510,7 +515,7 @@
       return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
         <td>${esc(s.student_label || '')}${test}</td>
         <td><code class="tok">${s.submission_token}</code> <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button></td>
-        <td>${STATUS_PILL[s.status] || esc(s.status)}${s.is_blocked ? ' <span class="badge-blocked">bloqueada</span>' : ''}</td>
+        <td>${STATUS_PILL[s.status] || esc(s.status)}${s.is_blocked ? ' <span class="badge-blocked">bloqueada</span>' : ''}${resumePill}</td>
         <td>${vid}</td>
         <td>${abrir}${blockBtn}${delBtn}</td>
       </tr>`;
@@ -520,6 +525,15 @@
     try { await navigator.clipboard.writeText((window.ORATIA_BASE_URL || location.origin) + '/s/' + token); } catch { return; }
     const prev = btn.textContent; btn.textContent = '✓'; btn.disabled = true;
     setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1500);
+  };
+
+  // Libera UMA retomada após queda de gravação (#260). A liberação é consumida
+  // na reconexão do aluno; nova queda volta a pausar.
+  window.allowResume = async (token) => {
+    if (!confirm('Permitir que o aluno RETOME a prova de onde parou?\n\nA gravação anterior caiu — a retomada abre uma nova parte de vídeo. Se preferir, você pode avaliar individualmente o que já foi gravado, sem retomar.')) return;
+    const r = await fetch(`${API}/submissions/${token}/allow-resume`, { method: 'POST' });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao liberar a retomada')); return; }
+    await refreshSubs();
   };
 
   window.toggleBlockOral = async (token, block) => {
@@ -565,6 +579,14 @@
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
       if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
       if (s.transcript_alerts > 0) alertPills.push(`<span class="pill" style="background:#eae6fb;border:1px solid #b9adec" title="Trechos da transcrição prováveis de ruído/eco/silêncio (idioma não reconhecido, ininteligível). Confira no detalhe do aluno.">transcrição (${s.transcript_alerts})</span>`);
+      // Vigilância de posição ao vivo (#267): pausas viram sinal; desligada
+      // também (ADR 0018) — o professor sabe que ESTE vídeo não teve cobrança
+      // de posição em tempo real e merece revisão com outro olho.
+      if (s.live_nudges) {
+        const ln = s.live_nudges;
+        if (ln.state && ln.state !== 'ativo') alertPills.push(`<span class="pill" style="background:#f1f3f5;border:1px solid #c4ccd4" title="A vigilância de posição ao vivo não rodou nesta sessão (${esc(ln.state).replace(/_/g, ' ')}). Os avisos de posição em tempo real não foram exibidos ao aluno.">sem vigilância ao vivo</span>`);
+        else if (Number(ln.pauses) > 0) alertPills.push(`<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="A sessão pausou por posição inadequada e retomou quando o aluno se ajustou (total pausado: ${Math.round((ln.paused_ms || 0) / 1000)}s).">posição: ${ln.pauses} pausa(s)</span>`);
+      }
       // Ampulheta SÓ quando a análise está realmente em andamento: manual em lote
       // (_proctorPending) OU automática rodando agora (proctor_running, in-memory no
       // servidor). Vídeo sem análise e sem nada rodando (prova antiga cujo upload

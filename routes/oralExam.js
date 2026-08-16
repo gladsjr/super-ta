@@ -14,6 +14,7 @@ import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
 import { publicBaseUrl } from "../lib/publicUrl.js";
 import * as db from "../lib/db.js";
+import { wouldResume } from "../lib/resumeGate.js";
 import { openai, clientForWork, apiKeyForWork } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
@@ -165,6 +166,10 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 is_blocked: !!s.is_blocked,
                 has_oral_video: !!s.has_oral_video,
                 oral_video_parts: Number(s.oral_video_parts_count) || (s.has_oral_video ? 1 : 0),
+                // Queda de gravação pausou a arguição (#260): o professor decide
+                // liberar a retomada ou avaliar o que já foi gravado.
+                resume_blocked: !!s.resume_blocked,
+                oral_student_turns: Number(s.oral_student_turns) || 0,
                 has_oral_eval: !!s.has_oral_eval,
                 grade: s.grade_final ?? null,
                 devolutiva_published: !!s.evaluation_published_at,
@@ -174,6 +179,10 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 proctor_failed: s.oral_voice_json?.proctor_status?.state === "failed",
                 proctor_alerts: proctorAlerts(s.oral_proctor_json),
                 voice_alert: voiceAlert(s.oral_voice_json),
+                // Vigilância de posição ao vivo (#267): pausas e estado. Desligada
+                // NÃO é silêncio — é sinal (ADR 0018): o professor sabe que aquele
+                // vídeo não teve cobrança de posição em tempo real.
+                live_nudges: s.oral_voice_json?.live_nudges || null,
                 calibration_alert: calibrationAlert(s.oral_calibration_json),
                 transcript_alerts: transcriptAlertCount(s.oral_voice_json),
             })),
@@ -901,10 +910,21 @@ router.post("/s/:submissionToken/oral/session", requireSubmissionToken, async (r
 });
 
 // Status para a página do aluno: já realizou a prova? (teste nunca trava).
-router.get("/s/:submissionToken/oral/status", requireSubmissionToken, (req, res) => {
+// resume_blocked (#260): a sessão anterior caiu com fala do aluno e o professor
+// ainda não liberou a retomada — a página mostra a tela de pausa em vez de
+// tentar conectar (o upgrade do WS rejeitaria de qualquer forma).
+router.get("/s/:submissionToken/oral/status", requireSubmissionToken, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     const done = !!req.submission.completion_reason && !req.submission.is_test;
-    res.json({ done, is_test: !!req.submission.is_test });
+    let resumeBlocked = false;
+    if (!done && !req.submission.is_test) {
+        try {
+            const prior = (await db.getOralTranscript(req.submission.id)) || [];
+            resumeBlocked = wouldResume({ isTest: false, priorTranscript: prior })
+                && !(await db.hasResumeAllowance(req.submission.id));
+        } catch {}
+    }
+    res.json({ done, is_test: !!req.submission.is_test, resume_blocked: resumeBlocked });
 });
 
 // --- Calibração de fala (pré-teste de captação, ANTES da sessão de voz) ---

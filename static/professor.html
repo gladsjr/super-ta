@@ -565,7 +565,21 @@ async function waiveVideo(token) {
     await load();
   } catch { alert('Falha ao liberar sem vídeo.'); }
 }
+// Libera UMA retomada após queda de gravação (#260, só variante realtime). A
+// liberação é consumida na reconexão; nova queda volta a pausar.
+async function allowResume(token) {
+  if (!confirm('Permitir que o aluno RETOME a entrevista de onde parou?\n\nA gravação anterior caiu — a retomada abre uma nova parte de vídeo. Se preferir, você pode avaliar individualmente o que já foi gravado, sem retomar.')) return;
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(token)}/allow-resume`, { method: 'POST' });
+    if (!r.ok) throw new Error();
+    await load();
+  } catch { alert('Falha ao liberar a retomada.'); }
+}
 function videoCell(s) {
+  // Queda de gravação pausou a entrevista realtime (#260): o professor decide.
+  if (s.resume_blocked) {
+    return `<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="A gravação de vídeo caiu no meio. O aluno está pausado, aguardando sua decisão.">gravação caiu — pausada (${Number(s.oral_student_turns) || 0} resposta(s))</span> <button class="btn btn-sm" type="button" onclick="allowResume('${escapeHtml(s.submission_token)}')" title="Autoriza o aluno a retomar de onde parou (uma vez). Alternativa: avaliar individualmente o que já foi gravado.">Permitir retomada</button>`;
+  }
   const hasVideo = (Number(s.oral_video_parts_count) > 0) || s.has_oral_video;
   if (!hasVideo) {
     // Proctoring obrigatório: a arguição terminou mas o vídeo não chegou. O
@@ -578,8 +592,16 @@ function videoCell(s) {
     let p = s.oral_proctor_json;
     if (typeof p === 'string') { try { p = JSON.parse(p); } catch { p = null; } }
     const al = videoAlertsList(p);
-    if (al.length) return al.map(x => `<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">${escapeHtml(x)}</span>`).join(' ');
-    return '<span class="hint">ok</span>';
+    // Vigilância de posição ao vivo (#267, só variante realtime): pausas viram
+    // sinal; desligada também (ADR 0018 — "não analisado" é estado visível).
+    let vj = s.oral_voice_json;
+    if (typeof vj === 'string') { try { vj = JSON.parse(vj); } catch { vj = null; } }
+    const ln = vj && vj.live_nudges;
+    let nudge = '';
+    if (ln && ln.state && ln.state !== 'ativo') nudge = ` <span class="pill" style="background:#f1f3f5;border:1px solid #c4ccd4" title="A vigilância de posição ao vivo não rodou nesta sessão (${escapeHtml(String(ln.state)).replace(/_/g, ' ')}).">sem vigilância ao vivo</span>`;
+    else if (ln && Number(ln.pauses) > 0) nudge = ` <span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="A sessão pausou por posição inadequada e retomou quando o aluno se ajustou (total pausado: ${Math.round((ln.paused_ms || 0) / 1000)}s).">posição: ${ln.pauses} pausa(s)</span>`;
+    if (al.length) return al.map(x => `<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">${escapeHtml(x)}</span>`).join(' ') + nudge;
+    return '<span class="hint">ok</span>' + nudge;
   }
   if (batchRunning) return '<span class="cell-spin" title="Analisando o vídeo…"></span>';
   return '<span class="muted">—</span>';
