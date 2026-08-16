@@ -277,12 +277,15 @@
         return `<h4 style="margin:12px 0 4px">${esc(title)}</h4><ul style="margin:0; padding-left:1.2rem">${arr.map(x => `<li style="margin:4px 0">${esc(x)}</li>`).join('')}</ul>`;
       };
       const opinion = ev.interviewer_opinion
-        ? `<h4 style="margin:12px 0 4px">Opinião do entrevistador</h4><p class="hint" style="margin:0 0 6px">Impressão de quem conduziu a entrevista, no papel que representava — <strong>não é a avaliação do professor</strong>.</p><p style="white-space:pre-wrap; margin:0">${esc(ev.interviewer_opinion)}</p>` : '';
+        ? `<h4 style="margin:12px 0 4px">Opinião do entrevistador</h4><p class="hint" style="margin:0 0 6px">Impressão de quem conduziu a entrevista, no papel que representava — <strong>não é uma mensagem do professor</strong>.</p><p style="white-space:pre-wrap; margin:0">${esc(ev.interviewer_opinion)}</p>` : '';
       const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q =>
         `<div style="margin:6px 0"><div class="qa-who">Pergunta ${Number(q.turn_index) + 1}</div><div>${esc(q.question_gist ?? '')}</div><div class="hint">${esc(q.feedback ?? '')}</div></div>`).join('');
+      // #274: comentário do professor é escrito por ele mesmo e é opcional.
+      const professorBlock = (ev.summary ?? '').trim()
+        ? `<h4 style="margin:12px 0 4px">Comentário do professor</h4>
+        <p style="white-space:pre-wrap; margin:0">${esc(ev.summary)}</p>` : '';
       return `${opinion}
-        <h4 style="margin:12px 0 4px">Avaliação do professor</h4>
-        <p style="white-space:pre-wrap; margin:0">${esc(ev.summary ?? '')}</p>
+        ${professorBlock}
         ${perQuestion ? `<h4 style="margin:12px 0 4px">Pergunta a pergunta</h4>${perQuestion}` : ''}
         ${list('O que você sustentou bem', ev.strengths)}
         ${list('O que pode melhorar', ev.improvement_areas)}

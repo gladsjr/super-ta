@@ -896,17 +896,20 @@
       // Parte 1 — opinião do ENTREVISTADOR (persona da conversa), quando o
       // professor decidiu incluí-la. A ressalva deixa claro de quem é a voz.
       const personaName = window.__personaName;
+      // #274: o comentário do professor é escrito por ele mesmo e é opcional —
+      // o bloco só existe quando há texto.
+      const hasProfessorComment = !!(ev.summary ?? '').trim();
       const opinionBlock = ev.interviewer_opinion ? `
         <div class="conv-section-label">Opinião do entrevistador${personaName ? ` — ${escapeHtml(personaName)}` : ''}</div>
-        <p class="muted" style="font-size: var(--fs-xs); margin: 0 0 var(--sp-2);">Esta é a impressão registrada por quem conduziu a entrevista (o entrevistador do cenário), na perspectiva do papel que ele representava. <strong>Não é a avaliação do professor</strong> — essa vem a seguir.</p>
+        <p class="muted" style="font-size: var(--fs-xs); margin: 0 0 var(--sp-2);">Esta é a impressão registrada por quem conduziu a entrevista (o entrevistador do cenário), na perspectiva do papel que ele representava. <strong>Não é uma mensagem do professor</strong>${hasProfessorComment ? ' — essa vem a seguir' : ''}.</p>
         <p style="white-space: pre-wrap;">${escapeHtml(ev.interviewer_opinion)}</p>` : '';
       const perQuestion = (Array.isArray(ev.per_question) ? ev.per_question : []).map(q => `
         <div class="conv-line"><span class="who">pergunta ${Number(q.turn_index) + 1}:</span><span class="text">${escapeHtml(q.question_gist ?? '')}</span></div>
         <div class="conv-line"><span class="who">devolutiva:</span><span class="text">${escapeHtml(q.feedback ?? '')}</span></div>`).join('');
       return `
         ${opinionBlock}
-        <div class="conv-section-label">Avaliação do professor</div>
-        <p style="white-space: pre-wrap;">${escapeHtml(ev.summary ?? '')}</p>
+        ${hasProfessorComment ? `<div class="conv-section-label">Comentário do professor</div>
+        <p style="white-space: pre-wrap;">${escapeHtml(ev.summary)}</p>` : ''}
         ${perQuestion ? `<div class="conv-section-label">Pergunta a pergunta</div>${perQuestion}` : ''}
         ${list('O que você sustentou bem', ev.strengths)}
         ${list('O que pode melhorar', ev.improvement_areas)}

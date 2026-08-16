@@ -17,6 +17,12 @@ bastidores e de suspeitas, que o professor revisa e publica quando quiser.
   investigativa da avaliação interna.
 - Tem **seções que o professor liga e desliga** por trabalho: pontos fortes,
   áreas de melhoria, sugestões de estudo e opinião do entrevistador.
+- **Nas entrevistas (2026-08-16, #274)**: o antigo "resumo" gerado na voz do
+  professor **não existe mais**. Em seu lugar há o **Comentário do professor** —
+  campo aberto, opcional, escrito pelo próprio professor no editor da devolutiva
+  (só aparece ao aluno se ele escrever algo; regerar a devolutiva automática não
+  o apaga). O corpo gerado passa a ser o pergunta-a-pergunta + as listas. Na
+  **prova oral** o resumo segue gerado (a devolutiva de lá é automática em lote).
 - A seção **pergunta a pergunta é obrigatória** quando a avaliação interna tem
   comentários por turno — deixou de ser escolha do modelo, porque colegas da
   mesma turma recebiam estruturas diferentes por sorteio. Ver

@@ -26,7 +26,10 @@ import { renderAgentPreamble } from "../lib/agentPreamble.js";
  *      ACUSAÇÃO); se algo vazar, re-tenta uma vez apontando o vazamento e,
  *      persistindo, FALHA — melhor não publicar do que publicar acusação crua.
  *
- * Output JSON contract (espelhado em STUDENT_FEEDBACK_SCHEMA):
+ * Output JSON contract (espelhado em STUDENT_FEEDBACK_SCHEMA; na variante SEM
+ * summary — entrevistas, #274 — o campo não é gerado e é normalizado para ""
+ * no armazenamento: o "Comentário do professor" é escrito pelo próprio
+ * professor, nunca por IA):
  *   {
  *     "summary": "<como foi a entrevista, 2-4 frases formativas>",
  *     "per_question": [
@@ -68,10 +71,16 @@ export function findForbiddenLeaks(reportObject) {
 // Validação de FORMA da devolutiva (sem o vínculo com o relatório interno).
 // Usada pelo agente (que adiciona a checagem de contagem de per_question) e
 // pela rota de edição manual do professor (PUT /student-version).
-export function validateStudentFeedbackShape(r) {
+// requireSummary: na ENTREVISTA (#274) o summary é o comentário aberto do
+// PROFESSOR — opcional, pode ser vazio; na prova oral ele segue gerado e
+// obrigatório.
+export function validateStudentFeedbackShape(r, { requireSummary = true } = {}) {
     if (!r || typeof r !== "object") throw new Error("devolutiva deve ser um objeto");
-    if (typeof r.summary !== "string" || !r.summary.trim()) {
+    if (requireSummary && (typeof r.summary !== "string" || !r.summary.trim())) {
         throw new Error("summary ausente ou vazio");
+    }
+    if (!requireSummary && r.summary !== undefined && typeof r.summary !== "string") {
+        throw new Error("summary deve ser string quando presente");
     }
     if (!Array.isArray(r.per_question)) {
         throw new Error("per_question deve ser array");
@@ -91,40 +100,35 @@ export function validateStudentFeedbackShape(r) {
     }
 }
 
-export class StudentFeedbackAgent {
-    static TYPE = "student_feedback";
-
-    constructor(openaiClient, model) {
-        if (!model) throw new Error("Missing model for StudentFeedbackAgent");
-        this.client = openaiClient;
-        this.model = model;
-        this.systemPromptBody = `Sua função específica: escrever a DEVOLUTIVA AO ENTREVISTADO a partir do relatório interno de avaliação de uma entrevista (JSON no input). O relatório interno foi escrito para o operador do sistema e NÃO pode ser mostrado cru; você produz a versão que a própria pessoa entrevistada vai ler.
-
-PROPÓSITO E ESTRUTURA — a devolutiva tem DUAS camadas com papéis distintos:
+// Monta o corpo do prompt nas duas variantes (#274). A variante COM summary é o
+// texto historicamente usado (prova oral, cenários); a SEM summary inverte o
+// contrato: as seções geradas SÃO a devolutiva, e o texto "na voz do professor"
+// deixa de existir — quem fala pelo professor é ele mesmo, num campo aberto.
+function buildPromptBody(withSummary) {
+    const proposito = withSummary ? `PROPÓSITO E ESTRUTURA — a devolutiva tem DUAS camadas com papéis distintos:
 
 1) O \`summary\` é o CORPO PRINCIPAL e AUTOSSUFICIENTE — é a comunicação do professor ao entrevistado, escrita conforme as DIRETRIZES dele, REINTERPRETANDO a avaliação INTEIRA (o que sustentou bem, o que ficou devendo, o que vale estudar). Ele tem de fazer sentido SOZINHO: NUNCA conte com os blocos de seção para comunicar algo essencial, porque o professor pode escolher não exibi-los. Se a crítica importa e o professor pede (ou o equilíbrio formativo exige), ela tem de estar AQUI, no summary — não terceirize as fraquezas para a seção "improvement_areas" achando que ela será mostrada.
 
 2) Os blocos \`strengths\` / \`improvement_areas\` / \`study_suggestions\` são INCLUSÕES OPCIONAIS, exibidas ao leitor APENAS quando o professor liga o checkbox correspondente. São uma versão fiel e direta daquela parte da avaliação (listas curtas). Preencha a lista de uma seção SÓ quando ela for exibida (ver o bloco "SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR" adiante); quando não for exibida, devolva a lista VAZIA e leve o conteúdo para o summary. Nunca deixe a crítica "morar" só numa lista que não será mostrada.
 
-DIRETRIZES DO PROFESSOR (quando presentes no input): orientam tom, formato, extensão, ênfases E QUAIS ASPECTOS entram no \`summary\` ("mais acolhedor", "texto corrido em dois parágrafos", "destaque as fraquezas", "comente a espontaneidade/o tempo de resposta", "evite citar perguntas específicas"). Siga-as fielmente — o professor é SOBERANO sobre estilo, estrutura, extensão, ênfase E conteúdo do summary. A única coisa que diretriz nenhuma afrouxa é a REGRA INVIOLÁVEL de não imputar causa/acusar (abaixo).
+DIRETRIZES DO PROFESSOR (quando presentes no input): orientam tom, formato, extensão, ênfases E QUAIS ASPECTOS entram no \`summary\` ("mais acolhedor", "texto corrido em dois parágrafos", "destaque as fraquezas", "comente a espontaneidade/o tempo de resposta", "evite citar perguntas específicas"). Siga-as fielmente — o professor é SOBERANO sobre estilo, estrutura, extensão, ênfase E conteúdo do summary. A única coisa que diretriz nenhuma afrouxa é a REGRA INVIOLÁVEL de não imputar causa/acusar (abaixo).` : `PROPÓSITO E ESTRUTURA — nesta devolutiva NÃO existe texto "na voz do professor": você NÃO escreve resumo, abertura, fechamento nem mensagem geral. O professor tem um campo próprio, escrito por ele mesmo, fora do seu alcance. O que você produz É a devolutiva:
 
-FORMATO:
+1) \`per_question\` — o comentário formativo de cada pergunta (o coração da devolutiva).
+
+2) Os blocos \`strengths\` / \`improvement_areas\` / \`study_suggestions\` — listas curtas e fiéis à avaliação, exibidas ao leitor APENAS quando o professor liga o checkbox correspondente. Preencha a lista de uma seção SÓ quando ela for exibida (ver o bloco "SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR" adiante); quando não for exibida, devolva a lista VAZIA — o conteúdo dela simplesmente não vai ao leitor, por decisão do professor.
+
+DIRETRIZES DO PROFESSOR (quando presentes no input): orientam tom, formato, extensão e ênfases do que você escreve nas listas e no per_question ("mais acolhedor", "destaque as fraquezas", "evite citar números do documento"). Siga-as fielmente — o professor é SOBERANO sobre estilo, ênfase e conteúdo. A única coisa que diretriz nenhuma afrouxa é a REGRA INVIOLÁVEL de não imputar causa/acusar (abaixo).`;
+
+    const formato = withSummary ? `FORMATO:
 - summary: corpo principal autossuficiente; respeite a extensão/estilo que o professor pedir (de um parágrafo a alguns; texto corrido se pedido).
-- per_question é OBRIGATÓRIO quando o relatório interno traz comentários por turno: devolva UMA entrada para CADA turn_index presente lá, sem pular nenhum. NÃO é sua escolha — alunos da mesma turma têm de receber devolutivas com a MESMA estrutura, e decidir isso caso a caso produziria tratamento desigual entre colegas. Se as diretrizes do professor pedirem texto corrido, isso governa o ESTILO do que você escreve em cada entrada (e do summary), não a existência da seção. Só devolva per_question: [] se o relatório interno também não tiver comentários por turno.
+- per_question é OBRIGATÓRIO quando o relatório interno traz comentários por turno: devolva UMA entrada para CADA turn_index presente lá, sem pular nenhum. NÃO é sua escolha — alunos da mesma turma têm de receber devolutivas com a MESMA estrutura, e decidir isso caso a caso produziria tratamento desigual entre colegas. Se as diretrizes do professor pedirem texto corrido, isso governa o ESTILO do que você escreve em cada entrada (e do summary), não a existência da seção. Só devolva per_question: [] se o relatório interno também não tiver comentários por turno.` : `FORMATO:
+- per_question é OBRIGATÓRIO quando o relatório interno traz comentários por turno: devolva UMA entrada para CADA turn_index presente lá, sem pular nenhum. NÃO é sua escolha — alunos da mesma turma têm de receber devolutivas com a MESMA estrutura, e decidir isso caso a caso produziria tratamento desigual entre colegas. Se as diretrizes do professor pedirem texto corrido, isso governa o ESTILO do que você escreve em cada entrada, não a existência da seção. Só devolva per_question: [] se o relatório interno também não tiver comentários por turno.`;
 
-REGRAS DE CONTEÚDO (a parte mais importante da sua função):
-- O professor é SOBERANO sobre QUE aspectos entram no summary. Por DEFAULT, sem pedido em contrário nas diretrizes, a devolutiva foca no CONTEÚDO (o que foi dito, o que sustentou, o que ficou devendo) e NÃO levanta por conta própria temas de forma/tempo/entrega/espontaneidade/autoria. MAS se as DIRETRIZES do professor pedirem para comentar um aspecto presente no relatório interno — espontaneidade, demora para responder, respostas que soaram preparadas/lidas, fluência, registro, ou qualquer dimensão de entrega —, você DEVE incluí-lo, resumindo fielmente o que o relatório interno traz sobre ele. Pedido do professor manda; não silencie um aspecto que ele pediu.
-- AO comentar forma/entrega/espontaneidade (quando pedido): enquadre como OBSERVAÇÃO ligada à conversa, em segunda pessoa, com respeito, e CALIBRANDO pelo falso-positivo (sinais de tempo/forma erram: áudio ruim, nervosismo, pensar devagar — prefira "pareceu/soou" a "você fez"; "nesta atividade espera-se resposta na hora, e algumas respostas demoraram a começar e soaram preparadas"). Se o relatório interno NÃO trouxer o sinal, não o invente.
-- REGRA INVIOLÁVEL (nenhuma diretriz a afrouxa): NUNCA impute a CAUSA nem acuse. Proibido afirmar trapaça, uso de IA, plágio, "colou", "suspeita" ou fraude. Descreva só o OBSERVADO, nunca a intenção ("as respostas demoraram e soaram preparadas", não "você usou IA"). Acusação formal, se o professor quiser, é decisão dele FORA desta devolutiva automática.
-- NUNCA atribua nota, conceito, aprovação ou juízo global de qualidade ("defesa fraca", "insuficiente"). Os campos internos defense_quality/authorship_confidence não existem para o leitor.
-- NUNCA copie as follow_up_suggestions do relatório interno (são o roteiro de investigação do operador).
-- Critique CONTEÚDO, sempre ancorado no que foi dito ou no que está na entrega: premissa não justificada, contradição com o documento, resposta que escapou da pergunta, conceito mal explicado. Isso PODE e DEVE ser dito, com gentileza e precisão.
-- Inconsistência entre a resposta e o documento entregue: relate como fato observável da CONVERSA ("na conversa você citou 12%, mas a tabela 3 usa 8% — vale alinhar"), nunca como insinuação sobre quem escreveu o documento.
-- Elogio tem que ser específico (o que exatamente foi bem) — nada de elogio genérico de consolação.
-- study_suggestions: 0 a 5 sugestões concretas de estudo/preparo ligadas às lacunas observadas ("revisitar o mecanismo de ajuste de dificuldade da rede", "praticar explicar o VPL por cenário sem consultar a planilha").
-- Escreva em segunda pessoa ("você explicou bem...", "faltou conectar..."). Não use o nome de campo interno nem jargão do sistema.
+    const soberano = withSummary
+        ? `- O professor é SOBERANO sobre QUE aspectos entram no summary. Por DEFAULT, sem pedido em contrário nas diretrizes, a devolutiva foca no CONTEÚDO (o que foi dito, o que sustentou, o que ficou devendo) e NÃO levanta por conta própria temas de forma/tempo/entrega/espontaneidade/autoria. MAS se as DIRETRIZES do professor pedirem para comentar um aspecto presente no relatório interno — espontaneidade, demora para responder, respostas que soaram preparadas/lidas, fluência, registro, ou qualquer dimensão de entrega —, você DEVE incluí-lo, resumindo fielmente o que o relatório interno traz sobre ele. Pedido do professor manda; não silencie um aspecto que ele pediu.`
+        : `- Por DEFAULT, sem pedido em contrário nas diretrizes, a devolutiva foca no CONTEÚDO (o que foi dito, o que sustentou, o que ficou devendo) e NÃO levanta por conta própria temas de forma/tempo/entrega/espontaneidade/autoria. MAS se as DIRETRIZES do professor pedirem para comentar um aspecto presente no relatório interno — espontaneidade, demora para responder, respostas que soaram preparadas/lidas, fluência, registro, ou qualquer dimensão de entrega —, você DEVE incluí-lo (no per_question do turno em que apareceu, ou como item de lista exibida), resumindo fielmente o que o relatório interno traz. Pedido do professor manda; não silencie um aspecto que ele pediu.`;
 
-# Saída
+    const saida = withSummary ? `# Saída
 Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
 {
   "summary": "<corpo principal: 1-3 parágrafos, como foi a entrevista, equilibrando o que sustentou e o que ficou devendo>",
@@ -136,7 +140,52 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
   "strengths": [ "<ponto específico que foi bem>" ],
   "improvement_areas": [ "<ponto específico a melhorar, ancorado em conteúdo>" ],
   "study_suggestions": [ "<sugestão concreta de estudo/preparo>" ]
+}` : `# Saída
+Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
+{
+  "per_question": [
+    { "turn_index": 0,
+      "question_gist": "<resumo curto da pergunta, na linguagem do leitor>",
+      "feedback": "<1-3 frases formativas sobre a resposta>" }
+  ],
+  "strengths": [ "<ponto específico que foi bem>" ],
+  "improvement_areas": [ "<ponto específico a melhorar, ancorado em conteúdo>" ],
+  "study_suggestions": [ "<sugestão concreta de estudo/preparo>" ]
 }`;
+
+    return `Sua função específica: escrever a DEVOLUTIVA AO ENTREVISTADO a partir do relatório interno de avaliação de uma entrevista (JSON no input). O relatório interno foi escrito para o operador do sistema e NÃO pode ser mostrado cru; você produz a versão que a própria pessoa entrevistada vai ler.
+
+${proposito}
+
+${formato}
+
+REGRAS DE CONTEÚDO (a parte mais importante da sua função):
+${soberano}
+- AO comentar forma/entrega/espontaneidade (quando pedido): enquadre como OBSERVAÇÃO ligada à conversa, em segunda pessoa, com respeito, e CALIBRANDO pelo falso-positivo (sinais de tempo/forma erram: áudio ruim, nervosismo, pensar devagar — prefira "pareceu/soou" a "você fez"; "nesta atividade espera-se resposta na hora, e algumas respostas demoraram a começar e soaram preparadas"). Se o relatório interno NÃO trouxer o sinal, não o invente.
+- REGRA INVIOLÁVEL (nenhuma diretriz a afrouxa): NUNCA impute a CAUSA nem acuse. Proibido afirmar trapaça, uso de IA, plágio, "colou", "suspeita" ou fraude. Descreva só o OBSERVADO, nunca a intenção ("as respostas demoraram e soaram preparadas", não "você usou IA"). Acusação formal, se o professor quiser, é decisão dele FORA desta devolutiva automática.
+- NUNCA atribua nota, conceito, aprovação ou juízo global de qualidade ("defesa fraca", "insuficiente"). Os campos internos defense_quality/authorship_confidence não existem para o leitor.
+- NUNCA copie as follow_up_suggestions do relatório interno (são o roteiro de investigação do operador).
+- Critique CONTEÚDO, sempre ancorado no que foi dito ou no que está na entrega: premissa não justificada, contradição com o documento, resposta que escapou da pergunta, conceito mal explicado. Isso PODE e DEVE ser dito, com gentileza e precisão.
+- Inconsistência entre a resposta e o documento entregue: relate como fato observável da CONVERSA ("na conversa você citou 12%, mas a tabela 3 usa 8% — vale alinhar"), nunca como insinuação sobre quem escreveu o documento.
+- Elogio tem que ser específico (o que exatamente foi bem) — nada de elogio genérico de consolação.
+- study_suggestions: 0 a 5 sugestões concretas de estudo/preparo ligadas às lacunas observadas ("revisitar o mecanismo de ajuste de dificuldade da rede", "praticar explicar o VPL por cenário sem consultar a planilha").
+- Escreva em segunda pessoa ("você explicou bem...", "faltou conectar..."). Não use o nome de campo interno nem jargão do sistema.
+
+${saida}`;
+}
+
+export class StudentFeedbackAgent {
+    static TYPE = "student_feedback";
+
+    constructor(openaiClient, model) {
+        if (!model) throw new Error("Missing model for StudentFeedbackAgent");
+        this.client = openaiClient;
+        this.model = model;
+        // Duas variantes do corpo (#274): COM summary gerado (prova oral) e SEM
+        // (entrevista — o campo "comentário do professor" é escrito pelo próprio
+        // professor, nunca por IA).
+        this.systemPromptBody = buildPromptBody(true);
+        this.systemPromptBodyNoSummary = buildPromptBody(false);
     }
 
     /**
@@ -151,19 +200,24 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
      * @param {string|null} p.proctoringInstruction - prompt do professor p/ a menção de
      *        proctoring (works.devolutiva_proctor_prompt); null = usa o default gentil
      * @param {object|null} p.meterCtx  - contexto de billing
+     * @param {boolean} p.includeSummary - true (default): summary gerado (prova
+     *        oral, cenários). false (#274, entrevistas): o summary é o campo
+     *        aberto do PROFESSOR — o agente não o escreve, e a devolutiva
+     *        gerada são o per_question e as listas.
      */
-    async derive({ internalReport, guidelines = null, visibleSections = null, proctoringSummary = null, proctoringInstruction = null, meterCtx = null }) {
+    async derive({ internalReport, guidelines = null, visibleSections = null, proctoringSummary = null, proctoringInstruction = null, meterCtx = null, includeSummary = true }) {
         if (!internalReport) throw new Error("StudentFeedback: missing internalReport");
 
-        // Diz ao agente quais blocos de seção serão EXIBIDOS ao leitor. As
-        // ocultas não aparecem — então sua substância relevante tem de ser
-        // dobrada no summary (que é autossuficiente). interviewer_opinion não é
-        // gerada aqui; só as três seções de conteúdo importam.
+        // Diz ao agente quais blocos de seção serão EXIBIDOS ao leitor. Com
+        // summary gerado, a substância das ocultas é dobrada nele (resumo
+        // autossuficiente); sem summary, oculta = fora da devolutiva, por
+        // decisão do professor. interviewer_opinion não é gerada aqui; só as
+        // três seções de conteúdo importam.
         const vs = visibleSections || {};
         const SECN = { strengths: "O que sustentou bem", improvement_areas: "O que pode melhorar", study_suggestions: "Sugestões de estudo" };
         const shown = [], hidden = [];
         for (const k of Object.keys(SECN)) (vs[k] === false ? hidden : shown).push(SECN[k]);
-        const sectionsBlock = visibleSections ? `
+        const sectionsBlock = visibleSections ? (includeSummary ? `
 
 SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR (decisão dele) — isto MUDA o que vai no summary e o que vai nas listas:
 - EXIBIDAS (vão como bloco fiel ao leitor): ${shown.length ? shown.join("; ") : "(nenhuma)"}.
@@ -171,29 +225,40 @@ SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR (decisão dele) — isto MUDA o que vai
 REGRAS OBRIGATÓRIAS (sobrepõem-se ao formato default):
 - Para cada seção EXIBIDA: preencha a lista correspondente (strengths/improvement_areas/study_suggestions) com itens fiéis e curtos.
 - Para cada seção NÃO exibida: devolva a lista correspondente VAZIA ([]) e LEVE a substância dela para DENTRO do summary, reinterpretada conforme as diretrizes do professor. NÃO há outro lugar para esse conteúdo aparecer — se ficar só na lista vazia, ele SOME para o leitor.
-- Em especial: se "O que pode melhorar" NÃO será exibido, os pontos fracos/a melhorar TÊM de estar escritos no summary. Uma devolutiva só com elogios, havendo pontos a melhorar no relatório interno, é ERRO. O equilíbrio (o que foi bem E o que faltou) é inegociável, salvo se o professor pedir explicitamente o contrário.` : "";
+- Em especial: se "O que pode melhorar" NÃO será exibido, os pontos fracos/a melhorar TÊM de estar escritos no summary. Uma devolutiva só com elogios, havendo pontos a melhorar no relatório interno, é ERRO. O equilíbrio (o que foi bem E o que faltou) é inegociável, salvo se o professor pedir explicitamente o contrário.` : `
+
+SEÇÕES QUE O PROFESSOR ESCOLHEU EXIBIR (decisão dele):
+- EXIBIDAS (vão como bloco fiel ao leitor): ${shown.length ? shown.join("; ") : "(nenhuma)"}.
+- NÃO exibidas (o leitor NÃO verá o bloco): ${hidden.length ? hidden.join("; ") : "(nenhuma)"}.
+REGRAS OBRIGATÓRIAS:
+- Para cada seção EXIBIDA: preencha a lista correspondente (strengths/improvement_areas/study_suggestions) com itens fiéis e curtos.
+- Para cada seção NÃO exibida: devolva a lista correspondente VAZIA ([]). O conteúdo dela fica fora da devolutiva — decisão do professor; NÃO o mova para outra seção nem para o per_question.
+- O equilíbrio da devolutiva vive no per_question: cada comentário diz o que foi bem E o que faltou naquela resposta, sem depender das listas.`) : "";
 
         const systemPrompt = `${renderAgentPreamble({ audience: "student_via_ui" })}
 
-${this.systemPromptBody}${sectionsBlock}`;
+${includeSummary ? this.systemPromptBody : this.systemPromptBodyNoSummary}${sectionsBlock}`;
         const guidelinesBlock = typeof guidelines === "string" && guidelines.trim()
             ? `DIRETRIZES DO PROFESSOR para esta devolutiva (siga em estilo/estrutura/ênfase E quais aspectos incluir; só a REGRA INVIOLÁVEL de não acusar prevalece):
 ${guidelines.trim()}
 
 `
             : "";
-        // Lembrete final (posição de maior peso) quando há seção de crítica oculta.
-        const hiddenReminder = (visibleSections && vs.improvement_areas === false)
+        // Lembrete final (posição de maior peso) quando há seção de crítica
+        // oculta — só faz sentido quando existe summary para absorvê-la.
+        const hiddenReminder = (includeSummary && visibleSections && vs.improvement_areas === false)
             ? `\n\nLEMBRETE FINAL: "O que pode melhorar" NÃO será exibido como bloco. Logo, os pontos fracos/a melhorar identificados no relatório interno TÊM de aparecer escritos no summary (e a lista improvement_areas vai vazia). Devolutiva só com elogios aqui é erro.`
             : "";
         // Proctoring por vídeo (opt-in): quando há observações relevantes, o professor
         // decidiu que elas PODEM entrar na devolutiva — mas sempre de forma SUAVE e não
         // acusatória (a REGRA INVIOLÁVEL e a varredura FORBIDDEN_PATTERNS continuam valendo).
-        const DEFAULT_PROCTOR_INSTRUCTION = "Mencione essas observações de forma BREVE e GENTIL, como ORIENTAÇÃO para a próxima vez (ex.: manter-se visível e sozinho no vídeo, guardar o celular durante a atividade). No máximo uma ou duas frases integradas ao summary. NÃO afirme trapaça, fraude nem intenção — descreva só o observado.";
+        const DEFAULT_PROCTOR_INSTRUCTION = includeSummary
+            ? "Mencione essas observações de forma BREVE e GENTIL, como ORIENTAÇÃO para a próxima vez (ex.: manter-se visível e sozinho no vídeo, guardar o celular durante a atividade). No máximo uma ou duas frases integradas ao summary. NÃO afirme trapaça, fraude nem intenção — descreva só o observado."
+            : "Mencione essas observações como UM item breve e gentil de orientação para a próxima vez (ex.: manter-se visível e sozinho no vídeo, guardar o celular durante a atividade), colocado em improvement_areas se ela for exibida — senão, na primeira lista exibida; se nenhuma lista for exibida, omita a menção. NÃO afirme trapaça, fraude nem intenção — descreva só o observado.";
         const proctorBlock = (typeof proctoringSummary === "string" && proctoringSummary.trim())
             ? `
 
-OBSERVAÇÕES DE PROCTORING POR VÍDEO (integre ao summary conforme a instrução; a REGRA INVIOLÁVEL de não acusar prevalece sobre tudo):
+OBSERVAÇÕES DE PROCTORING POR VÍDEO (${includeSummary ? "integre ao summary conforme a instrução" : "siga a instrução"}; a REGRA INVIOLÁVEL de não acusar prevalece sobre tudo):
 Observado na gravação: ${proctoringSummary.trim()}.
 Instrução do professor: ${typeof proctoringInstruction === "string" && proctoringInstruction.trim() ? proctoringInstruction.trim() : DEFAULT_PROCTOR_INSTRUCTION}`
             : "";
@@ -211,7 +276,7 @@ ${JSON.stringify(internalReport, null, 2)}${proctorBlock}${hiddenReminder}`;
                     type: "json_schema",
                     name: "student_feedback",
                     strict: true,
-                    schema: STUDENT_FEEDBACK_SCHEMA,
+                    schema: includeSummary ? STUDENT_FEEDBACK_SCHEMA : STUDENT_FEEDBACK_SCHEMA_NO_SUMMARY,
                 },
             },
         };
@@ -234,7 +299,10 @@ ${JSON.stringify(internalReport, null, 2)}${proctorBlock}${hiddenReminder}`;
                 const match = text.match(/\{[\s\S]*\}/);
                 if (!match) throw new Error(`StudentFeedback: no JSON in response (${log.preview(text, 120)})`);
                 const parsed = JSON.parse(match[0]);
-                this._validateReport(parsed, internalReport);
+                // Sem summary gerado (#274), normaliza para "" — o formato
+                // armazenado é o mesmo, e o campo é do professor.
+                if (!includeSummary) parsed.summary = "";
+                this._validateReport(parsed, internalReport, { requireSummary: includeSummary });
 
                 const leaks = findForbiddenLeaks(parsed);
                 if (leaks.length > 0) {
@@ -261,8 +329,8 @@ ${JSON.stringify(internalReport, null, 2)}${proctorBlock}${hiddenReminder}`;
         throw lastErr;
     }
 
-    _validateReport(r, internalReport) {
-        validateStudentFeedbackShape(r);
+    _validateReport(r, internalReport, { requireSummary = true } = {}) {
+        validateStudentFeedbackShape(r, { requireSummary });
         // per_question deixou de ser escolha do modelo (#251). Quando o relatório
         // interno tem comentários por turno, a devolutiva DEVE cobrir todos —
         // senão colegas da mesma turma recebem estruturas diferentes por variação
@@ -319,3 +387,14 @@ const STUDENT_FEEDBACK_SCHEMA = {
         study_suggestions: { type: "array", items: { type: "string" } },
     },
 };
+
+// Variante SEM summary (#274, entrevistas): o campo é do professor, não da IA.
+// Modo strict exige remover a propriedade inteira (não basta torná-la opcional).
+const STUDENT_FEEDBACK_SCHEMA_NO_SUMMARY = (() => {
+    const { summary, ...props } = STUDENT_FEEDBACK_SCHEMA.properties;
+    return {
+        ...STUDENT_FEEDBACK_SCHEMA,
+        required: STUDENT_FEEDBACK_SCHEMA.required.filter(k => k !== "summary"),
+        properties: props,
+    };
+})();
