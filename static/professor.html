@@ -6,6 +6,7 @@
 <title>ORATIA — Professor</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
 <script src="/static/js/theme.js"></script>
+  <script src="/static/js/proctorAxes.js"></script>
 <link rel="stylesheet" href="/static/css/studio.css"/>
 <style>
   /* Cockpit de cenário (visão por aluno só-leitura). */
@@ -541,15 +542,13 @@ let lastSubmissions = [];
 // não tem nota). Durante o lote "Avaliar entrevistas", as colunas Avaliação e Vídeo
 // mostram uma AMPULHETA (spinner) enquanto o item ainda não foi processado.
 
-// Alertas do vídeo (proctoring) — mesma lógica conservadora do backend (lib/proctor).
+// Alertas do vídeo (proctoring). Os LIMIARES vêm de static/js/proctorAxes.js —
+// fonte única compartilhada com a tela individual (#245). Antes viviam duplicados
+// aqui com valores diferentes dos de lá, e o aluno aparecia com sinal na lista e
+// sem alerta nenhum ao abrir a avaliação.
 function videoAlertsList(p) {
-  if (!p || !p.flags) return [];
-  const f = p.flags, a = [];
-  if (f.absent && f.absent.pct >= 20) a.push('ausência');
-  if (f.multiple_people && f.multiple_people.pct >= 20) a.push('+1 pessoa');
-  if (f.phone && (f.phone.pct >= 5 || f.phone.count >= 10)) a.push('celular');
-  if (f.hands && f.hands.flag) a.push('mãos fora');
-  return a;
+  if (!p || !p.flags || !window.proctorAxes) return [];
+  return window.proctorAxes.evaluate(p).filter(e => e.state === 'alert').map(e => e.label);
 }
 function avalCell(s) {
   if (s.has_student_version) return '<span class="badge badge-completed">avaliada</span>';
@@ -1317,10 +1316,17 @@ function batchLine(batch, verbing, doneNoun) {
   const stoppedNote = batch.stopped_reason === 'budget_exhausted'
     ? ' · <strong>interrompida: orçamento esgotado</strong>'
     : (batch.stopped_reason ? ` · interrompida (${escapeHtml(batch.stopped_reason)})` : '');
+  // Quem o lote NÃO pegou, e por quê (#258). Sem isto o professor não distingue
+  // "o sistema esqueceu" de "não entra em lote por regra" — e essas submissões
+  // continuam disponíveis para avaliação individual.
+  const fora = Object.entries(batch.ineligible || {});
+  const foraNote = fora.length
+    ? ` · fora do lote: ${fora.map(([motivo, n]) => `${n} ${escapeHtml(motivo)}${n === 1 ? '' : 's'}`).join(', ')} (avalie individualmente, se quiser)`
+    : '';
   if (batch.running) {
     return `<span class="cell-spin" style="margin-right:6px"></span>${verbing} (${batch.done}/${batch.total})… ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}. Cada item leva por volta de um minuto; pode sair desta página e voltar.`;
   }
-  return `✔ Lote concluído: ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}${stoppedNote}.`;
+  return `✔ Lote concluído: ${batch.ok} ${doneNoun}${batch.ok === 1 ? '' : 's'}, ${batch.skipped} pulada${batch.skipped === 1 ? '' : 's'}${failedNote}${stoppedNote}${foraNote}.`;
 }
 
 function renderBatchStatus(j) {

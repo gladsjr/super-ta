@@ -19,6 +19,7 @@ import {
     sessionMiddleware,
     seedInitialUsers,
     seedRoles,
+    seedProctorReviewLevels,
     seedCivilIdTypes,
     seedUnitLabels,
     seedAuthProviders,
@@ -166,6 +167,11 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedRoles();
     } catch (err) {
         log.error("BOOT", `seedRoles failed: ${err.message}`);
+    }
+    try {
+        await seedProctorReviewLevels();
+    } catch (err) {
+        log.error("BOOT", `seedProctorReviewLevels failed: ${err.message}`);
     }
     try {
         await seedCivilIdTypes();

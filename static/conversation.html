@@ -6,6 +6,7 @@
 <title>ORATIA — Conversa da entrevista</title>
 <link rel="stylesheet" href="/static/css/app.css"/>
 <script src="/static/js/theme.js"></script>
+  <script src="/static/js/proctorAxes.js"></script>
 <link rel="icon" type="image/png" sizes="32x32" href="/static/branding/favicon-32.png"/>
 <link rel="icon" type="image/png" sizes="192x192" href="/static/branding/favicon-192.png"/>
 <style>
@@ -799,18 +800,72 @@ window.seekVideoProctor = function (sec) {
   }
   window.selectProctorPart(idx, local);
 };
-function renderProctorAlertsHtml(rep) {
-  const f = rep && rep.flags; if (!f) return '';
+// Triagem do professor (#246): onde ele registra o que CONCLUIU depois de
+// assistir aos trechos. Sem isto o juízo se perdia — não dava para retomar
+// depois nem para a avaliação/devolutiva levarem em conta.
+// 'não revisado' é distinto de 'em aberto' de propósito: é o que permite saber
+// o que ainda falta revisar.
+window.salvarTriagemProctor = async function () {
+  const sel = document.getElementById('proctor-review-level');
+  const nota = document.getElementById('proctor-review-note');
+  const st = document.getElementById('proctor-review-status');
+  if (!sel) return;
+  st.textContent = 'salvando…';
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-review`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: sel.value, note: nota ? nota.value : null }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'falha ao salvar');
+    st.textContent = 'salvo ✓';
+    setTimeout(() => { if (st.textContent === 'salvo ✓') st.textContent = ''; }, 2500);
+  } catch (e) {
+    st.textContent = 'não salvou: ' + e.message;
+  }
+};
+function renderProctorReviewHtml(p) {
+  const niveis = Array.isArray(p.review_levels) ? p.review_levels : [];
+  if (!niveis.length) return '';
+  const atual = (p.review && p.review.level) || 'nao_revisado';
+  const nota = (p.review && p.review.note) || '';
+  const opts = niveis.map(n => `<option value="${escapeHtml(n.key)}"${n.key === atual ? ' selected' : ''}>${escapeHtml(n.name)}</option>`).join('');
+  return `
+    <div style="margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--c-line,#e4e9ee)">
+      <div class="eval-section-title">Sua conclusão sobre os indícios</div>
+      <div class="hint" style="margin:2px 0 8px">Revisão humana. Não altera a nota — ela entra como contexto na avaliação e, quando confirmada, pode virar observação formativa na devolutiva.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="proctor-review-level" style="font:inherit;padding:6px 10px;border:1px solid var(--c-line,#cbd5e1);border-radius:8px">${opts}</select>
+        <button type="button" onclick="salvarTriagemProctor()" style="font:inherit;padding:6px 14px;border:none;border-radius:8px;background:var(--c-accent,#2563eb);color:#fff;cursor:pointer">Salvar</button>
+        <span id="proctor-review-status" class="hint"></span>
+      </div>
+      <textarea id="proctor-review-note" rows="2" placeholder="O que você viu no trecho (opcional) — é o que dá sentido ao rótulo depois." style="width:100%;margin-top:8px;font:inherit;padding:8px;border:1px solid var(--c-line,#cbd5e1);border-radius:8px">${escapeHtml(nota)}</textarea>
+    </div>`;
+}
+// Painel POR EIXO (#244): mostra TODOS os eixos analisados, sempre — o limiar
+// DESTACA (cor), não OCULTA. Antes esta tela só listava o que passava do limiar,
+// então indício real sumia: um aluno com celular em 23 quadros aparecia na lista
+// e, ao abrir, exibia "nenhum alerta relevante". Os limiares vêm de
+// static/js/proctorAxes.js, compartilhados com a lista.
+// Segue valendo a ADR 0004: é indício para revisão humana, nunca acusação.
+function renderProctorAxesHtml(rep) {
+  if (!window.proctorAxes) return '';
+  const eixos = window.proctorAxes.evaluate(rep);
+  if (!eixos.length) return '';
   const stamps = at => (Array.isArray(at) && at.length)
     ? ` <span class="hint">· trechos: ${at.map(s => `<a href="#" onclick="seekVideoProctor(${s});return false" style="color:var(--c-accent,#2563eb);text-decoration:underline">${mmss(s)}</a>`).join(', ')}</span>` : '';
-  const row = (label, at) => `<div style="margin:4px 0"><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">${label}</span>${stamps(at)}</div>`;
-  const lines = [];
-  if (f.absent && f.absent.pct >= 20) lines.push(row(`ausência ${f.absent.pct}%`, f.absent.at));
-  if (f.multiple_people && f.multiple_people.pct >= 20) lines.push(row(`+1 pessoa ${f.multiple_people.pct}%`, f.multiple_people.at));
-  if (f.phone && f.phone.pct >= 25) lines.push(row(`celular ${f.phone.pct}%`, f.phone.at));
-  if (f.hands && f.hands.flag) lines.push(row('mãos fora do quadro', f.hands.at));
-  if (f.framing && f.framing.flag) lines.push(row('enquadramento fora do padrão', f.framing.at));
-  return lines.length ? `<div style="margin:6px 0">${lines.join('')}</div>` : '';
+  const estilo = {
+    alert: 'background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12',
+    ok: 'background:#e7f4eb;border:1px solid #9cc9ad;color:#1f6c3b',
+    unanalyzed: 'background:#eef0f3;border:1px solid #cbd2da;color:#5a6b80',
+  };
+  const marca = { alert: '⚠', ok: '✓', unanalyzed: '–' };
+  const linhas = eixos.map(e => `
+    <div style="margin:4px 0">
+      <span style="display:inline-block;padding:2px 9px;border-radius:999px;${estilo[e.state]};font-size:12px;font-weight:600">${marca[e.state]} ${escapeHtml(e.label)}</span>
+      <span class="hint"> · ${escapeHtml(e.detail)}</span>${stamps(e.at)}
+    </div>`).join('');
+  return `<div style="margin:6px 0">${linhas}</div>`;
 }
 // Vídeos do MediaRecorder (webm) chegam sem metadado de DURAÇÃO — a barra do
 // player não deixa "pular" para frente até o vídeo tocar até o fim (tedioso).
@@ -850,7 +905,7 @@ function renderProctoring(p) {
   }
   const rep = p.report;
   const hasVideo = p.video_parts > 0;
-  const alerts = rep ? renderProctorAlertsHtml(rep) : '';
+  const eixos = rep ? renderProctorAxesHtml(rep) : '';
   // A análise do vídeo roda AUTOMATICAMENTE ao fim da entrevista (#210); o lote
   // "Avaliar entrevistas" segue como reprocessamento. Sem botão individual aqui.
   // Player: com UMA parte é o de sempre; com VÁRIAS, navega entre elas e emenda
@@ -871,18 +926,20 @@ function renderProctoring(p) {
   const fragAviso = nParts > 1
     ? `<div style="margin:6px 0"><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">gravação em ${nParts} partes</span> <span class="hint">· a câmera caiu ${nParts - 1}× durante a arguição; a sessão foi pausada e retomada a cada queda</span></div>`
     : '';
-  const cobertura = rep && rep.truncated
-    ? `<div style="margin:6px 0"><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">análise parcial</span> <span class="hint">· foram analisados ${rep.covered_s}s de ${rep.video_duration_s ?? '?'}s de vídeo</span></div>`
+  const aviso = (window.proctorAxes && rep) ? window.proctorAxes.coverageWarning(rep) : null;
+  const cobertura = aviso
+    ? `<div style="margin:6px 0"><span style="display:inline-block;padding:2px 9px;border-radius:999px;background:#fdecd8;border:1px solid #e0a95e;color:#8a5a12;font-size:12px;font-weight:600">análise parcial</span> <span class="hint">· ${escapeHtml(aviso)}</span></div>`
     : '';
   const player = hasVideo
     ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="${window.proctorVideo.url(0)}"></video>${partBtns}`
     : '';
   const head = hasVideo ? '' : '<div class="eval-meta">Sem vídeo gravado para esta submissão.</div>';
-  const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>')
+  const body = rep ? (eixos || '<div class="eval-meta">Relatório sem eixos analisados.</div>')
     : (p.status === 'failed' ? '<div class="eval-meta" style="color:#8a1c1c">⚠ A análise do vídeo começou e não terminou (erro ou reinício). Rode “Avaliar entrevistas” para reprocessar.</div>'
       : (hasVideo ? '<div class="eval-meta">Processando a análise do vídeo… (roda automaticamente ao fim da entrevista; recarregue em instantes)</div>' : ''));
+  const triagem = hasVideo ? renderProctorReviewHtml(p) : '';
   card.innerHTML = `<h2 class="card-title">Fiscalização por vídeo</h2>
-    ${head}${fragAviso}${cobertura}${body}${player}`;
+    ${head}${fragAviso}${cobertura}${body}${player}${triagem}`;
   if (hasVideo) {
     const vid = card.querySelector('video');
     fixSeekableWebm(vid);

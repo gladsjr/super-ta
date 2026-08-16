@@ -105,6 +105,32 @@ export async function seedInitialUsers() {
 // Idempotente; roda ANTES de seedBootstrapAdmin (que precisa das linhas).
 // Papéis removidos de ROLE_DEFS não são apagados às cegas: o FK RESTRICT de
 // memberships acusa se houver vínculo pendurado.
+// Níveis da triagem de fiscalização (#246). Mesmo padrão de seedRoles: a
+// constante no código é a fonte, a tabela é reconciliada no boot. Remover um
+// nível em uso quebraria a FK — por isso o DELETE só vale para os não usados.
+export async function seedProctorReviewLevels() {
+  const { PROCTOR_REVIEW_DEFS } = await import("./lib/proctorReview.js");
+  for (const def of PROCTOR_REVIEW_DEFS) {
+    await pool.query(
+      `INSERT INTO proctor_review_levels (key, name, ordem, confirmado)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (key) DO UPDATE
+         SET name = EXCLUDED.name, ordem = EXCLUDED.ordem, confirmado = EXCLUDED.confirmado
+       WHERE proctor_review_levels.name IS DISTINCT FROM EXCLUDED.name
+          OR proctor_review_levels.ordem IS DISTINCT FROM EXCLUDED.ordem
+          OR proctor_review_levels.confirmado IS DISTINCT FROM EXCLUDED.confirmado`,
+      [def.key, def.name, def.ordem, def.confirmado]
+    );
+  }
+  const keys = PROCTOR_REVIEW_DEFS.map((d) => d.key);
+  await pool.query(
+    `DELETE FROM proctor_review_levels l
+      WHERE l.key <> ALL($1::text[])
+        AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.proctor_review = l.key)`,
+    [keys]
+  );
+}
+
 export async function seedRoles() {
   const { ROLE_DEFS } = await import("./lib/rbac.js");
   for (const def of ROLE_DEFS) {
