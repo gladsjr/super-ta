@@ -819,8 +819,8 @@ function renderProctoring(p) {
   const player = hasVideo ? `<video controls preload="metadata" style="width:100%;max-width:420px;border-radius:8px;margin-top:8px" src="/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(subToken)}/proctor-video/0"></video>` : '';
   const head = hasVideo ? '' : '<div class="eval-meta">Sem vídeo gravado para esta submissão.</div>';
   const body = rep ? (alerts || '<div class="eval-meta">Nenhum alerta relevante de integridade.</div>')
-    : (p.status === 'failed' ? '<div class="eval-meta" style="color:#8a1c1c">⚠ A análise do vídeo começou e não terminou (erro ou reinício). Rode “Avaliar entrevistas” para reprocessar.</div>'
-      : (hasVideo ? '<div class="eval-meta">Processando a análise do vídeo… (roda automaticamente ao fim da entrevista; recarregue em instantes)</div>' : ''));
+    : (p.status === 'failed' ? '<div class="eval-meta" style="color:#8a1c1c">⚠ A análise do vídeo falhou. Use o botão <strong>Reprocessar</strong> na lista de alunos (coluna Vídeo).</div>'
+      : (hasVideo ? '<div class="eval-meta">Vídeo em análise (fila automática ao fim da entrevista; recarregue em instantes).</div>' : ''));
   card.innerHTML = `<h2 class="card-title">Fiscalização por vídeo</h2>
     ${head}${body}${player}`;
   if (hasVideo) fixSeekableWebm(card.querySelector('video'));

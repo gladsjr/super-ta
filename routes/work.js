@@ -40,7 +40,7 @@ import {
 import { workMarkdown } from "../lib/exportMarkdown.js";
 import { mapPool } from "../lib/concurrency.js";
 import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
-import { analyzeOralVideoParts } from "../lib/proctor.js";
+import { enqueueProctor } from "../lib/proctorQueue.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import {
     PRINCIPAL_REASONING_MODEL,
@@ -443,9 +443,9 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
     }
 });
 
-// Roda o proctoring por vídeo de UMA submissão da entrevista (análise pós-envio, sob
-// demanda do professor). Reusa o mesmo núcleo da prova oral (analyzeOralVideoParts) e
-// grava em submissions.oral_proctor_json. Alimenta a penalidade (lib/gradePenalty) e o painel.
+// Reprocessa o proctoring por vídeo de UMA submissão da entrevista (botão ao lado
+// do 'falhou', #264). Não roda inline: ENFILEIRA na fila global (#262) com
+// prioridade manual e responde na hora — o painel acompanha pelo estado persistido.
 router.post("/w/:workToken/submissions/:subToken/proctor", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     try {
         if (req.work.proctoring_enabled !== true && req.work.interview_variant !== "realtime") {
@@ -453,13 +453,11 @@ router.post("/w/:workToken/submissions/:subToken/proctor", requireWorkToken, req
         }
         const parts = await db.getOralVideoParts(req.submission.id);
         if (!parts.length) return res.status(409).json({ error: "esta submissão não tem vídeo gravado" });
-        const report = await analyzeOralVideoParts(parts);
-        await db.setOralProctor(req.submission.id, report);
-        log.info("WORK", `proctor entrevista sub=${req.submission.submission_token} frames=${report.frames}`);
-        res.json({ ok: true, proctor: report });
+        enqueueProctor(req.submission.id, { priority: "manual", tokenForLog: req.submission.submission_token }).catch(() => {});
+        res.status(202).json({ ok: true, queued: true });
     } catch (err) {
-        log.error("WORK", `proctor (interview) failed: ${err.message}`);
-        res.status(500).json({ error: "falha na análise do vídeo", detail: err.message });
+        log.error("WORK", `proctor (interview) enqueue failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao enfileirar a análise", detail: err.message });
     }
 });
 
@@ -880,13 +878,15 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
         : "nenhuma entrevista nova para avaliar — todas as elegíveis já foram avaliadas",
     itemFn: async (work, found, force) => {
         // (1) Vídeo: best-effort — falha na análise NÃO derruba a avaliação.
+        // Passa pela FILA GLOBAL (#262) e AGUARDA a vez: respeita a concorrência
+        // configurada (não fura o teto de CPU/RAM) e deduplica com o disparo
+        // automático pós-sessão que pode estar em curso.
         if (work.proctoring_enabled === true || work.interview_variant === "realtime") {
             try {
                 const parts = await db.getOralVideoParts(found.id);
                 const detail = await db.getOralSubmissionDetail(found.id);
                 if (parts.length && (force || !(detail && detail.oral_proctor_json))) {
-                    const report = await analyzeOralVideoParts(parts);
-                    await db.setOralProctor(found.id, report);
+                    await enqueueProctor(found.id, { priority: "manual", tokenForLog: found.submission_token });
                 }
             } catch (e) {
                 log.error("EVALUATION", `proctor (lote) sub=${found.submission_token} falhou (ignorado): ${e.message}`);

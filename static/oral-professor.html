@@ -207,9 +207,10 @@
         <div class="card-collapsible-body">
           <p class="card-sub">Clique em <strong>Avaliação</strong> para ver a transcrição, o relatório, os alertas (com os trechos do vídeo) e atribuir a nota.</p>
           <p class="card-sub" data-help="Os alertas de vídeo (ausência, celular, outra pessoa, mãos fora) aparecem na coluna Alertas abaixo e no card de fiscalização de cada aluno, com os trechos do vídeo. Eles NÃO mexem na nota automaticamente — servem para você revisar e, se julgar necessário, ajustar a nota à mão.">Os alertas de <strong>fiscalização por vídeo</strong> (coluna <strong>Alertas</strong>) são indícios para a sua revisão — não alteram a nota automaticamente. Se algo justificar, ajuste a nota à mão na tela de cada aluno.</p>
-          <!-- Ações EM LOTE sobre os alunos (issue #189): analisar vídeos, calcular e publicar notas. -->
+          <!-- Ações EM LOTE sobre os alunos (issue #189): calcular e publicar notas.
+               O "Analisar vídeos" saiu (#262): a análise é automática ao fim de cada
+               prova (fila global) e o reprocesso é por aluno, ao lado do "falhou". -->
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-2)">
-            <button id="proctor-all-btn" class="btn" type="button" title="Analisa (visão computacional local) os vídeos ainda não analisados; alimenta a coluna Alertas">Analisar vídeos</button>
             <button id="eval-all-btn" class="btn btn-primary" type="button" title="Calcula as notas das provas realizadas que ainda não têm relatório (compara a transcrição ao gabarito)">Calcular Notas</button>
             <button id="eval-all-force-btn" class="btn" type="button" title="Recalcula as notas de TODAS as provas realizadas">Reavaliar todas</button>
             <button id="pub-grade-btn" class="btn btn-primary" type="button" title="Torna visíveis as notas e devolutivas já atribuídas">Publicar notas e devolutivas</button>
@@ -217,10 +218,8 @@
           </div>
           <div id="eval-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
           <div id="pub-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
-          <div id="proctor-batch-status" class="hint hidden" style="margin-bottom: var(--sp-2)"></div>
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-3)">
             <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
-            <button id="proctor-all-force-btn" class="btn btn-ghost btn-sm" type="button" title="Reanalisa TODOS os vídeos, inclusive os já analisados">Reanalisar vídeos</button>
           </div>
           <table id="eval-table" class="table hidden">
             <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
@@ -565,17 +564,17 @@
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
       if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
       if (s.transcript_alerts > 0) alertPills.push(`<span class="pill" style="background:#eae6fb;border:1px solid #b9adec" title="Trechos da transcrição prováveis de ruído/eco/silêncio (idioma não reconhecido, ininteligível). Confira no detalhe do aluno.">transcrição (${s.transcript_alerts})</span>`);
-      // Ampulheta SÓ quando a análise está realmente em andamento: manual em lote
-      // (_proctorPending) OU automática rodando agora (proctor_running, in-memory no
-      // servidor). Vídeo sem análise e sem nada rodando (prova antiga cujo upload
-      // foi antes do disparo, ou análise que falhou) mostra "não analisado" — o
-      // professor reprocessa pelo lote "Analisar vídeos".
-      const analysisPending = s._proctorPending || s.proctor_running;
-      const alerts = analysisPending
-        ? `${SPIN} <span class="hint">analisando vídeo…</span>`
+      // Estado da análise vem do SERVIDOR (fila global #262, persistido no banco):
+      //   'queued'/'running' → selo estático "em análise" (sem spinner, #264);
+      //   'failed'           → selo de falha + botão Reprocessar (enfileira de novo);
+      //   relatório pronto   → alertas (ou "ok").
+      // "não analisado" só sobra para legado que a reconciliação ainda não pegou.
+      const pst = s.proctor_state;
+      const alerts = (pst === 'queued' || pst === 'running')
+        ? '<span class="pill" title="O vídeo está na fila de análise; o resultado aparece aqui sozinho.">em análise</span>'
         : (alertPills.length ? alertPills.join(' ')
           : (s.has_oral_proctor ? '<span class="pill pill-done">ok</span>'
-            : (s.proctor_failed ? '<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3" title="A análise do vídeo começou e não terminou (erro ou reinício). Use \'Analisar vídeos\' para reprocessar.">falha na análise ⚠</span>'
+            : (pst === 'failed' ? `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3" title="${esc(s.proctor_error || 'A análise do vídeo falhou.')}${s.proctor_attempts > 1 ? ` (${s.proctor_attempts} tentativas)` : ''}">falhou ⚠</span> <button class="btn btn-sm" onclick="reprocessProctor('${s.submission_token}', this)">Reprocessar</button>`
               : (s.has_oral_video ? '<span class="hint">não analisado</span>' : '<span class="hint">—</span>'))));
       return `<tr data-sub="${s.submission_token}">
         <td>${esc(s.student_label || '')}${test}</td>
@@ -922,50 +921,22 @@
   document.getElementById('eval-all-btn').onclick = () => runEvalAll(false);
   document.getElementById('eval-all-force-btn').onclick = () => { if (confirm('Reavaliar TODAS as provas, inclusive as já avaliadas?')) runEvalAll(true); };
 
-  async function runProctorAll(force) {
-    const btnIds = ['proctor-all-btn', 'proctor-all-force-btn'];
-    btnIds.forEach(i => document.getElementById(i).disabled = true);
-    batchStatus('proctor-batch-status', (force ? 'Reanalisando todos os vídeos' : 'Analisando os vídeos') + '… (pode demorar — cada vídeo leva alguns segundos)');
-    await refreshSubs(); // pega provas concluídas desde que a página abriu (evita snapshot velho)
-    try {
-      const r = await fetch(`${API}/oral/proctor-all${force ? '?force=1' : ''}`, { method: 'POST' });
-      if (!r.ok || !r.body) {
-        let msg = r.status;
-        try { msg = (await r.json()).error || r.status; } catch (e) {}
-        batchStatus('proctor-batch-status', 'Falha: ' + msg);
-        return;
-      }
-      await readNdjson(r, (m) => {
-        if (m.type === 'start') {
-          (m.tokens || []).forEach(tok => { const s = findSub(tok); if (s) s._proctorPending = true; });
-          renderEvalTable();
-        } else if (m.type === 'item') {
-          const s = findSub(m.submission_token);
-          if (s) {
-            s._proctorPending = false;
-            if (m.ok) { s.has_oral_proctor = true; s.proctor_alerts = m.proctor_alerts; s.voice_alert = m.voice_alert; }
-            renderEvalTable();
-          }
-        } else if (m.type === 'done') {
-          SUBS.forEach(s => { if (s._proctorPending) s._proctorPending = false; }); // limpa sobras
-          let t = m.candidates === 0
-            ? 'Nenhum vídeo novo para analisar.'
-            : `${m.analyzed} vídeo(s) analisado(s) de ${m.candidates} com gravação.`;
-          if (m.errors && m.errors.length) t += ` ${m.errors.length} com erro.`;
-          if (m.elapsed_total_ms != null) t += ` (tempo total ${(m.elapsed_total_ms / 1000).toFixed(1)}s)`;
-          batchStatus('proctor-batch-status', t);
-          renderEvalTable();
-        }
-      });
-    } catch (e) {
-      SUBS.forEach(s => { if (s._proctorPending) s._proctorPending = false; });
-      renderEvalTable();
-      batchStatus('proctor-batch-status', 'Falha de comunicação.');
-    }
-    finally { btnIds.forEach(i => document.getElementById(i).disabled = false); await refreshSubs(); } // estado autoritativo do banco no fim
+  // Reprocesso individual da análise de vídeo (#264): enfileira no servidor com
+  // prioridade manual e responde na hora; a linha vira "em análise" no refresh
+  // (estado persistido é a fonte). Botão desabilita até o refresh — o dedup do
+  // servidor absorve cliques repetidos de qualquer forma.
+  async function reprocessProctor(token, btn) {
+    if (btn) btn.disabled = true;
+    try { await fetch(`${API}/oral/submissions/${token}/proctor`, { method: 'POST' }); } catch { /* estado vem do refresh */ }
+    await refreshSubs();
   }
-  document.getElementById('proctor-all-btn').onclick = () => runProctorAll(false);
-  document.getElementById('proctor-all-force-btn').onclick = () => { if (confirm('Reanalisar TODOS os vídeos, inclusive os já analisados?')) runProctorAll(true); };
+  window.reprocessProctor = reprocessProctor;
+
+  // Enquanto houver análise na fila/rodando, re-sincroniza sozinho (leve; para
+  // quando não há mais nada pendente).
+  setInterval(() => {
+    if (SUBS.some(s => s.proctor_state === 'queued' || s.proctor_state === 'running')) refreshSubs();
+  }, 10000);
 
   async function runPublishAll(target, on, statusId) {
     batchStatus(statusId, (on ? 'Publicando' : 'Despublicando') + (target === 'devolutiva' ? ' devolutivas…' : ' notas…'));

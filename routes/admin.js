@@ -13,6 +13,7 @@ import * as db from "../lib/db.js";
 import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
 import log from "../lib/logger.js";
+import { getProctorQueueSnapshot, setProctorConcurrency, enqueueProctor, cancelProctor, MAX_CONCURRENCY } from "../lib/proctorQueue.js";
 
 const router = express.Router();
 
@@ -297,6 +298,75 @@ router.post("/admin/analytics-tokens/:id/revoke", requireAdmin, async (req, res)
     } catch (err) {
         log.error("ADMIN", `revoke analytics token failed: ${err.message}`);
         res.status(500).json({ error: "failed to revoke analytics token" });
+    }
+});
+
+
+// ---- Operações: fila de proctoring (issues #262/#263) ----
+
+// Fotografia da fila + contadores. A fila vive em memória (proctorQueue); os
+// dados de aluno/trabalho vêm do banco por id (enriquecimento sob demanda).
+router.get("/admin/proctor/queue", requireAdmin, async (_req, res) => {
+    try {
+        const snap = getProctorQueueSnapshot();
+        const ids = [...snap.running, ...snap.queued].map(i => i.submission_id);
+        const info = await db.getProctorSubmissionInfo(ids);
+        const byId = Object.fromEntries(info.map(r => [r.id, r]));
+        const enrich = (i) => ({ ...i, ...(byId[i.submission_id] ? {
+            student_label: byId[i.submission_id].student_label,
+            is_test: byId[i.submission_id].is_test,
+            work_name: byId[i.submission_id].work_name,
+            work_token: byId[i.submission_id].work_token,
+            kind: byId[i.submission_id].kind,
+        } : {}) });
+        const [stats, failures] = await Promise.all([db.getProctorStats(), db.listProctorFailures()]);
+        res.json({
+            concurrency: snap.concurrency, max_concurrency: MAX_CONCURRENCY,
+            running: snap.running.map(enrich), queued: snap.queued.map(enrich),
+            stats, failures,
+        });
+    } catch (err) {
+        log.error("ADMIN", `proctor queue snapshot failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao ler a fila" });
+    }
+});
+
+router.post("/admin/proctor/concurrency", requireAdmin, async (req, res) => {
+    try {
+        const v = await setProctorConcurrency(req.body?.value);
+        log.info("ADMIN", `proctor concurrency=${v} by=${req.session.user.username}`);
+        res.json({ ok: true, concurrency: v });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// Reprocesso pelo admin (prioridade manual — fura fila sobre o automático).
+router.post("/admin/proctor/:submissionId/reprocess", requireAdmin, async (req, res) => {
+    try {
+        const id = Number(req.params.submissionId);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+        const info = await db.getProctorSubmissionInfo([id]);
+        if (!info.length) return res.status(404).json({ error: "submissão não encontrada" });
+        enqueueProctor(id, { priority: "manual", tokenForLog: info[0].submission_token }).catch(() => {});
+        log.info("ADMIN", `proctor reprocess sub=${info[0].submission_token} by=${req.session.user.username}`);
+        res.status(202).json({ ok: true, queued: true });
+    } catch (err) {
+        log.error("ADMIN", `proctor reprocess failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao enfileirar" });
+    }
+});
+
+// Cancela um item AINDA NA FILA (running não é interrompido — só termina).
+router.post("/admin/proctor/:submissionId/cancel", requireAdmin, async (req, res) => {
+    try {
+        const id = Number(req.params.submissionId);
+        const ok = await cancelProctor(id, `admin ${req.session.user.username}`);
+        if (!ok) return res.status(409).json({ error: "item não está na fila (já rodando ou concluído)" });
+        res.json({ ok: true });
+    } catch (err) {
+        log.error("ADMIN", `proctor cancel failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao cancelar" });
     }
 });
 

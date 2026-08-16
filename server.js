@@ -32,7 +32,7 @@ import {
 // O lib/config.js valida policy.yaml + pricing.yaml ao ser carregado.
 // Importar PORT antes de tudo garante fail-fast no boot.
 import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
-import { failOrphanProctorRunning } from "./lib/db.js";
+import { initProctorQueue } from "./lib/proctorQueue.js";
 import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import unitsRoutes from "./routes/units.js";
@@ -206,13 +206,14 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     } catch (err) {
         log.error("BOOT", `initAudioStore failed: ${err.message}`);
     }
-    // Análises de proctoring que ficaram 'running' no banco são órfãs de um
-    // reinício anterior (o processo que as rodava morreu) → marca 'failed' (#220).
+    // Fila global de proctoring (#262): carrega a concorrência persistida e
+    // RECONCILIA — 'queued'/'running' órfãos de reinício e legado com vídeo sem
+    // relatório voltam para a fila (substitui o antigo "órfã vira failed" do #220:
+    // agora a análise interrompida é retomada, não descartada).
     try {
-        const n = await failOrphanProctorRunning();
-        if (n) log.info("BOOT", `proctoring: ${n} análise(s) 'running' órfã(s) marcada(s) como 'failed'`);
+        await initProctorQueue();
     } catch (err) {
-        log.error("BOOT", `failOrphanProctorRunning failed: ${err.message}`);
+        log.error("BOOT", `initProctorQueue failed: ${err.message}`);
     }
     log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });

@@ -582,9 +582,33 @@ function videoCell(s) {
     if (al.length) return al.map(x => `<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">${escapeHtml(x)}</span>`).join(' ');
     return '<span class="hint">ok</span>';
   }
+  // Estado da fila global (#262), persistido no servidor: "em análise" cobre
+  // queued+running (sem spinner, #264); 'failed' ganha o Reprocessar aqui mesmo.
+  const pst = s.oral_voice_json?.proctor_status?.state;
+  if (pst === 'queued' || pst === 'running') return '<span class="pill" title="O vídeo está na fila de análise; o resultado aparece aqui sozinho.">em análise</span>';
+  if (pst === 'failed') {
+    const err = escapeHtml(s.oral_voice_json?.proctor_status?.error || 'A análise do vídeo falhou.');
+    return `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3" title="${err}">falhou ⚠</span> <button class="btn btn-sm" type="button" onclick="reprocessProctor('${escapeHtml(s.submission_token)}', this)">Reprocessar</button>`;
+  }
   if (batchRunning) return '<span class="cell-spin" title="Analisando o vídeo…"></span>';
   return '<span class="muted">—</span>';
 }
+// Reprocesso individual da análise de vídeo (#264): enfileira com prioridade
+// manual (fila global #262) e re-sincroniza — o estado persistido é a fonte.
+async function reprocessProctor(token, btn) {
+  if (btn) btn.disabled = true;
+  try { await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(token)}/proctor`, { method: 'POST' }); } catch { /* estado vem do load */ }
+  load();
+}
+// Enquanto houver análise de vídeo na fila/rodando, re-sincroniza sozinho (para
+// quando nada está pendente — o selo "em análise" nunca fica eterno).
+setInterval(() => {
+  const pend = (lastSubmissions || []).some(s => {
+    const st = s.oral_voice_json?.proctor_status?.state;
+    return st === 'queued' || st === 'running';
+  });
+  if (pend) load();
+}, 10000);
 function renderGradesTable() {
   const el = document.getElementById('grades-table');
   if (!el) return;

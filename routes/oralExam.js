@@ -25,7 +25,7 @@ import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL, ORAL_RUBRIC_BLOCK_SIZE
 import { exceedsPageLimit } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
-import { analyzeOralVideo, analyzeOralVideoParts } from "../lib/proctor.js";
+import { enqueueProctor } from "../lib/proctorQueue.js";
 import { mapPool } from "../lib/concurrency.js";
 import { rubricQuota, rubricsThatConsume } from "../lib/rubricQuota.js";
 import { questionHasRubric } from "../lib/oralRubric.js";
@@ -170,8 +170,12 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 devolutiva_published: !!s.evaluation_published_at,
                 grade_published: !!s.grade_published_at,
                 has_oral_proctor: !!s.has_oral_proctor,
-                proctor_running: proctorRunning.has(s.submission_token),
-                proctor_failed: s.oral_voice_json?.proctor_status?.state === "failed",
+                // Estado da fila global (#262), persistido no banco: o professor vê
+                // 'queued'/'running' colapsados em "em análise"; 'failed' ganha o
+                // botão de reprocessar (#264).
+                proctor_state: s.oral_voice_json?.proctor_status?.state || null,
+                proctor_error: s.oral_voice_json?.proctor_status?.error || null,
+                proctor_attempts: Number(s.oral_voice_json?.proctor_status?.attempts || 0),
                 proctor_alerts: proctorAlerts(s.oral_proctor_json),
                 voice_alert: voiceAlert(s.oral_voice_json),
                 calibration_alert: calibrationAlert(s.oral_calibration_json),
@@ -594,46 +598,26 @@ router.post("/w/:workToken/oral/submissions/:subToken/publish", requireWorkToken
 // token). Alimenta a ampulheta do batch: distingue "analisando agora" de "tem
 // vídeo mas sem análise" — este último (prova antiga cujo upload foi antes do
 // disparo automático, ou análise que falhou) NÃO deve ficar com spinner eterno.
-const proctorRunning = new Set();
 
-// Dispara a análise de vídeo (proctoring) em BACKGROUND para uma submissão
-// (#209). Fire-and-forget: usado pelo disparo automático pós-upload — analisa
-// todas as partes atuais e grava oral_proctor_json. Nunca lança para o caller.
+// Dispara a análise de vídeo pós-upload (#209): entra na FILA GLOBAL (#262), que
+// serializa, deduplica e persiste o estado. Fire-and-forget.
 function runOralProctorAuto(submissionId, token) {
-    if (proctorRunning.has(token)) return; // já em andamento
-    proctorRunning.add(token);
-    (async () => {
-        try {
-            const parts = await db.getOralVideoParts(submissionId);
-            if (!parts.length) return;
-            await db.setOralProctorStatus(submissionId, { state: "running", at: new Date().toISOString() });
-            const report = await analyzeOralVideoParts(parts);
-            await db.setOralProctor(submissionId, report); // grava o relatório e limpa o status
-            log.info("ORAL", `proctoring automático ok submission=${token} frames=${report.frames} ms=${report.ms}`);
-        } catch (e) {
-            // Persiste a FALHA (#220): distingue "não foi até o final" de "nunca analisada".
-            await db.setOralProctorStatus(submissionId, { state: "failed", at: new Date().toISOString(), error: e.message }).catch(() => {});
-            log.error("ORAL", `proctoring automático falhou submission=${token}: ${e.message}`);
-        } finally {
-            proctorRunning.delete(token);
-        }
-    })();
+    enqueueProctor(submissionId, { priority: "auto", tokenForLog: token }).catch(() => {});
 }
 
-// Proctoring local por vídeo (pós-prova): amostra frames e gera flags para
-// revisão humana (ausência / mais de uma pessoa / celular / mãos não visíveis).
-// Roda local (onnxruntime + ffmpeg); o vídeo não vai a serviço externo.
+// Reprocessar a análise de UMA prova (botão ao lado do 'falhou' no painel, #264).
+// Não roda inline: ENFILEIRA com prioridade manual (fura fila sobre o automático)
+// e responde na hora — o painel acompanha pelo proctor_state do /oral/info.
 router.post("/w/:workToken/oral/submissions/:subToken/proctor", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
         const parts = await db.getOralVideoParts(req.submission.id);
         if (!parts.length) return res.status(409).json({ error: "esta prova não tem vídeo gravado" });
-        const report = await analyzeOralVideoParts(parts);
-        await db.setOralProctor(req.submission.id, report);
-        res.json({ ok: true, proctor: report });
+        enqueueProctor(req.submission.id, { priority: "manual", tokenForLog: req.submission.submission_token }).catch(() => {});
+        res.status(202).json({ ok: true, queued: true });
     } catch (err) {
-        log.error("ORAL", `proctor failed: ${err.message}`);
-        res.status(500).json({ error: "falha na análise do vídeo", detail: err.message });
+        log.error("ORAL", `proctor enqueue failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao enfileirar a análise", detail: err.message });
     }
 });
 
@@ -768,66 +752,10 @@ router.post("/w/:workToken/oral/publish-all", requireWorkToken, requireOral, exp
     }
 });
 
-// Lote: proctoring por VÍDEO de todas as provas com vídeo gravado. Sem ?force,
-// pula as já analisadas; com ?force=1, reanalisa todas. Sequencial (cada vídeo:
-// ffmpeg + 2 modelos por frame), tudo local — o vídeo não vai a serviço externo.
-router.post("/w/:workToken/oral/proctor-all", requireWorkToken, requireOral, async (req, res) => {
-    let started = false; // se já mandamos headers (streaming), não dá mais p/ responder 500
-    try {
-        const force = req.query.force === "1" || req.body?.force === true;
-        const subs = await db.listOralSubmissionsForProctor(req.work.id, force);
-
-        // Streaming NDJSON (mesmo protocolo do evaluate-all): a coluna Alertas de
-        // cada aluno candidato vira ampulheta no "start" e é preenchida quando o
-        // respectivo "item" chega. SERIAL de propósito (cada vídeo: ffmpeg + 2
-        // modelos por frame); medimos o tempo por vídeo p/ avaliar paralelizar depois.
-        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
-        started = true;
-        const send = (obj) => res.write(JSON.stringify(obj) + "\n");
-        send({ type: "start", tokens: subs.map(s => s.submission_token) });
-
-        let analyzed = 0;
-        const errors = [];
-        const perVideoMs = [];
-        const t0 = Date.now();
-        for (const s of subs) {
-            try {
-                const parts = await db.getOralVideoParts(s.id);
-                if (!parts.length) {
-                    // Item pulado: avisa o cliente p/ tirar a ampulheta dessa linha.
-                    send({ type: "item", submission_token: s.submission_token, ok: false, error: "sem vídeo" });
-                    continue;
-                }
-                const tv = Date.now();
-                const report = await analyzeOralVideoParts(parts);
-                await db.setOralProctor(s.id, report);
-                const elapsed = Date.now() - tv;
-                perVideoMs.push(elapsed);
-                analyzed++;
-                // Mesmos cálculos que /oral/info: alertas de vídeo do report e alerta
-                // de voz do oral_voice_json gravado para o aluno.
-                const detail = await db.getOralSubmissionDetail(s.id);
-                send({
-                    type: "item", submission_token: s.submission_token, ok: true, has_oral_proctor: true,
-                    proctor_alerts: proctorAlerts(report),
-                    voice_alert: voiceAlert(detail?.oral_voice_json),
-                });
-            } catch (e) {
-                errors.push({ submission: s.submission_token, label: s.student_label, error: e.message });
-                log.error("ORAL", `proctor-all item failed sub=${s.submission_token}: ${e.message}`);
-                send({ type: "item", submission_token: s.submission_token, ok: false, error: e.message });
-            }
-        }
-        const elapsedTotal = Date.now() - t0;
-        log.info("ORAL", `proctor-all work=${req.work.work_token} analisados=${analyzed}/${subs.length} force=${force} tempo_total_ms=${elapsedTotal} por_video_ms=[${perVideoMs.join(", ")}]`);
-        send({ type: "done", analyzed, candidates: subs.length, errors, elapsed_total_ms: elapsedTotal, per_video_ms: perVideoMs });
-        res.end();
-    } catch (err) {
-        log.error("ORAL", `proctor-all failed: ${err.message}`);
-        if (started) { try { res.end(); } catch {} return; } // headers já enviados: só encerra
-        res.status(500).json({ error: "falha no proctoring em lote", detail: err.message });
-    }
-});
+// (removido, issue #262) O lote "Analisar vídeos" (proctor-all) saiu: a análise é
+// automática ao fim de cada prova (fila global em lib/proctorQueue.js) e o legado
+// sem relatório é re-enfileirado na reconciliação do boot. Reprocesso individual:
+// POST /oral/submissions/:subToken/proctor (acima).
 
 // --- Lado do ALUNO (Realtime) ---
 
