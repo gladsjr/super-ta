@@ -53,6 +53,15 @@
       <button class="btn btn-sm" id="nav-prev" title="Aluno anterior (←)">◀ Anterior</button>
       <span id="nav-counter" class="cockpit-counter"></span>
       <button class="btn btn-sm" id="nav-next" title="Próximo aluno (→)">Próximo ▶</button>
+      <!-- #278: filtro na navegação (paridade com a entrevista, #276). A lista
+           já é só de provas REALIZADAS — por isso não há Concluídas/Não concluídas. -->
+      <label class="hint" for="nav-filter" style="margin-left: var(--sp-3);">Mostrar:</label>
+      <select id="nav-filter" class="select" style="width: auto;">
+        <option value="all" selected>Todos</option>
+        <option value="blocked">Bloqueadas</option>
+        <option value="test">De teste</option>
+        <option value="real">Reais</option>
+      </select>
     </div>
 
     <!-- Ordem dos cards (#239): segue o fluxo de revisão do professor —
@@ -250,33 +259,68 @@
   }
 
   // Navegação lado a lado entre alunos (mesma lista do painel, só as provas
-  // realizadas). Espelha o cockpit da entrevista.
+  // realizadas). Espelha o cockpit da entrevista, inclusive o filtro (#278):
+  // restringe o Anterior/Próximo, persiste na URL (?filtro=) e, com o aluno
+  // aberto fora do filtro, leva ao vizinho mais próximo DENTRO do filtro.
   let cockpitPrev = null, cockpitNext = null;
+  let cockpitList = null; // provas realizadas, carregadas uma vez
+  const NAV_FILTERS = {
+    blocked: s => !!s.is_blocked,
+    test:    s => !!s.is_test,
+    real:    s => !s.is_test,
+  };
+  function navFilterValue() {
+    const v = new URLSearchParams(location.search).get('filtro');
+    return NAV_FILTERS[v] ? v : 'all';
+  }
+  function applyOralCockpit() {
+    const filter = document.getElementById('nav-filter').value;
+    const pass = NAV_FILTERS[filter] || (() => true);
+    const list = cockpitList.filter(s => pass(s) || s.submission_token === SUB);
+    const inFilter = cockpitList.filter(pass).length;
+    const idx = list.findIndex(s => s.submission_token === SUB);
+    cockpitPrev = idx > 0 ? list[idx - 1] : null;
+    cockpitNext = idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null;
+    const me = cockpitList.find(s => s.submission_token === SUB);
+    const foraDoFiltro = filter !== 'all' && me && !pass(me);
+    document.getElementById('nav-counter').innerHTML = foraDoFiltro
+      ? `<span class="muted">fora do filtro · ${inFilter} neste filtro</span> <span class="muted">· ${esc(me.student_label || SUB)}</span>`
+      : `Aluno ${idx + 1} de ${list.length} <span class="muted">· ${esc((me && me.student_label) || SUB)}</span>`;
+    const pb = document.getElementById('nav-prev'), nb = document.getElementById('nav-next');
+    pb.disabled = !cockpitPrev; nb.disabled = !cockpitNext;
+    pb.title = cockpitPrev ? `Anterior: ${cockpitPrev.student_label || cockpitPrev.submission_token} (←)` : 'Aluno anterior (←)';
+    nb.title = cockpitNext ? `Próximo: ${cockpitNext.student_label || cockpitNext.submission_token} (→)` : 'Próximo aluno (→)';
+  }
   async function setupOralCockpit() {
     try {
       const r = await fetch(`${API}/oral/info`);
       if (!r.ok) return;
       const j = await r.json();
-      const list = (j.submissions || []).filter(s => s.status === 'completed');
-      const idx = list.findIndex(s => s.submission_token === SUB);
-      if (idx === -1 || list.length <= 1) return;
-      cockpitPrev = idx > 0 ? list[idx - 1] : null;
-      cockpitNext = idx < list.length - 1 ? list[idx + 1] : null;
-      document.getElementById('nav-counter').innerHTML =
-        `Aluno ${idx + 1} de ${list.length} <span class="muted">· ${esc(list[idx].student_label || SUB)}</span>`;
-      const pb = document.getElementById('nav-prev'), nb = document.getElementById('nav-next');
-      pb.disabled = !cockpitPrev; nb.disabled = !cockpitNext;
-      if (cockpitPrev) pb.title = `Anterior: ${cockpitPrev.student_label || cockpitPrev.submission_token} (←)`;
-      if (cockpitNext) nb.title = `Próximo: ${cockpitNext.student_label || cockpitNext.submission_token} (→)`;
+      cockpitList = (j.submissions || []).filter(s => s.status === 'completed');
+      if (cockpitList.findIndex(s => s.submission_token === SUB) === -1 || cockpitList.length <= 1) return;
+      const sel = document.getElementById('nav-filter');
+      sel.value = navFilterValue();
+      sel.addEventListener('change', () => {
+        const u = new URL(location.href);
+        if (sel.value === 'all') u.searchParams.delete('filtro'); else u.searchParams.set('filtro', sel.value);
+        history.replaceState(null, '', u);
+        applyOralCockpit();
+      });
+      applyOralCockpit();
       document.getElementById('cockpit-nav').classList.remove('hidden');
     } catch { /* nav é melhoria; se falhar, a página segue normal */ }
   }
-  function gotoSubmission(s) { if (s) location.href = `${API}/oral/s/${s.submission_token}`; }
+  function gotoSubmission(s) {
+    if (!s) return;
+    const filter = document.getElementById('nav-filter').value;
+    const filtroParam = filter && filter !== 'all' ? `?filtro=${encodeURIComponent(filter)}` : '';
+    location.href = `${API}/oral/s/${s.submission_token}${filtroParam}`;
+  }
   document.getElementById('nav-prev').addEventListener('click', () => gotoSubmission(cockpitPrev));
   document.getElementById('nav-next').addEventListener('click', () => gotoSubmission(cockpitNext));
   document.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'textarea' || tag === 'input' || e.target.isContentEditable) return;
+    if (tag === 'textarea' || tag === 'input' || tag === 'select' || e.target.isContentEditable) return;
     if (e.key === 'ArrowLeft') gotoSubmission(cockpitPrev);
     else if (e.key === 'ArrowRight') gotoSubmission(cockpitNext);
   });
