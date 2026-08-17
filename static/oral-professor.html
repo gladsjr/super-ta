@@ -650,7 +650,7 @@
     SUBS = j.submissions || [];
     setMeta(j.work);
     document.getElementById('exam-status').innerHTML = j.work.has_exam
-      ? `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(j.work.exam_filename || 'abrir arquivo')} ↗</a>. As perguntas abaixo podem ser editadas.`
+      ? `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(j.work.exam_filename || 'abrir arquivo')} ↗</a>.`
       : 'Nenhuma prova enviada ainda — suba um PDF/TXT ou digite as perguntas abaixo.';
     document.getElementById('cfg-n').value = j.work.question_count || 5;
     const vs = document.getElementById('cfg-voice');
@@ -712,7 +712,7 @@
       if (j.truncated) {
         msg.innerHTML = `<span style="color:#8a6d1a">⚠ O material tinha mais perguntas do que o limite de <strong>${j.max_questions}</strong>; as excedentes foram <strong>descartadas</strong>. Se precisar de todas, divida o material em provas separadas.</span>`;
       }
-      document.getElementById('exam-status').innerHTML = `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(f.name || 'abrir arquivo')} ↗</a>. As perguntas abaixo podem ser editadas.`;
+      document.getElementById('exam-status').innerHTML = `Prova enviada — <a href="${API}/oral/exam-pdf" target="_blank" rel="noopener">${esc(f.name || 'abrir arquivo')} ↗</a>.`;
       adoptSaved(j.questions);
       renderQuestions();
       renderRubric();
