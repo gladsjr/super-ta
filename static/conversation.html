@@ -352,6 +352,17 @@
     <button class="btn btn-sm" id="nav-prev" title="Aluno anterior (←)">◀ Anterior</button>
     <span id="nav-counter" class="cockpit-counter"></span>
     <button class="btn btn-sm" id="nav-next" title="Próximo aluno (→)">Próximo ▶</button>
+    <!-- #276: mesmos filtros da lista de alunos; restringe o Anterior/Próximo
+         e persiste na URL ao navegar. -->
+    <label class="muted" for="nav-filter" style="margin-left: var(--sp-3); font-size: var(--fs-sm);">Mostrar:</label>
+    <select id="nav-filter" class="select" style="width: auto;">
+      <option value="all" selected>Todos</option>
+      <option value="done">Concluídas</option>
+      <option value="notdone">Não concluídas</option>
+      <option value="blocked">Bloqueadas</option>
+      <option value="test">De teste</option>
+      <option value="real">Reais</option>
+    </select>
   </div>
 
   <div class="page-header">
@@ -517,39 +528,73 @@ document.getElementById('back-link').href = '/w/' + encodeURIComponent(workToken
 // Reaproveita a própria página: prev/next navegam para a conversa do aluno
 // vizinho. A lista vem de /w/:t/info (mesma ordem do painel), filtrando os
 // que têm conversa (status != pendente — pendentes não têm o que revisar).
+// #276: o seletor "Mostrar" aplica os MESMOS filtros da lista de alunos e
+// restringe a navegação; o filtro persiste na URL (?filtro=) ao navegar.
 let cockpitPrev = null, cockpitNext = null;
+let cockpitList = null; // lista completa (não pendentes), carregada uma vez
+const NAV_FILTERS = {
+  done:    s => s.status === 'completed',
+  notdone: s => s.status !== 'completed',
+  blocked: s => !!s.is_blocked,
+  test:    s => !!s.is_test,
+  real:    s => !s.is_test,
+};
+function navFilterValue() {
+  const v = new URLSearchParams(location.search).get('filtro');
+  return NAV_FILTERS[v] ? v : 'all';
+}
+function applyCockpitNav() {
+  const filter = document.getElementById('nav-filter').value;
+  const pass = NAV_FILTERS[filter] || (() => true);
+  const list = cockpitList.filter(s => pass(s) || s.submission_token === subToken);
+  const inFilter = cockpitList.filter(pass).length;
+  const idx = list.findIndex(s => s.submission_token === subToken);
+  cockpitPrev = idx > 0 ? list[idx - 1] : null;
+  cockpitNext = idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null;
+  const me = cockpitList.find(s => s.submission_token === subToken);
+  const foraDoFiltro = filter !== 'all' && me && !pass(me);
+  document.getElementById('nav-counter').innerHTML = foraDoFiltro
+    ? `<span class="muted">fora do filtro · ${inFilter} neste filtro</span> <span class="muted">· ${escapeHtml(me.student_label || subToken)}</span>`
+    : `Aluno ${idx + 1} de ${list.length} <span class="muted">· ${escapeHtml((me && me.student_label) || subToken)}</span>`;
+  const prevBtn = document.getElementById('nav-prev');
+  const nextBtn = document.getElementById('nav-next');
+  prevBtn.disabled = !cockpitPrev;
+  nextBtn.disabled = !cockpitNext;
+  prevBtn.title = cockpitPrev ? `Anterior: ${cockpitPrev.student_label || cockpitPrev.submission_token} (←)` : 'Aluno anterior (←)';
+  nextBtn.title = cockpitNext ? `Próximo: ${cockpitNext.student_label || cockpitNext.submission_token} (→)` : 'Próximo aluno (→)';
+}
 async function setupCockpitNav() {
   if (VIEW_MODE !== 'avaliacao') return; // navegação lado a lado é coisa da avaliação
   try {
     const r = await fetch(`/w/${encodeURIComponent(workToken)}/info`);
     if (!r.ok) return;
     const j = await r.json();
-    const list = (j.submissions || []).filter(s => s.status !== 'pending');
-    const idx = list.findIndex(s => s.submission_token === subToken);
-    if (idx === -1 || list.length <= 1) return;
-    cockpitPrev = idx > 0 ? list[idx - 1] : null;
-    cockpitNext = idx < list.length - 1 ? list[idx + 1] : null;
-    const nav = document.getElementById('cockpit-nav');
-    document.getElementById('nav-counter').innerHTML =
-      `Aluno ${idx + 1} de ${list.length} <span class="muted">· ${escapeHtml(list[idx].student_label || subToken)}</span>`;
-    const prevBtn = document.getElementById('nav-prev');
-    const nextBtn = document.getElementById('nav-next');
-    prevBtn.disabled = !cockpitPrev;
-    nextBtn.disabled = !cockpitNext;
-    if (cockpitPrev) prevBtn.title = `Anterior: ${cockpitPrev.student_label || cockpitPrev.submission_token} (←)`;
-    if (cockpitNext) nextBtn.title = `Próximo: ${cockpitNext.student_label || cockpitNext.submission_token} (→)`;
-    nav.classList.remove('hidden');
+    cockpitList = (j.submissions || []).filter(s => s.status !== 'pending');
+    if (cockpitList.findIndex(s => s.submission_token === subToken) === -1 || cockpitList.length <= 1) return;
+    const sel = document.getElementById('nav-filter');
+    sel.value = navFilterValue();
+    sel.addEventListener('change', () => {
+      const u = new URL(location.href);
+      if (sel.value === 'all') u.searchParams.delete('filtro'); else u.searchParams.set('filtro', sel.value);
+      history.replaceState(null, '', u);
+      applyCockpitNav();
+    });
+    applyCockpitNav();
+    document.getElementById('cockpit-nav').classList.remove('hidden');
   } catch { /* nav é melhoria; se falhar, a página segue normal */ }
 }
 function gotoSubmission(s) {
-  if (s) location.href = `/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(s.submission_token)}?view=${VIEW_MODE}`;
+  if (!s) return;
+  const filter = document.getElementById('nav-filter').value;
+  const filtroParam = filter && filter !== 'all' ? `&filtro=${encodeURIComponent(filter)}` : '';
+  location.href = `/w/${encodeURIComponent(workToken)}/s/${encodeURIComponent(s.submission_token)}?view=${VIEW_MODE}${filtroParam}`;
 }
 document.getElementById('nav-prev').addEventListener('click', () => gotoSubmission(cockpitPrev));
 document.getElementById('nav-next').addEventListener('click', () => gotoSubmission(cockpitNext));
 document.addEventListener('keydown', e => {
   // Não sequestra setas quando o foco está num campo de texto (editor/diretrizes).
   const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'textarea' || tag === 'input' || e.target.isContentEditable) return;
+  if (tag === 'textarea' || tag === 'input' || tag === 'select' || e.target.isContentEditable) return;
   if (e.key === 'ArrowLeft') gotoSubmission(cockpitPrev);
   else if (e.key === 'ArrowRight') gotoSubmission(cockpitNext);
 });
