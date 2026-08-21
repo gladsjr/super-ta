@@ -204,12 +204,25 @@
   // Retranscrição de auditoria (#289): só a fala do ALUNO (o áudio contínuo do
   // tee não contém a voz do examinador, que toca no fone dele).
   function renderFinalTranscript(ft) {
-    if (!ft || !ft.text) return;
+    if (!ft || (!ft.text && !ft.segments)) return;
     document.getElementById('final-transcript-box').style.display = '';
     const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
     document.getElementById('ft-meta').textContent = `— ${esc(ft.model || ft.provider || '')}${dur} · só a voz do aluno`;
-    document.getElementById('final-transcript').textContent = ft.text;
+    const el = document.getElementById('final-transcript');
+    if (ft.mode === 'segments' && Array.isArray(ft.segments)) {
+      // Corte 2 (#289): trilha auditável — cada fala com timestamps e a
+      // pergunta POSICIONAL (fala após a k-ª pergunta tocar → pergunta k).
+      el.innerHTML = ft.segments.map(s => {
+        const q = s.q_idx > 0 ? `P${s.q_idx}` : 'abertura';
+        const time = `${fmtT(s.start_s)}–${fmtT(s.end_s)}`;
+        if (s.error) return `<p class="hint">[${q} · ${time}] <em>segmento não transcrito (${esc(s.error)})</em></p>`;
+        return `<p><span class="pill" style="background:var(--bg-muted);border:1px solid var(--ink-200)" title="Atribuição posicional pelo relógio do servidor — auditável, não semântica">${q} · ${time}</span> ${esc(s.text)}</p>`;
+      }).join('');
+    } else {
+      el.textContent = ft.text;
+    }
   }
+  function fmtT(s) { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
   function renderTranscript(turns, alerts) {
     const el = document.getElementById('transcript');
     if (!turns || !turns.length) { el.innerHTML = '<p class="hint">Sem transcrição — o aluno ainda não realizou a prova.</p>'; return; }

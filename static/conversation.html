@@ -1416,12 +1416,21 @@ async function load() {
 
   // Retranscrição de auditoria (#289): só a fala do ALUNO (o tee não contém a
   // voz do entrevistador, que toca no fone dele).
-  if (conv.final_transcript?.text) {
+  if (conv.final_transcript?.text || conv.final_transcript?.segments) {
     const ft = conv.final_transcript;
     document.getElementById('final-transcript-box').classList.remove('hidden');
     const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
     document.getElementById('ft-meta').textContent = `— ${ft.model || ft.provider || ''}${dur} · só a voz do aluno`;
-    document.getElementById('final-transcript-body').textContent = ft.text;
+    const body = document.getElementById('final-transcript-body');
+    if (ft.mode === 'segments' && Array.isArray(ft.segments)) {
+      const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+      body.textContent = ft.segments.map(s => {
+        const q = s.q_idx > 0 ? `P${s.q_idx}` : 'abertura';
+        return `[${q} · ${fmtT(s.start_s)}–${fmtT(s.end_s)}] ${s.error ? '(segmento não transcrito)' : s.text}`;
+      }).join('\n\n');
+    } else {
+      body.textContent = ft.text;
+    }
   }
 
   // Gravações do aluno: agrupa por turno para colá-las à conversa (renderTurn).
