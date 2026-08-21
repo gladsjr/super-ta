@@ -77,6 +77,21 @@ models:
   # novos: hints de idioma (languages) e keywords (lib/audio.js).
   # Voltar ao anterior (logprobs de volta) = "gpt-4o-transcribe".
   stt_model: "gpt-transcribe"
+  # Camada de provedor STT (#284): quem transcreve a fala do aluno.
+  #   stt_provider: openai (padrão) | groq
+  #   stt_fallback_provider: cai para cá em falha/timeout do primário (por chamada)
+  #   stt_groq_model: whisper-large-v3 (na Groq; exige GROQ_API_KEY no ambiente)
+  #   stt_timeout_ms: só vale quando HÁ fallback distinto (sem fallback, espera o SDK)
+  #   stt_shadow_provider + stt_shadow_rate (0..1): fração das chamadas roda TAMBÉM
+  #     no provedor sombra, só para comparação nos logs (custo é faturado; nunca
+  #     altera o texto). É a fase de validação antes de qualquer flip (#286).
+  # Provedor configurado sem credencial/preço DERRUBA O BOOT (ADR 0002).
+  stt_provider: "openai"
+  # stt_fallback_provider: "openai"
+  # stt_groq_model: "whisper-large-v3"
+  # stt_timeout_ms: 15000
+  # stt_shadow_provider: "groq"
+  # stt_shadow_rate: 0.1
   tts_model: "gpt-4o-mini-tts"
   # Realtime (fala-a-fala) — usado só pelo tipo de trabalho "prova oral".
   # gpt-realtime-2.1: geração 2.x (contexto 128k, melhor raciocínio e reconhecimento

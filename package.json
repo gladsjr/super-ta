@@ -30,7 +30,8 @@
     "predev": "npm run db:up && npm run db:migrate",
     "dev": "node server.js",
     "test:resume-gate": "node --test tests/resume-gate.test.mjs",
-    "test:live-nudge": "node --test tests/live-nudge.test.mjs"
+    "test:live-nudge": "node --test tests/live-nudge.test.mjs",
+    "test:stt-provider": "node --test tests/stt-provider.test.mjs"
   },
   "dependencies": {
     "@replit/object-storage": "^1.0.0",

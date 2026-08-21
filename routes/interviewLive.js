@@ -16,15 +16,14 @@ import OpenAI from "openai";
 import fs from "fs";
 import os from "os";
 import { requireSubmissionToken, requireNotFinalized, requireWithinBudget } from "../lib/middleware.js";
+import { sttTranscribe } from "../lib/stt.js";
 import * as db from "../lib/db.js";
 import { wouldResume } from "../lib/resumeGate.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
 import { clientForWork } from "../lib/openaiClient.js";
 import { prepBuilderAgent } from "../lib/agents.js";
 import { putAudio, extFromMimetype } from "../lib/audioStore.js";
-import { transcribeAudio } from "../lib/audio.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
-import { STT_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import log from "../lib/logger.js";
 
@@ -229,7 +228,7 @@ router.post("/s/:submissionToken/live/calibrate", requireSubmissionToken, requir
 
         // Extensão pelo mimetype real: MediaRecorder varia por navegador (webm no
         // Chrome/Firefox, mp4/m4a no Safari) e o STT infere o formato pela extensão.
-        const { text } = await transcribeAudio(clientForWork(req.work), STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
+        const { text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `calib.${extFromMimetype(req.file.mimetype)}` });
         const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
 
         // Acumula o registro (todas as tentativas) para o professor.

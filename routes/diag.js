@@ -18,10 +18,10 @@ import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import { openai } from "../lib/openaiClient.js";
-import { transcribeAudio } from "../lib/audio.js";
+import { sttTranscribe } from "../lib/stt.js";
 import { classifyAudio } from "../lib/audioIntelligibility.js";
 import { classifyAcoustic, combineTiers } from "../lib/acousticGate.js";
-import { STT_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC } from "../lib/config.js";
+import { AUDIO_INTELLIGIBILITY, ACOUSTIC } from "../lib/config.js";
 import log from "../lib/logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,7 +55,7 @@ router.post("/diag/audio", upload.single("audio"), async (req, res) => {
     // STT (mesma chamada de produção: logprobs ligados).
     let transcript = "", logprobs = null;
     try {
-        const r = await transcribeAudio(openai, STT_MODEL, req.file.buffer, req.file.originalname || "diag.webm");
+        const r = await sttTranscribe({ openaiClient: openai, buffer: req.file.buffer, filename: req.file.originalname || "diag.webm" });
         transcript = r.text;
         logprobs = r.logprobs ?? null;
     } catch (err) {
