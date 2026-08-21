@@ -848,7 +848,8 @@ router.get("/s/:submissionToken/oral/status", requireSubmissionToken, async (req
     if (!done && !req.submission.is_test) {
         try {
             const prior = (await db.getOralTranscript(req.submission.id)) || [];
-            resumeBlocked = wouldResume({ isTest: false, priorTranscript: prior })
+            const speechEvents = await db.getStudentSpeechEvents(req.submission.id).catch(() => 0);
+            resumeBlocked = wouldResume({ isTest: false, priorTranscript: prior, speechEvents })
                 && !(await db.hasResumeAllowance(req.submission.id));
         } catch {}
     }

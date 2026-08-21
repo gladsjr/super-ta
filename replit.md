@@ -57,7 +57,7 @@ Subsystem detail lives in `docs/` — update THERE when a subsystem changes:
 - `AudioIntelligibilityAgent` — phrases the audio pre-gate message (decision is algorithmic, `lib/audioIntelligibility.js`).
 - `SuperOrchestratorAgent` — the one reasoning call per turn.
 - `ConfigAssistantAgent` / `EnunciadoCoherenceAgent` — professor config chat + assignment-statement evaluator.
-- `InterviewEvaluatorAgent` — post-interview internal evaluation (+ delivery section from `lib/deliverySignals.js`); never auto-accuses, never shown to the student.
+- `InterviewEvaluatorAgent` — post-interview internal evaluation (content only; delivery/authorship inference removed 2026-08-12, #282); never auto-accuses, never shown to the student.
 - `StudentFeedbackAgent` — sanitized, formative student devolutiva derived from the internal eval (two-layer sanitization: prompt rules + `FORBIDDEN_PATTERNS` sweep); reused for the oral devolutiva.
 - `GradingAgent` — 0–10 per rubric criterion (one call per criterion); final = weighted average in code (`lib/rubric.js`). The grade is its OWN publication (`grade_published_at`), independent of the devolutiva.
 - *(removed 2026-08-13)* Automatic grade penalty (`GradePenaltyAgent`): proctoring is a human-review signal, never an automatic accusation. Video alerts are now only shown to the professor (who adjusts the grade manually) and may color the student devolutiva; the grade is just the weighted rubric average.
@@ -68,7 +68,7 @@ Subsystem detail lives in `docs/` — update THERE when a subsystem changes:
 ## External Dependencies
 
 ### OpenAI
-`openai@^6.x`; **no** Assistants API. APIs used: Files, Vector Stores (per-session `file_search`), Conversations (`conv_chat`/`conv_eval`, server-side compaction), Responses (all generation; `stream: true` for audio-mode `/chat`), STT (with logprobs for the pre-gate), TTS (interviewer voice), Realtime (`gpt-realtime`, oral relay).
+`openai@^6.x`; **no** Assistants API. APIs used: Files, Vector Stores (per-session `file_search`), Conversations (`conv_chat`/`conv_eval`, server-side compaction), Responses (all generation; `stream: true` for audio-mode `/chat`), STT (gpt-transcribe; sem logprobs — o pré-gate de inteligibilidade é no-op desde a troca de 01/08), TTS (interviewer voice), Realtime (`gpt-realtime`, oral relay).
 
 **Model selection**: `config/policy.yaml#models` is the source of truth (`principal_reasoning_model` for analysis/orchestration/evaluation, `fast_model` for extraction/phrasing; `principal_reasoning_effort` injected uniformly by `lib/openaiClient.js`). Don't hardcode model names in docs — check policy.yaml.
 

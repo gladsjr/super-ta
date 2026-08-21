@@ -22,11 +22,11 @@ import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
  *
  * Resultado costuma ser cacheado em submissions.evaluation_json.
  *
- * Output JSON contract:
+ * Output JSON contract (o contrato REAL é REPORT_SCHEMA, abaixo — este resumo
+ * é só orientação):
  *   {
  *     "overall": {
  *       "defense_quality": "strong" | "adequate" | "weak" | "poor",
- *       "authorship_confidence": "high" | "medium" | "low",
  *       "summary": "<3-6 frases>"
  *     },
  *     "interviewer_impression": "<parágrafo>",
@@ -38,16 +38,14 @@ import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
  *     ],
  *     "strengths": [ "<frase>" ],
  *     "weaknesses": [ "<frase>" ],
- *     "delivery": {
- *       "overall_impression": "natural" | "mixed" | "scripted" | "inconclusive",
- *       "observations": [ "<frase>" ]
- *     },
- *     "authorship_signals": [
- *       { "direction": "supports" | "questions", "signal": "<frase>", "where": "<turno/trecho>" }
- *     ],
  *     "follow_up_suggestions": [ "<pergunta>" ],
  *     "caveats": [ "<limitação desta avaliação>" ]
  *   }
+ *
+ * Os campos delivery/authorship_confidence/authorship_signals foram REMOVIDOS
+ * em 12/08/2026 (issue #282 fecha a limpeza): inferir autoria por tempo,
+ * fluência ou nome transcrito produzia laudo falso (auditorias de 18/08) — a
+ * integridade fica com a fiscalização por vídeo, revisada por humano (ADR 0004).
  */
 
 // Serializa o conversation_json num texto estável para o avaliador (abertura,

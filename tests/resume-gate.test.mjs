@@ -40,3 +40,26 @@ test("contagem de falas do aluno (o 'onde parou' do professor)", () => {
 test("o código de erro é estável — as páginas do aluno dependem dele", () => {
     assert.equal(RESUME_BLOCKED, "resume_blocked");
 });
+
+// --- #283: eventos de fala substituem a dependência do texto transcrito ---
+
+test("fala real SEM texto (sessão 100% alucinada) conta como retomada", () => {
+    // O caso Rebeca: o aluno falou 16 vezes, mas o STT só produziu lixo — no
+    // transcript não sobra role='student' com texto. O contador de eventos pega.
+    assert.equal(wouldResume({ isTest: false, priorTranscript: [], speechEvents: 16 }), true);
+    assert.equal(wouldResume({ isTest: false, priorTranscript: null, speechEvents: 1 }), true);
+});
+
+test("sessão antiga sem o contador decide pelo texto (compatibilidade)", () => {
+    assert.equal(wouldResume({ isTest: false, priorTranscript: [fala("student")] }), true);
+    assert.equal(wouldResume({ isTest: false, priorTranscript: [fala("examiner")], speechEvents: 0 }), false);
+});
+
+test("teste continua isento mesmo com eventos de fala", () => {
+    assert.equal(wouldResume({ isTest: true, priorTranscript: [], speechEvents: 30 }), false);
+});
+
+test("contador inválido não derruba a decisão", () => {
+    assert.equal(wouldResume({ isTest: false, priorTranscript: [], speechEvents: NaN }), false);
+    assert.equal(wouldResume({ isTest: false, priorTranscript: [], speechEvents: "3" }), true);
+});
