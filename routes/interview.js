@@ -16,15 +16,15 @@
 import express from "express";
 import multer from "multer";
 import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
+import { sttTranscribe } from "../lib/stt.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import * as db from "../lib/db.js";
 import { openai, clientForWork } from "../lib/openaiClient.js";
-import { transcribeAudio, synthesizeSpeech, AudioCache } from "../lib/audio.js";
+import { synthesizeSpeech, AudioCache } from "../lib/audio.js";
 import { getAudioDurationSeconds } from "../lib/audioMeta.js";
-import { meteredStt } from "../lib/billing.js";
 import { decideChatDedup, markChatDone, abortChatDedup } from "../lib/chatDedup.js";
 import { scheduleKeepalive, cancelKeepalive } from "../lib/cacheKeepalive.js";
-import { STT_MODEL, TTS_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
+import { TTS_MODEL, AUDIO_INTELLIGIBILITY, ACOUSTIC, DEFAULT_QUESTION_COUNT } from "../lib/config.js";
 import { pickPersona } from "../lib/personas.js";
 import { deleteConversationLog } from "../lib/conversationLog.js";
 import { classifyAudio } from "../lib/audioIntelligibility.js";
@@ -557,7 +557,7 @@ router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload
         if (!Number.isInteger(attempt) || attempt < 1) attempt = 1;
         if (attempt > MAX_CALIB_ATTEMPTS) attempt = MAX_CALIB_ATTEMPTS;
 
-        const { text } = await transcribeAudio(clientForWork(req.work), STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
+        const { text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `calib.${extFromMimetype(req.file.mimetype)}` });
         const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
 
         const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
@@ -1066,10 +1066,15 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 req.file.buffer,
                 req.file.mimetype || null,
             );
-            const sttResult = await meteredStt(
-                { ...sessionMeterCtx(sess), model: STT_MODEL },
-                () => transcribeAudio(sess.openai || openai, STT_MODEL, req.file.buffer, req.file.originalname || "audio.webm")
-            );
+            // Camada de provedor (#284): com a config padrão, caminho idêntico
+            // ao transcribeAudio de sempre; o metering fica NA camada, com o
+            // modelo realmente usado (fallback não fatura como o primário).
+            const sttResult = await sttTranscribe({
+                openaiClient: sess.openai || openai,
+                buffer: req.file.buffer,
+                filename: req.file.originalname || "audio.webm",
+                meterCtx: sessionMeterCtx(sess),
+            });
             message = sttResult.text;
             studentAudioLogprobs = sttResult.logprobs ?? null;
             // Preserva o buffer pra arquivamento best-effort APÓS o STT ter

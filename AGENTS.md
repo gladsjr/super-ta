@@ -96,6 +96,9 @@ por NNNN"); nunca reescreva uma ADR aceita.
   (saída livre).
 - **Lote com concorrência limitada**: use `lib/concurrency.js#mapPool`. Não
   escreva pool de workers à mão.
+- **STT (fala do aluno → texto)**: use `lib/stt.js#sttTranscribe` — a camada de
+  provedor (#284) cuida de fallback, metering e sombra. Não chame
+  `audio.transcriptions.create` nem `transcribeAudio` direto em rota nova.
 
 ## Migrations — file-per-change
 

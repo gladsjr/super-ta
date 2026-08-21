@@ -70,6 +70,8 @@ Subsystem detail lives in `docs/` — update THERE when a subsystem changes:
 ### OpenAI
 `openai@^6.x`; **no** Assistants API. APIs used: Files, Vector Stores (per-session `file_search`), Conversations (`conv_chat`/`conv_eval`, server-side compaction), Responses (all generation; `stream: true` for audio-mode `/chat`), STT (gpt-transcribe; sem logprobs — o pré-gate de inteligibilidade é no-op desde a troca de 01/08), TTS (interviewer voice), Realtime (`gpt-realtime`, oral relay).
 
+**STT provider layer (#284)**: fala do aluno passa por `lib/stt.js#sttTranscribe` (única porta de entrada — não chame `audio.transcriptions.create` direto). Provedores: `openai` (gpt-transcribe, padrão) e `groq` (whisper-large-v3, dormente até haver `GROQ_API_KEY` + aditivo LGPD #290). Config em `policy.yaml#models.stt_*`: fallback automático por chamada, timeout (só com fallback), sombra amostral p/ comparação. Provedor configurado sem credencial/preço derruba o boot (ADR 0002).
+
 **Model selection**: `config/policy.yaml#models` is the source of truth (`principal_reasoning_model` for analysis/orchestration/evaluation, `fast_model` for extraction/phrasing; `principal_reasoning_effort` injected uniformly by `lib/openaiClient.js`). Don't hardcode model names in docs — check policy.yaml.
 
 ### Interaction Modes (text vs audio)

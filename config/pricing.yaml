@@ -92,6 +92,10 @@ stt:
     input_per_mtok: 2.50
     output_per_mtok: 10.00
     per_second_usd: 0.006   # ~$0.36/min — usado se a API só devolver duration
+  # whisper-large-v3 hospedado na Groq (#284): $0.111/hora de áudio. A API
+  # devolve `duration` em segundos (o provedor sintetiza usage tipo duration).
+  whisper-large-v3:
+    per_second_usd: 0.0000308   # $0.111/h ÷ 3600
 
 # ---------------------------------------------------------------------------
 # TTS (audio.speech). A API NÃO retorna usage; cobramos por caractere de

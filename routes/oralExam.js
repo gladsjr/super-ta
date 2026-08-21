@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import fs from "fs";
 import os from "os";
 import { requireWorkToken, requireSubmissionToken, requireProfessorSubmission, requireWithinBudget } from "../lib/middleware.js";
+import { sttTranscribe } from "../lib/stt.js";
 import { publicBaseUrl } from "../lib/publicUrl.js";
 import * as db from "../lib/db.js";
 import { wouldResume } from "../lib/resumeGate.js";
@@ -19,10 +20,9 @@ import { openai, clientForWork, apiKeyForWork } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { ensureConsolidatedVideo } from "../lib/videoConsolidate.js";
-import { transcribeAudio } from "../lib/audio.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
-import { isValidQuestionCount, REALTIME_MODEL, STT_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
+import { isValidQuestionCount, REALTIME_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
 import { exceedsPageLimit } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
@@ -884,7 +884,7 @@ router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibU
 
         // Extensão pelo mimetype real: MediaRecorder varia por navegador (webm no
         // Chrome/Firefox, mp4/m4a no Safari) e o STT infere o formato pela extensão.
-        const { text } = await transcribeAudio(clientForWork(req.work), STT_MODEL, req.file.buffer, `calib.${extFromMimetype(req.file.mimetype)}`);
+        const { text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `calib.${extFromMimetype(req.file.mimetype)}` });
         const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
 
         // Acumula o registro (todas as tentativas) para o professor.
