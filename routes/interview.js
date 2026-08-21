@@ -18,6 +18,7 @@ import multer from "multer";
 import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
 import { sttTranscribe } from "../lib/stt.js";
 import { glossaryForSession } from "../lib/sttGlossary.js";
+import { classifyStudentTurn } from "../lib/transcriptAlerts.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import * as db from "../lib/db.js";
 import { openai, clientForWork } from "../lib/openaiClient.js";
@@ -1082,6 +1083,15 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             });
             message = sttResult.text;
             studentAudioLogprobs = sttResult.logprobs ?? null;
+            // Monitor de captação (#287, fase "só sinaliza"): classifica a
+            // transcrição com as heurísticas dos alertas (#137) e conta —
+            // telemetria para calibrar limiares ANTES de qualquer pausa
+            // automática. Fire-and-forget: nunca atrasa o turno.
+            try {
+                const suspeita = classifyStudentTurn(message);
+                if (suspeita) log.warn("STT-MONITOR", `resposta suspeita (${suspeita}) submission=${sess.submissionToken || ""} ${log.preview(message, 80)}`);
+                db.bumpSttMonitor(sess.submissionId, !!suspeita).catch(() => {});
+            } catch { /* telemetria nunca derruba o turno */ }
             // Preserva o buffer pra arquivamento best-effort APÓS o STT ter
             // sucesso. Só guarda se a fala for usada (passou pelo pré-gate
             // de inteligibilidade — checado mais abaixo).
