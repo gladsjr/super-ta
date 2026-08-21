@@ -476,6 +476,15 @@
     <pre id="doc-map-body"></pre>
   </details>
 
+  <!-- Retranscrição de auditoria (#289, variante realtime): texto do áudio
+       CONTÍNUO do aluno, gerado após a sessão. Quando divergir da conversa
+       acima, a retranscrição tende a ser a fiel (o transcript ao vivo alucina
+       quando o áudio degrada). Não altera a avaliação. -->
+  <details class="doc-map hidden" id="final-transcript-box">
+    <summary>Retranscrição de auditoria (áudio contínuo) <span id="ft-meta" style="font-weight:400; color:var(--ink-soft, #667)"></span></summary>
+    <pre id="final-transcript-body" style="white-space:pre-wrap"></pre>
+  </details>
+
   <details class="skipped hidden" id="skipped">
     <summary id="skipped-summary">Perguntas descartadas pelo agente de relevância</summary>
     <div id="skipped-body"></div>
@@ -1403,6 +1412,16 @@ async function load() {
   if (conv.document_map) {
     document.getElementById('doc-map').classList.remove('hidden');
     document.getElementById('doc-map-body').textContent = JSON.stringify(conv.document_map, null, 2);
+  }
+
+  // Retranscrição de auditoria (#289): só a fala do ALUNO (o tee não contém a
+  // voz do entrevistador, que toca no fone dele).
+  if (conv.final_transcript?.text) {
+    const ft = conv.final_transcript;
+    document.getElementById('final-transcript-box').classList.remove('hidden');
+    const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
+    document.getElementById('ft-meta').textContent = `— ${ft.model || ft.provider || ''}${dur} · só a voz do aluno`;
+    document.getElementById('final-transcript-body').textContent = ft.text;
   }
 
   // Gravações do aluno: agrupa por turno para colá-las à conversa (renderTurn).

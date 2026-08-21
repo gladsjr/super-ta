@@ -83,6 +83,14 @@
     <div class="card">
       <h3 class="card-title">Transcrição da prova</h3>
       <div id="transcript" class="transcript"></div>
+      <!-- Retranscrição de auditoria (#289): texto do áudio CONTÍNUO do aluno,
+           gerado após a sessão. Convive com a transcrição ao vivo acima — quando
+           as duas divergem, a retranscrição tende a ser a fiel (o transcript ao
+           vivo alucina quando o áudio degrada). Não altera a avaliação. -->
+      <details id="final-transcript-box" style="display:none; margin-top:var(--sp-3)">
+        <summary style="cursor:pointer; font-weight:600">Retranscrição de auditoria (áudio contínuo) <span id="ft-meta" class="hint"></span></summary>
+        <div id="final-transcript" class="transcript" style="margin-top:var(--sp-2); white-space:pre-wrap"></div>
+      </details>
     </div>
 
     <div class="card">
@@ -193,6 +201,15 @@
       </div>${seedHint}${summary}`;
     el.querySelectorAll('.g-score').forEach(inp => inp.addEventListener('input', recomputeFinalOral));
   }
+  // Retranscrição de auditoria (#289): só a fala do ALUNO (o áudio contínuo do
+  // tee não contém a voz do examinador, que toca no fone dele).
+  function renderFinalTranscript(ft) {
+    if (!ft || !ft.text) return;
+    document.getElementById('final-transcript-box').style.display = '';
+    const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
+    document.getElementById('ft-meta').textContent = `— ${esc(ft.model || ft.provider || '')}${dur} · só a voz do aluno`;
+    document.getElementById('final-transcript').textContent = ft.text;
+  }
   function renderTranscript(turns, alerts) {
     const el = document.getElementById('transcript');
     if (!turns || !turns.length) { el.innerHTML = '<p class="hint">Sem transcrição — o aluno ainda não realizou a prova.</p>'; return; }
@@ -238,6 +255,7 @@
     document.getElementById('devolutiva').value = d.devolutiva || '';
     setPubBtn(d.grade_published);
     renderTranscript(d.transcript, d.voice?.transcript_alerts);
+    renderFinalTranscript(d.final_transcript);
 
     const scCard = document.getElementById('student-comment-card');
     if (d.student_comment) {
