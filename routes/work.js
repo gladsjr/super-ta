@@ -420,6 +420,14 @@ router.get("/w/:workToken/submissions/:subToken/conversation", requireWorkToken,
         } catch (err) {
             log.error("WORK", `audio list failed submission=${subToken}: ${err.message}`);
         }
+        // Retranscrição de auditoria (#289, variante realtime): texto do áudio
+        // contínuo do tee, em convivência — a UI mostra num bloco próprio.
+        try {
+            const ft = await db.getFinalTranscript(found.id);
+            if (conversation && ft) conversation.final_transcript = ft;
+        } catch (err) {
+            log.error("WORK", `final transcript load failed submission=${subToken}: ${err.message}`);
+        }
         // Proctoring por vídeo (entrevista): relatório já analisado (se houver) e se
         // existe vídeo gravado — a UI mostra os alertas, o botão "Analisar vídeo" e o player.
         let proctoring = null;

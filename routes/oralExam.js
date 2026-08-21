@@ -508,6 +508,9 @@ router.get("/w/:workToken/oral/submissions/:subToken", requireWorkToken, require
             completion_reason: d?.completion_reason || null,
             has_oral_video: !!d?.has_oral_video,
             transcript: Array.isArray(d?.oral_transcript) ? d.oral_transcript : [],
+            // Retranscrição de auditoria (#289): o texto do áudio contínuo do tee,
+            // em CONVIVÊNCIA com o transcript ao vivo (não substitui a avaliação).
+            final_transcript: d?.final_transcript || null,
             evaluation: d?.oral_eval_json || null,
             devolutiva: d?.oral_devolutiva || "",
             grade: d?.grade_final ?? null,
