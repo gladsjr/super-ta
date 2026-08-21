@@ -17,6 +17,7 @@ import express from "express";
 import multer from "multer";
 import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
 import { sttTranscribe } from "../lib/stt.js";
+import { glossaryForSession } from "../lib/sttGlossary.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import * as db from "../lib/db.js";
 import { openai, clientForWork } from "../lib/openaiClient.js";
@@ -1073,6 +1074,10 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
                 openaiClient: sess.openai || openai,
                 buffer: req.file.buffer,
                 filename: req.file.originalname || "audio.webm",
+                // Glossário de domínio (#293): ancora a grafia de siglas/nomes
+                // do trabalho ("GENIUS Act", "USDC") — validado na bancada #285.
+                // A CALIBRAÇÃO não recebe glossário (ela mede a captação).
+                keywords: glossaryForSession(sess, { workName: req.work?.name }),
                 meterCtx: sessionMeterCtx(sess),
             });
             message = sttResult.text;
