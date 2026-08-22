@@ -62,6 +62,7 @@ alternativa descartada e o custo aceito.
 | [0019](docs/decisoes/0019-lote-avalia-quem-concluiu.md) | Lote só pega quem **concluiu e não é teste**; `force` não fura a regra. Teste, em andamento e desistência: só individualmente. |
 | [0020](docs/decisoes/0020-queda-de-gravacao-pausa-na-primeira.md) | Queda de gravação pausa na **primeira**; retomada exige **liberação do professor** (consumida a cada uso). Retomada automática era falhar em aberto. |
 | [0021](docs/decisoes/0021-vigilancia-fala-pela-interface.md) | Vigilância de posição ao vivo fala pela **interface** (pausa + modal), nunca pela voz; sob carga a detecção **morre primeiro**, a gravação nunca; desligada vira sinal. |
+| [0022](docs/decisoes/0022-jobs-no-banco-janela-ociosa.md) | Retranscrição **não roda no encerramento**: vai à fila `jobs` e espera a janela ociosa. O motor local degrada p/ API com log (exceção deliberada à 0002 — é batch re-executável, não caminho de sessão). |
 
 Decisão nova **supersede** a antiga (ADR nova, estado da antiga vira "Superada
 por NNNN"); nunca reescreva uma ADR aceita.

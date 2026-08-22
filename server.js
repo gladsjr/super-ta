@@ -34,6 +34,7 @@ import {
 // Importar PORT antes de tudo garante fail-fast no boot.
 import { PORT, PRINCIPAL_REASONING_MODEL } from "./lib/config.js";
 import { initProctorQueue } from "./lib/proctorQueue.js";
+import { startJobRunner } from "./lib/jobRunner.js";
 import staticRoutes from "./routes/static.js";
 import adminRoutes from "./routes/admin.js";
 import unitsRoutes from "./routes/units.js";
@@ -221,6 +222,9 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     } catch (err) {
         log.error("BOOT", `initProctorQueue failed: ${err.message}`);
     }
+    // Executor da fila de jobs (#289, corte 3): retranscrição na janela ociosa.
+    // Também recupera jobs órfãos de reinício (lease vencida volta a elegível).
+    startJobRunner();
     log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });
 
