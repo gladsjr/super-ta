@@ -40,6 +40,7 @@ código já explica sozinho.
 | [0019](0019-lote-avalia-quem-concluiu.md) | O lote avalia quem concluiu; o resto é individual | Aceita |
 | [0020](0020-queda-de-gravacao-pausa-na-primeira.md) | Queda de gravação pausa na primeira; retomada exige liberação | Aceita |
 | [0021](0021-vigilancia-fala-pela-interface.md) | Vigilância ao vivo fala pela interface; gravação > detecção | Aceita |
+| [0022](0022-jobs-no-banco-janela-ociosa.md) | Processamento pesado em fila no banco, executada na janela ociosa | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.
 

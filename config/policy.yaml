@@ -148,3 +148,14 @@ acoustic:
   bak_enabled: false # DNSMOS-BAK (modelo local de 1 MB) — ainda não calculado no cliente; plugável
   bak_warn: 2.5      # background quality (1=barulhento .. 5=limpo) abaixo disso -> avisar
   bak_repeat: 1.6    # abaixo disso -> repetir
+
+# Fila de jobs de processamento pesado (#289, corte 3 — lib/jobRunner.js).
+jobs:
+  # Motor da RETRANSCRIÇÃO de auditoria quando executada pela fila:
+  #   api   — provedor da camada STT (#284): roda em qualquer tique, custo por uso
+  #   local — faster-whisper (python) na própria VM: custo zero, mas SÓ roda na
+  #           janela ociosa (nenhuma sessão de voz ativa + memória livre mínima)
+  #           e exige python3 + `pip install faster-whisper` no ambiente.
+  retranscribe_engine: "api"
+  # local_min_free_mb: 700   # memória livre mínima p/ abrir a janela do motor local
+  # poll_seconds: 60         # intervalo do executor (mín. 10)

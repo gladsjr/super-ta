@@ -33,7 +33,8 @@
     "test:stt-provider": "node --test tests/stt-provider.test.mjs",
     "test:stt-glossary": "node --test tests/stt-glossary.test.mjs",
     "test:audio-tee": "node --test tests/audio-tee.test.mjs",
-    "test:transcript-segments": "node --test tests/transcript-segments.test.mjs"
+    "test:transcript-segments": "node --test tests/transcript-segments.test.mjs",
+    "test:job-runner": "node --test -r dotenv/config tests/job-runner.test.mjs"
   },
   "dependencies": {
     "@replit/object-storage": "^1.0.0",
