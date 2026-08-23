@@ -631,6 +631,18 @@ async function copyToken(btn, token) {
 
 // ---- Operações: fila de proctoring (#262/#263) ----
 const fmtMs = (ms) => { const sec = Math.round(ms/1000); return sec < 90 ? sec + 's' : Math.round(sec/60) + 'min'; };
+// Fila de jobs do banco (#289, corte 3): hoje só retranscrição de auditoria.
+// null = migration 078 ainda não aplicada neste ambiente — omite o bloco.
+function jobsSpan(jobs) {
+  if (!jobs || !Array.isArray(jobs.rows)) return '';
+  const by = {};
+  for (const r of jobs.rows) by[r.status] = (by[r.status] || 0) + r.n;
+  const pend = (by.pending || 0) + (by.running || 0);
+  const failed = by.failed || 0;
+  const failedTxt = failed ? ` · <strong style="color:var(--danger,#b00020)">${failed}</strong> falha(s)` : '';
+  return `<span title="retranscrição de auditoria na fila de jobs (motor: ${jobs.engine}); concluídas: ${by.done || 0}">` +
+    `<strong style="font-size:1.3em">${pend}</strong> retranscrição(ões) pendente(s)${failedTxt}</span>`;
+}
 async function loadOps() {
   const secEl = document.getElementById('sec-operacoes');
   if (!secEl || secEl.classList.contains('hidden-sec')) return;
@@ -654,7 +666,8 @@ async function loadOps() {
         `<span title="submissões com turno nos últimos ${d.active.messages_window_min} min"><strong style="font-size:1.3em">${d.active.interview_messages}</strong> em entrevista (mensagens)</span>` +
         `<span style="margin-left:auto" title="${kids ? `processos filhos da análise (ffmpeg/Python): ${kidsNames || 'nenhum agora'}` : 'medição de filhos só no Linux (produção)'}"><strong style="font-size:1.3em">${kids ? mb(kids.rss_bytes) : '—'}</strong> análise de vídeo${kids && kids.count ? ` (${kids.count} proc.)` : ''}</span>` +
         `<span title="RSS do processo Node (servidor)">${mb(d.memory.rss_bytes)} servidor</span>` +
-        (appPct != null ? `<span title="ORATIA inteiro (servidor + análise) frente ao limite do contêiner (${d.memory.source})"><strong>${appPct}%</strong> de ${mb(limit)}</span>` : '');
+        (appPct != null ? `<span title="ORATIA inteiro (servidor + análise) frente ao limite do contêiner (${d.memory.source})"><strong>${appPct}%</strong> de ${mb(limit)}</span>` : '') +
+        jobsSpan(d.jobs);
       document.getElementById('ops-dash-note').textContent =
         `Entrevista por mensagens não tem sessão: conta submissões com atividade nos últimos ${d.active.messages_window_min} min. ` +
         (d.memory.source === 'os'

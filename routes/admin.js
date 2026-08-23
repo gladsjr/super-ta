@@ -14,6 +14,8 @@ import * as scenarioStore from "../lib/scenarios/store.js";
 import { DEFAULT_WORK_BUDGET_USD } from "../lib/config.js";
 import log from "../lib/logger.js";
 import { getProctorQueueSnapshot, setProctorConcurrency, enqueueProctor, cancelProctor, prioritizeProctor, MAX_CONCURRENCY } from "../lib/proctorQueue.js";
+import { jobsSnapshot } from "../lib/jobs.js";
+import { RETRANSCRIBE_ENGINE } from "../lib/config.js";
 import { getActiveRealtimeSessions } from "../lib/realtimeBridge.js";
 import { getMemoryStats } from "../lib/opsStats.js";
 
@@ -377,6 +379,9 @@ router.get("/admin/ops/dashboard", requireAdmin, async (_req, res) => {
             },
             memory: getMemoryStats(),
             analyses: { running: snap.running.length, queued: snap.queued.length },
+            // Fila de jobs do banco (#289, corte 3): contagens por tipo/status.
+            // best-effort — sem a migration 078 o dashboard segue sem o bloco.
+            jobs: await jobsSnapshot().then(rows => ({ engine: RETRANSCRIBE_ENGINE, rows })).catch(() => null),
         });
     } catch (err) {
         log.error("ADMIN", `ops dashboard failed: ${err.message}`);
