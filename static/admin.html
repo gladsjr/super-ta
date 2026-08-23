@@ -208,7 +208,8 @@
           <input id="ops-conc" class="input" type="number" min="1" max="8" style="width:110px"/>
         </div>
         <button id="ops-conc-save" class="btn btn-primary btn-sm" type="button">Aplicar</button>
-        <span class="hint">1 protege as provas ao vivo (CPU). Aumente só se a VM tiver folga.</span>
+        <span class="hint">Cada análise usa ~1 CPU em prioridade mínima; este número é o total em paralelo. Aumente só se a VM tiver folga.</span>
+        <span id="ops-live-warn" class="hidden" style="color:var(--danger,#b00020); font-weight:600"></span>
         <span class="spacer"></span>
         <button id="ops-refresh" class="btn btn-sm" type="button">↻ Atualizar</button>
       </div>
@@ -668,6 +669,15 @@ async function loadOps() {
         `<span title="RSS do processo Node (servidor)">${mb(d.memory.rss_bytes)} servidor</span>` +
         (appPct != null ? `<span title="ORATIA inteiro (servidor + análise) frente ao limite do contêiner (${d.memory.source})"><strong>${appPct}%</strong> de ${mb(limit)}</span>` : '') +
         jobsSpan(d.jobs);
+      // Alerta de voz AO VIVO (#301): a análise de vídeo disputa a máquina com
+      // o relay (mitigada por nice + 1 thread, mas disputa). O operador vê o
+      // estado na hora de mexer na concorrência e decide se assume o risco.
+      const liveNow = (d.active.oral_realtime || 0) + (d.active.interview_realtime || 0);
+      const warn = document.getElementById('ops-live-warn');
+      if (warn) {
+        warn.textContent = liveNow ? `⚠ ${liveNow} sessão(ões) de voz AO VIVO agora — subir a concorrência tira CPU delas` : '';
+        warn.classList.toggle('hidden', !liveNow);
+      }
       document.getElementById('ops-dash-note').textContent =
         `Entrevista por mensagens não tem sessão: conta submissões com atividade nos últimos ${d.active.messages_window_min} min. ` +
         (d.memory.source === 'os'
