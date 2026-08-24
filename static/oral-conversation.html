@@ -207,7 +207,10 @@
     if (!ft || (!ft.text && !ft.segments)) return;
     document.getElementById('final-transcript-box').style.display = '';
     const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
-    document.getElementById('ft-meta').textContent = `— ${esc(ft.model || ft.provider || '')}${dur} · só a voz do aluno`;
+    // Monitor de captação sobre o tee (#287/corte 4): 0 suspeitos = sessão íntegra.
+    const q = ft.quality;
+    const qual = q ? (q.suspects > 0 ? ` · ⚠ ${q.suspects}/${q.parts} trecho(s) suspeito(s)` : ` · captação íntegra (${q.parts} trechos)`) : '';
+    document.getElementById('ft-meta').textContent = `— ${esc(ft.model || ft.provider || '')}${dur} · só a voz do aluno${qual}`;
     const el = document.getElementById('final-transcript');
     if (ft.mode === 'segments' && Array.isArray(ft.segments)) {
       // Corte 2 (#289): trilha auditável — cada fala com timestamps e a

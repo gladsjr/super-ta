@@ -58,6 +58,7 @@ import {
     pregenSnapshot,
 } from "../lib/sessionLifecycle.js";
 import { attachNarratorAudio } from "../lib/narrator.js";
+import { buildAuditBlock } from "../lib/auditTranscript.js";
 import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import { videoMandatory } from "../lib/proctor.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
@@ -1976,9 +1977,10 @@ router.get("/s/:submissionToken/review", requireSubmissionToken, async (req, res
         return res.status(410).json({ error: "review_window_expired", deadline: win.deadline });
     }
     try {
-        const [convJson, audios] = await Promise.all([
+        const [convJson, audios, finalTranscript] = await Promise.all([
             db.getConversationJson(subId),
             db.listStudentAudioArtifactsForSubmission(subId),
+            db.getFinalTranscript(subId).catch(() => null),
         ]);
         let conversation = null;
         if (convJson) {
@@ -2008,6 +2010,9 @@ router.get("/s/:submissionToken/review", requireSubmissionToken, async (req, res
             },
             conversation,
             student_audio: audioList,
+            // Corte 4 (#289, D2): retranscrição de auditoria (versão fiel da fala
+            // do aluno) — hoje só a variante realtime a produz; null nas demais.
+            audit_transcript: buildAuditBlock({ final: finalTranscript }),
         });
     } catch (err) {
         log.error("REVIEW", `failed token=${req.submission.submission_token}: ${err.message}`);

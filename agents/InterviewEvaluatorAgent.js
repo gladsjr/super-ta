@@ -181,7 +181,7 @@ Apenas JSON válido, sem cercas markdown e sem texto antes/depois:
      * @param {boolean} p.expectSpontaneous - o trabalho declarou exigir "resposta de cabeça"
      * @param {object|null} p.meterCtx   - contexto de billing
      */
-    async evaluate({ enunciadoFileId, studentFileId, interviewerYamlText, conversation, audioArtifacts = [], expectSpontaneous = false, proctorReview = null, meterCtx = null }) {
+    async evaluate({ enunciadoFileId, studentFileId, interviewerYamlText, conversation, auditBlock = "", audioArtifacts = [], expectSpontaneous = false, proctorReview = null, meterCtx = null }) {
         if (!enunciadoFileId) throw new Error("InterviewEvaluator: missing enunciadoFileId");
         if (!studentFileId) throw new Error("InterviewEvaluator: missing studentFileId");
         if (!interviewerYamlText) throw new Error("InterviewEvaluator: missing interviewerYamlText");
@@ -213,7 +213,7 @@ Trate cada item acima como lacuna JÁ CARACTERIZADA na entrevista: o entrevistad
 ${agendaBlock}
 
 **TRANSCRIÇÃO DA ENTREVISTA**
-${transcript}${openThreadsBlock}${reviewBlock}
+${transcript}${auditBlock || ""}${openThreadsBlock}${reviewBlock}
 
 Documento motivador e entrega em anexo (PDFs). Avalie a entrevista acima sob a perspectiva do entrevistador da agenda e produza o relatório JSON conforme o contrato.`;
 

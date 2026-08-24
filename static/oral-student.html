@@ -223,7 +223,7 @@
           if (rv.status === 409 && attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
           if (rv.ok) {
             const j = await rv.json();
-            renderReviewTranscript(j.transcript || [], j.transcript_alerts || null);
+            renderReviewTranscript(j.transcript || [], j.transcript_alerts || null, j.audit_transcript || null);
             renderCommentBox(j.comment || {}, { calibFlagged: !!j.calibration_flagged });
           } else if (rv.status === 410) {
             $('review-transcript').innerHTML = '<p class="sub" style="text-align:center">A janela de revisão (7 dias) já se encerrou.</p>';
@@ -240,7 +240,7 @@
       } catch {}
     }
 
-    function renderReviewTranscript(turns, alerts) {
+    function renderReviewTranscript(turns, alerts, audit) {
       const el = $('review-transcript');
       if (!turns.length) { el.innerHTML = ''; return; }
       // Alertas de transcrição (#137): destaca trechos da SUA fala prováveis de ruído/
@@ -259,7 +259,14 @@
       const note = (alertsOk && alerts.count > 0)
         ? `<p class="sub" style="text-align:left;margin:0 0 8px">⚠️ Destacamos ${alerts.count} trecho(s) da sua fala que podem ter sido captados com ruído, eco ou silêncio (idioma não reconhecido/ininteligível). Se algo importante foi transcrito errado, avise o professor no comentário.</p>`
         : '';
-      el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${note}${rows}</div>`;
+      // Corte 4 (#289, D2): a RETRANSCRIÇÃO de auditoria — versão mais fiel da
+      // fala do aluno, gerada do áudio contínuo depois da prova.
+      const auditBlock = (audit && audit.text)
+        ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Sua fala, retranscrita com mais fidelidade</summary>`
+          + `<p class="sub" style="text-align:left;margin:6px 0">A transcrição acima foi feita ao vivo e pode ter picotado a sua fala. Esta versão foi refeita do áudio contínuo, depois da prova, e é a que o professor também recebe na avaliação.</p>`
+          + `<div class="card" style="text-align:left;max-height:280px;overflow:auto;white-space:pre-wrap">${esc(audit.text)}</div></details>`
+        : '';
+      el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${note}${rows}</div>${auditBlock}`;
     }
 
     function renderCommentBox(comment, opts) {
