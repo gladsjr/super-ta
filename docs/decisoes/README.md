@@ -41,6 +41,7 @@ código já explica sozinho.
 | [0020](0020-queda-de-gravacao-pausa-na-primeira.md) | Queda de gravação pausa na primeira; retomada exige liberação | Aceita |
 | [0021](0021-vigilancia-fala-pela-interface.md) | Vigilância ao vivo fala pela interface; gravação > detecção | Aceita |
 | [0022](0022-jobs-no-banco-janela-ociosa.md) | Processamento pesado em fila no banco, executada na janela ociosa | Aceita |
+| [0023](0023-sound-check-em-escada.md) | Sound check em escada: vermelho bloqueia o início, com três saídas | Aceita |
 
 Use o [modelo](template.md) para criar a próxima.
 

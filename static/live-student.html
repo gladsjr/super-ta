@@ -51,6 +51,7 @@
   </style>
   <script src="/static/js/proctorGate.js"></script>
   <script src="/static/js/setupGate.js"></script>
+  <script src="/static/js/soundCheck.js"></script>
   <script src="/static/js/liveNudge.js"></script>
 </head>
 <body>
@@ -99,6 +100,14 @@
           <div class="card" style="text-align:center; font-size:18px; line-height:1.5; margin:0 0 10px" id="calib-sentence">…</div>
           <div style="text-align:center"><button class="btn" id="calib-rec-btn">🎤 Gravar e ler a frase</button></div>
           <div class="banner wait" id="calib-status" style="margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
+          <!-- Etapa 2 (#288): teste de ECO — a entrevistadora fala, o aluno fica em silêncio -->
+          <div id="echo-block" style="display:none; margin-top:14px">
+            <p style="margin:0 0 6px"><strong>Etapa 2: teste de eco.</strong> Vou tocar a voz da entrevista por alguns segundos. <strong>Fique em silêncio</strong> — o teste verifica se ela volta pelo seu microfone (eco).</p>
+            <div style="text-align:center"><button class="btn" id="echo-btn">🔊 Tocar e testar o eco</button></div>
+            <div class="banner wait" id="echo-status" style="margin-top:10px; display:none"></div>
+          </div>
+          <!-- Painel do VERMELHO (#288/ADR 0023): nunca é beco -->
+          <div id="sc-red" style="margin-top:14px"></div>
         </div>
         <!-- Sempre habilitado: o bloqueio acontece no clique, com explicação (#255). -->
         <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
@@ -681,14 +690,17 @@
       poseLm = null;
     }
 
-    // --- Calibração de fala: pré-teste de captação, NON-BLOCKING. ---
+    // --- Calibração de fala + sound check v2 (#288): leitura, eco e escada. ---
     let calibRec = null, calibChunks = [], calibAttempt = 0;
+    let soundCheckState = null, scSpectral = null, hfpBasic = null;
     async function initCalibration() {
       let cfg = null;
       try { cfg = await (await fetch(`/s/${SUB}/live/calibrate-config`)).json(); } catch {}
       if (!cfg || !cfg.enabled || !cfg.sentence) { $('calib-block').style.display = 'none'; return; } // fail-open
       $('calib-sentence').textContent = cfg.sentence;
       $('calib-block').style.display = '';
+      hfpBasic = window.soundCheck ? window.soundCheck.detectHfp(micStream) : null;
+      applySoundCheck(cfg.sound_check); // reload: vermelho de ontem continua vermelho
     }
     function calibToggleRecord() {
       const btn = $('calib-rec-btn');
@@ -700,6 +712,8 @@
       calibRec.ondataavailable = e => { if (e.data && e.data.size) calibChunks.push(e.data); };
       calibRec.onstop = calibSubmit;
       calibRec.start();
+      // Sonda espectral do HFP (#288): mede enquanto o aluno fala.
+      scSpectral = window.soundCheck ? window.soundCheck.spectralProbe(stream) : null;
       calibRecording = true; // pausa o medidor de ruído (a fala não é "ambiente")
       btn.textContent = '⏹ Parar e verificar';
       const st = $('calib-status'); st.className = 'banner wait'; st.textContent = '🎤 Gravando… leia a frase e toque em “Parar e verificar”.';
@@ -710,10 +724,13 @@
       btn.textContent = '🎤 Gravar e ler a frase'; btn.disabled = true;
       st.className = 'banner wait'; st.textContent = 'Verificando a captação…';
       calibAttempt++;
+      const spectral = scSpectral ? scSpectral.stop() : null; scSpectral = null;
       let j = null;
       try {
         const blob = new Blob(calibChunks, { type: (calibRec && calibRec.mimeType) || 'audio/webm' });
         const form = new FormData(); form.append('file', blob, 'calib.webm'); form.append('attempt', String(calibAttempt));
+        const hfp = window.soundCheck ? window.soundCheck.hfpVerdict(hfpBasic, spectral) : null;
+        if (hfp) form.append('hfp', JSON.stringify(hfp));
         j = await (await fetch(`/s/${SUB}/live/calibrate`, { method: 'POST', body: form })).json();
       } catch {}
       btn.disabled = false;
@@ -723,20 +740,67 @@
       const st = $('calib-status'), rec = $('calib-rec-btn');
       if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui verificar agora. Você pode tentar de novo ou seguir (Continuar).'; return; }
       if (j.ok) {
-        st.className = 'banner ok'; st.textContent = 'Captação ok ✓ Sua fala foi transcrita corretamente. Pode Continuar.';
-        rec.style.display = 'none'; return;
-      }
-      const left = Number(j.attempts_left) || 0;
-      if (left > 0) {
-        st.className = 'banner adjust';
-        st.textContent = (j.advice || 'A captação não ficou boa.') + ` Toque em “Gravar e ler a frase” e tente de novo (${left} tentativa(s) restante(s)).`;
-      } else {
-        st.className = 'banner adjust';
-        st.innerHTML = esc(j.advice || 'A captação não ficou ideal.') + ' <strong>Você pode seguir assim mesmo.</strong> Ao final, confira a transcrição da entrevista e, se algo tiver saído errado, avise o professor no comentário.';
+        st.className = 'banner ok'; st.textContent = 'Leitura ok ✓ Sua fala foi transcrita corretamente. Agora faça o teste de eco abaixo.';
         rec.style.display = 'none';
+      } else {
+        const left = Number(j.attempts_left) || 0;
+        if (left > 0) {
+          st.className = 'banner adjust';
+          st.textContent = (j.advice || 'A captação não ficou boa.') + ` Toque em “Gravar e ler a frase” e tente de novo (${left} tentativa(s) restante(s)).`;
+        } else {
+          st.className = 'banner adjust';
+          st.innerHTML = esc(j.advice || 'A captação não ficou ideal.') + ' Faça também o teste de eco abaixo. Ao final, confira a transcrição da entrevista e, se algo tiver saído errado, avise o professor no comentário.';
+          rec.style.display = 'none';
+        }
       }
+      if (j.ok || (Number(j.attempts_left) || 0) === 0) $('echo-block').style.display = '';
+      applySoundCheck(j.sound_check);
     }
     $('calib-rec-btn').onclick = calibToggleRecord;
+
+    // --- Teste de ECO (#288): a entrevista fala, o aluno fica em silêncio ---
+    async function runEcho() {
+      const btn = $('echo-btn'), st = $('echo-status');
+      if (!window.soundCheck || !micStream) return;
+      btn.disabled = true; st.style.display = '';
+      st.className = 'banner wait'; st.textContent = '🔊 Tocando a voz da entrevista… fique em silêncio.';
+      let j = null;
+      try {
+        j = await window.soundCheck.runEchoTest({
+          base: `/s/${SUB}/live`, micStream,
+          onStatus: (s) => { if (s === 'checking') { st.textContent = 'Verificando…'; } },
+        });
+      } catch {}
+      btn.disabled = false;
+      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui testar o eco agora. Você pode tentar de novo ou seguir.'; return; }
+      if (j.leak) {
+        st.className = 'banner adjust';
+        st.textContent = '⚠ Eco detectado: a voz da entrevista voltou pelo seu microfone. Use fone de ouvido (de preferência com fio), baixe o volume e teste de novo.';
+        btn.textContent = '🔊 Testar o eco de novo';
+      } else {
+        st.className = 'banner ok'; st.textContent = 'Sem eco ✓ A voz da entrevista não vazou para o seu microfone.';
+        btn.style.display = 'none';
+      }
+      applySoundCheck(j.sound_check);
+    }
+    $('echo-btn').onclick = runEcho;
+
+    // Escada (#288): painel vermelho (nunca é beco) + estado consumido no gate.
+    function applySoundCheck(sc) {
+      if (sc) soundCheckState = sc;
+      const red = $('sc-red');
+      if (soundCheckState && soundCheckState.state === 'vermelho' && !soundCheckState.waived) {
+        window.soundCheck && window.soundCheck.mountRedPanel(red, soundCheckState, () => {
+          red.innerHTML = '';
+          const rec = $('calib-rec-btn'); rec.style.display = ''; rec.disabled = false;
+          const st = $('calib-status'); st.className = 'banner wait'; st.textContent = 'Refaça a leitura da frase e depois o teste de eco.';
+          const eb = $('echo-btn'); eb.style.display = ''; eb.disabled = false; eb.textContent = '🔊 Tocar e testar o eco';
+          $('echo-block').style.display = '';
+        });
+      } else {
+        red.innerHTML = '';
+      }
+    }
 
     // Bloqueia o INÍCIO quando o proctoring de vídeo obrigatório não tem captura
     // confirmada (câmera/navegador incompatível). Para gravação/streams e mostra
@@ -828,7 +892,7 @@
     // Fones: impedimento (sem eles a entrevista degrada para todo mundo). Conexão
     // e ruído: aviso que deixa passar — é o ambiente do aluno, ele decide assumir.
     $('to-check-btn').onclick = () => {
-      const estado = { fonesOk: !!$('hp-check').checked, conexaoRuim: connWarn, ruidoAlto: !noiseOk };
+      const estado = { fonesOk: !!$('hp-check').checked, conexaoRuim: connWarn, ruidoAlto: !noiseOk, soundCheck: soundCheckState };
       if (!window.setupGate) return continueToCheck(); // fail-open: sem o helper, não trava o aluno
       if (window.setupGate.avaliar(estado, continueToCheck)) continueToCheck();
     };

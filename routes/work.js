@@ -42,6 +42,7 @@ import { mapPool } from "../lib/concurrency.js";
 import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
 import { enqueueProctor } from "../lib/proctorQueue.js";
 import { isBatchEligible, summarizeIneligible } from "../lib/batchEligibility.js";
+import { ladderState } from "../lib/soundCheck.js";
 import { PROCTOR_REVIEW_DEFS, isValidProctorReview, PROCTOR_REVIEW_DEFAULT } from "../lib/proctorReview.js";
 import { exceedsPageLimit, MAX_PDF_PAGES } from "../lib/pdfPages.js";
 import {
@@ -109,7 +110,9 @@ router.get("/w/:workToken/info", requireWorkToken, async (req, res) => {
                 remaining_usd: balance?.remaining_usd ?? 0,
                 percent_used: balance?.percent_used ?? 100,
             },
-            submissions,
+            // Escada do sound check v2 (#288): estado por submissão para a lista
+            // (vermelho ganha o botão "Liberar sound check").
+            submissions: submissions.map(s => ({ ...s, sound_check: ladderState(s.oral_calibration_json) })),
             public_base_url: publicBaseUrl(req),   // origem canônica p/ montar o link do aluno
         });
     } catch (err) {
@@ -1552,6 +1555,21 @@ router.post("/w/:workToken/submissions/:subToken/waive-video", requireWorkToken,
     } catch (err) {
         log.error("SUBMISSION", `waive-video failed submission=${found.submission_token}: ${err.message}`);
         res.status(500).json({ error: "falha ao liberar sem vídeo" });
+    }
+});
+
+// Liberar o aluno reprovado no SOUND CHECK (#288, ADR 0023): a escada vermelha
+// (2 sinais duros de captação) não segue sozinha; o professor decide assumir.
+// Liberação PERMANENTE para esta submissão (grava waived_at no registro).
+router.post("/w/:workToken/submissions/:subToken/waive-soundcheck", requireWorkToken, requireProfessorSubmission, async (req, res) => {
+    const found = req.submission;
+    try {
+        await db.setOralCalibrationResult(found.id, { waived_at: new Date().toISOString() });
+        log.info("SUBMISSION", `sound check liberado (waive) submission=${found.submission_token} work=${req.work.work_token}`);
+        res.json({ ok: true, submission_token: found.submission_token, sound_check_waived: true });
+    } catch (err) {
+        log.error("SUBMISSION", `waive-soundcheck failed submission=${found.submission_token}: ${err.message}`);
+        res.status(500).json({ error: "falha ao liberar o sound check" });
     }
 });
 

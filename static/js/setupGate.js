@@ -70,9 +70,12 @@
   // Avalia o estado do setup e decide. Retorna true se pode seguir DIRETO
   // (sem diálogo). Caso contrário mostra o diálogo e retorna false — quando o
   // impedimento é só de ambiente, `onProsseguir` leva adiante.
-  //   estado: { fonesOk, conexaoRuim, ruidoAlto }
+  //   estado: { fonesOk, conexaoRuim, ruidoAlto, soundCheck }
+  //   soundCheck (#288, opcional): { state: 'verde'|'amarelo'|'vermelho', waived }
   function avaliar(estado, onProsseguir) {
     const itens = [];
+    const sc = estado.soundCheck || null;
+    const scVermelho = !!(sc && sc.state === "vermelho" && !sc.waived);
     if (!estado.fonesOk) {
       itens.push({
         texto:
@@ -80,6 +83,20 @@
           "avaliador — isso gera eco, corta a sua fala e prejudica a sua avaliação.",
         critico: true,
       });
+    }
+    if (scVermelho) {
+      // ADR 0023: dois sinais duros de captação = não segue sozinho. As saídas
+      // (checklist, re-teste, reagendar, liberação do professor) estão no
+      // painel vermelho da própria tela — aqui só se explica o impedimento.
+      itens.push({
+        texto:
+          "O teste de captação de áudio reprovou duas vezes. Com o áudio assim, a transcrição das suas " +
+          "respostas sairia errada e a sua avaliação seria prejudicada. Ajuste o equipamento e teste de novo " +
+          "— ou combine com o professor (reagendar sem penalidade, ou liberação pelo painel).",
+        critico: true,
+      });
+    } else if (sc && sc.state === "amarelo") {
+      itens.push({ texto: "O teste de captação sinalizou instabilidade no seu áudio. Você pode seguir, mas confira a transcrição ao final e avise o professor se algo sair errado." });
     }
     if (estado.conexaoRuim) {
       itens.push({ texto: "A sua conexão está instável ou lenta. Pode haver cortes e atrasos durante a conversa." });
@@ -89,9 +106,11 @@
     }
     if (!itens.length) return true;
 
-    const bloqueante = !estado.fonesOk;
+    const bloqueante = !estado.fonesOk || scVermelho;
     show({
-      titulo: bloqueante ? "Falta confirmar os fones de ouvido" : "Antes de continuar, atenção",
+      titulo: !estado.fonesOk ? "Falta confirmar os fones de ouvido"
+        : scVermelho ? "A captação de áudio reprovou no teste"
+        : "Antes de continuar, atenção",
       itens,
       bloqueante,
       onProsseguir,
