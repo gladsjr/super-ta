@@ -1079,6 +1079,14 @@
         const reason = completionReason === 'give_up' ? 'Você encerrou a entrevista.' : 'Entrevista concluída.';
         parts.push(`<div class="conv-line"><span class="text">${escapeHtml(reason)}</span></div>`);
       }
+      // Corte 4B (#289): a RETRANSCRIÇÃO de auditoria — versão mais fiel das
+      // respostas faladas, refeita das gravações depois da entrevista.
+      const audit = data.audit_transcript || null;
+      if (audit && audit.text) {
+        parts.push('<div class="conv-section-label">Suas respostas, retranscritas com mais fidelidade</div>');
+        parts.push(`<div class="conv-line"><span class="text" style="white-space:pre-wrap">${escapeHtml(audit.text)}</span></div>`);
+        parts.push('<div class="conv-line"><span class="text"><em>A conversa acima usou a transcrição feita ao vivo; esta versão foi refeita das suas gravações e é a que o professor também recebe na avaliação.</em></span></div>');
+      }
       body.innerHTML = parts.length > 0 ? parts.join('') : '<em>Sem registros de conversa.</em>';
 
       // Áudios do aluno (modo áudio)

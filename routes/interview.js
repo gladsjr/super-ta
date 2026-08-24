@@ -59,6 +59,7 @@ import {
 } from "../lib/sessionLifecycle.js";
 import { attachNarratorAudio } from "../lib/narrator.js";
 import { buildAuditBlock } from "../lib/auditTranscript.js";
+import { runMessageRetranscribeAuto } from "../lib/retranscribe.js";
 import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import { videoMandatory } from "../lib/proctor.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
@@ -1890,6 +1891,15 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         };
         await persistFinalization(req, completionReason);
         await persist();
+        // Corte 4B (#289): no modo áudio, enfileira a retranscrição das
+        // respostas gravadas (registro fiel p/ avaliação e revisão do aluno).
+        if (req.work.interaction_mode === "audio") {
+            runMessageRetranscribeAuto({
+                submissionId: req.submission.id, token: req.submission.submission_token,
+                workName: req.work.name, isBenchmark: !!req.work.is_benchmark,
+                meterCtx: { workId: req.work.id, submissionId: req.submission.id },
+            });
+        }
         // Estado terminal limpo: invariante runtime_state_json IS NULL ⇔ sem
         // tentativa em andamento. Sem isto a submissão ficava com
         // runtime_state_json não-nulo e current_phase="finalizing" para sempre
@@ -1953,6 +1963,15 @@ router.post("/s/:submissionToken/finalize", requireSubmissionToken, express.json
             sess.currentPhase = "finalized";
         }
         log.info("SUBMISSION", `finalized token=${req.submission.submission_token} reason=${reason} status=${gateStatus} has_comment=${!!comment}`);
+        // Corte 4B (#289): desistência também retranscreve o que foi gravado —
+        // o professor pode avaliar o parcial, e o registro deve ser o fiel.
+        if (req.work.interaction_mode === "audio") {
+            runMessageRetranscribeAuto({
+                submissionId: req.submission.id, token: req.submission.submission_token,
+                workName: req.work.name, isBenchmark: !!req.work.is_benchmark,
+                meterCtx: { workId: req.work.id, submissionId: req.submission.id },
+            });
+        }
         res.json({ ok: true, completion_reason: reason, status: gateStatus });
     } catch (err) {
         log.error("SUBMISSION", `finalize failed token=${req.submission.submission_token}: ${err.message}`);

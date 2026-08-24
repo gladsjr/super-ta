@@ -1431,6 +1431,12 @@ async function load() {
         const q = s.q_idx > 0 ? `P${s.q_idx}` : 'abertura';
         return `[${q} · ${fmtT(s.start_s)}–${fmtT(s.end_s)}] ${s.error ? '(segmento não transcrito)' : s.text}`;
       }).join('\n\n');
+    } else if (ft.mode === 'answers' && Array.isArray(ft.answers)) {
+      // Modo mensagem (corte 4B): uma resposta por blob, com o turno exato.
+      body.textContent = ft.answers.map(a => {
+        const t = Number.isInteger(a.turn_index) ? `turno ${a.turn_index}` : `áudio ${a.audio_idx}`;
+        return `[${t}] ${a.error ? '(resposta não transcrita)' : a.text}`;
+      }).join('\n\n');
     } else {
       body.textContent = ft.text;
     }
