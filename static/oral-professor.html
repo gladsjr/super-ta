@@ -540,6 +540,15 @@
     await refreshSubs();
   };
 
+  // Libera o aluno reprovado no sound check (#288/ADR 0023): permanente para
+  // esta submissão — o aluno passa a poder iniciar mesmo com a escada vermelha.
+  window.waiveSoundCheck = async (token) => {
+    if (!confirm('Liberar o aluno para fazer a prova MESMO com a captação reprovada no teste?\n\nA transcrição das respostas dele pode sair degradada — a alternativa é combinar outro horário/equipamento.')) return;
+    const r = await fetch(`${API}/submissions/${token}/waive-soundcheck`, { method: 'POST' });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao liberar o sound check')); return; }
+    await refreshSubs();
+  };
+
   window.toggleBlockOral = async (token, block) => {
     const r = await fetch(`${API}/submissions/${token}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_blocked: block }) });
     if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao alterar bloqueio')); return; }
@@ -581,7 +590,15 @@
       const pub = s.grade_published ? '<span class="pill pill-pub">publicado</span>' : '<span class="hint">—</span>';
       const alertPills = (s.proctor_alerts || []).map(a => `<span class="pill" style="background:#fdeaea;border:1px solid #e7b3b3">${esc(a)}</span>`);
       if (s.voice_alert) alertPills.push('<span class="pill" style="background:#fff6e0;border:1px solid #ecc874">voz</span>');
-      if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
+      // Escada do sound check v2 (#288): subsome o pill antigo de captação.
+      // VERMELHO = o aluno está pausado na tela dele (ADR 0023) — o professor vê
+      // ANTES do dia da prova e pode liberar daqui.
+      if (s.sound_check) {
+        const sc = s.sound_check, motivos = esc((sc.reasons || []).join('; '));
+        if (sc.state === 'vermelho' && !sc.waived) alertPills.push(`<span class="pill" style="background:#fdeaea;border:1px solid #dc2626;font-weight:600" title="${motivos}. O aluno não consegue iniciar sozinho: a tela dele pede ajuste do equipamento, novo teste, ou a sua liberação.">sound check ⛔</span> <button class="btn btn-sm" onclick="waiveSoundCheck('${s.submission_token}')" title="Autoriza o aluno a fazer a prova mesmo com a captação reprovada no teste.">Liberar</button>`);
+        else if (sc.state === 'vermelho') alertPills.push(`<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="${motivos}. Você liberou; o aluno pode seguir.">sound check liberado</span>`);
+        else if (sc.state === 'amarelo') alertPills.push(`<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="${motivos}. O aluno pôde seguir com aviso.">captação instável</span>`);
+      } else if (s.calibration_alert) alertPills.push('<span class="pill" style="background:#fdecd8;border:1px solid #e0a95e">captação</span>');
       if (s.transcript_alerts > 0) alertPills.push(`<span class="pill" style="background:#eae6fb;border:1px solid #b9adec" title="Trechos da transcrição prováveis de ruído/eco/silêncio (idioma não reconhecido, ininteligível). Confira no detalhe do aluno.">transcrição (${s.transcript_alerts})</span>`);
       // Vigilância de posição ao vivo (#267): pausas viram sinal; desligada
       // também (ADR 0018) — o professor sabe que ESTE vídeo não teve cobrança

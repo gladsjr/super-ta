@@ -24,6 +24,9 @@ import { clientForWork } from "../lib/openaiClient.js";
 import { prepBuilderAgent } from "../lib/agents.js";
 import { putAudio, extFromMimetype } from "../lib/audioStore.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
+import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp } from "../lib/soundCheck.js";
+import { synthesizeSpeech } from "../lib/audio.js";
+import { TTS_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import log from "../lib/logger.js";
 
@@ -212,8 +215,13 @@ router.get("/s/:submissionToken/live/prep-status", requireSubmissionToken, requi
 router.get("/s/:submissionToken/live/calibrate-config", requireSubmissionToken, requireLive, async (req, res) => {
     try {
         const calib = await db.getOralCalibration(req.work.id);
+        // Estado atual da escada (#288) para o reload da página (ver oralExam.js).
+        const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
         res.set("Cache-Control", "no-store");
-        res.json({ enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS });
+        res.json({
+            enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS,
+            sound_check: ladderState(prev),
+        });
     } catch (err) { log.error("LIVE", `calibrate-config failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
 
@@ -237,7 +245,7 @@ router.post("/s/:submissionToken/live/calibrate", requireSubmissionToken, requir
         const transcripts = (Array.isArray(prev?.transcripts) ? prev.transcripts : []).slice(-3);
         transcripts.push({ attempt, wer: wer == null ? null : Math.round(wer * 1000) / 1000, missed: missedTerms, text });
         const worst = Math.max(Number(prev?.worst_wer) || 0, wer == null ? 0 : wer);
-        await db.setOralCalibrationResult(req.submission.id, {
+        const patch = {
             passed: ok || prev?.passed === true,
             attempts: attempt,
             worst_wer: Math.round(worst * 1000) / 1000,
@@ -245,16 +253,66 @@ router.post("/s/:submissionToken/live/calibrate", requireSubmissionToken, requir
             target: calib.sentence,
             transcripts,
             updated_at: new Date().toISOString(),
-        });
+        };
+        // Sinal de HFP (#288): reportado pelo navegador junto da gravação; só aviso.
+        const hfp = parseHfp(req.body?.hfp);
+        if (hfp) patch.hfp = hfp;
+        await db.setOralCalibrationResult(req.submission.id, patch);
 
-        log.info("LIVE", `calibrate submission=${req.submission.submission_token} attempt=${attempt} ok=${ok} wer=${wer == null ? "—" : wer.toFixed(2)} missed=${missedTerms.length}`);
+        const state = ladderState({ ...(prev || {}), ...patch });
+        log.info("LIVE", `calibrate submission=${req.submission.submission_token} attempt=${attempt} ok=${ok} wer=${wer == null ? "—" : wer.toFixed(2)} missed=${missedTerms.length} escada=${state?.state || "—"}`);
         res.json({
             ok, attempt, attempts_left: Math.max(0, MAX_CALIB_ATTEMPTS - attempt),
             wer, missed_terms: missedTerms, transcript: text, advice: ok ? null : CALIB_ADVICE,
+            sound_check: state,
         });
     } catch (err) {
         log.error("LIVE", `calibrate failed: ${err.message}`);
         res.status(500).json({ error: "falha ao verificar a captação", detail: err.message });
+    }
+});
+
+// --- Sound check v2 (#288): teste de ECO — espelha a prova oral (ver oralExam.js). ---
+const echoAudioCache = new Map(); // voice -> Buffer mp3
+router.get("/s/:submissionToken/live/echo-audio", requireSubmissionToken, requireLive, async (req, res) => {
+    try {
+        const voice = req.work.voice || "coral";
+        let buf = echoAudioCache.get(voice);
+        if (!buf) { buf = await synthesizeSpeech(clientForWork(req.work), TTS_MODEL, ECHO_SENTENCE, voice); echoAudioCache.set(voice, buf); }
+        res.type("audio/mpeg").send(buf);
+    } catch (err) {
+        log.error("LIVE", `echo-audio failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar o áudio do teste de eco" });
+    }
+});
+
+router.post("/s/:submissionToken/live/echo-check", requireSubmissionToken, requireLive, calibUpload.single("file"), async (req, res) => {
+    try {
+        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        let text = "";
+        try {
+            ({ text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `echo.${extFromMimetype(req.file.mimetype)}` }));
+        } catch { text = ""; }
+        const matches = countEchoMatches(text);
+        const leak = matches >= ECHO_LEAK_MIN_MATCHES;
+
+        const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
+        const leaksRecent = (Array.isArray(prev?.echo?.leaks_recent) ? prev.echo.leaks_recent : []).slice(-1);
+        leaksRecent.push(leak);
+        const echo = {
+            leak, matches,
+            tests: (Number(prev?.echo?.tests) || 0) + 1,
+            leaks_recent: leaksRecent,
+            transcript: text.slice(0, 200),
+            at: new Date().toISOString(),
+        };
+        await db.setOralCalibrationResult(req.submission.id, { echo, updated_at: echo.at });
+        const state = ladderState({ ...(prev || {}), echo });
+        log.info("LIVE", `echo-check submission=${req.submission.submission_token} leak=${leak} matches=${matches} escada=${state?.state || "—"}`);
+        res.json({ leak, matches, tests: echo.tests, sound_check: state });
+    } catch (err) {
+        log.error("LIVE", `echo-check failed: ${err.message}`);
+        res.status(500).json({ error: "falha no teste de eco", detail: err.message });
     }
 });
 

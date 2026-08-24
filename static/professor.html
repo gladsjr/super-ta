@@ -565,6 +565,16 @@ async function waiveVideo(token) {
     await load();
   } catch { alert('Falha ao liberar sem vídeo.'); }
 }
+// Libera o aluno reprovado no sound check (#288/ADR 0023): permanente para
+// esta submissão — o aluno passa a poder iniciar mesmo com a escada vermelha.
+async function waiveSoundCheck(token) {
+  if (!confirm('Liberar o aluno para começar MESMO com a captação reprovada no teste?\n\nA transcrição das respostas dele pode sair degradada — a alternativa é combinar outro horário/equipamento.')) return;
+  try {
+    const r = await fetch(`/w/${encodeURIComponent(workToken)}/submissions/${encodeURIComponent(token)}/waive-soundcheck`, { method: 'POST' });
+    if (!r.ok) throw new Error();
+    await load();
+  } catch { alert('Falha ao liberar o sound check.'); }
+}
 // Libera UMA retomada após queda de gravação (#260, só variante realtime). A
 // liberação é consumida na reconexão; nova queda volta a pausar.
 async function allowResume(token) {
@@ -719,6 +729,15 @@ function renderSubmissionsTable() {
       : s.has_evaluation ? '<span class="badge badge-completed">avaliada</span>'
       : (s.status === 'completed' || s.status === 'gave_up') ? '<span class="badge badge-pending">a avaliar</span>'
       : '';
+    // Escada do sound check v2 (#288): o professor vê os VERMELHOS antes do dia
+    // e pode liberar daqui (ADR 0023). Amarelo é só sinal.
+    let scBadge = '';
+    if (s.sound_check) {
+      const sc = s.sound_check, motivos = escapeHtml((sc.reasons || []).join('; '));
+      if (sc.state === 'vermelho' && !sc.waived) scBadge = ` <span class="pill" style="background:#fdeaea;border:1px solid #dc2626;font-weight:600" title="${motivos}. O aluno não consegue iniciar sozinho: a tela dele pede ajuste do equipamento, novo teste, ou a sua liberação.">sound check ⛔</span> <button class="btn btn-sm" onclick="waiveSoundCheck('${s.submission_token}')" title="Autoriza o aluno a começar mesmo com a captação reprovada no teste.">Liberar</button>`;
+      else if (sc.state === 'vermelho') scBadge = ` <span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="${motivos}. Você liberou; o aluno pode seguir.">sound check liberado</span>`;
+      else if (sc.state === 'amarelo') scBadge = ` <span class="pill" style="background:#fdecd8;border:1px solid #e0a95e" title="${motivos}. O aluno pôde seguir com aviso.">captação instável</span>`;
+    }
     return `<tr${s.is_blocked ? ' class="row-blocked"' : ''}>
       <td>${escapeHtml(s.student_label || '—')}${testBadge}</td>
       <td>
@@ -727,7 +746,7 @@ function renderSubmissionsTable() {
           <button class="icon-btn" title="Copiar link do aluno" onclick="copyStudentLink(this, '${s.submission_token}')">📋</button>
         </div>
       </td>
-      <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge} ${evalBadge}</td>
+      <td><span class="badge badge-${s.status}${s.status === 'completed' ? ' badge-dot' : ''}">${statusLabel(s.status)}</span>${blockedBadge} ${evalBadge}${scBadge}</td>
       <td>${convCell}</td>
       <td>${abrirLink}${actionBtn}${deleteBtn}</td>
     </tr>`;

@@ -21,8 +21,10 @@ import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent,
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { ensureConsolidatedVideo } from "../lib/videoConsolidate.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
+import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp } from "../lib/soundCheck.js";
+import { synthesizeSpeech } from "../lib/audio.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
-import { isValidQuestionCount, REALTIME_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
+import { isValidQuestionCount, REALTIME_MODEL, TTS_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
 import { exceedsPageLimit } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { sampleKeepingOrder, buildExamInstructions } from "../lib/oralRealtime.js";
@@ -188,6 +190,9 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 // vídeo não teve cobrança de posição em tempo real.
                 live_nudges: s.oral_voice_json?.live_nudges || null,
                 calibration_alert: calibrationAlert(s.oral_calibration_json),
+                // Escada do sound check v2 (#288): o professor vê os VERMELHOS
+                // antes do dia da prova e pode liberar (waive-soundcheck).
+                sound_check: ladderState(s.oral_calibration_json),
                 transcript_alerts: transcriptAlertCount(s.oral_voice_json),
             })),
             voices: VOICES,
@@ -866,8 +871,14 @@ router.get("/s/:submissionToken/oral/calibrate-config", requireSubmissionToken, 
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
         const calib = await db.getOralCalibration(req.work.id);
+        // Estado atual da escada (#288): a página do aluno precisa dele no reload
+        // (um vermelho de ontem continua vermelho hoje, até liberar ou re-testar).
+        const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
         res.set("Cache-Control", "no-store");
-        res.json({ enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS });
+        res.json({
+            enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS,
+            sound_check: ladderState(prev),
+        });
     } catch (err) { log.error("ORAL", `calibrate-config failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
 
@@ -895,7 +906,7 @@ router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibU
         const transcripts = (Array.isArray(prev?.transcripts) ? prev.transcripts : []).slice(-3);
         transcripts.push({ attempt, wer: wer == null ? null : Math.round(wer * 1000) / 1000, missed: missedTerms, text });
         const worst = Math.max(Number(prev?.worst_wer) || 0, wer == null ? 0 : wer);
-        await db.setOralCalibrationResult(req.submission.id, {
+        const patch = {
             passed: ok || prev?.passed === true,
             attempts: attempt,
             worst_wer: Math.round(worst * 1000) / 1000,
@@ -903,16 +914,74 @@ router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibU
             target: calib.sentence,
             transcripts,
             updated_at: new Date().toISOString(),
-        });
+        };
+        // Sinal de HFP (#288): detectado no NAVEGADOR (rótulo do dispositivo +
+        // penhasco espectral) e reportado junto da gravação. Sempre aviso, nunca
+        // bloqueio por si só — heurística não bloqueia.
+        const hfp = parseHfp(req.body?.hfp);
+        if (hfp) patch.hfp = hfp;
+        await db.setOralCalibrationResult(req.submission.id, patch);
 
-        log.info("ORAL", `calibrate submission=${req.submission.submission_token} attempt=${attempt} ok=${ok} wer=${wer == null ? "—" : wer.toFixed(2)} missed=${missedTerms.length}`);
+        const state = ladderState({ ...(prev || {}), ...patch });
+        log.info("ORAL", `calibrate submission=${req.submission.submission_token} attempt=${attempt} ok=${ok} wer=${wer == null ? "—" : wer.toFixed(2)} missed=${missedTerms.length} escada=${state?.state || "—"}`);
         res.json({
             ok, attempt, attempts_left: Math.max(0, MAX_CALIB_ATTEMPTS - attempt),
             wer, missed_terms: missedTerms, transcript: text, advice: ok ? null : CALIB_ADVICE,
+            sound_check: state,
         });
     } catch (err) {
         log.error("ORAL", `calibrate failed: ${err.message}`);
         res.status(500).json({ error: "falha ao verificar a captação", detail: err.message });
+    }
+});
+
+// --- Sound check v2 (#288): teste de ECO ---
+// A voz do examinador toca no aluno (em silêncio); se os marcadores da frase
+// voltam pelo microfone, o eco é real. Frase fixa, TTS na voz do trabalho,
+// cache em memória (mesmo padrão do setup-audio da entrevista).
+const echoAudioCache = new Map(); // voice -> Buffer mp3
+router.get("/s/:submissionToken/oral/echo-audio", requireSubmissionToken, async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        const voice = req.work.voice || "coral";
+        let buf = echoAudioCache.get(voice);
+        if (!buf) { buf = await synthesizeSpeech(clientForWork(req.work), TTS_MODEL, ECHO_SENTENCE, voice); echoAudioCache.set(voice, buf); }
+        res.type("audio/mpeg").send(buf);
+    } catch (err) {
+        log.error("ORAL", `echo-audio failed: ${err.message}`);
+        res.status(500).json({ error: "falha ao gerar o áudio do teste de eco" });
+    }
+});
+
+router.post("/s/:submissionToken/oral/echo-check", requireSubmissionToken, calibUpload.single("file"), async (req, res) => {
+    if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
+    try {
+        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        // Silêncio quase puro pode fazer o STT falhar — sem texto = sem eco (ok).
+        let text = "";
+        try {
+            ({ text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `echo.${extFromMimetype(req.file.mimetype)}` }));
+        } catch { text = ""; }
+        const matches = countEchoMatches(text);
+        const leak = matches >= ECHO_LEAK_MIN_MATCHES;
+
+        const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
+        const leaksRecent = (Array.isArray(prev?.echo?.leaks_recent) ? prev.echo.leaks_recent : []).slice(-1);
+        leaksRecent.push(leak);
+        const echo = {
+            leak, matches,
+            tests: (Number(prev?.echo?.tests) || 0) + 1,
+            leaks_recent: leaksRecent, // as 2 últimas medições — base do vermelho recuperável
+            transcript: text.slice(0, 200),
+            at: new Date().toISOString(),
+        };
+        await db.setOralCalibrationResult(req.submission.id, { echo, updated_at: echo.at });
+        const state = ladderState({ ...(prev || {}), echo });
+        log.info("ORAL", `echo-check submission=${req.submission.submission_token} leak=${leak} matches=${matches} escada=${state?.state || "—"}`);
+        res.json({ leak, matches, tests: echo.tests, sound_check: state });
+    } catch (err) {
+        log.error("ORAL", `echo-check failed: ${err.message}`);
+        res.status(500).json({ error: "falha no teste de eco", detail: err.message });
     }
 });
 
