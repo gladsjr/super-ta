@@ -43,6 +43,18 @@ test("buildAuditBlock", async (t) => {
         assert.equal(a.mode, "continuous");
         assert.equal(a.text, "restou isto");
     });
+    await t.test("answers (modo mensagem, corte 4B): turno exato por resposta", () => {
+        const a = buildAuditBlock({ final: { mode: "answers", text: "x", answers: [
+            { audio_idx: 0, turn_index: 0, intervention_index: null, text: "primeira resposta" },
+            { audio_idx: 1, turn_index: 1, intervention_index: 0, text: "réplica" },
+            { audio_idx: 2, turn_index: 2, error: "falhou" },
+        ] } });
+        assert.equal(a.mode, "answers");
+        const lines = a.text.split("\n");
+        assert.equal(lines.length, 2);
+        assert.equal(lines[0], "[turno 0] primeira resposta");
+        assert.equal(lines[1], "[turno 1 (intervenção)] réplica");
+    });
 });
 
 test("auditPromptBlock", async (t) => {
