@@ -73,15 +73,16 @@ export class OralExamEvaluatorAgent {
      * @param {object} p
      * @param {Array} p.questions   - [{id, question, rubric, weight}] (rubric = critério)
      * @param {Array} p.transcript  - [{role:'examiner'|'student', text}]
+     * @param {string} [p.auditBlock] - retranscrição de auditoria pronta (lib/auditTranscript.js#auditPromptBlock; "" = sem)
      * @param {object|null} p.meterCtx
      */
-    async evaluate({ questions, transcript, meterCtx = null }) {
+    async evaluate({ questions, transcript, auditBlock = "", meterCtx = null }) {
         if (!Array.isArray(questions) || questions.length === 0) throw new Error("OralExamEvaluator: sem questões");
         if (!Array.isArray(transcript) || transcript.length === 0) throw new Error("OralExamEvaluator: transcrição vazia");
 
         const material = questions.map(q => `Pergunta ${q.id}: ${q.question}\nRubrica de pontuação (por nível):\n${rubricForPrompt(q) || "(sem rubrica)"}`).join("\n\n");
         const conversa = transcript.map(t => `${t.role === "examiner" ? "EXAMINADOR" : "ALUNO"}: ${t.text}`).join("\n");
-        const userText = `**MATERIAL DO PROFESSOR**\n${material}\n\n**TRANSCRIÇÃO DA PROVA**\n${conversa}\n\nAvalie pergunta a pergunta conforme o contrato e retorne o JSON.`;
+        const userText = `**MATERIAL DO PROFESSOR**\n${material}\n\n**TRANSCRIÇÃO DA PROVA**\n${conversa}${auditBlock || ""}\n\nAvalie pergunta a pergunta conforme o contrato e retorne o JSON.`;
 
         const systemPrompt = `${renderAgentPreamble({ audience: "professor_via_ui" })}\n\n${SYS}`;
         const parsed = await runStructured({

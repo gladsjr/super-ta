@@ -22,6 +22,7 @@ import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/a
 import { ensureConsolidatedVideo } from "../lib/videoConsolidate.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp } from "../lib/soundCheck.js";
+import { buildAuditBlock, auditPromptBlock } from "../lib/auditTranscript.js";
 import { synthesizeSpeech } from "../lib/audio.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL, TTS_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
@@ -473,8 +474,17 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
         if (!transcript.length) return res.status(409).json({ error: "sem transcrição — o aluno ainda não realizou a prova" });
         const semRubrica = questions.filter(q => !questionHasRubric(q));
         if (semRubrica.length) return res.status(409).json({ error: `gere ou escreva a rubrica de ${semRubrica.length} questão(ões) antes de avaliar (aba Avaliação & notas)` });
+        // Corte 4 (#289): a retranscrição de auditoria entra como fonte de maior
+        // fidelidade da fala do aluno (a conversa ao vivo segue dando a ordem e
+        // as falas do examinador). Sessão retomada (multi-parte) = tee cobre só
+        // o último trecho -> o bloco cai para o texto contínuo.
+        const audit = buildAuditBlock({
+            final: detail?.final_transcript,
+            multiPart: Array.isArray(detail?.oral_video_parts) && detail.oral_video_parts.length > 1,
+        });
         const report = await oralExamEvaluatorAgent.evaluate({
-            questions, transcript, meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: req.submission.id },
+            questions, transcript, auditBlock: auditPromptBlock(audit),
+            meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: req.submission.id },
         });
         await db.setOralEvaluation(req.submission.id, report);
         await applyEvalDefaults(req.work, req.submission.id, detail, report, questions); // nota default (+ penalidade)
@@ -684,8 +694,15 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
                     send({ type: "item", submission_token: s.submission_token, ok: false, error: "rubrica faltando" });
                     return;
                 }
+                // Corte 4 (#289): retranscrição de auditoria como fonte de maior
+                // fidelidade da fala do aluno (mesmo desenho da rota individual).
+                const audit = buildAuditBlock({
+                    final: detail?.final_transcript,
+                    multiPart: Array.isArray(detail?.oral_video_parts) && detail.oral_video_parts.length > 1,
+                });
                 const report = await oralExamEvaluatorAgent.evaluate({
-                    questions, transcript, meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: s.id },
+                    questions, transcript, auditBlock: auditPromptBlock(audit),
+                    meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: s.id },
                 });
                 await db.setOralEvaluation(s.id, report);
                 await applyEvalDefaults(req.work, s.id, detail, report, questions); // nota default (+ penalidade)
@@ -1028,6 +1045,12 @@ router.get("/s/:submissionToken/oral/review", requireSubmissionToken, async (req
             transcript: Array.isArray(d?.oral_transcript) ? d.oral_transcript : [],
             transcript_alerts: d?.oral_voice_json?.transcript_alerts || { count: 0, turns: [] },
             calibration_flagged: calibrationAlert(d?.oral_calibration_json),
+            // Corte 4 (#289, D2): o aluno vê a RETRANSCRIÇÃO de auditoria (a
+            // versão fiel da própria fala) junto do transcript ao vivo.
+            audit_transcript: buildAuditBlock({
+                final: d?.final_transcript,
+                multiPart: Array.isArray(d?.oral_video_parts) && d.oral_video_parts.length > 1,
+            }),
         });
     } catch (err) {
         log.error("ORAL", `review failed token=${req.submission.submission_token}: ${err.message}`);

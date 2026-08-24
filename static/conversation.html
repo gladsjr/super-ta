@@ -1420,7 +1420,10 @@ async function load() {
     const ft = conv.final_transcript;
     document.getElementById('final-transcript-box').classList.remove('hidden');
     const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
-    document.getElementById('ft-meta').textContent = `— ${ft.model || ft.provider || ''}${dur} · só a voz do aluno`;
+    // Monitor de captação sobre o tee (#287/corte 4): 0 suspeitos = sessão íntegra.
+    const fq = ft.quality;
+    const qual = fq ? (fq.suspects > 0 ? ` · ⚠ ${fq.suspects}/${fq.parts} trecho(s) suspeito(s)` : ` · captação íntegra (${fq.parts} trechos)`) : '';
+    document.getElementById('ft-meta').textContent = `— ${ft.model || ft.provider || ''}${dur} · só a voz do aluno${qual}`;
     const body = document.getElementById('final-transcript-body');
     if (ft.mode === 'segments' && Array.isArray(ft.segments)) {
       const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
