@@ -219,7 +219,12 @@ async function main() {
 
     // 1) Setup do professor (perguntas com gabarito + N + voz).
     const work = await db.createWork("E2E Prova Oral", 10, "oral_realtime");
-    const questions = SCRIPT.map((s, i) => ({ id: i + 1, question: s.question, answer: s.answer, aspects: s.aspects }));
+    // Rubrica em string (fallback legado aceito): exigida desde a migration 039 —
+    // o avaliador recusa questão sem rubrica.
+    const questions = SCRIPT.map((s, i) => ({
+        id: i + 1, question: s.question, answer: s.answer, aspects: s.aspects,
+        rubric: `10: resposta correta e completa (${s.aspects.join("; ")}). 7,5: correta com pequena omissão. 5: parcialmente correta. 2,5: majoritariamente incorreta. 0: não respondeu ou resposta errada.`,
+    }));
     await db.setOralQuestions(work.id, questions);
     await db.setQuestionCount(work.id, SCRIPT.length);
     await db.setWorkVoice(work.id, "verse");
@@ -288,40 +293,59 @@ async function main() {
         else fail("oral_video_key", "chave não persistida");
     } catch (e) { fail("oral_video_key", e.message); }
 
-    // 7) evaluate-all (HTTP NDJSON).
+    // 7) Retranscrição de auditoria (#289 cortes 2-4): o fechamento enfileira o
+    // job na fila (tique de ~60s) — espera o final_transcript aparecer, com o
+    // monitor de captação (quality) preenchido.
     try {
-        const res = await fetch(`${BASE_HTTP}/w/${work.work_token}/oral/evaluate-all?force=1`, { method: "POST" });
-        const lines = parseNdjson(await res.text());
-        const done = lines.find((l) => l.type === "done");
-        const item = lines.find((l) => l.type === "item" && l.submission_token === sub.submission_token);
-        if (done && done.evaluated >= 1 && item?.ok) pass("evaluate_all", { evaluated: done.evaluated, grade: item.grade });
-        else fail("evaluate_all", `done=${JSON.stringify(done)} item=${JSON.stringify(item)}`);
+        let ft = null;
+        for (let i = 0; i < 30 && !ft; i++) { await sleep(4000); ft = await db.getFinalTranscript(subRow.id); }
+        if (ft?.text && ft.quality) pass("final_transcript", { mode: ft.mode, provider: ft.provider, quality: ft.quality, segs: ft.segments?.length ?? null });
+        else fail("final_transcript", ft ? `sem quality/texto (mode=${ft.mode})` : "não apareceu em 120s (fila parada?)");
+    } catch (e) { fail("final_transcript", e.message); }
+
+    // 8) Avaliação INDIVIDUAL (o lote exclui testes por design — ADR 0019). Com o
+    // final_transcript presente, o avaliador recebe também o bloco de auditoria.
+    try {
+        const ev = await expectJson(
+            await fetch(`${BASE_HTTP}/w/${work.work_token}/oral/submissions/${sub.submission_token}/evaluate`, { method: "POST" }),
+            "evaluate"
+        );
+        if (ev?.ok) pass("evaluate", { grade: ev.grade });
+        else fail("evaluate", JSON.stringify(ev).slice(0, 200));
         const d2 = await db.getOralSubmissionDetail(subRow.id);
         if (d2?.oral_eval_json?.per_question?.length) pass("oral_eval_json", { perguntas: d2.oral_eval_json.per_question.length, nota: d2.grade_final });
         else fail("oral_eval_json", "relatório de avaliação ausente");
-    } catch (e) { fail("evaluate_all", e.message); }
+    } catch (e) { fail("evaluate", e.message); }
 
-    // 8) proctor-all (HTTP NDJSON).
+    // 9) Proctoring: o upload do vídeo JÁ enfileira a análise na fila global
+    // (#262) — só espera o relatório aparecer (concorrência 1, ~30-60s).
     try {
-        const res = await fetch(`${BASE_HTTP}/w/${work.work_token}/oral/proctor-all?force=1`, { method: "POST" });
-        const lines = parseNdjson(await res.text());
-        const done = lines.find((l) => l.type === "done");
-        const item = lines.find((l) => l.type === "item" && l.submission_token === sub.submission_token);
-        if (done && item?.ok) pass("proctor_all", { analyzed: done.analyzed, alerts: item.proctor_alerts, voice_alert: item.voice_alert });
-        else fail("proctor_all", `done=${JSON.stringify(done)} item=${JSON.stringify(item)}`);
-        const d3 = await db.getOralSubmissionDetail(subRow.id);
+        let d3 = null;
+        for (let i = 0; i < 30; i++) {
+            d3 = await db.getOralSubmissionDetail(subRow.id);
+            if (d3?.oral_proctor_json?.flags) break;
+            await sleep(4000);
+        }
         if (d3?.oral_proctor_json?.flags) pass("oral_proctor_json", { frames: d3.oral_proctor_json.frames, flags: Object.keys(d3.oral_proctor_json.flags) });
-        else fail("oral_proctor_json", "relatório de proctoring ausente");
-    } catch (e) { fail("proctor_all", e.message); }
+        else fail("oral_proctor_json", `relatório não apareceu em 120s (estado=${d3?.oral_voice_json?.proctor_status?.state})`);
+    } catch (e) { fail("oral_proctor_json", e.message); }
 
-    // 9) Visão do professor (/oral/info) reflete tudo.
+    // 10) Visão do professor (/oral/info) reflete tudo.
     try {
         const info = await expectJson(await fetch(`${BASE_HTTP}/w/${work.work_token}/oral/info`), "oral info");
         const row = (info.submissions || []).find((s) => s.submission_token === sub.submission_token);
         if (row?.has_oral_eval && row?.has_oral_video && row?.has_oral_proctor) {
-            pass("professor_view", { grade: row.grade, proctor_alerts: row.proctor_alerts, voice_alert: row.voice_alert });
+            pass("professor_view", { grade: row.grade, proctor_alerts: row.proctor_alerts, voice_alert: row.voice_alert, sound_check: row.sound_check });
         } else fail("professor_view", JSON.stringify(row));
     } catch (e) { fail("professor_view", e.message); }
+
+    // 11) Revisão do aluno (corte 4A): transcript + comentário + retranscrição.
+    try {
+        const rv = await expectJson(await fetch(`${BASE_HTTP}/s/${sub.submission_token}/oral/review`), "oral review");
+        if (Array.isArray(rv.transcript) && rv.transcript.length && rv.audit_transcript?.text && rv.comment && !rv.comment.locked) {
+            pass("student_review", { turnos: rv.transcript.length, audit_mode: rv.audit_transcript.mode });
+        } else fail("student_review", JSON.stringify({ turnos: rv.transcript?.length, audit: !!rv.audit_transcript, comment: rv.comment }));
+    } catch (e) { fail("student_review", e.message); }
 
     // ----- Resumo -----
     console.log("\n========== RESUMO E2E PROVA ORAL ==========");
