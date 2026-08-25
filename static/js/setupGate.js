@@ -70,12 +70,23 @@
   // Avalia o estado do setup e decide. Retorna true se pode seguir DIRETO
   // (sem diálogo). Caso contrário mostra o diálogo e retorna false — quando o
   // impedimento é só de ambiente, `onProsseguir` leva adiante.
-  //   estado: { fonesOk, conexaoRuim, ruidoAlto, soundCheck }
+  //   estado: { fonesOk, conexaoRuim, ruidoAlto, soundCheck, soundCheckPendente }
   //   soundCheck (#288, opcional): { state: 'verde'|'amarelo'|'vermelho', waived }
+  //   soundCheckPendente (#288, adendo): o teste é obrigatório — true bloqueia
+  //   até o aluno concluir leitura + eco (erro de infra faz fail-open na página).
   function avaliar(estado, onProsseguir) {
     const itens = [];
     const sc = estado.soundCheck || null;
     const scVermelho = !!(sc && sc.state === "vermelho" && !sc.waived);
+    const scPendente = !!estado.soundCheckPendente && !scVermelho; // vermelho já tem mensagem própria
+    if (scPendente) {
+      itens.push({
+        texto:
+          "Falta fazer o teste de captação: leia a frase em voz alta e depois rode o teste de eco. " +
+          "É rápido, e garante que a transcrição vai refletir o que você disser na prova.",
+        critico: true,
+      });
+    }
     if (!estado.fonesOk) {
       itens.push({
         texto:
@@ -106,10 +117,11 @@
     }
     if (!itens.length) return true;
 
-    const bloqueante = !estado.fonesOk || scVermelho;
+    const bloqueante = !estado.fonesOk || scVermelho || scPendente;
     show({
       titulo: !estado.fonesOk ? "Falta confirmar os fones de ouvido"
         : scVermelho ? "A captação de áudio reprovou no teste"
+        : scPendente ? "Falta o teste de captação"
         : "Antes de continuar, atenção",
       itens,
       bloqueante,
