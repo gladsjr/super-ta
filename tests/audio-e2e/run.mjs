@@ -169,6 +169,18 @@ async function main() {
             server = await ensureServer(ARGS.base);
             log(`[seed] criando trabalho em modo audio (voz=${ARGS.voice}, perguntas=${ARGS.questions})...`);
             s = await seed({ base: ARGS.base, voice: ARGS.voice, questionCount: ARGS.questions });
+            // Desde a reforma da entrevista (#177), TODA entrevista nasce com
+            // fiscalização por vídeo LIGADA (fixo, sem UI do professor). Este
+            // harness testa a CADEIA DE ÁUDIO (mic falso, sem câmera) — o setup
+            // de câmera/posição/gestos é intestável aqui (MediaPipe sobre canvas).
+            // Andaime de teste: desliga a fiscalização SÓ no trabalho semeado,
+            // direto no banco (a coluna segue honrada pelo produto).
+            {
+                const db = await import("../../lib/db.js");
+                const w = await db.getWorkByToken(s.workToken);
+                await db.setProctoringEnabled(w.id, false);
+                log("[seed] fiscalização desligada no trabalho de teste (andaime; ver #177/ADR 0005)");
+            }
         }
         // --pdf: substitui o PDF de teste padrão pelo trabalho real informado.
         if (ARGS.pdf) {
