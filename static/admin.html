@@ -198,6 +198,8 @@
       <h3 class="card-title">Agora no sistema</h3>
       <div id="ops-dash" class="row" style="gap: var(--sp-4); flex-wrap: wrap; align-items: baseline"></div>
       <p class="hint" id="ops-dash-note" style="margin-top: var(--sp-2)"></p>
+      <!-- Falhas da fila de jobs (#311): o contador sem detalhe/ação era beco -->
+      <div id="ops-jobs-failures" style="margin-top: var(--sp-2)"></div>
     </div>
     <div class="card">
       <h3 class="card-title">Fila de análises de vídeo</h3>
@@ -640,10 +642,40 @@ function jobsSpan(jobs) {
   for (const r of jobs.rows) by[r.status] = (by[r.status] || 0) + r.n;
   const pend = (by.pending || 0) + (by.running || 0);
   const failed = by.failed || 0;
-  const failedTxt = failed ? ` · <strong style="color:var(--danger,#b00020)">${failed}</strong> falha(s)` : '';
-  return `<span title="retranscrição de auditoria na fila de jobs (motor: ${jobs.engine}); concluídas: ${by.done || 0}">` +
+  const failedTxt = failed ? ` · <strong style="color:var(--danger,#b00020)">${failed}</strong> falha(s) ↓` : '';
+  return `<span title="retranscrição de auditoria na fila de jobs (motor: ${jobs.engine}); concluídas: ${by.done || 0}${failed ? '; as falhas estão listadas logo abaixo' : ''}">` +
     `<strong style="font-size:1.3em">${pend}</strong> retranscrição(ões) pendente(s)${failedTxt}</span>`;
 }
+// Falhas da fila de jobs (#311): tabela acionável (reprocessar / descartar).
+function renderJobsFailures(jobs) {
+  const el = document.getElementById('ops-jobs-failures');
+  if (!el) return;
+  const fails = (jobs && jobs.failures) || [];
+  if (!fails.length) { el.innerHTML = ''; return; }
+  const TYPE_LABEL = { retranscribe: 'retranscrição (voz)', retranscribe_message: 'retranscrição (mensagem)' };
+  const rows = fails.map(f => {
+    const quem = escapeHtml(f.student_label || f.submission_token || '—');
+    const link = f.work_token
+      ? `<a href="/w/${encodeURIComponent(f.work_token)}${f.work_kind === 'oral_realtime' ? '/oral' : ''}" target="_blank" rel="noopener">${escapeHtml(f.work_name || f.work_token)}</a>` : '—';
+    const quando = f.updated_at ? new Date(f.updated_at).toLocaleString('pt-BR') : '';
+    return `<tr><td>${TYPE_LABEL[f.type] || escapeHtml(f.type)}</td><td>${quem}</td><td>${link}</td>` +
+      `<td class="hint" style="max-width:320px">${escapeHtml(f.last_error || '')}</td><td>${f.attempts}</td><td class="hint">${quando}</td>` +
+      `<td style="text-align:right"><button class="btn btn-sm" onclick="opsJobRetry(${f.id})" title="Volta o job à fila com as tentativas zeradas">Reprocessar</button> ` +
+      `<button class="btn btn-ghost btn-sm" onclick="opsJobDiscard(${f.id})" title="Tira da contagem de falhas sem apagar o registro">Descartar</button></td></tr>`;
+  }).join('');
+  el.innerHTML = `<table class="table"><thead><tr><th>Job</th><th>Aluno</th><th>Trabalho</th><th>Causa</th><th>Tent.</th><th>Quando</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+window.opsJobRetry = async (id) => {
+  const r = await fetch(`/admin/jobs/${id}/retry`, { method: 'POST' });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao reenfileirar')); }
+  loadOps();
+};
+window.opsJobDiscard = async (id) => {
+  if (!confirm('Descartar esta falha? O job sai da contagem, mas o registro permanece no banco.')) return;
+  const r = await fetch(`/admin/jobs/${id}/discard`, { method: 'POST' });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao descartar')); }
+  loadOps();
+};
 async function loadOps() {
   const secEl = document.getElementById('sec-operacoes');
   if (!secEl || secEl.classList.contains('hidden-sec')) return;
@@ -669,6 +701,7 @@ async function loadOps() {
         `<span title="RSS do processo Node (servidor)">${mb(d.memory.rss_bytes)} servidor</span>` +
         (appPct != null ? `<span title="ORATIA inteiro (servidor + análise) frente ao limite do contêiner (${d.memory.source})"><strong>${appPct}%</strong> de ${mb(limit)}</span>` : '') +
         jobsSpan(d.jobs);
+      renderJobsFailures(d.jobs);
       // Alerta de voz AO VIVO (#301): a análise de vídeo disputa a máquina com
       // o relay (mitigada por nice + 1 thread, mas disputa). O operador vê o
       // estado na hora de mexer na concorrência e decide se assume o risco.
