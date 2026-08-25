@@ -148,6 +148,27 @@
     const { base, micStream, sentence, els, getEnv, setCalibRecording, hfp, onUpdate } = opts;
     let ecoLoops = 0, attempt = 0, hfpSent = false, lastCap = null, stopped = false;
 
+    // Sonda de eco em stream CRU (achado do teste manual de 26/08): o AEC do
+    // navegador, ligado por padrão, CANCELA o áudio tocado pela própria página
+    // na trilha do microfone — a captura chegava VAZIA ao STT justamente sem
+    // fones. O gate mede o ARRANJO FÍSICO (voz voltando pelo ar), então a
+    // amostra de eco usa echoCancellation/noiseSuppression/autoGain OFF; a
+    // LEITURA continua no stream normal (mede o que a prova vai ouvir).
+    let rawMic = null;
+    async function getRawMic() {
+      if (rawMic) return rawMic;
+      try {
+        rawMic = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+      } catch { rawMic = micStream; }
+      return rawMic;
+    }
+    function dropRawMic() {
+      if (rawMic && rawMic !== micStream) { try { rawMic.getTracks().forEach(tr => tr.stop()); } catch {} }
+      rawMic = null;
+    }
+
     const stage = els.stage;
     function ui(html) { stage.innerHTML = html; }
     const esc2 = esc;
@@ -159,13 +180,16 @@
 
     // Toca um roteiro (com espelho visual) e, se `capture`, grava o microfone
     // durante a fala + cauda — a captura vira a amostra de eco daquele trecho.
-    function speak(key, { capture = false, extraHtml = "" } = {}) {
+    async function speak(key, { capture = false, extraHtml = "" } = {}) {
+      // UI PRIMEIRO e síncrona (os controles do estágio nascem com o chamador
+      // ainda no mesmo tick — quem chama sem await já os encontra no DOM).
+      ui(speechRow(SC_TEXTS[key]) + extraHtml);
+      const capStream = capture ? await getRawMic() : null; // cru: o AEC não apaga o eco
       return new Promise((resolve) => {
-        ui(speechRow(SC_TEXTS[key]) + extraHtml);
         let rec = null, chunks = [];
-        if (capture && micStream) {
+        if (capture && capStream) {
           try {
-            rec = new MediaRecorder(new MediaStream(micStream.getAudioTracks()));
+            rec = new MediaRecorder(new MediaStream(capStream.getAudioTracks()));
             rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
             rec.start();
           } catch { rec = null; }
@@ -309,6 +333,7 @@
       return s4Fim({ ressalva: true });
     }
     async function s4Fim({ ressalva = false, infra = false } = {}) {
+      dropRawMic(); // a sonda crua cumpriu o papel; libera o dispositivo
       const extra = ressalva
         ? `<div class="banner adjust">A leitura não foi aprovada, mas você pode seguir. Ao final, confira a transcrição e avise o professor se algo sair errado.</div>`
         : (infra ? `<div class="banner adjust">Não consegui concluir a verificação agora (falha do serviço). Você pode seguir.</div>` : "");
