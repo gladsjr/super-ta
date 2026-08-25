@@ -2031,7 +2031,7 @@ router.get("/s/:submissionToken/review", requireSubmissionToken, async (req, res
             student_audio: audioList,
             // Corte 4 (#289, D2): retranscrição de auditoria (versão fiel da fala
             // do aluno) — hoje só a variante realtime a produz; null nas demais.
-            audit_transcript: buildAuditBlock({ final: finalTranscript }),
+            audit_transcript: buildAuditBlock({ final: finalTranscript, humanLabels: true }),
         });
     } catch (err) {
         log.error("REVIEW", `failed token=${req.submission.submission_token}: ${err.message}`);

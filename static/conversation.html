@@ -481,7 +481,7 @@
        acima, a retranscrição tende a ser a fiel (o transcript ao vivo alucina
        quando o áudio degrada). Não altera a avaliação. -->
   <details class="doc-map hidden" id="final-transcript-box">
-    <summary>Retranscrição de auditoria (áudio contínuo) <span id="ft-meta" style="font-weight:400; color:var(--ink-soft, #667)"></span></summary>
+    <summary>Retranscrição de auditoria <span id="ft-meta" style="font-weight:400; color:var(--ink-soft, #667)"></span></summary>
     <pre id="final-transcript-body" style="white-space:pre-wrap"></pre>
   </details>
 
@@ -1420,10 +1420,18 @@ async function load() {
     const ft = conv.final_transcript;
     document.getElementById('final-transcript-box').classList.remove('hidden');
     const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
-    // Monitor de captação sobre o tee (#287/corte 4): 0 suspeitos = sessão íntegra.
+    // Origem por modo (#310): mensagem = gravações por resposta; voz = tee contínuo.
+    const fonte = ft.mode === 'answers' ? 'gravações por resposta' : 'áudio contínuo';
+    // Monitor de captação (#287/corte 4): íntegra exige 0 suspeitos E estrutura
+    // compatível (#312 — trechos ≥ respostas do transcript ao vivo).
     const fq = ft.quality;
-    const qual = fq ? (fq.suspects > 0 ? ` · ⚠ ${fq.suspects}/${fq.parts} trecho(s) suspeito(s)` : ` · captação íntegra (${fq.parts} trechos)`) : '';
-    document.getElementById('ft-meta').textContent = `— ${ft.model || ft.provider || ''}${dur} · só a voz do aluno${qual}`;
+    let qual = '';
+    if (fq) {
+      if (fq.coverage_ok === false) qual = ` · ⚠ estrutura divergente (${fq.parts} trecho(s) para ${fq.expected_turns} resposta(s) — pode haver falas fundidas)`;
+      else if (fq.suspects > 0) qual = ` · ⚠ ${fq.suspects}/${fq.parts} trecho(s) suspeito(s)`;
+      else qual = ` · captação íntegra (${fq.parts} trechos)`;
+    }
+    document.getElementById('ft-meta').textContent = `— ${fonte} · ${ft.model || ft.provider || ''}${dur} · só a voz do aluno${qual}`;
     const body = document.getElementById('final-transcript-body');
     if (ft.mode === 'segments' && Array.isArray(ft.segments)) {
       const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -1433,8 +1441,9 @@ async function load() {
       }).join('\n\n');
     } else if (ft.mode === 'answers' && Array.isArray(ft.answers)) {
       // Modo mensagem (corte 4B): uma resposta por blob, com o turno exato.
+      // Numeração HUMANA (#310): mesma da conversa acima (Turno 1, 2, …).
       body.textContent = ft.answers.map(a => {
-        const t = Number.isInteger(a.turn_index) ? `turno ${a.turn_index}` : `áudio ${a.audio_idx}`;
+        const t = Number.isInteger(a.turn_index) ? `turno ${a.turn_index + 1}` : 'abertura';
         return `[${t}] ${a.error ? '(resposta não transcrita)' : a.text}`;
       }).join('\n\n');
     } else {

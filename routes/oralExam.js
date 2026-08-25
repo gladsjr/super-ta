@@ -1064,6 +1064,7 @@ router.get("/s/:submissionToken/oral/review", requireSubmissionToken, async (req
             audit_transcript: buildAuditBlock({
                 final: d?.final_transcript,
                 multiPart: Array.isArray(d?.oral_video_parts) && d.oral_video_parts.length > 1,
+                humanLabels: true,
             }),
         });
     } catch (err) {
