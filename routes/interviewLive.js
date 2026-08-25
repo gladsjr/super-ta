@@ -24,7 +24,7 @@ import { clientForWork } from "../lib/openaiClient.js";
 import { prepBuilderAgent } from "../lib/agents.js";
 import { putAudio, extFromMimetype } from "../lib/audioStore.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
-import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp, soundCheckPending } from "../lib/soundCheck.js";
+import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp, soundCheckPending, soundCheckProgress, SC_SCRIPTS, SCRIPT_LEAK_MIN, scriptLeakMatches } from "../lib/soundCheck.js";
 import { synthesizeSpeech } from "../lib/audio.js";
 import { TTS_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
@@ -223,6 +223,8 @@ router.get("/s/:submissionToken/live/calibrate-config", requireSubmissionToken, 
             sound_check: ladderState(prev),
             // Adendo ADR 0023: o teste (leitura + eco) e obrigatorio para seguir.
             sound_check_pending: !!calib && soundCheckPending(prev, MAX_CALIB_ATTEMPTS),
+            // Wizard guiado por voz (#321): reentrada no estágio certo pós-reload.
+            sound_check_progress: soundCheckProgress(prev, MAX_CALIB_ATTEMPTS),
         });
     } catch (err) { log.error("LIVE", `calibrate-config failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
@@ -307,14 +309,19 @@ router.post("/s/:submissionToken/live/echo-check", requireSubmissionToken, requi
         try {
             ({ text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `echo.${extFromMimetype(req.file.mimetype)}` }));
         } catch { text = ""; }
-        const matches = countEchoMatches(text);
-        const leak = matches >= ECHO_LEAK_MIN_MATCHES;
+        // Wizard (#321): a voz-guia é a sonda — o cliente informa QUAL roteiro
+        // tocou durante a captura e o vazamento é medido contra o texto
+        // conhecido. Sem `script`, vale o caminho legado (frase de marcadores).
+        const scriptKey = String(req.body?.script || "");
+        const scriptText = SC_SCRIPTS[scriptKey] || null;
+        const matches = scriptText ? scriptLeakMatches(text, scriptText) : countEchoMatches(text);
+        const leak = matches >= (scriptText ? SCRIPT_LEAK_MIN : ECHO_LEAK_MIN_MATCHES);
 
         const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
         const leaksRecent = (Array.isArray(prev?.echo?.leaks_recent) ? prev.echo.leaks_recent : []).slice(-1);
         leaksRecent.push(leak);
         const echo = {
-            leak, matches,
+            leak, matches, ...(scriptText ? { script: scriptKey } : {}),
             tests: (Number(prev?.echo?.tests) || 0) + 1,
             leaks_recent: leaksRecent,
             transcript: text.slice(0, 200),

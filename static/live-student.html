@@ -76,9 +76,9 @@
       <!-- Tela 1: verificações sem câmera — conexão, silêncio, captação; a
            PREPARAÇÃO da entrevista (análise do trabalho) roda em paralelo. -->
       <div id="instr" style="display:none">
-        <!-- Fones: requisito em DESTAQUE + checkbox obrigatório. Sem fones, o
-             microfone capta a voz do entrevistador (eco/feedback) e degrada a conversa. -->
-        <div style="background:#eef4ff; border:2px solid #3b6fd4; border-radius:10px; padding:14px 16px; margin:0 0 14px">
+        <!-- Fones (#321): o card aparece no ESTÁGIO do wizard (S2) — a voz-guia
+             conduz. Sem wizard (trabalho sem frase), volta a aparecer direto. -->
+        <div id="sc-fones" style="display:none; background:#eef4ff; border:2px solid #3b6fd4; border-radius:10px; padding:14px 16px; margin:0 0 14px">
           <div style="font-size:22px; font-weight:700; line-height:1.25">🎧 Use fones de ouvido</div>
           <p style="margin:8px 0 12px; font-size:15.5px; line-height:1.5; text-wrap:pretty">A entrevista é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do entrevistador — isso causa eco, pode cortar a sua fala e prejudicar a sua avaliação.</p>
           <label class="accept" style="font-size:15px"><input type="checkbox" id="hp-check"/> <span><strong>Estou usando fones de ouvido</strong></span></label>
@@ -87,26 +87,17 @@
         <div class="banner wait" id="prep-banner">Analisando o seu trabalho e preparando a entrevista…</div>
         <!-- Conexão -->
         <div class="banner wait" id="conn-banner">Testando a conexão…</div>
-        <!-- Silêncio: medidor de ruído CONTÍNUO -->
-        <div style="max-width:380px; margin:14px auto 0">
+        <!-- Silêncio: medidor de ruído CONTÍNUO (some após o veredito do wizard) -->
+        <div id="noise-wrap" style="max-width:380px; margin:14px auto 0">
           <div class="hint" style="text-align:center; margin-bottom:4px">Nível de ruído do ambiente</div>
           <div style="height:10px; background:#e5e7eb; border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:var(--ok); transition:width .1s linear"></div></div>
           <div class="banner wait" id="noise-verdict" style="margin-top:6px">Medindo o ambiente…</div>
         </div>
-        <!-- Captação da fala (calibração) — só aparece se o professor configurou -->
+        <!-- Sound check GUIADO POR VOZ (#321): o orientador conduz as etapas e
+             cada fala dele é sonda de eco. O wizard monta a UI de cada estágio
+             em sc-stage; o painel vermelho (ADR 0023) continua em sc-red. -->
         <div id="calib-block" style="display:none; margin-top:18px; border-top:1px solid var(--line); padding-top:14px">
-          <p style="margin:0 0 4px"><strong>Teste de captação da sua fala.</strong> Vamos conferir se o sistema transcreve bem o que você fala — a avaliação sai da transcrição, então isso ajuda a avaliação a refletir a sua resposta.</p>
-          <p class="hint" style="margin:0 0 8px">Fale em <strong>volume médio</strong>, num <strong>ritmo tranquilo</strong> (sem correr) e <strong>sem cortar o fim das palavras</strong>. Leia a frase abaixo em voz alta:</p>
-          <div class="card" style="text-align:center; font-size:18px; line-height:1.5; margin:0 0 10px" id="calib-sentence">…</div>
-          <div style="text-align:center"><button class="btn" id="calib-rec-btn">🎤 Gravar e ler a frase</button></div>
-          <div class="banner wait" id="calib-status" style="margin-top:12px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>
-          <!-- Etapa 2 (#288): teste de ECO — a entrevistadora fala, o aluno fica em silêncio -->
-          <div id="echo-block" style="display:none; margin-top:14px">
-            <p style="margin:0 0 6px"><strong>Etapa 2: teste de eco.</strong> Vou tocar a voz da entrevista por alguns segundos. <strong>Fique em silêncio</strong> — o teste verifica se ela volta pelo seu microfone (eco).</p>
-            <div style="text-align:center"><button class="btn" id="echo-btn">🔊 Tocar e testar o eco</button></div>
-            <div class="banner wait" id="echo-status" style="margin-top:10px; display:none"></div>
-          </div>
-          <!-- Painel do VERMELHO (#288/ADR 0023): nunca é beco -->
+          <div id="sc-stage"></div>
           <div id="sc-red" style="margin-top:14px"></div>
         </div>
         <!-- Sempre habilitado: o bloqueio acontece no clique, com explicação (#255). -->
@@ -704,116 +695,50 @@
       poseLm = null;
     }
 
-    // --- Calibração de fala + sound check v2 (#288): leitura, eco e escada. ---
-    let calibRec = null, calibChunks = [], calibAttempt = 0;
-    let soundCheckState = null, scSpectral = null, hfpBasic = null;
+    // --- Sound check GUIADO POR VOZ (#321): o wizard (static/js/soundCheck.js)
+    // conduz silêncio → veredito conexão/ruído → fones+eco → leitura, com
+    // áudios pré-gravados; cada fala do orientador é sonda de eco. A página só
+    // fornece as primitivas (micStream, medições, pausa do medidor) e guarda o
+    // estado da escada p/ o gate do Continuar. ---
+    let soundCheckState = null, hfpBasic = null, wizardCtl = null;
     let soundCheckPending = false; // adendo ADR 0023: o teste (leitura+eco) e obrigatorio
     async function initCalibration() {
       let cfg = null;
       try { cfg = await (await fetch(`/s/${SUB}/live/calibrate-config`)).json(); } catch {}
-      if (!cfg || !cfg.enabled || !cfg.sentence) { $('calib-block').style.display = 'none'; return; } // fail-open
-      $('calib-sentence').textContent = cfg.sentence;
-      $('calib-block').style.display = '';
-      hfpBasic = window.soundCheck ? window.soundCheck.detectHfp(micStream) : null;
+      if (!cfg || !cfg.enabled || !cfg.sentence || !window.soundCheck || !window.soundCheck.mountWizard) {
+        // fail-open: sem frase/wizard, sem sound check — o card de fones volta
+        // a aparecer direto e o gate fica só no checkbox (comportamento antigo).
+        $('calib-block').style.display = 'none';
+        $('sc-fones').style.display = '';
+        return;
+      }
+      hfpBasic = window.soundCheck.detectHfp(micStream);
       soundCheckPending = !!cfg.sound_check_pending;
       applySoundCheck(cfg.sound_check); // reload: vermelho de ontem continua vermelho
+      $('calib-block').style.display = '';
+      wizardCtl = window.soundCheck.mountWizard({
+        base: `/s/${SUB}/live`, micStream, sentence: cfg.sentence,
+        els: { stage: $('sc-stage'), conn: $('conn-banner'), noise: $('noise-wrap'), fones: $('sc-fones'), hpCheck: $('hp-check'), red: $('sc-red') },
+        getEnv: () => ({ connWarn, noiseOk, noiseDone: true }),
+        setCalibRecording: (b) => { calibRecording = b; }, // pausa o medidor de ruído na gravação
+        hfp: () => window.soundCheck.hfpVerdict(hfpBasic, null),
+        onUpdate: (j) => {
+          if (typeof j.sound_check_pending === 'boolean') soundCheckPending = j.sound_check_pending;
+          if (j.sound_check) applySoundCheck(j.sound_check);
+        },
+      });
+      wizardCtl.start({ progress: cfg.sound_check_progress || {}, state: cfg.sound_check, pending: cfg.sound_check_pending });
     }
-    function calibToggleRecord() {
-      const btn = $('calib-rec-btn');
-      if (calibRec && calibRec.state === 'recording') { calibRec.stop(); return; }
-      if (!micStream) return;
-      calibChunks = [];
-      let stream; try { stream = new MediaStream(micStream.getAudioTracks()); } catch { stream = micStream; }
-      try { calibRec = new MediaRecorder(stream); } catch { return; }
-      calibRec.ondataavailable = e => { if (e.data && e.data.size) calibChunks.push(e.data); };
-      calibRec.onstop = calibSubmit;
-      calibRec.start();
-      // Sonda espectral do HFP (#288): mede enquanto o aluno fala.
-      scSpectral = window.soundCheck ? window.soundCheck.spectralProbe(stream) : null;
-      calibRecording = true; // pausa o medidor de ruído (a fala não é "ambiente")
-      btn.textContent = '⏹ Parar e verificar';
-      const st = $('calib-status'); st.className = 'banner wait'; st.textContent = '🎤 Gravando… leia a frase e toque em “Parar e verificar”.';
-    }
-    async function calibSubmit() {
-      calibRecording = false; // retoma o medidor de ruído
-      const btn = $('calib-rec-btn'), st = $('calib-status');
-      btn.textContent = '🎤 Gravar e ler a frase'; btn.disabled = true;
-      st.className = 'banner wait'; st.textContent = 'Verificando a captação…';
-      calibAttempt++;
-      const spectral = scSpectral ? scSpectral.stop() : null; scSpectral = null;
-      let j = null;
-      try {
-        const blob = new Blob(calibChunks, { type: (calibRec && calibRec.mimeType) || 'audio/webm' });
-        const form = new FormData(); form.append('file', blob, 'calib.webm'); form.append('attempt', String(calibAttempt));
-        const hfp = window.soundCheck ? window.soundCheck.hfpVerdict(hfpBasic, spectral) : null;
-        if (hfp) form.append('hfp', JSON.stringify(hfp));
-        j = await (await fetch(`/s/${SUB}/live/calibrate`, { method: 'POST', body: form })).json();
-      } catch {}
-      btn.disabled = false;
-      renderCalibResult(j);
-    }
-    function renderCalibResult(j) {
-      const st = $('calib-status'), rec = $('calib-rec-btn');
-      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui verificar agora. Você pode tentar de novo ou seguir (Continuar).'; soundCheckPending = false; return; } // erro de infra: fail-open
-      if (j.ok) {
-        st.className = 'banner ok'; st.textContent = 'Leitura ok ✓ Sua fala foi transcrita corretamente. Agora faça o teste de eco abaixo.';
-        rec.style.display = 'none';
-      } else {
-        const left = Number(j.attempts_left) || 0;
-        if (left > 0) {
-          st.className = 'banner adjust';
-          st.textContent = (j.advice || 'A captação não ficou boa.') + ` Toque em “Gravar e ler a frase” e tente de novo (${left} tentativa(s) restante(s)).`;
-        } else {
-          st.className = 'banner adjust';
-          st.innerHTML = esc(j.advice || 'A captação não ficou ideal.') + ' Faça também o teste de eco abaixo. Ao final, confira a transcrição da entrevista e, se algo tiver saído errado, avise o professor no comentário.';
-          rec.style.display = 'none';
-        }
-      }
-      if (j.ok || (Number(j.attempts_left) || 0) === 0) $('echo-block').style.display = '';
-      if (typeof j.sound_check_pending === 'boolean') soundCheckPending = j.sound_check_pending;
-      applySoundCheck(j.sound_check);
-    }
-    $('calib-rec-btn').onclick = calibToggleRecord;
-
-    // --- Teste de ECO (#288): a entrevista fala, o aluno fica em silêncio ---
-    async function runEcho() {
-      const btn = $('echo-btn'), st = $('echo-status');
-      if (!window.soundCheck || !micStream) return;
-      btn.disabled = true; st.style.display = '';
-      st.className = 'banner wait'; st.textContent = '🔊 Tocando a voz da entrevista… fique em silêncio.';
-      let j = null;
-      try {
-        j = await window.soundCheck.runEchoTest({
-          base: `/s/${SUB}/live`, micStream,
-          onStatus: (s) => { if (s === 'checking') { st.textContent = 'Verificando…'; } },
-        });
-      } catch {}
-      btn.disabled = false;
-      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui testar o eco agora. Você pode tentar de novo ou seguir.'; soundCheckPending = false; return; } // erro de infra: fail-open
-      if (j.leak) {
-        st.className = 'banner adjust';
-        st.textContent = '⚠ Eco detectado: a voz da entrevista voltou pelo seu microfone. Use fone de ouvido (de preferência com fio), baixe o volume e teste de novo.';
-        btn.textContent = '🔊 Testar o eco de novo';
-      } else {
-        st.className = 'banner ok'; st.textContent = 'Sem eco ✓ A voz da entrevista não vazou para o seu microfone.';
-        btn.style.display = 'none';
-      }
-      if (typeof j.sound_check_pending === 'boolean') soundCheckPending = j.sound_check_pending;
-      applySoundCheck(j.sound_check);
-    }
-    $('echo-btn').onclick = runEcho;
 
     // Escada (#288): painel vermelho (nunca é beco) + estado consumido no gate.
     function applySoundCheck(sc) {
       if (sc) soundCheckState = sc;
       const red = $('sc-red');
       if (soundCheckState && soundCheckState.state === 'vermelho' && !soundCheckState.waived) {
+        $('sc-stage').innerHTML = '';
         window.soundCheck && window.soundCheck.mountRedPanel(red, soundCheckState, () => {
           red.innerHTML = '';
-          const rec = $('calib-rec-btn'); rec.style.display = ''; rec.disabled = false;
-          const st = $('calib-status'); st.className = 'banner wait'; st.textContent = 'Refaça a leitura da frase e depois o teste de eco.';
-          const eb = $('echo-btn'); eb.style.display = ''; eb.disabled = false; eb.textContent = '🔊 Tocar e testar o eco';
-          $('echo-block').style.display = '';
+          if (wizardCtl) wizardCtl.restart();
         });
       } else {
         red.innerHTML = '';

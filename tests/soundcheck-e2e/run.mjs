@@ -85,7 +85,8 @@ async function launchChrome() {
     }
 }
 
-// --- Helpers de página ---
+// --- Helpers de página (wizard #321: a voz-guia conduz; os passos esperam
+// os áudios pré-gravados tocarem, então os timeouts são generosos) ---
 async function openStudent(context, token) {
     const page = await context.newPage();
     page.on("pageerror", e => console.log("[sc-e2e][pageerror]", String(e).slice(0, 160)));
@@ -95,26 +96,47 @@ async function openStudent(context, token) {
     await page.waitForSelector("#instr", { state: "visible", timeout: 20000 });
     return page;
 }
+async function reenter(page) {
+    await page.reload();
+    await page.check("#accept"); await page.click("#start-btn");
+    await page.waitForSelector("#instr", { state: "visible" });
+    await sleep(800);
+}
 const dialogText = (page) => page.evaluate(() => document.getElementById("setup-gate-dialog")?.innerText || null);
 async function closeDialog(page) { await page.evaluate(() => { document.getElementById("sg-ok")?.click(); document.getElementById("sg-voltar")?.click(); }); }
-async function readSentence(page, b64) {
-    await page.click("#calib-rec-btn");
-    await sleep(600); // MediaRecorder no ar
-    await page.evaluate(b => window.__speak(b), b64);
-    await page.click("#calib-rec-btn"); // parar e verificar
-    await page.waitForFunction(() =>
-        !/Verificando|Gravando/.test(document.getElementById("calib-status").textContent), null, { timeout: 30000 });
-    return page.evaluate(() => document.getElementById("calib-status").textContent);
-}
-async function runEchoUi(page) {
-    await page.click("#echo-btn");
-    await page.waitForFunction(() => {
-        const t = document.getElementById("echo-status").textContent;
-        return /Sem eco|Eco detectado|Não consegui/.test(t);
-    }, null, { timeout: 60000 });
-    return page.evaluate(() => document.getElementById("echo-status").textContent);
-}
 const redVisible = (page) => page.evaluate(() => (document.getElementById("sc-red").innerHTML || "").length > 0);
+const stageText = (page) => page.evaluate(() => document.getElementById("sc-stage")?.innerText || "");
+
+// Espera o estágio S2 (botão Testar captação) — g1 + medição + g2 tocam antes.
+async function waitFonesStage(page) {
+    await page.waitForSelector("#sc-test-btn", { state: "visible", timeout: 120000 });
+}
+// Marca fones e roda o teste de eco do wizard (mic falso em silêncio -> sem eco).
+async function passEchoStage(page) {
+    await waitFonesStage(page);
+    await page.check("#hp-check");
+    await page.waitForFunction(() => !document.getElementById("sc-test-btn").disabled, null, { timeout: 10000 });
+    await page.click("#sc-test-btn");
+}
+// Espera o estágio S3 (leitura) e lê a frase com o áudio dado.
+async function readSentence(page, b64) {
+    await page.waitForSelector("#sc-rec-btn", { state: "visible", timeout: 120000 });
+    await page.click("#sc-rec-btn");
+    // a gravação só começa após a instrução falada terminar (botão vira ⏹)
+    await page.waitForFunction(() => /⏹/.test(document.getElementById("sc-rec-btn")?.textContent || ""), null, { timeout: 60000 });
+    await sleep(400);
+    await page.evaluate(b => window.__speak(b), b64);
+    await page.click("#sc-rec-btn"); // parar e verificar
+    // Desfecho: novo botão de leitura (reprova com tentativa), banner de fim, ou painel vermelho.
+    await page.waitForFunction(() => {
+        const red = (document.getElementById("sc-red").innerHTML || "").length > 0;
+        const txt = document.getElementById("sc-stage")?.innerText || "";
+        const done = /Verificação concluída|já concluído/.test(txt);
+        const again = !!document.querySelector("#sc-rec-btn");
+        const busy = /Verificando|Gravando/.test(txt);
+        return !busy && (red || done || again);
+    }, null, { timeout: 120000 });
+}
 async function infoRow(workToken, subToken) {
     const info = await (await fetch(`${BASE}/w/${workToken}/oral/info`)).json();
     return (info.submissions || []).find(s => s.submission_token === subToken);
@@ -138,74 +160,64 @@ async function main() {
     await context.addInitScript(INJECT);
 
     try {
-        // ---------- JORNADA A: obrigatório → vermelho → reload → liberação ----------
+        // ---------- JORNADA A: obrigatório -> vermelho por leitura -> reload -> liberação ----------
         const A = subs[0].submission_token;
         let page = await openStudent(context, A);
-        // A1. Continuar sem testar → bloqueio "Falta o teste de captação"
-        await page.check("#hp-check");
+        // A1. Continuar sem concluir o wizard -> bloqueio "Falta o teste de captação"
+        // (o card de fones ainda está oculto — o wizard o revela no estágio S2)
         await page.click("#to-check-btn");
         const d1 = await dialogText(page);
-        if (d1 && /Falta o teste de captação/.test(d1)) pass("A1_gate_obrigatorio", {});
+        if (d1 && /Falta o teste de capta/.test(d1)) pass("A1_gate_obrigatorio", {});
         else fail("A1_gate_obrigatorio", `diálogo: ${String(d1).slice(0, 120)}`);
         await closeDialog(page);
-        // A2. Duas leituras ERRADAS → tentativas esgotadas + eco liberado
-        const r1 = await readSentence(page, wrongB64);
-        const r2 = await readSentence(page, wrongB64);
-        const echoVisible = await page.evaluate(() => document.getElementById("echo-block").style.display !== "none");
-        if (echoVisible) pass("A2_leituras_ruins", { r1: r1.slice(0, 60), r2: r2.slice(0, 60) });
-        else fail("A2_leituras_ruins", `echo-block não apareceu (r2=${r2.slice(0, 120)})`);
-        // A3. Eco (mic falso em silêncio → sem eco) e escada → VERMELHO
-        const e1 = await runEchoUi(page);
-        await sleep(300);
-        if (await redVisible(page)) pass("A3_vermelho", { echo: e1.slice(0, 40) });
-        else fail("A3_vermelho", `painel vermelho não apareceu (echo=${e1.slice(0, 80)})`);
-        // A4. Continuar → bloqueado pelo vermelho
+        // A2. Wizard: fones+eco (silêncio -> sem eco) -> leitura ERRADA 2x -> vermelho
+        await passEchoStage(page);
+        await readSentence(page, wrongB64);
+        await readSentence(page, wrongB64);
+        await sleep(500);
+        if (await redVisible(page)) pass("A2_vermelho_por_leitura", {});
+        else fail("A2_vermelho_por_leitura", `stage=${(await stageText(page)).slice(0, 100)}`);
+        // A3. Continuar -> bloqueado pelo vermelho
         await page.click("#to-check-btn");
         const d2 = await dialogText(page);
-        if (d2 && /reprovou/.test(d2)) pass("A4_gate_vermelho", {});
-        else fail("A4_gate_vermelho", `diálogo: ${String(d2).slice(0, 120)}`);
+        if (d2 && /reprovou/.test(d2)) pass("A3_gate_vermelho", {});
+        else fail("A3_gate_vermelho", `diálogo: ${String(d2).slice(0, 120)}`);
         await closeDialog(page);
-        // A5. Reload → vermelho persiste (o reload volta ao consentimento; reentra)
-        await page.reload();
-        await page.check("#accept"); await page.click("#start-btn");
-        await page.waitForSelector("#instr", { state: "visible" });
-        await sleep(800);
-        if (await redVisible(page)) pass("A5_reload_persiste", {});
-        else fail("A5_reload_persiste", "painel vermelho sumiu no reload");
-        // A6. Professor vê vermelho e libera; aluno segue
+        // A4. Reload -> vermelho persiste (o wizard não recomeça por cima do painel)
+        await reenter(page);
+        if (await redVisible(page)) pass("A4_reload_persiste", {});
+        else fail("A4_reload_persiste", "painel vermelho sumiu no reload");
+        // A5. Professor vê vermelho e libera; aluno segue
         const rowA = await infoRow(work.work_token, A);
-        if (rowA?.sound_check?.state === "vermelho" && !rowA.sound_check.waived) pass("A6_professor_ve", { reasons: rowA.sound_check.reasons });
-        else fail("A6_professor_ve", JSON.stringify(rowA?.sound_check));
+        if (rowA?.sound_check?.state === "vermelho" && !rowA.sound_check.waived) pass("A5_professor_ve", { reasons: rowA.sound_check.reasons });
+        else fail("A5_professor_ve", JSON.stringify(rowA?.sound_check));
         await fetch(`${BASE}/w/${work.work_token}/submissions/${A}/waive-soundcheck`, { method: "POST" });
-        await page.reload();
-        await page.check("#accept"); await page.click("#start-btn");
-        await page.waitForSelector("#instr", { state: "visible" });
-        await sleep(800);
+        await reenter(page);
         await page.check("#hp-check");
         await page.click("#to-check-btn");
         await sleep(500);
         const setupVisible = await page.evaluate(() => document.getElementById("setup").style.display !== "none");
-        if (setupVisible && !(await redVisible(page))) pass("A7_liberado_segue", {});
-        else fail("A7_liberado_segue", `setup=${setupVisible} red=${await redVisible(page)} dialog=${String(await dialogText(page)).slice(0, 100)}`);
+        if (setupVisible && !(await redVisible(page))) pass("A6_liberado_segue", {});
+        else fail("A6_liberado_segue", `setup=${setupVisible} dialog=${String(await dialogText(page)).slice(0, 100)}`);
         await page.close();
 
-        // ---------- JORNADA B: vermelho → recuperação → amarelo ----------
+        // ---------- JORNADA B: vermelho -> "Já ajustei" (wizard reabre) -> amarelo ----------
         const B = subs[1].submission_token;
         page = await openStudent(context, B);
-        await page.check("#hp-check");
+        await passEchoStage(page);
         await readSentence(page, wrongB64);
         await readSentence(page, wrongB64);
-        await runEchoUi(page);
-        await sleep(300);
+        await sleep(500);
         if (await redVisible(page)) pass("B1_vermelho", {});
-        else fail("B1_vermelho", "não ficou vermelho após 2 leituras ruins + eco");
+        else fail("B1_vermelho", "não ficou vermelho após 2 leituras ruins");
         await page.click("#sc-retry-btn");
-        const r3 = await readSentence(page, goodB64);
-        await sleep(300);
+        await passEchoStage(page); // o restart reabre do estágio do eco
+        await readSentence(page, goodB64);
+        await sleep(500);
         const rowB = await infoRow(work.work_token, B);
-        if (!(await redVisible(page)) && rowB?.sound_check?.state === "amarelo") pass("B2_recupera_amarelo", { leitura: r3.slice(0, 50), reasons: rowB.sound_check.reasons });
-        else fail("B2_recupera_amarelo", `red=${await redVisible(page)} estado=${rowB?.sound_check?.state} leitura=${r3.slice(0, 120)}`);
-        // B3. Continuar → aviso não-bloqueante ("Continuar assim mesmo")
+        if (!(await redVisible(page)) && rowB?.sound_check?.state === "amarelo") pass("B2_recupera_amarelo", { reasons: rowB.sound_check.reasons });
+        else fail("B2_recupera_amarelo", `red=${await redVisible(page)} estado=${rowB?.sound_check?.state}`);
+        await page.check("#hp-check");
         await page.click("#to-check-btn");
         const d3 = await dialogText(page);
         if (d3 && /instabilidade|assim mesmo/i.test(d3)) {
@@ -220,22 +232,19 @@ async function main() {
         // ---------- JORNADA C: verde direto ----------
         const C = subs[2].submission_token;
         page = await openStudent(context, C);
-        await page.check("#hp-check");
-        const rc = await readSentence(page, goodB64);
-        if (/Leitura ok/.test(rc)) pass("C1_leitura_ok", {});
-        else fail("C1_leitura_ok", rc.slice(0, 120));
-        const ec = await runEchoUi(page);
-        if (/Sem eco/.test(ec)) pass("C2_sem_eco", {});
-        else fail("C2_sem_eco", ec.slice(0, 120));
+        await passEchoStage(page);
+        await readSentence(page, goodB64);
+        await page.waitForFunction(() => /concluída/.test(document.getElementById("sc-stage")?.innerText || ""), null, { timeout: 90000 });
         const rowC = await infoRow(work.work_token, C);
-        if (rowC?.sound_check?.state === "verde") pass("C3_verde", {});
-        else fail("C3_verde", JSON.stringify(rowC?.sound_check));
+        if (rowC?.sound_check?.state === "verde") pass("C1_verde", {});
+        else fail("C1_verde", JSON.stringify(rowC?.sound_check));
+        await page.check("#hp-check");
         await page.click("#to-check-btn");
         await sleep(500);
         const dC = await dialogText(page);
         const setupC = await page.evaluate(() => document.getElementById("setup").style.display !== "none");
-        if (setupC && !dC) pass("C4_verde_segue_direto", {});
-        else fail("C4_verde_segue_direto", `setup=${setupC} dialog=${String(dC).slice(0, 100)}`);
+        if (setupC && !dC) pass("C2_verde_segue_direto", {});
+        else fail("C2_verde_segue_direto", `setup=${setupC} dialog=${String(dC).slice(0, 100)}`);
         await page.close();
     } finally {
         await browser.close();
@@ -243,7 +252,7 @@ async function main() {
 
     console.log("\n========== RESUMO E2E SOUND CHECK ==========");
     for (const [k, v] of Object.entries(report.steps)) console.log(`${v.ok ? "PASS" : "FAIL"}  ${k}${v.ok ? "" : " — " + v.msg}`);
-    console.log(`\nRESULTADO GERAL: ${report.ok ? "✅ PASS" : "❌ FAIL"}`);
+    console.log(`\nRESULTADO GERAL: ${report.ok ? "PASS" : "FAIL"}`);
     process.exit(report.ok ? 0 : 1);
 }
 

@@ -82,12 +82,14 @@
     if (scPendente) {
       itens.push({
         texto:
-          "Falta fazer o teste de captação: leia a frase em voz alta e depois rode o teste de eco. " +
-          "É rápido, e garante que a transcrição vai refletir o que você disser na prova.",
+          "Falta concluir o teste de captação: siga as instruções da voz de orientação (silêncio, " +
+          "fones e eco, e a leitura da frase). É rápido, e garante que a transcrição vai refletir o que você disser.",
         critico: true,
       });
     }
-    if (!estado.fonesOk) {
+    // Com o teste pendente, o wizard ainda vai conduzir a etapa dos fones — o
+    // card pode nem estar visível (#321), então não se cobra o checkbox aqui.
+    if (!estado.fonesOk && !scPendente) {
       itens.push({
         texto:
           "Confirme que está usando fones de ouvido. Sem fones, o microfone capta a voz do " +
@@ -119,9 +121,9 @@
 
     const bloqueante = !estado.fonesOk || scVermelho || scPendente;
     show({
-      titulo: !estado.fonesOk ? "Falta confirmar os fones de ouvido"
-        : scVermelho ? "A captação de áudio reprovou no teste"
+      titulo: scVermelho ? "A captação de áudio reprovou no teste"
         : scPendente ? "Falta o teste de captação"
+        : !estado.fonesOk ? "Falta confirmar os fones de ouvido"
         : "Antes de continuar, atenção",
       itens,
       bloqueante,

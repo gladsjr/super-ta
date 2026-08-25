@@ -1,7 +1,7 @@
 // Escada do sound check v2 (#288, ADR 0023) — regras puras de lib/soundCheck.js.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ladderState, countEchoMatches, parseHfp, soundCheckPending, HARD_WER } from "../lib/soundCheck.js";
+import { ladderState, countEchoMatches, parseHfp, soundCheckPending, soundCheckProgress, scriptLeakMatches, SC_SCRIPTS, SCRIPT_LEAK_MIN, HARD_WER } from "../lib/soundCheck.js";
 
 const att = (wer) => ({ attempt: 1, wer, missed: [], text: "x" });
 
@@ -93,6 +93,34 @@ test("soundCheckPending — o teste é obrigatório (adendo ADR 0023)", async (t
     });
     await t.test("liberação do professor destrava", () => {
         assert.equal(soundCheckPending({ waived_at: "2026-08-24T00:00:00Z" }), false);
+    });
+});
+
+test("scriptLeakMatches — a voz-guia como sonda de eco (#321)", async (t) => {
+    await t.test("roteiro voltando pelo mic = vazamento (>= SCRIPT_LEAK_MIN palavras distintivas)", () => {
+        const n = scriptLeakMatches("é obrigatório usar fones de ouvido o microfone vira eco", SC_SCRIPTS.g3_fones);
+        assert.ok(n >= SCRIPT_LEAK_MIN, `esperava >= ${SCRIPT_LEAK_MIN}, veio ${n}`);
+    });
+    await t.test("fala legítima do aluno não pontua (stopwords/curtas não contam)", () => {
+        const n = scriptLeakMatches("eu acho que a resposta é a fotossíntese das plantas", SC_SCRIPTS.g3_fones);
+        assert.ok(n < SCRIPT_LEAK_MIN, `veio ${n}`);
+    });
+    await t.test("silêncio/vazio = zero", () => {
+        assert.equal(scriptLeakMatches("", SC_SCRIPTS.g1_intro), 0);
+    });
+});
+
+test("soundCheckProgress — reentrada do wizard (#321)", async (t) => {
+    await t.test("nada feito", () => {
+        assert.deepEqual(soundCheckProgress(null), { leitura_done: false, echo_done: false });
+    });
+    await t.test("leitura aprovada + eco limpo no último teste", () => {
+        const p = soundCheckProgress({ passed: true, attempts: 1, echo: { tests: 2, leaks_recent: [true, false] } });
+        assert.deepEqual(p, { leitura_done: true, echo_done: true });
+    });
+    await t.test("eco testado mas ÚLTIMO com vazamento -> echo não resolvido", () => {
+        const p = soundCheckProgress({ passed: true, attempts: 1, echo: { tests: 1, leaks_recent: [true] } });
+        assert.equal(p.echo_done, false);
     });
 });
 
