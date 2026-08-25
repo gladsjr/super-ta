@@ -30,7 +30,7 @@ const activationLimiter = rateLimit({
     message: { error: "Muitas tentativas. Tente de novo em alguns minutos." },
 });
 
-router.get("/ativar", (_req, res) => res.sendFile(path.join(STATIC_DIR, "ativar.html")));
+router.get("/ativar", (_req, res) => res.sendFile(path.join(STATIC_DIR, "ativar.html"), { headers: { "Cache-Control": "no-cache" } }));
 
 router.get("/api/ativar", activationLimiter, async (req, res) => {
     try {
