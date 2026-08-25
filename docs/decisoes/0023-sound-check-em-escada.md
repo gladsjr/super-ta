@@ -64,3 +64,24 @@ uma vez (`soundCheckPending`). Sem isso, o aluno com eco driblaria o gate
 simplesmente não testando — a escada só protege quem mede. Erro de
 infraestrutura (STT/TTS fora do ar) faz **fail-open**: o gate é contra pular o
 teste, não contra o azar; e a liberação do professor também destrava.
+
+## Adendo 2 (26/08, pré-deploy) — sound check guiado por VOZ (#321)
+
+O setup vira um **wizard conduzido por voz pré-gravada** (o "orientador", voz
+fixa distinta do examinador): silêncio → veredito de conexão/ruído (avisa, não
+bloqueia, mas exige "Estou ciente") → fones+eco → leitura. Duas mudanças de
+regra:
+
+- **Cada fala do orientador é sonda de eco**: o microfone grava durante a
+  reprodução e o vazamento é medido contra o ROTEIRO conhecido
+  (`SC_SCRIPTS`/`scriptLeakMatches`) — não há mais um "momento do teste" que o
+  aluno possa contornar mutando a caixa de som.
+- **O estágio do eco não avança com eco detectado**: 1º eco → aviso falado,
+  checkbox de fones desmarcado e repetição do estágio; 2º eco → **vermelho**
+  (mesmos dois sinais duros da escada) → painel com as três saídas de sempre.
+  O laço nunca é beco.
+
+Os mp3 vivem em `static/audio/soundcheck/` e são regenerados de `SC_SCRIPTS`
+por `scripts/gen-soundcheck-audio.mjs` — roteiro e referência de vazamento têm
+fonte única; mudou o texto, regere o áudio. Tudo que a voz diz aparece também
+em texto (acessibilidade / saída de áudio quebrada).

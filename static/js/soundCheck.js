@@ -139,5 +139,213 @@
     if (b && onRetry) b.onclick = onRetry;
   }
 
-  window.soundCheck = { detectHfp, spectralProbe, hfpVerdict, runEchoTest, mountRedPanel };
+  // --- WIZARD guiado por VOZ (#321) ---------------------------------------
+  // Máquina de estados do sound check: o orientador (áudios pré-gravados em
+  // /static/audio/soundcheck/) conduz as etapas, e CADA fala dele é sonda de
+  // eco — o microfone grava durante a reprodução e o servidor confere se o
+  // roteiro voltou. Tudo que a voz diz aparece em texto (espelho visual).
+  function mountWizard(opts) {
+    const { base, micStream, sentence, els, getEnv, setCalibRecording, hfp, onUpdate } = opts;
+    let ecoLoops = 0, attempt = 0, hfpSent = false, lastCap = null, stopped = false;
+
+    const stage = els.stage;
+    function ui(html) { stage.innerHTML = html; }
+    const esc2 = esc;
+    function speechRow(text) {
+      return `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">` +
+        `<div style="font-size:22px">🎧</div>` +
+        `<div style="flex:1;background:var(--bg-muted,#f4f1ea);border-radius:10px;padding:10px 12px;line-height:1.5"><span style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#5a6b80;display:block;margin-bottom:4px">Orientação (voz)</span>${esc2(text)}</div></div>`;
+    }
+
+    // Toca um roteiro (com espelho visual) e, se `capture`, grava o microfone
+    // durante a fala + cauda — a captura vira a amostra de eco daquele trecho.
+    function speak(key, { capture = false, extraHtml = "" } = {}) {
+      return new Promise((resolve) => {
+        ui(speechRow(SC_TEXTS[key]) + extraHtml);
+        let rec = null, chunks = [];
+        if (capture && micStream) {
+          try {
+            rec = new MediaRecorder(new MediaStream(micStream.getAudioTracks()));
+            rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+            rec.start();
+          } catch { rec = null; }
+        }
+        const audio = new Audio(`/static/audio/soundcheck/${key}.mp3`);
+        const finish = () => setTimeout(() => {
+          if (rec && rec.state === "recording") {
+            rec.onstop = () => { lastCap = { blob: new Blob(chunks, { type: rec.mimeType || "audio/webm" }), script: key }; resolve(); };
+            rec.stop();
+          } else resolve();
+        }, 600);
+        audio.onended = finish;
+        audio.onerror = finish; // sem áudio (arquivo/saída quebrados): o espelho visual segue valendo
+        audio.play().catch(finish);
+      });
+    }
+
+    const sleepW = (ms) => new Promise(r => setTimeout(r, ms));
+    function push(resp) { if (onUpdate) onUpdate(resp); }
+    function isRed(resp) { return resp && resp.sound_check && resp.sound_check.state === "vermelho" && !resp.sound_check.waived; }
+
+    async function postEcho() {
+      const form = new FormData();
+      form.append("file", lastCap.blob, "echo.webm");
+      form.append("script", lastCap.script);
+      return await (await fetch(`${base}/echo-check`, { method: "POST", body: form })).json();
+    }
+
+    // ---- Estágios ----
+    async function s0Silencio() {
+      if (els.conn) els.conn.style.display = "";
+      if (els.noise) els.noise.style.display = "";
+      await speak("g1_intro", { capture: true });
+      await sleepW(3500); // janela de medição em silêncio, pós-fala
+      return s1Veredito();
+    }
+    async function s1Veredito() {
+      const env = getEnv ? getEnv() : {};
+      const problems = [];
+      if (env.connWarn) problems.push("g2_conn");
+      if (env.noiseDone && !env.noiseOk) problems.push("g2_ruido");
+      if (!problems.length) {
+        await speak("g2_ok", { capture: true });
+      } else {
+        for (const p of problems) {
+          await speak(p, { capture: true, extraHtml: `<div style="text-align:center"><button class="btn" id="sc-aware-btn">Estou ciente</button></div>` });
+          await new Promise((res) => { const b = stage.querySelector("#sc-aware-btn"); if (b) b.onclick = res; else res(); });
+        }
+      }
+      // O feedback de conexão/ruído cumpriu o papel: some (nada de pilha rolando).
+      if (els.conn) els.conn.style.display = "none";
+      if (els.noise) els.noise.style.display = "none";
+      return s2Fones();
+    }
+    async function s2Fones() {
+      if (stopped) return;
+      if (els.fones) els.fones.style.display = "";
+      const key = ecoLoops === 0 ? "g3_fones" : "g5_eco_loop";
+      const btnHtml = `<div style="text-align:center"><button class="btn" id="sc-test-btn" disabled>🎧 Testar captação</button></div>` +
+        `<div class="banner wait" id="sc-echo-status" style="margin-top:10px;display:none"></div>`;
+      // A UI nasce ANTES de a fala terminar (ui() é síncrono dentro de speak):
+      // o checkbox/botão já respondem durante o áudio; o clique só processa
+      // após o fim da fala (aguarda `spoken`), garantindo a captura do eco.
+      const spoken = speak(key, { capture: true, extraHtml: btnHtml });
+      const btn = stage.querySelector("#sc-test-btn");
+      const st = stage.querySelector("#sc-echo-status");
+      const sync = () => { if (btn) btn.disabled = !(els.hpCheck && els.hpCheck.checked); };
+      if (els.hpCheck) els.hpCheck.addEventListener("change", sync);
+      sync();
+      await new Promise((res) => { if (btn) btn.onclick = res; });
+      await spoken; // fala + captura completas antes de conferir o eco
+      if (els.hpCheck) els.hpCheck.removeEventListener("change", sync);
+      if (btn) btn.disabled = true;
+      if (st) { st.style.display = ""; st.textContent = "Verificando o eco…"; }
+      let j = null;
+      try { j = lastCap ? await postEcho() : null; } catch {}
+      if (!j || j.error) {
+        // erro de INFRA no teste de eco: fail-open (ADR 0023) — segue à leitura
+        push({ sound_check_pending: false });
+        return s3Leitura();
+      }
+      push(j);
+      if (j.leak) {
+        ecoLoops++;
+        if (els.hpCheck) els.hpCheck.checked = false; // desfaz a confirmação: havia eco
+        if (isRed(j)) return; // 2 ecos = vermelho — painel/liberação assumem (nunca é beco)
+        await speak("g4_eco", { capture: true });
+        return s2Fones();
+      }
+      return s3Leitura();
+    }
+    async function s3Leitura() {
+      if (stopped) return;
+      const frame = `
+        <div class="card" style="text-align:center;font-size:18px;line-height:1.5;margin:0 0 10px">${esc2(sentence)}</div>
+        <div style="text-align:center"><button class="btn" id="sc-rec-btn">🎤 Gravar e ler a frase</button></div>
+        <div class="banner wait" id="sc-read-status" style="margin-top:10px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>`;
+      // UI e handler nascem JÁ (ui é síncrono dentro de speak); a gravação em si
+      // espera a instrução terminar — clicar cedo não grava a voz-guia junto.
+      const spoken = (attempt === 0)
+        ? speak("g6_leitura", { capture: true, extraHtml: frame })
+        : (ui(speechRow(SC_TEXTS.g7_leitura_ruim) + frame), Promise.resolve());
+      const btn = stage.querySelector("#sc-rec-btn");
+      const st = stage.querySelector("#sc-read-status");
+      let rec = null, chunks = [];
+      const j = await new Promise((res) => {
+        btn.onclick = async () => {
+          if (rec && rec.state === "recording") { rec.stop(); return; }
+          await spoken; // instrução concluída (e captura de eco fechada)
+          chunks = [];
+          try { rec = new MediaRecorder(new MediaStream(micStream.getAudioTracks())); } catch { return res(null); }
+          rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+          rec.onstop = async () => {
+            if (setCalibRecording) setCalibRecording(false);
+            btn.disabled = true; st.className = "banner wait"; st.textContent = "Verificando a captação…";
+            attempt++;
+            try {
+              const form = new FormData();
+              form.append("file", new Blob(chunks, { type: rec.mimeType || "audio/webm" }), "calib.webm");
+              form.append("attempt", String(attempt));
+              const h = hfp && !hfpSent ? hfp() : null;
+              if (h) { form.append("hfp", JSON.stringify(h)); hfpSent = true; }
+              res(await (await fetch(`${base}/calibrate`, { method: "POST", body: form })).json());
+            } catch { res(null); }
+          };
+          rec.start();
+          if (setCalibRecording) setCalibRecording(true);
+          btn.textContent = "⏹ Parar e verificar";
+          st.className = "banner wait"; st.textContent = "🎤 Gravando… leia a frase e toque em “Parar e verificar”.";
+        };
+      });
+      if (!j || j.error) { push({ sound_check_pending: false }); return s4Fim({ infra: true }); } // infra: fail-open
+      push(j);
+      if (j.ok) return s4Fim({});
+      if ((Number(j.attempts_left) || 0) > 0) {
+        await speak("g7_leitura_ruim", { capture: true, extraHtml: `<div class="banner adjust">${esc2(j.advice || "A captação não ficou boa.")}</div>` });
+        return s3Leitura();
+      }
+      // tentativas esgotadas: a escada decide (vermelho → painel; senão segue com aviso)
+      if (isRed(j)) return;
+      return s4Fim({ ressalva: true });
+    }
+    async function s4Fim({ ressalva = false, infra = false } = {}) {
+      const extra = ressalva
+        ? `<div class="banner adjust">A leitura não foi aprovada, mas você pode seguir. Ao final, confira a transcrição e avise o professor se algo sair errado.</div>`
+        : (infra ? `<div class="banner adjust">Não consegui concluir a verificação agora (falha do serviço). Você pode seguir.</div>` : "");
+      await speak("g8_fim", { extraHtml: extra + `<div class="banner ok" style="margin-top:8px">Verificação concluída ✓ Use o botão Continuar abaixo.</div>` });
+    }
+
+    // Entrada: retoma do estágio certo (reload) ou pula tudo se já concluído.
+    async function start({ progress = {}, state = null, pending = true } = {}) {
+      if (state && state.state === "vermelho" && !state.waived) return; // painel vermelho da página assume
+      if (pending === false) { ui(`<div class="banner ok">Teste de captação já concluído ✓</div>`); if (els.fones) els.fones.style.display = ""; return; }
+      if (progress.echo_done) { if (els.conn) els.conn.style.display = "none"; if (els.noise) els.noise.style.display = "none"; if (els.fones) els.fones.style.display = ""; return s3Leitura(); }
+      return s0Silencio();
+    }
+    // Recuperação pós-vermelho ("Já ajustei"): reabre do estágio do eco.
+    function restart() {
+      stopped = false; ecoLoops = 0;
+      if (els.conn) els.conn.style.display = "none";
+      if (els.noise) els.noise.style.display = "none";
+      return s2Fones();
+    }
+    return { start, restart };
+  }
+
+  // Espelho dos textos falados (mantido em sincronia com lib/soundCheck.js —
+  // regerado junto com os mp3 por scripts/gen-soundcheck-audio.mjs).
+  const SC_TEXTS = window.SC_SCRIPTS_MIRROR || {
+    g1_intro: "Olá! Eu sou a orientação automática. Antes de começar, vou fazer alguns testes rápidos para garantir que a sua fala será entendida sem erros. Primeiro: fique em silêncio por alguns segundos, enquanto eu meço o ambiente e a conexão.",
+    g2_ok: "Conexão e nível de ruído: tudo certo.",
+    g2_conn: "A sua conexão está instável ou lenta. Você pode continuar, mas pode haver cortes — se puder, aproxime-se do roteador ou troque de rede. Clique em Estou ciente para seguir.",
+    g2_ruido: "O ambiente está barulhento. Você pode continuar, mas o ruído atrapalha a transcrição da sua fala — se puder, procure um lugar mais silencioso. Clique em Estou ciente para seguir.",
+    g3_fones: "Para a prova, é obrigatório usar fones de ouvido. Sem eles, a minha voz volta pelo seu microfone e vira eco. Coloque os fones agora, marque a caixa confirmando, e clique em Testar captação.",
+    g4_eco: "Detectei eco: a minha voz está voltando pelo seu microfone. Isso normalmente acontece sem fones de ouvido, ou com o volume muito alto. Este ponto é bloqueante: ajuste o equipamento, e vamos tentar de novo.",
+    g5_eco_loop: "Para garantir a qualidade da avaliação, preciso de som sem eco. Use fones de ouvido e baixe o volume. Se eu detectar eco de novo, voltaremos a este mesmo estágio.",
+    g6_leitura: "Agora, leia em voz alta a frase que está na tela, com a mesma entonação que você vai usar na prova. O objetivo é garantir uma boa transcrição dos termos específicos do tema. Clique em Gravar, leia a frase, e clique em Parar e verificar.",
+    g7_leitura_ruim: "A captação da sua leitura não ficou boa. Fale um pouco mais perto do microfone, num ritmo tranquilo, e tente novamente.",
+    g8_fim: "Tudo certo por aqui. Pode continuar para a próxima etapa.",
+  };
+
+  window.soundCheck = { detectHfp, spectralProbe, hfpVerdict, runEchoTest, mountRedPanel, mountWizard };
 })();
