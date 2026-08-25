@@ -84,7 +84,14 @@ const app = express();
 // (KaTeX/marked) e inline, e uma CSP restritiva quebraria o front. Ligar CSP com
 // allowlist testada é um passo separado.
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use("/static", express.static(path.join(__dirname, "static")));
+// Estáticos com REVALIDAÇÃO obrigatória (#313, reaberto): sem Cache-Control o
+// navegador aplica cache heurístico (fração do tempo desde o Last-Modified) e
+// pode servir página/JS VELHOS depois de um deploy — foi assim que um aluno
+// viu o gate antigo do sound check já corrigido no servidor. `no-cache` não
+// desliga o cache: obriga a revalidar (ETag/304, barato) a cada carga.
+app.use("/static", express.static(path.join(__dirname, "static"), {
+    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+}));
 
 // Parser JSON global, teto apertado (2mb) — vale para praticamente tudo.
 // EXCEÇÃO: rotas que declaram o próprio teto por serem legitimamente grandes.
@@ -146,7 +153,7 @@ app.get("/:slug", async (req, res, next) => {
     try {
         const { getTenantBySlug } = await import("./lib/tenants.js");
         if (!(await getTenantBySlug(slug))) return next();
-        return res.sendFile(path.join(__dirname, "static", "tenant-login.html"));
+        return res.sendFile(path.join(__dirname, "static", "tenant-login.html"), { headers: { "Cache-Control": "no-cache" } });
     } catch (err) {
         log.error("TENANT", `slug route failed: ${err.message}`);
         return next();
