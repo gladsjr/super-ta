@@ -917,7 +917,17 @@ router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibU
 
         // Extensão pelo mimetype real: MediaRecorder varia por navegador (webm no
         // Chrome/Firefox, mp4/m4a no Safari) e o STT infere o formato pela extensão.
-        const { text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `calib.${extFromMimetype(req.file.mimetype)}` });
+        // SILÊNCIO não é erro de infra (#313): o STT devolve transcrição vazia e a
+        // camada lança "empty transcription" — isso é LEITURA REPROVADA (wer=1),
+        // conta tentativa e mantém o gate. Erro real de infra segue como 500
+        // (fail-open do cliente, restrito de fato à infra — ADR 0023).
+        let text = "";
+        try {
+            ({ text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `calib.${extFromMimetype(req.file.mimetype)}` }));
+        } catch (err) {
+            if (!/empty transcription/i.test(String(err.message))) throw err;
+        }
+        const silent = !text.trim();
         const { ok, wer, missedTerms } = scoreCalibration({ target: calib.sentence, keyTerms: calib.key_terms || [], hypothesis: text });
 
         // Acumula o registro (todas as tentativas) para o professor.
@@ -945,7 +955,8 @@ router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibU
         log.info("ORAL", `calibrate submission=${req.submission.submission_token} attempt=${attempt} ok=${ok} wer=${wer == null ? "—" : wer.toFixed(2)} missed=${missedTerms.length} escada=${state?.state || "—"}`);
         res.json({
             ok, attempt, attempts_left: Math.max(0, MAX_CALIB_ATTEMPTS - attempt),
-            wer, missed_terms: missedTerms, transcript: text, advice: ok ? null : CALIB_ADVICE,
+            wer, missed_terms: missedTerms, transcript: text,
+            advice: ok ? null : (silent ? "Não ouvi nenhuma fala na gravação. Verifique se o microfone certo está selecionado e leia a frase em voz alta." : CALIB_ADVICE),
             sound_check: state,
             sound_check_pending: soundCheckPending({ ...(prev || {}), ...patch }, MAX_CALIB_ATTEMPTS),
         });
