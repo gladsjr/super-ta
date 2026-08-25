@@ -21,7 +21,7 @@ import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent,
 import { putAudio, localFilePath, readAllBytes, extFromMimetype } from "../lib/audioStore.js";
 import { ensureConsolidatedVideo } from "../lib/videoConsolidate.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
-import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp } from "../lib/soundCheck.js";
+import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp, soundCheckPending } from "../lib/soundCheck.js";
 import { buildAuditBlock, auditPromptBlock } from "../lib/auditTranscript.js";
 import { synthesizeSpeech } from "../lib/audio.js";
 import { VOICES, isValidVoice } from "../config/voices.js";
@@ -895,6 +895,8 @@ router.get("/s/:submissionToken/oral/calibrate-config", requireSubmissionToken, 
         res.json({
             enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS,
             sound_check: ladderState(prev),
+            // Adendo ADR 0023: o teste (leitura + eco) e obrigatorio para seguir.
+            sound_check_pending: !!calib && soundCheckPending(prev, MAX_CALIB_ATTEMPTS),
         });
     } catch (err) { log.error("ORAL", `calibrate-config failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
@@ -945,6 +947,7 @@ router.post("/s/:submissionToken/oral/calibrate", requireSubmissionToken, calibU
             ok, attempt, attempts_left: Math.max(0, MAX_CALIB_ATTEMPTS - attempt),
             wer, missed_terms: missedTerms, transcript: text, advice: ok ? null : CALIB_ADVICE,
             sound_check: state,
+            sound_check_pending: soundCheckPending({ ...(prev || {}), ...patch }, MAX_CALIB_ATTEMPTS),
         });
     } catch (err) {
         log.error("ORAL", `calibrate failed: ${err.message}`);
@@ -995,7 +998,7 @@ router.post("/s/:submissionToken/oral/echo-check", requireSubmissionToken, calib
         await db.setOralCalibrationResult(req.submission.id, { echo, updated_at: echo.at });
         const state = ladderState({ ...(prev || {}), echo });
         log.info("ORAL", `echo-check submission=${req.submission.submission_token} leak=${leak} matches=${matches} escada=${state?.state || "—"}`);
-        res.json({ leak, matches, tests: echo.tests, sound_check: state });
+        res.json({ leak, matches, tests: echo.tests, sound_check: state, sound_check_pending: soundCheckPending({ ...(prev || {}), echo }, MAX_CALIB_ATTEMPTS) });
     } catch (err) {
         log.error("ORAL", `echo-check failed: ${err.message}`);
         res.status(500).json({ error: "falha no teste de eco", detail: err.message });

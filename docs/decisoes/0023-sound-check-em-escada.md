@@ -55,3 +55,12 @@ para poder bloquear era **medir os modos de falha reais** primeiro.
 - Vale para os fluxos de VOZ (prova oral e entrevista realtime). A entrevista
   por mensagem mantém a calibração antiga (o monitor #287 é a defesa dela);
   estender a escada para lá é decisão futura.
+
+## Adendo (mesmo dia, antes de qualquer deploy)
+
+O teste é **obrigatório**: o Continuar bloqueia enquanto a leitura não estiver
+resolvida (aprovada ou tentativas esgotadas) E o eco não tiver rodado ao menos
+uma vez (`soundCheckPending`). Sem isso, o aluno com eco driblaria o gate
+simplesmente não testando — a escada só protege quem mede. Erro de
+infraestrutura (STT/TTS fora do ar) faz **fail-open**: o gate é contra pular o
+teste, não contra o azar; e a liberação do professor também destrava.

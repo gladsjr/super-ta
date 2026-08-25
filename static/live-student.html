@@ -700,6 +700,7 @@
     // --- Calibração de fala + sound check v2 (#288): leitura, eco e escada. ---
     let calibRec = null, calibChunks = [], calibAttempt = 0;
     let soundCheckState = null, scSpectral = null, hfpBasic = null;
+    let soundCheckPending = false; // adendo ADR 0023: o teste (leitura+eco) e obrigatorio
     async function initCalibration() {
       let cfg = null;
       try { cfg = await (await fetch(`/s/${SUB}/live/calibrate-config`)).json(); } catch {}
@@ -707,6 +708,7 @@
       $('calib-sentence').textContent = cfg.sentence;
       $('calib-block').style.display = '';
       hfpBasic = window.soundCheck ? window.soundCheck.detectHfp(micStream) : null;
+      soundCheckPending = !!cfg.sound_check_pending;
       applySoundCheck(cfg.sound_check); // reload: vermelho de ontem continua vermelho
     }
     function calibToggleRecord() {
@@ -745,7 +747,7 @@
     }
     function renderCalibResult(j) {
       const st = $('calib-status'), rec = $('calib-rec-btn');
-      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui verificar agora. Você pode tentar de novo ou seguir (Continuar).'; return; }
+      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui verificar agora. Você pode tentar de novo ou seguir (Continuar).'; soundCheckPending = false; return; } // erro de infra: fail-open
       if (j.ok) {
         st.className = 'banner ok'; st.textContent = 'Leitura ok ✓ Sua fala foi transcrita corretamente. Agora faça o teste de eco abaixo.';
         rec.style.display = 'none';
@@ -761,6 +763,7 @@
         }
       }
       if (j.ok || (Number(j.attempts_left) || 0) === 0) $('echo-block').style.display = '';
+      if (typeof j.sound_check_pending === 'boolean') soundCheckPending = j.sound_check_pending;
       applySoundCheck(j.sound_check);
     }
     $('calib-rec-btn').onclick = calibToggleRecord;
@@ -779,7 +782,7 @@
         });
       } catch {}
       btn.disabled = false;
-      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui testar o eco agora. Você pode tentar de novo ou seguir.'; return; }
+      if (!j || j.error) { st.className = 'banner adjust'; st.textContent = 'Não consegui testar o eco agora. Você pode tentar de novo ou seguir.'; soundCheckPending = false; return; } // erro de infra: fail-open
       if (j.leak) {
         st.className = 'banner adjust';
         st.textContent = '⚠ Eco detectado: a voz da entrevista voltou pelo seu microfone. Use fone de ouvido (de preferência com fio), baixe o volume e teste de novo.';
@@ -788,6 +791,7 @@
         st.className = 'banner ok'; st.textContent = 'Sem eco ✓ A voz da entrevista não vazou para o seu microfone.';
         btn.style.display = 'none';
       }
+      if (typeof j.sound_check_pending === 'boolean') soundCheckPending = j.sound_check_pending;
       applySoundCheck(j.sound_check);
     }
     $('echo-btn').onclick = runEcho;
@@ -899,7 +903,7 @@
     // Fones: impedimento (sem eles a entrevista degrada para todo mundo). Conexão
     // e ruído: aviso que deixa passar — é o ambiente do aluno, ele decide assumir.
     $('to-check-btn').onclick = () => {
-      const estado = { fonesOk: !!$('hp-check').checked, conexaoRuim: connWarn, ruidoAlto: !noiseOk, soundCheck: soundCheckState };
+      const estado = { fonesOk: !!$('hp-check').checked, conexaoRuim: connWarn, ruidoAlto: !noiseOk, soundCheck: soundCheckState, soundCheckPendente: soundCheckPending };
       if (!window.setupGate) return continueToCheck(); // fail-open: sem o helper, não trava o aluno
       if (window.setupGate.avaliar(estado, continueToCheck)) continueToCheck();
     };

@@ -24,7 +24,7 @@ import { clientForWork } from "../lib/openaiClient.js";
 import { prepBuilderAgent } from "../lib/agents.js";
 import { putAudio, extFromMimetype } from "../lib/audioStore.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
-import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp } from "../lib/soundCheck.js";
+import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp, soundCheckPending } from "../lib/soundCheck.js";
 import { synthesizeSpeech } from "../lib/audio.js";
 import { TTS_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
@@ -221,6 +221,8 @@ router.get("/s/:submissionToken/live/calibrate-config", requireSubmissionToken, 
         res.json({
             enabled: !!calib, sentence: calib?.sentence || null, max_attempts: MAX_CALIB_ATTEMPTS,
             sound_check: ladderState(prev),
+            // Adendo ADR 0023: o teste (leitura + eco) e obrigatorio para seguir.
+            sound_check_pending: !!calib && soundCheckPending(prev, MAX_CALIB_ATTEMPTS),
         });
     } catch (err) { log.error("LIVE", `calibrate-config failed: ${err.message}`); res.status(500).json({ error: "falha" }); }
 });
@@ -265,6 +267,7 @@ router.post("/s/:submissionToken/live/calibrate", requireSubmissionToken, requir
             ok, attempt, attempts_left: Math.max(0, MAX_CALIB_ATTEMPTS - attempt),
             wer, missed_terms: missedTerms, transcript: text, advice: ok ? null : CALIB_ADVICE,
             sound_check: state,
+            sound_check_pending: soundCheckPending({ ...(prev || {}), ...patch }, MAX_CALIB_ATTEMPTS),
         });
     } catch (err) {
         log.error("LIVE", `calibrate failed: ${err.message}`);
@@ -309,7 +312,7 @@ router.post("/s/:submissionToken/live/echo-check", requireSubmissionToken, requi
         await db.setOralCalibrationResult(req.submission.id, { echo, updated_at: echo.at });
         const state = ladderState({ ...(prev || {}), echo });
         log.info("LIVE", `echo-check submission=${req.submission.submission_token} leak=${leak} matches=${matches} escada=${state?.state || "—"}`);
-        res.json({ leak, matches, tests: echo.tests, sound_check: state });
+        res.json({ leak, matches, tests: echo.tests, sound_check: state, sound_check_pending: soundCheckPending({ ...(prev || {}), echo }, MAX_CALIB_ATTEMPTS) });
     } catch (err) {
         log.error("LIVE", `echo-check failed: ${err.message}`);
         res.status(500).json({ error: "falha no teste de eco", detail: err.message });

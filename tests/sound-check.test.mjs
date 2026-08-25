@@ -1,7 +1,7 @@
 // Escada do sound check v2 (#288, ADR 0023) — regras puras de lib/soundCheck.js.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ladderState, countEchoMatches, parseHfp, HARD_WER } from "../lib/soundCheck.js";
+import { ladderState, countEchoMatches, parseHfp, soundCheckPending, HARD_WER } from "../lib/soundCheck.js";
 
 const att = (wer) => ({ attempt: 1, wer, missed: [], text: "x" });
 
@@ -71,6 +71,28 @@ test("ladderState — casos da escada", async (t) => {
     await t.test("limiar duro é exatamente HARD_WER (inclusivo)", () => {
         assert.equal(ladderState({ passed: false, transcripts: [att(HARD_WER), att(HARD_WER)] }).state, "vermelho");
         assert.equal(ladderState({ passed: false, transcripts: [att(HARD_WER - 0.01), att(HARD_WER - 0.01)] }).state, "amarelo");
+    });
+});
+
+test("soundCheckPending — o teste é obrigatório (adendo ADR 0023)", async (t) => {
+    await t.test("nada medido -> pendente", () => {
+        assert.equal(soundCheckPending(null), true);
+        assert.equal(soundCheckPending({}), true);
+    });
+    await t.test("só leitura, sem eco -> pendente", () => {
+        assert.equal(soundCheckPending({ passed: true, attempts: 1 }), true);
+    });
+    await t.test("leitura aprovada + eco feito -> concluído", () => {
+        assert.equal(soundCheckPending({ passed: true, attempts: 1, echo: { tests: 1 } }), false);
+    });
+    await t.test("leitura reprovada mas tentativas esgotadas + eco -> concluído", () => {
+        assert.equal(soundCheckPending({ passed: false, attempts: 2, echo: { tests: 1 } }), false);
+    });
+    await t.test("só eco, leitura não resolvida -> pendente", () => {
+        assert.equal(soundCheckPending({ attempts: 1, passed: false, echo: { tests: 2 } }), true);
+    });
+    await t.test("liberação do professor destrava", () => {
+        assert.equal(soundCheckPending({ waived_at: "2026-08-24T00:00:00Z" }), false);
     });
 });
 
