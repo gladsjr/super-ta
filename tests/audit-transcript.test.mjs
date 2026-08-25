@@ -55,6 +55,15 @@ test("buildAuditBlock", async (t) => {
         assert.equal(lines[0], "[turno 0] primeira resposta");
         assert.equal(lines[1], "[turno 1 (intervenção)] réplica");
     });
+    await t.test("humanLabels (#310): 1-based p/ gente; intro sem turno vira 'abertura'", () => {
+        const a = buildAuditBlock({ final: { mode: "answers", text: "x", answers: [
+            { audio_idx: 0, turn_index: null, text: "oi, sou o aluno" },
+            { audio_idx: 1, turn_index: 0, text: "primeira resposta" },
+        ] }, humanLabels: true });
+        const lines = a.text.split("\n");
+        assert.equal(lines[0], "[abertura] oi, sou o aluno");
+        assert.equal(lines[1], "[turno 1] primeira resposta");
+    });
 });
 
 test("auditPromptBlock", async (t) => {
