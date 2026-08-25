@@ -1429,7 +1429,8 @@ async function load() {
     if (fq) {
       if (fq.coverage_ok === false) qual = ` · ⚠ estrutura divergente (${fq.parts} trecho(s) para ${fq.expected_turns} resposta(s) — pode haver falas fundidas)`;
       else if (fq.suspects > 0) qual = ` · ⚠ ${fq.suspects}/${fq.parts} trecho(s) suspeito(s)`;
-      else qual = ` · captação íntegra (${fq.parts} trechos)`;
+      else if (fq.coverage_ok === true) qual = ` · captação íntegra (${fq.parts} trechos)`;
+      else qual = ` · sem trechos suspeitos (${fq.parts}) — sem verificação estrutural`; // legado/sem comparador (#312): não afirma integridade
     }
     document.getElementById('ft-meta').textContent = `— ${fonte} · ${ft.model || ft.provider || ''}${dur} · só a voz do aluno${qual}`;
     const body = document.getElementById('final-transcript-body');
