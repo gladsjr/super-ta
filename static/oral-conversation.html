@@ -214,7 +214,8 @@
     if (q) {
       if (q.coverage_ok === false) qual = ` · ⚠ estrutura divergente (${q.parts} trecho(s) para ${q.expected_turns} resposta(s) — pode haver falas fundidas)`;
       else if (q.suspects > 0) qual = ` · ⚠ ${q.suspects}/${q.parts} trecho(s) suspeito(s)`;
-      else qual = ` · captação íntegra (${q.parts} trechos)`;
+      else if (q.coverage_ok === true) qual = ` · captação íntegra (${q.parts} trechos)`;
+      else qual = ` · sem trechos suspeitos (${q.parts}) — sem verificação estrutural`; // legado/sem comparador (#312): não afirma integridade
     }
     document.getElementById('ft-meta').textContent = `— ${esc(ft.model || ft.provider || '')}${dur} · só a voz do aluno${qual}`;
     const el = document.getElementById('final-transcript');
