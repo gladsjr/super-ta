@@ -215,21 +215,28 @@
     }
 
     async function renderPostExam() {
-      // Uma repetição: logo após encerrar, o servidor pode ainda não ter marcado
-      // a prova como concluída (corrida com o fechamento do relay).
-      for (let attempt = 0; attempt < 2; attempt++) {
+      // Corrida real: o vídeo sobe ANTES de o relay fechar, e é o fechamento que
+      // marca a prova como concluída (~2s depois). Insiste por ~12s; se ainda
+      // assim não vier, mostra um fallback com botão — nunca a tela vazia.
+      let rendered = false;
+      for (let attempt = 0; attempt < 6; attempt++) {
         try {
           const rv = await fetch(`/s/${SUB}/oral/review`);
-          if (rv.status === 409 && attempt === 0) { await new Promise(r => setTimeout(r, 1500)); continue; }
+          if (rv.status === 409) { await new Promise(r => setTimeout(r, 2000)); continue; }
           if (rv.ok) {
             const j = await rv.json();
             renderReviewTranscript(j.transcript || [], j.transcript_alerts || null, j.audit_transcript || null);
             renderCommentBox(j.comment || {}, { calibFlagged: !!j.calibration_flagged });
+            rendered = true;
           } else if (rv.status === 410) {
             $('review-transcript').innerHTML = '<p class="sub" style="text-align:center">A janela de revisão (7 dias) já se encerrou.</p>';
+            rendered = true;
           }
         } catch {}
         break;
+      }
+      if (!rendered) {
+        $('review-transcript').innerHTML = '<p class="sub" style="text-align:center">A transcrição está sendo preparada. <button class="btn btn-sm" onclick="location.reload()">Atualizar</button></p>';
       }
       try {
         const rr = await (await fetch(`/s/${SUB}/oral/result`)).json();
