@@ -144,6 +144,22 @@
   // /static/audio/soundcheck/) conduz as etapas, e CADA fala dele é sonda de
   // eco — o microfone grava durante a reprodução e o servidor confere se o
   // roteiro voltou. Tudo que a voz diz aparece em texto (espelho visual).
+  // Voz-guia num ELEMENTO ÚNICO de áudio, desbloqueado por GESTO: navegadores
+  // móveis (Chrome e WebKit) rejeitam play() quando a ativação do clique já
+  // expirou — e entre o "Iniciar" e a 1ª fala há o diálogo de permissão de
+  // mic/câmera. A página chama unlockAudio() SINCRONAMENTE dentro do clique
+  // que inicia o fluxo (toca um silêncio de 50 ms, que "abençoa" o elemento);
+  // as falas seguintes reutilizam o mesmo elemento já liberado.
+  const SILENT_WAV = "data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+  let guideAudioEl = null;
+  function unlockAudio() {
+    if (!guideAudioEl) {
+      guideAudioEl = new Audio(SILENT_WAV);
+      guideAudioEl.play().catch(() => {});
+    }
+    return guideAudioEl;
+  }
+
   function mountWizard(opts) {
     const { base, micStream, sentence, els, getEnv, setCalibRecording, hfp, onUpdate } = opts;
     let ecoLoops = 0, attempt = 0, hfpSent = false, lastCap = null, stopped = false;
@@ -204,13 +220,16 @@
 
     // Toca um roteiro (com espelho visual) e, se `capture`, grava o microfone
     // durante a fala + cauda — a captura vira a amostra de eco daquele trecho.
+    // A voz sai do ELEMENTO ÚNICO desbloqueado por gesto (unlockAudio); se o
+    // play for bloqueado mesmo assim (autoplay policy), o espelho visual fica
+    // na tela pelo tempo de LEITURA — mensagem nunca pisca e some.
     async function speak(key, { capture = false, extraHtml = "" } = {}) {
       // UI PRIMEIRO e síncrona (os controles do estágio nascem com o chamador
       // ainda no mesmo tick — quem chama sem await já os encontra no DOM).
       ui(speechRow(SC_TEXTS[key]) + extraHtml);
       const capStream = capture ? await getRawMic() : null; // cru: o AEC não apaga o eco
       return new Promise((resolve) => {
-        let rec = null, chunks = [];
+        let rec = null, chunks = [], settled = false;
         if (capture && capStream) {
           try {
             rec = new MediaRecorder(new MediaStream(capStream.getAudioTracks()));
@@ -218,16 +237,21 @@
             rec.start();
           } catch { rec = null; }
         }
-        const audio = new Audio(`/static/audio/soundcheck/${key}.mp3`);
-        const finish = () => setTimeout(() => {
-          if (rec && rec.state === "recording") {
-            rec.onstop = () => { lastCap = { blob: new Blob(chunks, { type: rec.mimeType || "audio/webm" }), script: key }; resolve(); };
-            rec.stop();
-          } else resolve();
-        }, 600);
-        audio.onended = finish;
-        audio.onerror = finish; // sem áudio (arquivo/saída quebrados): o espelho visual segue valendo
-        audio.play().catch(finish);
+        const readMs = Math.max(2800, String(SC_TEXTS[key] || "").length * 55); // fallback: tempo de leitura
+        const finish = (delay) => {
+          if (settled) return; settled = true;
+          setTimeout(() => {
+            if (rec && rec.state === "recording") {
+              rec.onstop = () => { lastCap = { blob: new Blob(chunks, { type: rec.mimeType || "audio/webm" }), script: key }; resolve(); };
+              rec.stop();
+            } else resolve();
+          }, delay);
+        };
+        const audio = unlockAudio();
+        audio.onended = () => finish(600);
+        audio.onerror = () => finish(readMs); // sem áudio: a mensagem segura o tempo de leitura
+        audio.src = `/static/audio/soundcheck/${key}.mp3`;
+        audio.play().catch(() => finish(readMs)); // autoplay bloqueado: idem
       });
     }
 
@@ -432,5 +456,5 @@
     g8_fim: "Tudo certo por aqui. Pode continuar para a próxima etapa.",
   };
 
-  window.soundCheck = { detectHfp, spectralProbe, hfpVerdict, runEchoTest, mountRedPanel, mountWizard };
+  window.soundCheck = { detectHfp, spectralProbe, hfpVerdict, runEchoTest, mountRedPanel, mountWizard, unlockAudio };
 })();
