@@ -109,7 +109,13 @@
         critico: true,
       });
     } else if (sc && sc.state === "amarelo") {
-      itens.push({ texto: "O teste de captação sinalizou instabilidade no seu áudio. Você pode seguir, mas confira a transcrição ao final e avise o professor se algo sair errado." });
+      // Motivo REAL da escada (a mensagem genérica contradizia o "tudo certo"
+      // da voz-guia quando o fluxo terminava bem mas havia um aviso no
+      // histórico — ex.: eco numa medição recente, já limpo no re-teste).
+      const motivo = Array.isArray(sc.reasons) && sc.reasons.length
+        ? sc.reasons.join("; ")
+        : "instabilidade no seu áudio";
+      itens.push({ texto: "O teste de captação registrou: " + motivo + ". Você pode seguir. Ao final, a transcrição fica disponível na revisão (neste mesmo link, por 7 dias) — confira e avise o professor se algo sair errado." });
     }
     if (estado.conexaoRuim) {
       itens.push({ texto: "A sua conexão está instável ou lenta. Pode haver cortes e atrasos durante a conversa." });
