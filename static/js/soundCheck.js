@@ -158,11 +158,30 @@
     async function getRawMic() {
       if (rawMic) return rawMic;
       try {
+        // MESMO dispositivo do stream da sessão (#323 round 2): sem deviceId, o
+        // getUserMedia cru pode abrir OUTRO microfone (o padrão do sistema) e
+        // captar silêncio. Pina no device que o aluno autorizou.
+        const devId = micStream?.getAudioTracks?.()[0]?.getSettings?.().deviceId;
         rawMic = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          audio: {
+            ...(devId ? { deviceId: { exact: devId } } : {}),
+            echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+          },
         });
       } catch { rawMic = micStream; }
       return rawMic;
+    }
+    // RMS da amostra gravada (diagnóstico #323): distingue "captura muda"
+    // (constraint/driver apagou o som) de "áudio presente mas STT vazio".
+    async function blobRms(blob) {
+      try {
+        const ac = new (window.AudioContext || window.webkitAudioContext)();
+        const buf = await ac.decodeAudioData(await blob.arrayBuffer());
+        const d = buf.getChannelData(0);
+        let sum = 0; for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+        try { ac.close(); } catch {}
+        return Math.round(Math.sqrt(sum / d.length) * 1e5) / 1e5;
+      } catch { return null; }
     }
     function dropRawMic() {
       if (rawMic && rawMic !== micStream) { try { rawMic.getTracks().forEach(tr => tr.stop()); } catch {} }
@@ -215,6 +234,8 @@
       const form = new FormData();
       form.append("file", lastCap.blob, "echo.webm");
       form.append("script", lastCap.script);
+      const rms = await blobRms(lastCap.blob);
+      if (rms != null) form.append("rms", String(rms));
       return await (await fetch(`${base}/echo-check`, { method: "POST", body: form })).json();
     }
 
