@@ -990,11 +990,19 @@ router.post("/s/:submissionToken/oral/echo-check", requireSubmissionToken, calib
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     try {
         if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
-        // Silêncio quase puro pode fazer o STT falhar — sem texto = sem eco (ok).
+        // Silêncio quase puro faz o STT devolver vazio — sem texto = sem eco (ok).
+        // Erro REAL de STT (arquivo rejeitado, provedor fora) NÃO é "sem eco":
+        // registrar teste limpo aqui era verde fingido (#328) — devolve 502 sem
+        // contar o teste; o cliente retenta e, na 2ª falha, segue em fail-open.
         let text = "";
         try {
             ({ text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `echo.${extFromMimetype(req.file.mimetype)}` }));
-        } catch { text = ""; }
+        } catch (err) {
+            if (!/empty transcription/i.test(String(err.message))) {
+                log.error("ORAL", `echo-check stt falhou: ${err.message}`);
+                return res.status(502).json({ error: "stt indisponível no teste de eco" });
+            }
+        }
         // Wizard (#321): a voz-guia é a sonda — o cliente informa QUAL roteiro
         // tocou durante a captura e o vazamento é medido contra o texto
         // conhecido. Sem `script`, vale o caminho legado (frase de marcadores).

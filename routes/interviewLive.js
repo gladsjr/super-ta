@@ -305,10 +305,17 @@ router.get("/s/:submissionToken/live/echo-audio", requireSubmissionToken, requir
 router.post("/s/:submissionToken/live/echo-check", requireSubmissionToken, requireLive, calibUpload.single("file"), async (req, res) => {
     try {
         if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "file required" });
+        // Vazio = silêncio = sem eco; erro REAL de STT devolve 502 sem contar o
+        // teste (senão vira verde fingido — #328; espelho do oral/echo-check).
         let text = "";
         try {
             ({ text } = await sttTranscribe({ openaiClient: clientForWork(req.work), buffer: req.file.buffer, filename: `echo.${extFromMimetype(req.file.mimetype)}` }));
-        } catch { text = ""; }
+        } catch (err) {
+            if (!/empty transcription/i.test(String(err.message))) {
+                log.error("LIVE", `echo-check stt falhou: ${err.message}`);
+                return res.status(502).json({ error: "stt indisponível no teste de eco" });
+            }
+        }
         // Wizard (#321): a voz-guia é a sonda — o cliente informa QUAL roteiro
         // tocou durante a captura e o vazamento é medido contra o texto
         // conhecido. Sem `script`, vale o caminho legado (frase de marcadores).
