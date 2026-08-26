@@ -1,8 +1,14 @@
-// Gera os áudios PRÉ-GRAVADOS do sound check guiado por voz (#321) a partir
-// dos roteiros de lib/soundCheck.js (fonte única) → static/audio/soundcheck/.
+// FALLBACK do gerador de áudios do sound check guiado por voz (#321).
 //
-// Rodar UMA vez (e a cada mudança de roteiro — senão o áudio fala uma coisa e
-// a referência de vazamento do servidor é outra):
+// Os mp3 CANÔNICOS em static/audio/soundcheck/ são da voz "Voz C — ORATIA" do
+// HeyGen (Cartesia), gerados manualmente pela UI (a conta não tem créditos de
+// API). Convenção de pronúncia na locução do HeyGen: grafar "Orátia" e "iá";
+// nos roteiros de lib/soundCheck.js (referência de vazamento + legenda) fica a
+// grafia da marca ("ORATIA").
+//
+// Este script sintetiza os MESMOS roteiros na voz OpenAI (SC_VOICE) — use-o só
+// como quebra-galho quando um roteiro mudar e o HeyGen não estiver à mão
+// (depois substitua pelos áudios da Voz C):
 //   node -r dotenv/config scripts/gen-soundcheck-audio.mjs
 // Custo: ~10 chamadas de TTS (centavos). Os mp3 são commitados no repo.
 

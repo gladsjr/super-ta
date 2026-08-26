@@ -381,7 +381,7 @@
   // Espelho dos textos falados (mantido em sincronia com lib/soundCheck.js —
   // regerado junto com os mp3 por scripts/gen-soundcheck-audio.mjs).
   const SC_TEXTS = window.SC_SCRIPTS_MIRROR || {
-    g1_intro: "Olá! Eu sou a orientação automática. Antes de começar, vou fazer alguns testes rápidos para garantir que a sua fala será entendida sem erros. Primeiro: fique em silêncio por alguns segundos, enquanto eu meço o ambiente e a conexão.",
+    g1_intro: "Olá! Eu sou a orientação automática da ORATIA. Antes de começar, vou fazer alguns testes rápidos para garantir que a sua fala será entendida sem erros. Primeiro: fique em silêncio por alguns segundos, enquanto eu meço o ambiente e a conexão.",
     g2_ok: "Conexão e nível de ruído: tudo certo.",
     g2_conn: "A sua conexão está instável ou lenta. Você pode continuar, mas pode haver cortes — se puder, aproxime-se do roteador ou troque de rede. Clique em Estou ciente para seguir.",
     g2_ruido: "O ambiente está barulhento. Você pode continuar, mas o ruído atrapalha a transcrição da sua fala — se puder, procure um lugar mais silencioso. Clique em Estou ciente para seguir.",
