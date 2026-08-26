@@ -147,6 +147,10 @@
   function mountWizard(opts) {
     const { base, micStream, sentence, els, getEnv, setCalibRecording, hfp, onUpdate } = opts;
     let ecoLoops = 0, attempt = 0, hfpSent = false, lastCap = null, stopped = false;
+    // #328: falha de infra ganha UMA retentativa antes do fail-open; sonda crua
+    // morta (iOS mata uma das capturas com dois getUserMedia no mesmo mic) cai
+    // p/ o stream da sessão na retentativa; leitura já aprovada não se repete.
+    let ecoInfraFails = 0, readInfraFails = 0, probeDead = false, leituraJaFeita = false;
 
     // Sonda de eco em stream CRU (achado do teste manual de 26/08): o AEC do
     // navegador, ligado por padrão, CANCELA o áudio tocado pela própria página
@@ -156,6 +160,7 @@
     // LEITURA continua no stream normal (mede o que a prova vai ouvir).
     let rawMic = null;
     async function getRawMic() {
+      if (probeDead) return micStream; // sonda crua veio muda (#328): última chance no stream da sessão
       if (rawMic) return rawMic;
       try {
         // MESMO dispositivo do stream da sessão (#323 round 2): sem deviceId, o
@@ -230,13 +235,14 @@
     function push(resp) { if (onUpdate) onUpdate(resp); }
     function isRed(resp) { return resp && resp.sound_check && resp.sound_check.state === "vermelho" && !resp.sound_check.waived; }
 
-    async function postEcho() {
+    async function postEcho(rms) {
       const form = new FormData();
       form.append("file", lastCap.blob, "echo.webm");
       form.append("script", lastCap.script);
-      const rms = await blobRms(lastCap.blob);
       if (rms != null) form.append("rms", String(rms));
-      return await (await fetch(`${base}/echo-check`, { method: "POST", body: form })).json();
+      const r = await fetch(`${base}/echo-check`, { method: "POST", body: form });
+      if (!r.ok) return { error: `http ${r.status}` }; // 502 do STT etc. → ramo de infra
+      return await r.json();
     }
 
     // ---- Estágios ----
@@ -285,13 +291,28 @@
       if (els.hpCheck) els.hpCheck.removeEventListener("change", sync);
       if (btn) btn.disabled = true;
       if (st) { st.style.display = ""; st.textContent = "Verificando o eco…"; }
+      // Amostra sem energia = a sonda NÃO mediu nada (#328, caso iOS rms=0) —
+      // não é "sem eco"; trata como falha e retenta (a retentativa usa o
+      // stream da sessão via probeDead).
+      const rms = lastCap ? await blobRms(lastCap.blob) : null;
+      const dead = rms != null && rms < 0.0001;
       let j = null;
-      try { j = lastCap ? await postEcho() : null; } catch {}
-      if (!j || j.error) {
-        // erro de INFRA no teste de eco: fail-open (ADR 0023) — segue à leitura
+      if (!dead) { try { j = lastCap ? await postEcho(rms) : null; } catch {} }
+      if (dead || !j || j.error) {
+        ecoInfraFails++;
+        if (dead) { dropRawMic(); probeDead = true; }
+        if (ecoInfraFails < 2) {
+          ui(`<div class="banner adjust">Não consegui medir o eco agora${dead ? " (a captação veio muda)" : " (falha do serviço)"}. Vamos tentar mais uma vez.</div><div style="text-align:center;margin-top:8px"><button class="btn" id="sc-retry-eco">Tentar de novo</button></div>`);
+          await new Promise((res) => { const b = stage.querySelector("#sc-retry-eco"); if (b) b.onclick = res; else res(); });
+          return s2Fones();
+        }
+        // 2ª falha seguida: infra não bloqueia (ADR 0023) — segue com aviso explícito
         push({ sound_check_pending: false });
-        return s3Leitura();
+        ui(`<div class="banner adjust">O teste de eco não pôde ser concluído (falha do serviço). Você pode seguir.</div>`);
+        await sleepW(1800);
+        return leituraJaFeita ? s4Fim({ infra: true }) : s3Leitura();
       }
+      ecoInfraFails = 0;
       push(j);
       if (j.leak) {
         ecoLoops++;
@@ -300,9 +321,9 @@
         await speak("g4_eco", { capture: true });
         return s2Fones();
       }
-      return s3Leitura();
+      return leituraJaFeita ? s4Fim({}) : s3Leitura();
     }
-    async function s3Leitura() {
+    async function s3Leitura(infraRetry = false) {
       if (stopped) return;
       const frame = `
         <div class="card" style="text-align:center;font-size:18px;line-height:1.5;margin:0 0 10px">${esc2(sentence)}</div>
@@ -310,9 +331,11 @@
         <div class="banner wait" id="sc-read-status" style="margin-top:10px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>`;
       // UI e handler nascem JÁ (ui é síncrono dentro de speak); a gravação em si
       // espera a instrução terminar — clicar cedo não grava a voz-guia junto.
+      // Retentativa por INFRA não repete o g7 ("captação ruim"): a falha foi do
+      // serviço, não do aluno (#328).
       const spoken = (attempt === 0)
         ? speak("g6_leitura", { capture: true, extraHtml: frame })
-        : (ui(speechRow(SC_TEXTS.g7_leitura_ruim) + frame), Promise.resolve());
+        : (ui((infraRetry ? "" : speechRow(SC_TEXTS.g7_leitura_ruim)) + frame), Promise.resolve());
       const btn = stage.querySelector("#sc-rec-btn");
       const st = stage.querySelector("#sc-read-status");
       let rec = null, chunks = [];
@@ -342,7 +365,18 @@
           st.className = "banner wait"; st.textContent = "🎤 Gravando… leia a frase e toque em “Parar e verificar”.";
         };
       });
-      if (!j || j.error) { push({ sound_check_pending: false }); return s4Fim({ infra: true }); } // infra: fail-open
+      if (!j || j.error) {
+        // 1ª falha de infra: retenta; só a 2ª seguida libera (fail-open, #328)
+        readInfraFails++;
+        if (readInfraFails < 2) {
+          ui(`<div class="banner adjust">Não consegui verificar a captação agora (falha do serviço). Toque em Tentar de novo e grave outra vez.</div><div style="text-align:center;margin-top:8px"><button class="btn" id="sc-retry-read">Tentar de novo</button></div>`);
+          await new Promise((res) => { const b = stage.querySelector("#sc-retry-read"); if (b) b.onclick = res; else res(); });
+          return s3Leitura(true);
+        }
+        push({ sound_check_pending: false });
+        return s4Fim({ infra: true });
+      }
+      readInfraFails = 0;
       push(j);
       if (j.ok) return s4Fim({});
       if ((Number(j.attempts_left) || 0) > 0) {
@@ -365,12 +399,17 @@
     async function start({ progress = {}, state = null, pending = true } = {}) {
       if (state && state.state === "vermelho" && !state.waived) return; // painel vermelho da página assume
       if (pending === false) { ui(`<div class="banner ok">Teste de captação já concluído ✓</div>`); if (els.fones) els.fones.style.display = ""; return; }
-      if (progress.echo_done) { if (els.conn) els.conn.style.display = "none"; if (els.noise) els.noise.style.display = "none"; if (els.fones) els.fones.style.display = ""; return s3Leitura(); }
+      leituraJaFeita = progress.leitura_done === true;
+      // Reentrada (#328): o eco "resolvido" veio de OUTRO momento físico — o
+      // aluno pode ter voltado sem os fones. Refaz confirmação (checkbox) +
+      // sonda; a leitura aprovada segue valendo (não se repete).
+      if (progress.echo_done) { if (els.conn) els.conn.style.display = "none"; if (els.noise) els.noise.style.display = "none"; return s2Fones(); }
       return s0Silencio();
     }
     // Recuperação pós-vermelho ("Já ajustei"): reabre do estágio do eco.
     function restart() {
       stopped = false; ecoLoops = 0;
+      leituraJaFeita = false; // recuperação: a leitura NOVA é o que limpa o vermelho
       if (els.conn) els.conn.style.display = "none";
       if (els.noise) els.noise.style.display = "none";
       return s2Fones();

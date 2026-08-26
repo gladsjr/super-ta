@@ -45,8 +45,14 @@ async function tts(text) {
 const INJECT = `(() => {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const ctx = new AudioCtx();
-    const silent = ctx.createConstantSource();
-    const silentGain = ctx.createGain(); silentGain.gain.value = 0;
+    // Ruído de fundo BEM leve (~-50 dB): um mic real nunca entrega silêncio
+    // digital puro, e o wizard trata rms=0 como sonda morta (#328). O STT
+    // transcreve isso como vazio (= silêncio legítimo), como antes.
+    const noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * 0.003;
+    const silent = ctx.createBufferSource(); silent.buffer = noiseBuf; silent.loop = true;
+    const silentGain = ctx.createGain(); silentGain.gain.value = 1;
     silent.connect(silentGain); try { silent.start(); } catch (e) {}
     // A página chama getUserMedia MAIS DE UMA VEZ (mic+câmera no start, medidor
     // de ruído à parte): guardamos TODOS os destinos e a fala toca em todos —
@@ -127,14 +133,16 @@ async function readSentence(page, b64) {
     await sleep(400);
     await page.evaluate(b => window.__speak(b), b64);
     await page.click("#sc-rec-btn"); // parar e verificar
-    // Desfecho: novo botão de leitura (reprova com tentativa), banner de fim, ou painel vermelho.
+    // Desfecho: novo botão de leitura (reprova com tentativa), retry de infra
+    // (#328), banner de fim, ou painel vermelho.
     await page.waitForFunction(() => {
         const red = (document.getElementById("sc-red").innerHTML || "").length > 0;
         const txt = document.getElementById("sc-stage")?.innerText || "";
         const done = /Verificação concluída|já concluído/.test(txt);
         const again = !!document.querySelector("#sc-rec-btn");
+        const retry = !!document.querySelector("#sc-retry-read");
         const busy = /Verificando|Gravando/.test(txt);
-        return !busy && (red || done || again);
+        return !busy && (red || done || again || retry);
     }, null, { timeout: 120000 });
 }
 async function infoRow(workToken, subToken) {
@@ -148,7 +156,7 @@ async function main() {
     await db.setOralQuestions(work.id, [{ id: 1, question: "O que é fotossíntese?", answer: "Processo de produção de glicose com luz.", rubric: "10: correta. 7,5: quase. 5: parcial. 2,5: fraca. 0: errada." }]);
     await db.setWorkVoice(work.id, "coral"); // (sem sessão de voz aqui — só a página 1)
     await db.setOralCalibration(work.id, { sentence: SENTENCE, key_terms: KEY_TERMS });
-    const subs = await db.createSubmissions(work.id, "SC-E2E", 3, true);
+    const subs = await db.createSubmissions(work.id, "SC-E2E", 5, true);
     pass("seed", { work: work.work_token, subs: subs.map(s => s.submission_token) });
 
     const [goodB64, wrongB64] = await Promise.all([tts(SENTENCE), tts(WRONG)]);
@@ -245,6 +253,53 @@ async function main() {
         const setupC = await page.evaluate(() => document.getElementById("setup").style.display !== "none");
         if (setupC && !dC) pass("C2_verde_segue_direto", {});
         else fail("C2_verde_segue_direto", `setup=${setupC} dialog=${String(dC).slice(0, 100)}`);
+        await page.close();
+
+        // ---------- JORNADA D: reentrada refaz o gate dos fones (#328) ----------
+        // Eco feito e limpo -> desiste antes da leitura -> volta: o wizard deve
+        // REABRIR no estágio dos fones (checkbox desmarcado, teste desabilitado),
+        // nunca pular direto ao "Gravar e ler a frase".
+        const D = subs[3].submission_token;
+        page = await openStudent(context, D);
+        await passEchoStage(page);
+        await page.waitForSelector("#sc-rec-btn", { state: "visible", timeout: 120000 }); // chegou à leitura
+        await reenter(page);
+        await waitFonesStage(page);
+        const recVisible = await page.evaluate(() => !!document.querySelector("#sc-rec-btn"));
+        const cbChecked = await page.evaluate(() => document.getElementById("hp-check")?.checked === true);
+        const testDisabled = await page.evaluate(() => document.getElementById("sc-test-btn")?.disabled === true);
+        if (!recVisible && !cbChecked && testDisabled) pass("D1_reentrada_refaz_fones", {});
+        else fail("D1_reentrada_refaz_fones", `rec=${recVisible} cb=${cbChecked} disabled=${testDisabled}`);
+        await passEchoStage(page);
+        await readSentence(page, goodB64);
+        await page.waitForFunction(() => /concluída/.test(document.getElementById("sc-stage")?.innerText || ""), null, { timeout: 90000 });
+        const rowD = await infoRow(work.work_token, D);
+        if (rowD?.sound_check?.state === "verde") pass("D2_pos_reentrada_verde", {});
+        else fail("D2_pos_reentrada_verde", JSON.stringify(rowD?.sound_check));
+        await page.close();
+
+        // ---------- JORNADA E: falha de infra na leitura dá retry antes do fail-open (#328) ----------
+        const E = subs[4].submission_token;
+        let calibCalls = 0;
+        await context.route("**/oral/calibrate", (route) => {
+            calibCalls++;
+            if (calibCalls === 1) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "falha simulada" }) });
+            return route.continue();
+        });
+        page = await openStudent(context, E);
+        await passEchoStage(page);
+        await readSentence(page, goodB64); // 1ª: 500 simulado
+        const retryBtn = await page.evaluate(() => !!document.querySelector("#sc-retry-read"));
+        const liberou = await page.evaluate(() => /Verificação concluída/.test(document.getElementById("sc-stage")?.innerText || ""));
+        if (retryBtn && !liberou) pass("E1_infra_retry_sem_liberar", {});
+        else fail("E1_infra_retry_sem_liberar", `retry=${retryBtn} liberou=${liberou}`);
+        await page.click("#sc-retry-read");
+        await readSentence(page, goodB64); // 2ª: passa de verdade
+        await page.waitForFunction(() => /concluída/.test(document.getElementById("sc-stage")?.innerText || ""), null, { timeout: 90000 });
+        const rowE = await infoRow(work.work_token, E);
+        if (rowE?.sound_check?.state === "verde") pass("E2_retry_conclui_verde", {});
+        else fail("E2_retry_conclui_verde", JSON.stringify(rowE?.sound_check));
+        await context.unroute("**/oral/calibrate");
         await page.close();
     } finally {
         await browser.close();
