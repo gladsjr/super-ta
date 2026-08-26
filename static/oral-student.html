@@ -352,6 +352,10 @@
 
     async function start() {
       if (blocked) { show('blocked'); return; }
+      // Desbloqueia o áudio da voz-guia AINDA no gesto do clique (autoplay
+      // policy móvel): os awaits abaixo (consentimento + permissão de
+      // mic/câmera) expiram a ativação e o play() da 1ª fala seria rejeitado.
+      if (window.soundCheck && window.soundCheck.unlockAudio) window.soundCheck.unlockAudio();
       $('pre-err').textContent = '';
       $('start-btn').disabled = true;
       // 1) registra o consentimento no servidor
