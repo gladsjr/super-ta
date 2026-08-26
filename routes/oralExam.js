@@ -1006,8 +1006,13 @@ router.post("/s/:submissionToken/oral/echo-check", requireSubmissionToken, calib
         const prev = (await db.getOralSubmissionDetail(req.submission.id))?.oral_calibration_json || null;
         const leaksRecent = (Array.isArray(prev?.echo?.leaks_recent) ? prev.echo.leaks_recent : []).slice(-1);
         leaksRecent.push(leak);
+        // RMS medido no CLIENTE sobre a amostra crua (diagnóstico #323):
+        // ~0 = captura muda (driver/constraint apagou); alto + transcript vazio
+        // = áudio presente que o STT não reconheceu.
+        const rms = Number(req.body?.rms);
         const echo = {
             leak, matches, ...(scriptText ? { script: scriptKey } : {}),
+            ...(Number.isFinite(rms) ? { rms } : {}),
             tests: (Number(prev?.echo?.tests) || 0) + 1,
             leaks_recent: leaksRecent, // as 2 últimas medições — base do vermelho recuperável
             transcript: text.slice(0, 200),
