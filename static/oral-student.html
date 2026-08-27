@@ -4,42 +4,46 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Prova oral</title>
+  <link rel="stylesheet" href="/static/css/app.css"/>
   <style>
-    :root { --ink:#1c2530; --ink-soft:#5b6675; --line:#e1e6ec; --bg:#f6f8fa; --accent:#2a6df4; --ok:#1a8a4a; --danger:#c0392b; }
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 24px; }
+    /* Tema da página do aluno = tokens da MARCA (app.css, cream/navy — #334).
+       Este bloco só mapeia os aliases locais e ajusta tamanhos p/ toque. */
+    :root { --ink: var(--ink-900); --ink-soft: var(--ink-500); --line: var(--ink-100); --accent: var(--accent-700); --ok: var(--success-700); --danger: var(--danger-700); }
+    body { padding: 24px; }
     .wrap { max-width: 880px; margin: 0 auto; }
     /* Setup em 2 colunas no desktop (instruções | câmera+medidores) p/ usar a
        largura e reduzir a altura; empilha no mobile. */
     .setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
     .setup-grid p:first-child { margin-top: 0; }
     @media (max-width: 760px) { .setup-grid { grid-template-columns: 1fr; gap: 4px; } }
-    h1 { font-size: 22px; margin: 0 0 6px; }
+    h1 { font-family: var(--font-display); font-size: 24px; font-weight: 600; margin: 0 0 6px; }
     .sub { color: var(--ink-soft); margin: 0 0 20px; }
-    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding: 18px; }
-    .btn { font: inherit; padding: 12px 22px; border-radius: 10px; border:1px solid var(--accent); background: var(--accent); color:#fff; cursor:pointer; font-size: 16px; }
-    .btn.danger { background:#fff; color: var(--danger); border-color: var(--danger); }
+    /* Alvos de toque do aluno (celular): botões maiores que o .btn padrão. */
+    .btn { padding: 12px 22px; border-radius: var(--r-md); font-size: 16px; min-height: 48px; }
+    .btn.danger { background: var(--bg-raised); color: var(--danger); border-color: var(--danger); }
     .btn:disabled { opacity:.5; cursor: default; }
+    /* Página 1 (som/conexão): coluna de leitura confortável, sem ar morto. */
+    #instr { max-width: 640px; margin: 0 auto; }
     .status { display:flex; align-items:center; gap:10px; font-size:16px; margin: 16px 0; }
-    .dot { width:12px; height:12px; border-radius:50%; background:#bbb; flex:none; }
+    .dot { width:12px; height:12px; border-radius:50%; background: var(--ink-300); flex:none; }
     .dot.live { background: var(--ok); animation: pulse 1.4s infinite; }
     .dot.err { background: var(--danger); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
     .hint { font-size: 13px; color: var(--ink-soft); }
     .err { color: var(--danger); font-size: 14px; margin-top: 10px; white-space: pre-wrap; }
     .big { font-size: 18px; text-align:center; padding: 10px 0; }
-    /* Avisos de status (posição/silêncio) em DESTAQUE: banner colorido grande. */
-    .banner { font-size:17px; font-weight:600; text-align:center; padding:12px 14px; border-radius:10px; margin:12px auto 0; max-width:380px; border:1px solid var(--line); min-height:72px; display:flex; align-items:center; justify-content:center; box-sizing:border-box; line-height:1.3; }
-    .banner.ok { color:#fff; background:var(--ok); border-color:var(--ok); }
-    .banner.adjust { color:#7a4a12; background:#fff6e0; border-color:#ecc874; }
-    .banner.wait { color:var(--ink-soft); background:#f1f3f5; }
-    .note-warn { font-size:14px; line-height:1.45; background:#fff8e6; border:1px solid #f0d27a; border-radius:10px; padding:12px 14px; margin:14px 0; }
-    .consent { border:1px solid var(--line); border-radius:10px; padding: 14px 16px; max-height: 360px; overflow:auto; background:#fbfcfd; font-size: 14px; margin: 14px 0; }
+    /* Avisos de status (posição/silêncio): banner destacado nos tons da marca. */
+    .banner { font-size:16px; font-weight:600; text-align:center; padding:12px 14px; border-radius: var(--r-lg); margin:12px auto 0; max-width:380px; border:1px solid var(--ink-100); min-height:64px; display:flex; align-items:center; justify-content:center; box-sizing:border-box; line-height:1.35; }
+    .banner.ok { color: var(--success-700); background: var(--success-50); border-color: #cfe4d6; }
+    .banner.adjust { color: var(--warning-700); background: var(--warning-50); border-color: #ecd9a8; }
+    .banner.wait { color: var(--ink-soft); background: var(--ink-50); }
+    .note-warn { font-size:14px; line-height:1.45; background: var(--warning-50); border:1px solid #ecd9a8; border-radius: var(--r-lg); padding:12px 14px; margin:14px 0; }
+    .consent { border:1px solid var(--ink-100); border-radius: var(--r-lg); padding: 14px 16px; max-height: 360px; overflow:auto; background: var(--ink-50); font-size: 14px; margin: 14px 0; }
     .consent h4 { margin: 12px 0 4px; font-size: 14px; }
     .consent p, .consent li { line-height: 1.45; }
     .accept { display:flex; align-items:flex-start; gap:10px; margin: 6px 0 14px; cursor:pointer; }
     .accept input { margin-top: 3px; }
-    video { width: 100%; max-width: 300px; border-radius: 10px; background:#000; transform: scaleX(-1); display:block; margin: 0 auto 10px; }
+    video { width: 100%; max-width: 300px; border-radius: var(--r-lg); background:#000; transform: scaleX(-1); display:block; margin: 0 auto 10px; }
     /* Palco dividido (prova oral): a câmera é o assunto — grande à esquerda,
        orientação/estado sempre visível à direita; nada rola. Empilha no mobile.
        (nota de design de largura de telas, 06/08/2026.) */
@@ -67,7 +71,7 @@
         <p>Você vai fazer uma <strong>prova oral por voz</strong>, com a câmera ligada. Leia o termo abaixo e confirme para continuar — na tela seguinte você ajusta fones, posição e silêncio antes de começar.</p>
         <div class="consent" id="consent-text">Carregando o termo…</div>
         <label class="accept"><input type="checkbox" id="accept"/> <span>Li e <strong>concordo</strong> com a gravação de voz e vídeo e com o uso descrito acima.</span></label>
-        <button class="btn" id="start-btn" disabled>Iniciar prova oral</button>
+        <button class="btn btn-primary" id="start-btn" disabled>Iniciar prova oral</button>
         <div class="err" id="pre-err"></div>
       </div>
 
@@ -76,17 +80,22 @@
       <div id="instr" style="display:none">
         <!-- Fones (#321): o card aparece no ESTÁGIO do wizard (S2) — a voz-guia
              conduz. Sem wizard (trabalho sem frase), volta a aparecer direto. -->
-        <div id="sc-fones" style="display:none; background:#eef4ff; border:2px solid #3b6fd4; border-radius:10px; padding:14px 16px; margin:0 0 14px">
-          <div style="font-size:22px; font-weight:700; line-height:1.25">🎧 Use fones de ouvido</div>
-          <p style="margin:8px 0 12px; font-size:15.5px; line-height:1.5; text-wrap:pretty">A prova é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do avaliador — isso causa eco, pode cortar a sua fala e prejudicar a sua nota.</p>
-          <label class="accept" style="font-size:15px"><input type="checkbox" id="hp-check"/> <span><strong>Estou usando fones de ouvido</strong></span></label>
+        <div id="sc-fones" style="display:none; background:var(--accent-50); border:1px solid #c9d6e6; border-radius:10px; padding:16px; margin:0 0 14px">
+          <div style="display:flex; align-items:center; gap:10px">
+            <div style="width:40px; height:40px; border-radius:999px; background:var(--accent-700); display:flex; align-items:center; justify-content:center; flex:none">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f4f4e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v-2a8 8 0 0 1 16 0v2"></path><rect x="3" y="14" width="4" height="6" rx="2"></rect><rect x="17" y="14" width="4" height="6" rx="2"></rect></svg>
+            </div>
+            <div style="font-family:var(--font-display); font-size:20px; font-weight:600; line-height:1.25">Use fones de ouvido</div>
+          </div>
+          <p style="margin:10px 0 12px; font-size:15px; line-height:1.55; text-wrap:pretty">A prova é <strong>por voz, em tempo real</strong>. Sem fones, o microfone capta a voz do avaliador — isso causa eco, pode cortar a sua fala e prejudicar a sua nota.</p>
+          <label class="accept" style="font-size:14.5px; font-weight:600; background:var(--bg-raised); border:1px solid var(--ink-200); border-radius:var(--r-md); padding:12px; margin:0; align-items:center; min-height:44px"><input type="checkbox" id="hp-check" style="margin-top:0"/> <span>Estou usando fones de ouvido</span></label>
         </div>
         <!-- Conexão -->
         <div class="banner wait" id="conn-banner">Testando a conexão…</div>
         <!-- Silêncio: medidor de ruído CONTÍNUO (some após o veredito do wizard) -->
         <div id="noise-wrap" style="max-width:380px; margin:14px auto 0">
           <div class="hint" style="text-align:center; margin-bottom:4px">Nível de ruído do ambiente</div>
-          <div style="height:10px; background:#e5e7eb; border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:var(--ok); transition:width .1s linear"></div></div>
+          <div style="height:10px; background:var(--ink-100); border-radius:5px; overflow:hidden"><div id="noise-bar" style="height:100%; width:0; background:var(--ok); transition:width .1s linear"></div></div>
           <div class="banner wait" id="noise-verdict" style="margin-top:6px">Medindo o ambiente…</div>
         </div>
         <!-- Sound check GUIADO POR VOZ (#321): o orientador conduz as etapas e
@@ -97,7 +106,8 @@
           <div id="sc-red" style="margin-top:14px"></div>
         </div>
         <!-- Sempre habilitado: o bloqueio acontece no clique, com explicação (#255). -->
-        <div style="margin-top:18px"><button class="btn" id="to-check-btn">Continuar</button></div>
+        <div style="margin-top:18px"><button class="btn btn-primary" id="to-check-btn">Continuar</button>
+          <div class="hint" style="margin-top:8px">Etapa 1 de 2 — a câmera vem em seguida.</div></div>
       </div>
 
       <!-- Página 2: posicionamento na câmera (a prova começa sozinha quando ok).
@@ -120,7 +130,7 @@
               <figure><img id="pose-b2" alt="exemplo de posição" style="width:100%; border:1px solid var(--line); border-radius:10px; display:block"/><figcaption class="hint" style="text-align:center; margin-top:3px" id="pose-b2-cap"></figcaption></figure>
             </div>
             <div class="note-warn"><strong>Importante:</strong> mantenha a posição das fotos durante toda a prova. Se você sair da posição por mais de alguns segundos, a prova <strong>pausa sozinha</strong> e continua quando você se ajustar. O vídeo fica gravado e é analisado.</div>
-            <button class="btn" id="pos-begin-btn" disabled>Começar a prova</button>
+            <button class="btn btn-primary" id="pos-begin-btn" disabled>Começar a prova</button>
             <div class="err" id="setup-err"></div>
           </div>
         </div>
@@ -281,7 +291,7 @@
         + warn
         + `<p class="sub" style="text-align:center">Confira a transcrição acima. Se algo que você disse saiu diferente do que quis dizer, deixe um comentário — é opcional e enviado uma única vez. Você também pode simplesmente fechar a página.</p>`
         + `<textarea id="oral-comment" maxlength="2000" rows="4" style="width:100%;box-sizing:border-box;font:inherit;padding:8px" placeholder="Escreva aqui (opcional)…"></textarea>`
-        + `<div style="text-align:center;margin-top:8px"><button id="oral-comment-btn" class="btn">Confirmar e enviar</button> <span class="sub" id="oral-comment-msg"></span></div>`;
+        + `<div style="text-align:center;margin-top:8px"><button id="oral-comment-btn" class="btn btn-primary">Confirmar e enviar</button> <span class="sub" id="oral-comment-msg"></span></div>`;
       $('oral-comment-btn').onclick = submitOralComment;
     }
 

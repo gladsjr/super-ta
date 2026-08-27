@@ -119,7 +119,7 @@
     const motivos = (state && state.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("");
     return (
       `<div style="border:2px solid #dc2626;border-radius:10px;padding:14px;background:#fef2f2">` +
-      `<p style="margin:0 0 8px"><strong>⛔ A captação do seu áudio reprovou no teste.</strong> Com ela assim, a transcrição das suas respostas sairia errada — e a sua avaliação seria prejudicada. Por isso a prova não começa ainda.</p>` +
+      `<p style="margin:0 0 8px"><strong>A captação do seu áudio reprovou no teste.</strong> Com ela assim, a transcrição das suas respostas sairia errada — e a sua avaliação seria prejudicada. Por isso a prova não começa ainda.</p>` +
       (motivos ? `<ul style="margin:0 0 10px;padding-left:20px">${motivos}</ul>` : "") +
       `<p style="margin:0 0 6px"><strong>Antes de qualquer coisa, tente isto (resolve a maioria dos casos):</strong></p>` +
       `<ol style="margin:0 0 10px;padding-left:20px">` +
@@ -128,7 +128,7 @@
       `<li>Se houver outro microfone/fone disponível, troque o dispositivo e recarregue a página.</li>` +
       `</ol>` +
       `<p style="margin:0 0 10px">Depois de ajustar, toque em <strong>“Já ajustei — testar de novo”</strong>. Se não conseguir resolver agora, <strong>não há penalidade</strong>: combine outro horário com o professor, ou peça a ele a liberação para fazer a prova assim mesmo (ele consegue liberar pelo painel).</p>` +
-      `<div style="text-align:center"><button class="btn" id="sc-retry-btn">Já ajustei — testar de novo</button></div>` +
+      `<div style="text-align:center"><button class="btn btn-primary" id="sc-retry-btn">Já ajustei — testar de novo</button></div>` +
       `</div>`
     );
   }
@@ -212,10 +212,13 @@
     const stage = els.stage;
     function ui(html) { stage.innerHTML = html; }
     const esc2 = esc;
+    // Balão da voz-guia no visual da marca (#334): avatar navy com ondas gold.
     function speechRow(text) {
       return `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">` +
-        `<div style="font-size:22px">🎧</div>` +
-        `<div style="flex:1;background:var(--bg-muted,#f4f1ea);border-radius:10px;padding:10px 12px;line-height:1.5"><span style="font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#5a6b80;display:block;margin-bottom:4px">Orientação (voz)</span>${esc2(text)}</div></div>`;
+        `<div style="width:34px;height:34px;border-radius:999px;background:var(--accent-700,#181f39);display:flex;align-items:center;justify-content:center;flex:none">` +
+        `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d4b779" stroke-width="2" stroke-linecap="round"><path d="M8 9v6"></path><path d="M12 5v14"></path><path d="M16 8v8"></path><path d="M20 11v2"></path><path d="M4 11v2"></path></svg>` +
+        `</div>` +
+        `<div style="flex:1;background:var(--ink-50,#f3f5f8);border:1px solid var(--ink-100,#e4e9ee);border-radius:10px;padding:10px 12px;line-height:1.5;text-align:left"><span style="font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-500,#5a6b80);display:block;margin-bottom:4px">Orientação por voz</span>${esc2(text)}</div></div>`;
     }
 
     // Toca um roteiro (com espelho visual) e, se `capture`, grava o microfone
@@ -286,7 +289,7 @@
         await speak("g2_ok", { capture: true });
       } else {
         for (const p of problems) {
-          await speak(p, { capture: true, extraHtml: `<div style="text-align:center"><button class="btn" id="sc-aware-btn">Estou ciente</button></div>` });
+          await speak(p, { capture: true, extraHtml: `<div style="text-align:center"><button class="btn btn-primary" id="sc-aware-btn">Estou ciente</button></div>` });
           await new Promise((res) => { const b = stage.querySelector("#sc-aware-btn"); if (b) b.onclick = res; else res(); });
         }
       }
@@ -299,7 +302,7 @@
       if (stopped) return;
       if (els.fones) els.fones.style.display = "";
       const key = ecoLoops === 0 ? "g3_fones" : "g5_eco_loop";
-      const btnHtml = `<div style="text-align:center"><button class="btn" id="sc-test-btn" disabled>🎧 Testar captação</button></div>` +
+      const btnHtml = `<div style="text-align:center"><button class="btn btn-primary" id="sc-test-btn" disabled>Testar captação</button></div>` +
         `<div class="banner wait" id="sc-echo-status" style="margin-top:10px;display:none"></div>`;
       // A UI nasce ANTES de a fala terminar (ui() é síncrono dentro de speak):
       // o checkbox/botão já respondem durante o áudio; o clique só processa
@@ -326,7 +329,7 @@
         ecoInfraFails++;
         if (dead) { dropRawMic(); probeDead = true; }
         if (ecoInfraFails < 2) {
-          ui(`<div class="banner adjust">Não consegui medir o eco agora${dead ? " (a captação veio muda)" : " (falha do serviço)"}. Vamos tentar mais uma vez.</div><div style="text-align:center;margin-top:8px"><button class="btn" id="sc-retry-eco">Tentar de novo</button></div>`);
+          ui(`<div class="banner adjust">Não consegui medir o eco agora${dead ? " (a captação veio muda)" : " (falha do serviço)"}. Vamos tentar mais uma vez.</div><div style="text-align:center;margin-top:8px"><button class="btn btn-primary" id="sc-retry-eco">Tentar de novo</button></div>`);
           await new Promise((res) => { const b = stage.querySelector("#sc-retry-eco"); if (b) b.onclick = res; else res(); });
           return s2Fones();
         }
@@ -351,7 +354,7 @@
       if (stopped) return;
       const frame = `
         <div class="card" style="text-align:center;font-size:18px;line-height:1.5;margin:0 0 10px">${esc2(sentence)}</div>
-        <div style="text-align:center"><button class="btn" id="sc-rec-btn">🎤 Gravar e ler a frase</button></div>
+        <div style="text-align:center"><button class="btn btn-primary" id="sc-rec-btn">Gravar e ler a frase</button></div>
         <div class="banner wait" id="sc-read-status" style="margin-top:10px">Quando estiver pronto, toque em “Gravar e ler a frase”.</div>`;
       // UI e handler nascem JÁ (ui é síncrono dentro de speak); a gravação em si
       // espera a instrução terminar — clicar cedo não grava a voz-guia junto.
@@ -385,15 +388,15 @@
           };
           rec.start();
           if (setCalibRecording) setCalibRecording(true);
-          btn.textContent = "⏹ Parar e verificar";
-          st.className = "banner wait"; st.textContent = "🎤 Gravando… leia a frase e toque em “Parar e verificar”.";
+          btn.textContent = "Parar e verificar";
+          st.className = "banner wait"; st.textContent = "Gravando… leia a frase e toque em “Parar e verificar”.";
         };
       });
       if (!j || j.error) {
         // 1ª falha de infra: retenta; só a 2ª seguida libera (fail-open, #328)
         readInfraFails++;
         if (readInfraFails < 2) {
-          ui(`<div class="banner adjust">Não consegui verificar a captação agora (falha do serviço). Toque em Tentar de novo e grave outra vez.</div><div style="text-align:center;margin-top:8px"><button class="btn" id="sc-retry-read">Tentar de novo</button></div>`);
+          ui(`<div class="banner adjust">Não consegui verificar a captação agora (falha do serviço). Toque em Tentar de novo e grave outra vez.</div><div style="text-align:center;margin-top:8px"><button class="btn btn-primary" id="sc-retry-read">Tentar de novo</button></div>`);
           await new Promise((res) => { const b = stage.querySelector("#sc-retry-read"); if (b) b.onclick = res; else res(); });
           return s3Leitura(true);
         }

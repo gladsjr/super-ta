@@ -128,8 +128,8 @@ async function passEchoStage(page) {
 async function readSentence(page, b64) {
     await page.waitForSelector("#sc-rec-btn", { state: "visible", timeout: 120000 });
     await page.click("#sc-rec-btn");
-    // a gravação só começa após a instrução falada terminar (botão vira ⏹)
-    await page.waitForFunction(() => /⏹/.test(document.getElementById("sc-rec-btn")?.textContent || ""), null, { timeout: 60000 });
+    // a gravação só começa após a instrução falada terminar (botão vira "Parar")
+    await page.waitForFunction(() => /Parar e verificar/.test(document.getElementById("sc-rec-btn")?.textContent || ""), null, { timeout: 60000 });
     await sleep(400);
     await page.evaluate(b => window.__speak(b), b64);
     await page.click("#sc-rec-btn"); // parar e verificar
