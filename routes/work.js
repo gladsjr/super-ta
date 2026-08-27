@@ -40,7 +40,7 @@ import {
 import { workMarkdown } from "../lib/exportMarkdown.js";
 import { mapPool } from "../lib/concurrency.js";
 import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
-import { enqueueProctor } from "../lib/proctorQueue.js";
+import { enqueueProctor, enqueueProctorAndWait } from "../lib/proctorQueue.js";
 import { isBatchEligible, summarizeIneligible } from "../lib/batchEligibility.js";
 import { ladderState } from "../lib/soundCheck.js";
 import { PROCTOR_REVIEW_DEFS, isValidProctorReview, PROCTOR_REVIEW_DEFAULT } from "../lib/proctorReview.js";
@@ -931,7 +931,9 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
                 const parts = await db.getOralVideoParts(found.id);
                 const detail = await db.getOralSubmissionDetail(found.id);
                 if (parts.length && (force || !(detail && detail.oral_proctor_json))) {
-                    await enqueueProctor(found.id, { priority: "manual", tokenForLog: found.submission_token });
+                    // Aguarda o DESFECHO (#338): a avaliação do lote vem depois
+                    // da análise; a espera respeita a concorrência da lane.
+                    await enqueueProctorAndWait(found.id, { tokenForLog: found.submission_token });
                 }
             } catch (e) {
                 log.error("EVALUATION", `proctor (lote) sub=${found.submission_token} falhou (ignorado): ${e.message}`);
