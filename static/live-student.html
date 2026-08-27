@@ -200,6 +200,23 @@
         // #260: a gravação caiu na sessão anterior e o professor ainda não
         // liberou a retomada — pausa aqui, antes de qualquer setup.
         if (st.resume_blocked) { blocked = true; showResumeBlocked(); return; }
+        // Teste concluído pode ser REFEITO (não fecha de propósito) — mas quem
+        // testa também quer VER a tela de revisão do aluno (#336): atalho.
+        if (st.is_test) {
+          try {
+            const rv = await fetch(`/s/${SUB}/review`);
+            if (rv.ok) {
+              const j = await rv.json();
+              if (j.conversation && (j.conversation.turns || []).length) {
+                const p = document.createElement('p');
+                p.className = 'sub';
+                p.innerHTML = 'Este link de teste já tem uma tentativa concluída — <a href="#" id="ver-revisao">ver a revisão da última tentativa</a>. Para refazer o teste, siga abaixo normalmente.';
+                $('pre').insertBefore(p, $('pre').firstChild);
+                $('ver-revisao').onclick = (e) => { e.preventDefault(); enterPostInterview({}); };
+              }
+            }
+          } catch {}
+        }
         if (st.prep_status === 'ready' || st.prep_status === 'preparing') {
           resumeMode = true;
           prepReady = st.prep_status === 'ready';
@@ -233,6 +250,9 @@
     }
 
     async function renderPostInterview() {
+      // O box de comentário NÃO espera a conversa (#336): nasce já aberto e é
+      // re-renderizado com o estado real quando o review responder.
+      renderCommentBox({});
       // Corrida real: o vídeo sobe ANTES de o relay fechar, e é o fechamento que
       // marca a entrevista como concluída (~2s depois). Insiste por ~12s; se
       // ainda assim não vier, fallback com botão — nunca a tela vazia.
@@ -276,7 +296,7 @@
         ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Sua fala, retranscrita com mais fidelidade</summary>`
           + `<p class="sub" style="text-align:left;margin:6px 0">A conversa acima foi transcrita ao vivo e pode ter picotado a sua fala. Esta versão foi refeita do áudio contínuo, depois da entrevista, e é a que o professor também recebe na avaliação.</p>`
           + `<div class="card" style="text-align:left;max-height:280px;overflow:auto;white-space:pre-wrap">${esc(audit.text)}</div></details>`
-        : '';
+        : `<p class="sub" style="text-align:left;margin-top:10px">Esta conversa foi transcrita <strong>ao vivo</strong> e pode conter erros pontuais. Ela será refinada automaticamente em alguns minutos — recarregue a página para ver a versão revisada, que é a que o professor recebe na avaliação.</p>`;
       el.innerHTML = `<h3 style="text-align:center">Sua entrevista</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${rows}${farewell}</div>${auditBlock}`;
     }
 
