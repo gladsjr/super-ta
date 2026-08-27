@@ -14,11 +14,22 @@ The message interview (default kind) can run with **camera-on video proctoring**
 - **Player multi-parte (#256):** `static/conversation.html` deixou de ficar cravado em `proctor-video/0`; navega entre as partes, emenda ao fim de cada uma e mostra a fragmentação como alerta. `appendOralVideoPart` passou a guardar em `oral_video_key` a PRIMEIRA parte (antes a última).
 - **Schema**: `works.proctoring_enabled` + `works.devolutiva_proctor_prompt` (migration 041); the interview submission **reuses** the oral columns `oral_video_key`/`oral_proctor_json`/`oral_calibration_json`. The command-area scheme was validated with a standalone tuning page, `static/poc/gesture.html` (kept on the `feat/proctor-zone-poc` branch).
 
-## Fila global de análises (issues #261–#264, 2026-08-16)
+## Fila global de análises (issues #261–#264, 2026-08-16; infra #338, 2026-08-27)
 
 A análise de vídeo deixou de rodar solta e passou a ser **serializada por uma fila
 global** (`lib/proctorQueue.js`), compartilhada pelos três fluxos (prova oral,
-entrevista simplificada, entrevista com fiscalização):
+entrevista simplificada, entrevista com fiscalização).
+
+Desde o #338 a fila vive na **tabela `jobs`** (migrations 078/079), como **lane
+separada** da retranscrição (`type: video_analysis`) — decisão explícita: as duas
+continuam filas logicamente distintas (políticas próprias de prioridade, retry e
+concorrência), mas compartilham a mecânica (claim atômico com lease, dedup por
+submissão via índice único parcial, repriorização, visibilidade). Com isso a fila
+de vídeo **sobrevive a restart** (o claim repesca lease vencida) e ganha trilha
+auditável (`attempts`, `last_error`, `result`); a bomba roda no próprio app
+(`pump`, acordada também pelo tique do `jobRunner`), e o aborto do admin segue
+cooperativo (AbortController em memória — quem roda vídeo é este processo). Tudo
+abaixo continua valendo:
 
 - **Disparo**: automático ao fim de cada sessão (`lib/proctorAuto.js` e o pós-upload
   do vídeo oral apenas enfileiram). O lote "Analisar vídeos" do professor **foi

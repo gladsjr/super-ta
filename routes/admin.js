@@ -312,7 +312,7 @@ router.post("/admin/analytics-tokens/:id/revoke", requireAdmin, async (req, res)
 // dados de aluno/trabalho vêm do banco por id (enriquecimento sob demanda).
 router.get("/admin/proctor/queue", requireAdmin, async (_req, res) => {
     try {
-        const snap = getProctorQueueSnapshot();
+        const snap = await getProctorQueueSnapshot();
         const ids = [...snap.running, ...snap.queued].map(i => i.submission_id);
         const info = await db.getProctorSubmissionInfo(ids);
         const byId = Object.fromEntries(info.map(r => [r.id, r]));
@@ -369,7 +369,7 @@ router.get("/admin/ops/dashboard", requireAdmin, async (_req, res) => {
     try {
         const voice = getActiveRealtimeSessions(); // { ORAL_RELAY: n, LIVE_RELAY: n }
         const messages = await db.countActiveMessageInterviews(10);
-        const snap = getProctorQueueSnapshot();
+        const snap = await getProctorQueueSnapshot();
         res.json({
             active: {
                 oral_realtime: voice.ORAL_RELAY || 0,
@@ -431,9 +431,9 @@ router.post("/admin/proctor/:submissionId/cancel", requireAdmin, async (req, res
     }
 });
 
-// Fura fila (#272): item enfileirado vai para a cabeça (prioridade manual).
-router.post("/admin/proctor/:submissionId/prioritize", requireAdmin, (req, res) => {
-    const ok = prioritizeProctor(Number(req.params.submissionId));
+// Fura fila (#272): item enfileirado vira prioridade manual.
+router.post("/admin/proctor/:submissionId/prioritize", requireAdmin, async (req, res) => {
+    const ok = await prioritizeProctor(Number(req.params.submissionId)).catch(() => false);
     if (!ok) return res.status(409).json({ error: "item não está na fila (já rodando ou concluído)" });
     res.json({ ok: true });
 });
