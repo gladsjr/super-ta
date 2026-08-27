@@ -187,25 +187,12 @@
     (async () => {
       try {
         const st = await (await fetch(`/s/${SUB}/oral/status`)).json();
-        if (st.done) { blocked = true; enterPostExam({}); }
+        // Teste concluído entra como o ALUNO entraria: direto na revisão; o
+        // refazer vira ação explícita (#340 — supera o atalho do #336).
+        if (st.done || (st.is_test && st.completed)) { blocked = true; enterPostExam({ testRedo: st.is_test && st.completed }); }
         // #260: a gravação caiu na sessão anterior e o professor ainda não
         // liberou a retomada — pausa aqui, antes de qualquer setup.
         else if (st.resume_blocked) { blocked = true; showResumeBlocked(); }
-        // Teste concluído pode ser REFEITO (não fecha de propósito) — mas quem
-        // testa também quer VER a tela de revisão do aluno (#336): atalho.
-        else if (st.is_test) {
-          const rv = await fetch(`/s/${SUB}/oral/review`);
-          if (rv.ok) {
-            const j = await rv.json();
-            if ((j.transcript || []).length) {
-              const p = document.createElement('p');
-              p.className = 'sub';
-              p.innerHTML = 'Este link de teste já tem uma tentativa concluída — <a href="#" id="ver-revisao">ver a revisão da última tentativa</a>. Para refazer o teste, siga abaixo normalmente.';
-              $('pre').insertBefore(p, $('pre').firstChild);
-              $('ver-revisao').onclick = (e) => { e.preventDefault(); enterPostExam({}); };
-            }
-          }
-        }
       } catch {}
     })();
 
@@ -226,6 +213,12 @@
       if (opts && opts.uploadNote) {
         $('blocked-title').textContent = 'Prova encerrada';
         $('blocked-sub').innerHTML = esc(opts.uploadNote) + ' Abaixo você pode revisar a transcrição e deixar um comentário ao professor.';
+      }
+      // Link de TESTE (#340): a revisão é a porta de entrada; refazer é ação.
+      if (opts && opts.testRedo) {
+        $('blocked-title').textContent = 'Prova de teste realizada';
+        $('blocked-sub').innerHTML = 'Este link de teste já tem uma tentativa concluída — abaixo, a revisão dela (como o aluno veria). <button class="btn btn-sm" id="test-redo-btn" type="button" style="margin-left:6px">Refazer o teste</button>';
+        $('test-redo-btn').onclick = () => { blocked = false; show('pre'); };
       }
       renderPostExam();
     }

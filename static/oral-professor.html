@@ -221,11 +221,26 @@
           <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--sp-3)">
             <button id="open-cockpit-oral" class="btn" type="button" title="Abre as avaliações com navegação entre os alunos">Abrir avaliações lado a lado ↗</button>
           </div>
+          <!-- Filtro (#341) — mesmo padrão do "Mostrar:" da aba Alunos. -->
+          <div class="table-toolbar">
+            <label class="filter-label" for="eval-filter">Mostrar:</label>
+            <select id="eval-filter" class="select">
+              <option value="all" selected>Todos</option>
+              <option value="evaluated">Avaliadas</option>
+              <option value="notevaluated">Não avaliadas</option>
+              <option value="alerts">Com alertas</option>
+              <option value="published">Publicadas</option>
+              <option value="notpublished">Não publicadas</option>
+              <option value="real">Reais</option>
+              <option value="test">De teste</option>
+            </select>
+          </div>
           <table id="eval-table" class="table hidden">
             <thead><tr><th>Aluno</th><th>Prova</th><th>Avaliação</th><th style="text-align:right">Nota</th><th>Alertas</th><th>Publicado</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
           <div id="eval-empty" class="table-empty hidden">Nenhum aluno ainda.</div>
+          <div id="eval-filtered-empty" class="table-empty hidden">Nenhum aluno neste filtro.</div>
         </div>
       </details>
     </div>
@@ -563,6 +578,7 @@
   };
 
   document.getElementById('sub-filter').onchange = renderSubsTable;
+  document.getElementById('eval-filter').onchange = renderEvalTable;
   document.getElementById('download-csv').onclick = () => {
     const lines = [['rotulo', 'token', 'url'].join(',')].concat(
       SUBS.map(s => [`"${(s.student_label || '').replace(/"/g, '""')}"`, s.submission_token, `${window.ORATIA_BASE_URL || location.origin}/s/${s.submission_token}`].join(','))
@@ -576,9 +592,24 @@
     const tbody = document.querySelector('#eval-table tbody');
     const tableEl = document.getElementById('eval-table');
     const empty = document.getElementById('eval-empty');
-    const rows = SUBS.filter(s => !s.is_test || s.status === 'completed'); // mostra reais + testes já realizados
-    if (!rows.length) { tableEl.classList.add('hidden'); empty.classList.remove('hidden'); return; }
-    empty.classList.add('hidden'); tableEl.classList.remove('hidden');
+    const fEmpty = document.getElementById('eval-filtered-empty');
+    const base = SUBS.filter(s => !s.is_test || s.status === 'completed'); // reais + testes já realizados
+    if (!base.length) { tableEl.classList.add('hidden'); fEmpty.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    // Filtro (#341): recorta sobre a base da aba, no padrão da aba Alunos.
+    const f = document.getElementById('eval-filter')?.value || 'all';
+    const rows = base.filter(s => {
+      if (f === 'evaluated') return !!s.has_oral_eval;
+      if (f === 'notevaluated') return !s.has_oral_eval;
+      if (f === 'alerts') return (s.proctor_alerts || []).length > 0 || !!s.voice_alert || (s.sound_check && s.sound_check.state !== 'verde');
+      if (f === 'published') return !!s.grade_published;
+      if (f === 'notpublished') return !s.grade_published;
+      if (f === 'real') return !s.is_test;
+      if (f === 'test') return s.is_test;
+      return true;
+    });
+    if (!rows.length) { tableEl.classList.add('hidden'); fEmpty.classList.remove('hidden'); return; }
+    fEmpty.classList.add('hidden'); tableEl.classList.remove('hidden');
     const SPIN = '<span class="cell-spin"></span>';
     tbody.innerHTML = rows.map(s => {
       const test = s.is_test ? ' <span class="pill pill-test">teste</span>' : '';

@@ -196,27 +196,8 @@
         // Nome do trabalho + do aluno no cabeçalho (#135), como na entrevista profunda.
         const wc = document.getElementById('work-context');
         if (wc) wc.textContent = [st.work_name, st.student_label].filter(Boolean).join(' · ');
-        if (st.done) { blocked = true; enterPostInterview({}); return; }
-        // #260: a gravação caiu na sessão anterior e o professor ainda não
-        // liberou a retomada — pausa aqui, antes de qualquer setup.
-        if (st.resume_blocked) { blocked = true; showResumeBlocked(); return; }
-        // Teste concluído pode ser REFEITO (não fecha de propósito) — mas quem
-        // testa também quer VER a tela de revisão do aluno (#336): atalho.
-        if (st.is_test) {
-          try {
-            const rv = await fetch(`/s/${SUB}/review`);
-            if (rv.ok) {
-              const j = await rv.json();
-              if (j.conversation && (j.conversation.turns || []).length) {
-                const p = document.createElement('p');
-                p.className = 'sub';
-                p.innerHTML = 'Este link de teste já tem uma tentativa concluída — <a href="#" id="ver-revisao">ver a revisão da última tentativa</a>. Para refazer o teste, siga abaixo normalmente.';
-                $('pre').insertBefore(p, $('pre').firstChild);
-                $('ver-revisao').onclick = (e) => { e.preventDefault(); enterPostInterview({}); };
-              }
-            }
-          } catch {}
-        }
+        // A tela inicial é configurada ANTES do desvio para a revisão: se o
+        // teste concluído for "Refazer" (#340), ela já está pronta (retomada).
         if (st.prep_status === 'ready' || st.prep_status === 'preparing') {
           resumeMode = true;
           prepReady = st.prep_status === 'ready';
@@ -225,6 +206,12 @@
           $('start-btn').textContent = 'Continuar';
           if (consented) { $('accept-row').style.display = 'none'; $('start-btn').disabled = false; }
         }
+        // Teste concluído entra como o ALUNO entraria: direto na revisão; o
+        // refazer vira ação explícita (#340 — supera o atalho do #336).
+        if (st.done || (st.is_test && st.completed)) { blocked = true; enterPostInterview({ testRedo: st.is_test && st.completed }); return; }
+        // #260: a gravação caiu na sessão anterior e o professor ainda não
+        // liberou a retomada — pausa aqui, antes de qualquer setup.
+        if (st.resume_blocked) { blocked = true; showResumeBlocked(); return; }
       } catch {}
     })();
 
@@ -245,6 +232,12 @@
       if (opts && opts.uploadNote) {
         $('blocked-title').textContent = 'Entrevista encerrada';
         $('blocked-sub').innerHTML = esc(opts.uploadNote) + ' Abaixo você pode revisar a conversa e deixar um comentário ao professor.';
+      }
+      // Link de TESTE (#340): a revisão é a porta de entrada; refazer é ação.
+      if (opts && opts.testRedo) {
+        $('blocked-title').textContent = 'Entrevista de teste realizada';
+        $('blocked-sub').innerHTML = 'Este link de teste já tem uma tentativa concluída — abaixo, a revisão dela (como o aluno veria). <button class="btn btn-sm" id="test-redo-btn" type="button" style="margin-left:6px">Refazer o teste</button>';
+        $('test-redo-btn').onclick = () => { blocked = false; show('pre'); };
       }
       renderPostInterview();
     }
