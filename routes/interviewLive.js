@@ -81,6 +81,7 @@ router.get("/s/:submissionToken/live/status", requireSubmissionToken, requireLiv
             student_label: req.submission.student_label || null,
             done,
             is_test: !!req.submission.is_test,
+            completed: !!req.submission.completion_reason, // #340: teste concluído cai na revisão
             consented: !!req.submission.consent_version,
             prep_status: prepStatus,
             question_count: prep?.plan?.questions?.length ?? null,

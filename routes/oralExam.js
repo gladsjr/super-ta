@@ -878,7 +878,10 @@ router.get("/s/:submissionToken/oral/status", requireSubmissionToken, async (req
                 && !(await db.hasResumeAllowance(req.submission.id));
         } catch {}
     }
-    res.json({ done, is_test: !!req.submission.is_test, resume_blocked: resumeBlocked });
+    // completed: tentativa concluída, independente de is_test — o teste não
+    // "fecha" (refazível de propósito), mas a página usa isto p/ cair na
+    // REVISÃO como o aluno, com "Refazer o teste" explícito (#340).
+    res.json({ done, is_test: !!req.submission.is_test, completed: !!req.submission.completion_reason, resume_blocked: resumeBlocked });
 });
 
 // --- Calibração de fala (pré-teste de captação, ANTES da sessão de voz) ---

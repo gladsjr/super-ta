@@ -350,6 +350,19 @@
       <summary><span class="card-title">Alunos</span></summary>
       <div class="card-collapsible-body">
       <p class="card-sub">Clique em <strong>Avaliação</strong> para ver a conversa, a avaliação e a devolutiva — revisar, editar e publicar por aluno.</p>
+      <!-- Filtro (#341) — mesmo padrão do "Mostrar:" da aba Alunos. -->
+      <div class="table-toolbar">
+        <label class="filter-label" for="grades-filter">Mostrar:</label>
+        <select id="grades-filter" class="select" onchange="renderGradesTable()">
+          <option value="all" selected>Todos</option>
+          <option value="evaluated">Avaliadas</option>
+          <option value="notevaluated">Não avaliadas</option>
+          <option value="published">Devolutiva publicada</option>
+          <option value="notpublished">Não publicada</option>
+          <option value="real">Reais</option>
+          <option value="test">De teste</option>
+        </select>
+      </div>
       <div id="grades-table"></div>
       </div>
     </details>
@@ -643,9 +656,24 @@ setInterval(() => {
 function renderGradesTable() {
   const el = document.getElementById('grades-table');
   if (!el) return;
-  const rows = (lastSubmissions || []).filter(s => s.status !== 'pending');
-  if (rows.length === 0) {
+  const base = (lastSubmissions || []).filter(s => s.status !== 'pending');
+  if (base.length === 0) {
     el.innerHTML = '<p class="muted">Nenhuma entrevista ainda.</p>';
+    return;
+  }
+  // Filtro (#341): recorta sobre a base da aba, no padrão da aba Alunos.
+  const f = document.getElementById('grades-filter')?.value || 'all';
+  const rows = base.filter(s => {
+    if (f === 'evaluated') return !!s.has_student_version;
+    if (f === 'notevaluated') return !s.has_student_version;
+    if (f === 'published') return !!s.evaluation_published_at;
+    if (f === 'notpublished') return !s.evaluation_published_at;
+    if (f === 'real') return !s.is_test;
+    if (f === 'test') return s.is_test;
+    return true;
+  });
+  if (rows.length === 0) {
+    el.innerHTML = '<p class="muted">Nenhum aluno neste filtro.</p>';
     return;
   }
   const body = rows.map(s => {
