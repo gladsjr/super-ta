@@ -55,3 +55,6 @@ RUBRIC_QUOTA_LIMIT = "100"
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 180000
+
+[objectStorage]
+defaultBucketID = "replit-objstore-2ab3cafe-9e57-40cf-b9c1-79b790e36d3f"
