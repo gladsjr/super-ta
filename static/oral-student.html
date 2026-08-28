@@ -797,14 +797,18 @@
           else if (m.state === 'listening') { flushPlayback(); setStatus('🎤 Ouvindo você…', 'live'); }
           else if (m.state === 'thinking') setStatus('…', 'live');
         } else if (m.type === 'wrapup') { endAfterPlayback(); }
-        else if (m.type === 'ended') { finish(); }
+        // 'ended' com motivo != normal = a sessão caiu do lado do provedor
+        // (#343): o aluno precisa saber que foi técnico, não fim da prova.
+        else if (m.type === 'ended') { finish({ dropped: m.reason && m.reason !== 'normal' }); }
       };
       ws.onerror = () => setStatus('Erro de conexão', 'err');
       ws.onclose = () => {
         if (ended) return;
         stopPresenceWatch(); // libera a pose (Layer 2)
-        setStatus('Conexão encerrada', 'err');
-        salvageVideo(); // queda inesperada: sobe o vídeo parcial p/ não perder a gravação
+        setStatus('Conexão perdida', 'err');
+        // Queda inesperada (#343): sobe o vídeo parcial E leva o aluno à tela
+        // final COM explicação — antes ele ficava sem resposta na tela.
+        salvageVideo({ dropped: true });
       };
       // Vigia a CAPTURA (não o conteúdo): se a track de vídeo cai (permissão
       // revogada, webcam desconectada) ou o recorder morre, pausa a prova no
@@ -834,7 +838,13 @@
     async function uploadVideo() {
       // chamado quando o MediaRecorder para; envia o vídeo e leva à revisão.
       const stopTracks = () => { try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} };
-      if (!recChunks.length) { stopTracks(); enterPostExam({ uploadNote: 'Prova registrada.' }); return; }
+      if (!recChunks.length) {
+        stopTracks();
+        // Queda (#343): a tela final explica o corte; não é "prova realizada".
+        if (droppedSession) { showDroppedEnd('Nada de vídeo foi gravado nesta tentativa.'); return; }
+        enterPostExam({ uploadNote: 'Prova registrada.' });
+        return;
+      }
       $('done-msg').textContent = 'Enviando o vídeo…';
       $('done-sub').textContent = 'Não feche a página até concluir.';
       let note = 'Vídeo enviado.';
@@ -852,27 +862,46 @@
       } catch {
         note = 'O envio do vídeo falhou. Recarregue a página para tentar de novo; se persistir, avise o professor.';
       } finally { stopTracks(); }
+      if (droppedSession) { showDroppedEnd(note); return; } // queda: explica, não "encerrada" (#343)
       enterPostExam({ uploadNote: note });
     }
 
     // Rede de segurança do vídeo: numa QUEDA inesperada (sem encerramento limpo),
-    // sobe o que já foi gravado — senão os pedaços se perdem se o aluno não voltar.
-    // best-effort e silencioso (a tela já mostra "Conexão encerrada").
+    // sobe o que já foi gravado — senão os pedaços se perdem se o aluno não
+    // voltar. Com `dropped`, também tira o aluno da tela da prova e explica o
+    // que houve (#343) — antes ele ficava sem resposta na tela.
     let salvaged = false;
-    function salvageVideo() {
+    function salvageVideo(opts) {
       if (salvaged) return; salvaged = true;
+      const dropped = !!(opts && opts.dropped);
+      if (dropped) {
+        ended = true; droppedSession = true;
+        show('done');
+        $('done-msg').textContent = 'A conexão caiu';
+        $('done-sub').textContent = 'A prova foi interrompida por um problema de conexão — não foi você nem o seu equipamento. Enviando o que já foi gravado…';
+      }
       try {
-        if (recorder && recorder.state !== 'inactive') { recorder.onstop = uploadVideoSilent; recorder.stop(); }
-        else uploadVideoSilent();
+        if (recorder && recorder.state !== 'inactive') { recorder.onstop = () => uploadVideoSilent(dropped); recorder.stop(); }
+        else uploadVideoSilent(dropped);
       } catch {}
     }
-    async function uploadVideoSilent() {
-      if (!recChunks.length) return;
+    async function uploadVideoSilent(dropped) {
+      if (!recChunks.length) { if (dropped) showDroppedEnd('Nada de vídeo foi gravado nesta tentativa.'); return; }
+      let ok = false;
       try {
         const blob = new Blob(recChunks, { type: (recorder && recorder.mimeType) || 'video/webm' });
         const form = new FormData(); form.append('file', blob, 'prova.webm');
-        await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form });
+        const r = await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form });
+        ok = r.ok;
       } catch {}
+      if (dropped) showDroppedEnd(ok ? 'O vídeo do trecho gravado foi enviado.' : 'Não foi possível enviar o vídeo do trecho gravado.');
+    }
+    // Tela final da QUEDA: diz o que houve e o que fazer (#343).
+    function showDroppedEnd(note) {
+      $('done-msg').textContent = 'A conexão caiu';
+      $('done-sub').innerHTML = 'A prova foi interrompida por um <strong>problema de conexão</strong> — não foi você nem o seu equipamento. ' + esc(note)
+        + '<br><br>Recarregue esta página para continuar de onde parou. Se a queda se repetir, procure uma rede mais estável ou avise o professor.'
+        + '<div style="margin-top:14px"><button class="btn btn-primary" onclick="location.reload()">Recarregar e continuar</button></div>';
     }
 
     // Auto-encerramento: o examinador terminou e o servidor mandou 'wrapup'.
@@ -902,9 +931,12 @@
       })();
     }
 
-    function finish() {
+    // dropped = a sessão CAIU (queda de rede/provedor), não terminou (#343).
+    let droppedSession = false;
+    function finish(opts) {
       if (ended) return;
       ended = true;
+      if (opts && opts.dropped) droppedSession = true;
       stopPresenceWatch(); // libera a pose (Layer 2)
       try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'bye' })); } catch {}
       try { ws && ws.close(); } catch {}
@@ -912,13 +944,17 @@
       try { srcNode && srcNode.disconnect(); } catch {}
       try { ctx && ctx.close(); } catch {}
       show('done');
+      if (droppedSession) {
+        $('done-msg').textContent = 'A conexão caiu';
+        $('done-sub').textContent = 'A prova foi interrompida por um problema de conexão — não foi você nem o seu equipamento. O que já foi gravado está salvo.';
+      }
       // para a gravação → onstop dispara o upload (e só então paramos a câmera)
       if (recorder && recorder.state !== 'inactive') { try { recorder.stop(); } catch { uploadVideo(); } }
       else { uploadVideo(); }
     }
 
     $('start-btn').onclick = start;
-    $('end-btn').onclick = finish;
+    $('end-btn').onclick = () => finish();
     if (!SUB) { $('pre-err').textContent = 'Link inválido.'; $('start-btn').disabled = true; }
   </script>
 </body>
