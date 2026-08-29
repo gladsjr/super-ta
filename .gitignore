@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+# Branch `oratia-sdlc` — workspace de trabalho do ORATIA.
+#
+# Este branch é ÓRFÃO: não compartilha história com `main`/`release`. Ele
+# versiona apenas o ferramental de SDLC do workspace (a pasta `.claude/`),
+# nunca o código da aplicação.
+# ---------------------------------------------------------------------------
+
+# O tronco principal é um CLONE INDEPENDENTE deste mesmo repositório,
+# posicionado dentro do workspace. Ele tem o próprio .git e vive em
+# `main`/`release` — jamais deve ser rastreado por este branch.
+super-ta/
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Artefatos locais
+.audio-store/
+node_modules/
+*.log
+
+# Sistema operacional
+Thumbs.db
+desktop.ini
+.DS_Store
