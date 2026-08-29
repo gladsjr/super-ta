@@ -11,8 +11,10 @@ description: >-
   mexer em prompt, alterar schema ou avançar uma frente do roadmap no ORATIA —
   frases como "evoluir o oratia", "implementar no super-ta", "nova feature",
   "criar um agente", "mexer no orquestrador", "avançar a frente N do roadmap",
-  "corrigir bug no oratia". NÃO use para deploy/subida local (use
-  oratia-local-deploy) nem para rodar o teste de áudio (use testar-modo-audio).
+  "corrigir bug no oratia". NÃO use para preparar o ambiente (use
+  oratia-ambiente), para construir imagem ou migrations (use oratia-build),
+  para subir a aplicação (use oratia-deploy) nem para rodar o teste de áudio
+  (use testar-modo-audio).
 ---
 
 # Evoluir o ORATIA (super-ta)
