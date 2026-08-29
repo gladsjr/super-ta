@@ -1,0 +1,29 @@
+# Finais de linha — normalização explícita.
+#
+# Esta máquina tem `core.autocrlf=true`, e o `git add` avisa que converterá LF
+# em CRLF no working tree. Sem um `.gitattributes`, o que fica no repositório
+# depende da configuração de cada clone — e um colaborador com outra
+# configuração pode gravar CRLF no repositório, que então chega assim a quem
+# usa Linux.
+#
+# Verificado nesta máquina: o BuildKit constrói normalmente a partir de um
+# Dockerfile com CRLF, então o build não é o risco. O risco é o arquivo que
+# EXECUTA dentro do container: um script com shebang e CRLF falha no Linux com
+# um erro que não menciona finais de linha. Normalizar custa nada e fecha essa
+# porta antes de ela existir.
+#
+# O tronco tem regra equivalente para `*.sh` no seu próprio `.gitattributes`.
+
+# Todo arquivo de texto é gravado com LF no repositório.
+* text=auto eol=lf
+
+# Arquivos consumidos por ferramentas dentro do container: LF sempre, também no
+# working tree, qualquer que seja o sistema.
+Dockerfile      text eol=lf
+*.mjs           text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.sh            text eol=lf
+.dockerignore   text eol=lf
+.gitignore      text eol=lf
+.env.example    text eol=lf

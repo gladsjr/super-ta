@@ -1,0 +1,45 @@
+# O contexto de build é a raiz do workspace, que contém o clone inteiro do
+# tronco. Sem estas exclusões o Docker envia centenas de megabytes ao daemon a
+# cada build — `super-ta/.git` sozinho passa de 60 MB, e `node_modules` do host
+# não só é grande como carrega binários nativos da plataforma ERRADA, que
+# sobrescreveriam os do container se copiados.
+
+# Histórico dos dois repositórios.
+.git
+super-ta/.git
+
+# Dependências: reinstaladas dentro da imagem pelo alvo `pack`, e servidas por
+# volume nomeado no alvo `dev`. As do host nunca entram.
+node_modules
+super-ta/node_modules
+super-ta/.pythonlibs
+
+# Segredos. Redundante com o `.gitignore`, e é para ser redundante: o contexto
+# de build não é filtrado pelo git, então um `.env` presente no disco entraria
+# na imagem se não estivesse listado aqui.
+.env
+.env.*
+!.env.example
+super-ta/.env
+super-ta/.env.*
+!super-ta/.env.example
+*.pem
+*.key
+
+# Dados de runtime e saídas de execução — regeneráveis, nunca parte da imagem.
+super-ta/.audio-store
+super-ta/data/works
+super-ta/data/submissions
+super-ta/bench/runs
+super-ta/bench/setup-generations
+super-ta/tests/runs-text
+super-ta/tmp
+super-ta/reports
+*.log
+
+# Ferramental deste workspace: não faz parte da aplicação.
+tools
+docs
+.claude
+*.md
+!super-ta/**/*.md

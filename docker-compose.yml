@@ -1,0 +1,162 @@
+# Ambiente local do ORATIA, inteiro em containers.
+#
+# Rode SEMPRE a partir da raiz do workspace (onde este arquivo está).
+#
+# Ordem canônica — cada passo tem verificação própria, ver INSTALACAO.md:
+#   docker compose up -d db          → banco de pé e saudável
+#   docker compose run --rm deps     → node_modules do Linux no volume
+#   docker compose run --rm migrate  → schema aplicado
+#   docker compose up -d app         → aplicação respondendo
+#
+# `name` FIXO e deliberado. Sem ele o Compose deriva o nome do projeto do nome
+# da PASTA, e como o nome da pasta do workspace é livre, o volume do banco
+# mudaria de colaborador para colaborador. Verificado: da raiz do workspace o
+# volume sairia `oratia_superta-pgdata`; de dentro do clone, `super-ta_superta-
+# pgdata` — dois bancos distintos para o mesmo projeto. Fixando em `super-ta`,
+# os dois caminhos convergem no MESMO volume.
+name: super-ta
+
+# O serviço `db` vem inteiro daqui — imagem, credenciais, healthcheck, volume.
+# Esta é a fonte única da definição do banco; não a copie para cá. Se o tronco
+# mudar a credencial ou a versão do Postgres, este arquivo acompanha sozinho.
+include:
+  - path: ./super-ta/docker-compose.yml
+
+# ---------------------------------------------------------------------------
+# Blocos comuns aos serviços que rodam a aplicação.
+# ---------------------------------------------------------------------------
+
+# Bind mount do código + volume nomeado por cima de `node_modules`.
+#
+# A sobreposição não é detalhe: o host pode ter instalado `bcrypt` e
+# `onnxruntime-node` para Windows ou macOS, e esses binários nativos não
+# carregam no Linux do container. O volume nomeado esconde o `node_modules` do
+# host e guarda o do container, para que as duas instalações coexistam sem se
+# corromperem.
+x-codigo-montado: &codigo-montado
+  - type: bind
+    source: ./super-ta
+    target: /app
+  - type: volume
+    source: node-modules-linux
+    target: /app/node_modules
+
+# Ambiente da aplicação. Fonte única: o `.env` da raiz do workspace (ignorado
+# pelo git), a partir do `.env.example`.
+#
+# `DATABASE_URL` NÃO vem do `.env`: dentro da rede do Compose o banco atende em
+# `db:5432`, não em `localhost`. Quem determina isso é a topologia deste
+# arquivo, então é aqui que o valor vive.
+#
+# `OPENAI_API_KEY` é a ponte de segredo: o código só conhece este nome
+# (`lib/openaiClient.js`), e o colaborador fornece o valor por
+# `ORATIA_OPENAI_TOKEN` — variável de ambiente da máquina ou linha do `.env`.
+# Assim a chave nunca precisa virar arquivo dentro do clone.
+x-ambiente-app: &ambiente-app
+  DATABASE_URL: postgres://superta:superta@db:5432/superta
+  OPENAI_API_KEY: ${ORATIA_OPENAI_TOKEN:-}
+  SESSION_SECRET: ${SESSION_SECRET:-}
+  INITIAL_USERS: ${INITIAL_USERS:-professor:senha123,admin:admin123}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  NODE_ENV: development
+  # O servidor escuta sempre 5099 DENTRO do container; o que varia por
+  # colaborador é a porta publicada no host (ver o mapeamento em `app`).
+  PORT: "5099"
+  # Fora do Replit o default do código já é `local`, mas explícito é melhor:
+  # grava em `.audio-store/`, que o bind mount devolve ao host.
+  AUDIO_STORE_BACKEND: local
+
+services:
+  # -------------------------------------------------------------------------
+  # deps — one-shot. Popula `node_modules` no volume, com binários do Linux.
+  # -------------------------------------------------------------------------
+  # Precisa rodar ANTES de `migrate` e de `app`, e de novo sempre que o
+  # `package-lock.json` mudar.
+  #
+  # `npm ci --foreground-scripts`: `ci` obedece ao lockfile e falha se ele
+  # divergir do `package.json`; `--foreground-scripts` mostra a saída dos
+  # scripts de instalação dos módulos nativos, em vez de escondê-la até o
+  # ponto em que o erro reapareceria como "módulo não carrega".
+  deps:
+    build:
+      context: .
+      target: dev
+    volumes: *codigo-montado
+    command: ["npm", "ci", "--foreground-scripts", "--no-audit", "--no-fund"]
+
+  # -------------------------------------------------------------------------
+  # migrate — one-shot. Aplica as migrations pendentes.
+  # -------------------------------------------------------------------------
+  # Passo separado de propósito: o boot da aplicação NÃO roda DDL (ADR 0001 do
+  # tronco). Rodar `npm run dev` aqui seria errado — o `predev` chamaria
+  # `db:up`, que tenta abrir o Docker Desktop do host de dentro do container.
+  migrate:
+    build:
+      context: .
+      target: dev
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes: *codigo-montado
+    environment: *ambiente-app
+    command: ["npm", "run", "db:migrate"]
+
+  # -------------------------------------------------------------------------
+  # app — o servidor.
+  # -------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      target: dev
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes: *codigo-montado
+    environment: *ambiente-app
+    ports:
+      # 5099 no host por padrão, e não 5000 (que é o default do código): no
+      # macOS a porta 5000 é ocupada pelo AirPlay Receiver, e o ambiente
+      # precisa subir igual nos três sistemas. Sobrescreva com ORATIA_APP_PORT
+      # se 5099 estiver tomada nesta máquina.
+      - "${ORATIA_APP_PORT:-5099}:5099"
+    command: ["node", "server.js"]
+    healthcheck:
+      # Rota pública de saúde do próprio produto (`routes/oralExam.js`).
+      # `node -e` em vez de curl: a imagem slim não traz curl, e adicioná-lo só
+      # para o healthcheck seria dependência a mais para manter.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5099/oral/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # -------------------------------------------------------------------------
+  # pack — imagem fechada, sob perfil. Não sobe no dia a dia.
+  # -------------------------------------------------------------------------
+  # Verifica que a aplicação se empacota e sobe SEM nada do host: código dentro
+  # da imagem, dependências instaladas no build, nenhum bind mount. É o teste
+  # de que o ambiente é de fato reprodutível numa máquina limpa.
+  #
+  # Publica em outra porta para poder rodar ao lado de `app`, sem colidir.
+  pack:
+    profiles: ["pack"]
+    build:
+      context: .
+      target: pack
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *ambiente-app
+    ports:
+      - "${ORATIA_PACK_PORT:-5098}:5099"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5099/oral/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  # `node_modules` do Linux, isolado do host. Descartável: `docker compose down
+  # -v` o remove, e `docker compose run --rm deps` o reconstrói.
+  node-modules-linux:
