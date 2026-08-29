@@ -39,10 +39,21 @@ próprio (neste branch) e, aninhado, um clone do tronco principal.
 
 ```
 <workspace>/                     # repositório deste branch (oratia-sdlc)
+├── CLAUDE.md                    # steering: mapa e regras invioláveis
+├── MANIFESTO.yaml               # fonte da verdade do ambiente
+├── INSTALACAO.md                # roteiro de instalação e diagnóstico
+├── docker-compose.yml           # ambiente em containers (inclui o compose do tronco)
+├── Dockerfile                   # imagem da aplicação (Node 20 + ffmpeg)
+├── .env.example                 # modelo da configuração local
+├── tools/
+│   └── verificar-prerequisitos.mjs
 ├── .claude/
 │   └── skills/                  # skills carregadas automaticamente
-│       ├── oratia-improve/
-│       └── oratia-local-deploy/
+│       ├── oratia-ambiente/
+│       ├── oratia-build/
+│       ├── oratia-deploy/
+│       ├── oratia-conhecimento/
+│       └── oratia-improve/
 ├── docs/
 │   └── analise-arquitetural.md  # visão técnica e análise crítica do sistema
 ├── .gitignore                   # ignora o clone do tronco
@@ -57,15 +68,26 @@ que o `.gitignore` o exclui.
 
 ## Configuração do ambiente local
 
+**Todo o ambiente roda em containers.** Você não precisa de Node, ffmpeg,
+Python nem PostgreSQL instalados na máquina para a aplicação funcionar — a
+imagem traz tudo, na versão certa.
+
 ### Pré-requisitos
 
-| Item | Necessário para |
-|---|---|
-| Git | Ambos os repositórios |
-| Node.js 20 | Executar a aplicação |
-| Docker (ou runtime OCI equivalente) | PostgreSQL local |
-| Claude Code | Carregar as skills |
-| Chave de API da OpenAI | **Qualquer** jornada funcional — sem ela nada roda |
+| Item | Necessário para | Obrigatório |
+|---|---|---|
+| Git | Obter os dois repositórios | sim |
+| Docker + Compose v2.20+ | Todo o ambiente. No Windows, com backend **WSL2** | sim |
+| Node.js 18+ | Rodar o verificador de pré-requisitos (só o ferramental) | recomendado |
+| Claude Code | Carregar as skills | opcional |
+| Chave de API da OpenAI | Jornadas de entrevista, avaliação e voz | opcional |
+
+A chave da OpenAI **não** bloqueia o ambiente: sem ela tudo sobe e responde,
+e só as jornadas que conversam com o modelo ficam indisponíveis.
+
+A lista completa, com o teste objetivo de cada item, está em
+[`MANIFESTO.yaml`](MANIFESTO.yaml) — e é executada por
+`node tools/verificar-prerequisitos.mjs`.
 
 ### 1. Clonar o workspace
 
@@ -84,7 +106,8 @@ git clone git@github.com:gladsjr/super-ta.git super-ta
 ```
 
 O diretório `super-ta/` é ignorado por este branch — os dois repositórios
-convivem sem interferência.
+convivem sem interferência. O nome **precisa** ser `super-ta`: é assim que o
+`.gitignore` o exclui.
 
 ### 3. Configurar a identidade de commit
 
@@ -107,26 +130,38 @@ git config core.sshCommand "ssh -o IdentitiesOnly=yes -i ~/.ssh/sua_chave"
 Quando a chave está carregada no agent do sistema em vez de legível em disco,
 aponte para o arquivo público correspondente (`~/.ssh/sua_chave.pub`).
 
-### 4. Preparar a aplicação
+### 4. Subir o ambiente
 
-A partir daqui, peça ao Claude Code — a skill **`oratia-local-deploy`** conduz o
-processo (banco em contêiner, `.env`, migrations, verificação de fumaça) e traz
-a tabela de diagnóstico dos erros mais comuns:
+O roteiro completo, com verificação a cada passo e tabela de diagnóstico, está
+em [`INSTALACAO.md`](INSTALACAO.md). Em resumo:
+
+```bash
+cp .env.example .env
+node tools/verificar-prerequisitos.mjs
+docker compose build app
+docker compose up -d db
+docker compose run --rm deps
+docker compose run --rm migrate
+docker compose up -d app
+curl -s http://localhost:5099/oral/ping
+```
+
+O último comando responde `ok`. Ou peça ao Claude Code — a skill
+**`oratia-deploy`** conduz o processo e diagnostica as falhas:
 
 ```
 sobe o oratia localmente
 ```
 
-Ou manualmente, dentro de `super-ta/`: copie `.env.example` para `.env`,
-preencha as variáveis obrigatórias e execute `npm install` seguido de
-`npm run dev`.
-
 ## Skills disponíveis
 
 | Skill | Quando é acionada | O que entrega |
 |---|---|---|
-| **`oratia-improve`** | Implementar funcionalidade, corrigir bug, refatorar, criar agente, mexer em prompt, alterar schema, avançar o roadmap | Princípios inegociáveis, invariantes de segurança, processo de mudança (migrations, mapa de prompts, helpers obrigatórios), as 12 frentes do roadmap, débitos conhecidos e a matriz de validação por tipo de mudança |
-| **`oratia-local-deploy`** | Subir, rodar ou testar o sistema localmente; diagnosticar falhas de ambiente | Passo a passo do ambiente local, capacidades opcionais (fiscalização por vídeo, prova oral) e diagnóstico de erros comuns |
+| **`oratia-ambiente`** | Montar em máquina nova, diagnosticar falha de ambiente, decidir onde mudar uma configuração | Pré-requisitos, Docker sobre WSL2, volumes e portas, e a **matriz de propagação** dos fatos que aparecem em mais de um arquivo |
+| **`oratia-build`** | Construir imagem, instalar dependências, aplicar migrations, validar empacotamento | Os três estágios do build com verificação própria, os módulos nativos e o porquê do volume |
+| **`oratia-deploy`** | Subir, rodar, reiniciar ou validar a aplicação | Sequência de validação real (health, login, escrita no banco), operação do dia a dia e diagnóstico |
+| **`oratia-conhecimento`** | Entender por que algo é como é, onde registrar uma lição, qual credencial usar | Topologia, contratos de integração, credenciais de teste, armadilhas verificadas e divergências conhecidas da documentação |
+| **`oratia-improve`** | Implementar funcionalidade, corrigir bug, refatorar, mexer em prompt, alterar schema | Princípios inegociáveis, invariantes de segurança, processo de mudança e as frentes do roadmap |
 
 O tronco traz ainda a skill `testar-modo-audio`, versionada em `super-ta/` e
 válida apenas ao trabalhar naquele repositório.
