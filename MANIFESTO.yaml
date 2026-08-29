@@ -1,0 +1,319 @@
+# =========================================================================
+# MANIFESTO DO AMBIENTE — ORATIA
+#
+# Fonte da verdade sobre COMO este workspace se monta. Legível por humano e
+# consumido por `tools/verificar-prerequisitos.mjs`, que executa a lista de
+# pré-requisitos daqui — os dois nunca divergem porque há uma lista só.
+#
+# Regras que valem para todo artefato desta branch:
+#
+#   1. Nenhum artefato presume a identidade da máquina, do colaborador ou do
+#      agente. O que varia por pessoa vive em arquivo ignorado pelo git.
+#   2. Caminhos são relativos à raiz do workspace (a pasta que contém ESTE
+#      arquivo). Nenhum caminho absoluto de máquina.
+#   3. Só o NOME de um segredo entra aqui, com a origem. Nunca o valor.
+#   4. Todo comando registrado foi executado antes de ser escrito. O que não
+#      pôde ser executado está marcado `verificado: false`.
+#
+# Ao mudar este arquivo, confira a matriz de propagação na skill
+# `oratia-ambiente` — ela lista os fatos que aparecem em mais de um lugar e
+# quem manda em cada um.
+# =========================================================================
+
+workspace:
+  nome: ORATIA
+  branch: oratia-sdlc
+  # Branch órfã: sem ancestral comum com as branches de código, portanto sem
+  # merge possível, sem conflito e sem aparecer em PR de produto.
+  proposito: Ferramental de SDLC do ORATIA — ambiente, build, deploy local e conhecimento operacional.
+  # O nome da PASTA do workspace é livre; nada aqui depende dele. Já o nome da
+  # pasta do clone importa: é `super-ta` que o .gitignore exclui.
+  raiz_detectada_por: MANIFESTO.yaml
+  escopo: Ambiente de desenvolvimento local. Deploy de produção não faz parte deste workspace.
+
+# -------------------------------------------------------------------------
+# LAYOUT — de onde vem cada pasta.
+#
+# origem:
+#   versionada  — está no git desta branch; chega com o clone.
+#   clone       — repositório independente, aninhado e ignorado por esta branch.
+#   gerada      — produzida por comando; descartável e reconstruível.
+#   volume      — vive dentro do Docker, não no sistema de arquivos do host.
+# -------------------------------------------------------------------------
+layout:
+  - caminho: CLAUDE.md
+    origem: versionada
+    descricao: Steering — mapa do terreno e regras invioláveis. Primeira leitura de qualquer sessão.
+
+  - caminho: MANIFESTO.yaml
+    origem: versionada
+    descricao: Este arquivo. Fonte da verdade do ambiente.
+
+  - caminho: INSTALACAO.md
+    origem: versionada
+    descricao: Roteiro de instalação com verificação por passo e tabela de diagnóstico.
+
+  - caminho: docker-compose.yml
+    origem: versionada
+    descricao: Orquestra o ambiente. Inclui o compose do tronco (serviço db) e acrescenta app, deps, migrate e pack.
+
+  - caminho: Dockerfile
+    origem: versionada
+    descricao: Imagem da aplicação — Node 20 e ffmpeg, independente do que o host tem instalado.
+
+  - caminho: tools
+    origem: versionada
+    descricao: Ferramental executável desta branch. Só Node puro, sem dependências.
+
+  - caminho: .claude/skills
+    origem: versionada
+    descricao: Skills carregadas pelo agente quando a sessão abre na raiz do workspace.
+
+  - caminho: docs
+    origem: versionada
+    descricao: Documentação de processo e análise arquitetural.
+
+  - caminho: super-ta
+    origem: clone
+    descricao: Repositório do tronco (código da aplicação). Clone INDEPENDENTE, com .git próprio, ignorado por esta branch.
+    obtido_por: git clone <url-do-tronco> super-ta
+    # O nome `super-ta` NÃO é livre: é assim que o .gitignore desta branch o
+    # exclui. Renomear faria o clone inteiro entrar no índice desta branch.
+    nome_obrigatorio: true
+
+  - caminho: .env
+    origem: gerada
+    descricao: Configuração local do colaborador. Ignorada pelo git.
+    obtido_por: cp .env.example .env
+
+  - caminho: super-ta/node_modules
+    origem: volume
+    descricao: Dependências Linux do container, no volume super-ta_node-modules-linux. Um node_modules do host, se existir, fica escondido por baixo e não é usado.
+    obtido_por: docker compose run --rm deps
+
+  - caminho: super-ta/.audio-store
+    origem: gerada
+    descricao: Áudio das sessões gravado localmente. Dados de runtime, descartáveis.
+
+# -------------------------------------------------------------------------
+# PRÉ-REQUISITOS — o que a máquina precisa ter.
+#
+# Executados por `node tools/verificar-prerequisitos.mjs`.
+#
+# nivel:
+#   bloqueio — sem isto o ambiente não sobe; o verificador sai com código ≠ 0.
+#   aviso    — o ambiente sobe, mas alguma capacidade fica indisponível.
+# -------------------------------------------------------------------------
+prerequisitos:
+  - id: docker-engine
+    nome: Docker Engine em execução
+    nivel: bloqueio
+    teste: docker info
+    # `docker info` só retorna 0 com o daemon de pé; `docker --version` responde
+    # com o daemon parado e por isso não serve como teste.
+    porque: Todo o ambiente roda em containers — banco e aplicação.
+    acao: Instale o Docker (docker.com/get-started) e deixe o serviço em execução. No Windows e no macOS, abra o Docker Desktop e espere ficar verde.
+
+  - id: docker-compose
+    nome: Docker Compose v2.20 ou superior
+    nivel: bloqueio
+    teste: docker compose version
+    versao_minima: "2.20.0"
+    # 2.20 é onde entrou a chave `include`, que este compose usa para reaproveitar
+    # a definição do banco do tronco em vez de duplicá-la.
+    porque: O docker-compose.yml usa `include`, disponível a partir da 2.20.
+    acao: Atualize o Docker. O Compose v2 vem embutido como subcomando `docker compose` — o `docker-compose` antigo, com hífen, não serve.
+
+  - id: docker-backend-wsl2
+    nome: Docker sobre WSL2 (só no Windows)
+    nivel: bloqueio
+    aplica_se_so: win32
+    teste: docker info --format "{{.KernelVersion}}"
+    saida_contem: WSL2
+    # No Windows o Docker Desktop pode rodar sobre WSL2 ou sobre Hyper-V. Aqui
+    # é sempre WSL2: é o backend suportado, e o único em que os tempos de I/O
+    # medidos abaixo valem.
+    porque: Backend padronizado no Windows. O kernel do WSL2 é o que executa os containers.
+    acao: Abra o Docker Desktop → Settings → General e ligue "Use the WSL 2 based engine". Se o WSL não estiver instalado, rode `wsl --install` num PowerShell como administrador e reinicie.
+
+  - id: git
+    nome: Git
+    nivel: bloqueio
+    teste: git --version
+    porque: Obter e atualizar os dois repositórios.
+    acao: Instale o Git em git-scm.com/downloads.
+
+  - id: clone-do-tronco
+    nome: Clone do tronco presente em ./super-ta
+    nivel: bloqueio
+    teste_arquivos:
+      - super-ta/package.json
+      - super-ta/docker-compose.yml
+    porque: A aplicação chega por bind mount desta pasta, e o compose do workspace inclui o do tronco.
+    acao: Da raiz do workspace, rode `git clone <url-do-tronco> super-ta`. A pasta precisa se chamar exatamente `super-ta`.
+
+  - id: arquivo-env
+    nome: Arquivo .env do workspace
+    nivel: aviso
+    teste_arquivos:
+      - .env
+    porque: Sem ele o Compose usa os defaults embutidos, que funcionam — mas não há onde declarar porta alternativa nem a chave da OpenAI.
+    acao: "Rode: cp .env.example .env"
+
+  - id: porta-app
+    nome: Porta da aplicação livre no host
+    nivel: aviso
+    teste_porta_env: ORATIA_APP_PORT
+    porta_padrao: 5099
+    porque: É a porta publicada pelo container. Ocupada, o `up` falha com EADDRINUSE.
+    acao: Libere a porta ou defina outra em ORATIA_APP_PORT no .env.
+
+  - id: node-ferramental
+    nome: Node.js 18+ no host
+    nivel: aviso
+    teste: node --version
+    versao_minima: "18.0.0"
+    # Requisito DO FERRAMENTAL, não da aplicação: é o que executa este
+    # verificador. A aplicação roda com o Node 20 da imagem, e a versão do host
+    # não a afeta em nada.
+    porque: Executa os scripts de tools/. A aplicação não usa o Node do host.
+    acao: Instale o Node 18 ou superior em nodejs.org. Sem ele, use o equivalente em container descrito no INSTALACAO.md.
+
+  - id: token-openai
+    nome: Chave da API da OpenAI
+    nivel: aviso
+    teste_env_ou_dotenv: ORATIA_OPENAI_TOKEN
+    porque: Toda a camada cognitiva depende dela. Ausente, o ambiente sobe e responde normalmente — só as jornadas que conversam com o modelo não funcionam.
+    acao: Defina ORATIA_OPENAI_TOKEN como variável de ambiente da máquina, ou preencha a linha no .env. Obtenha a chave em platform.openai.com.
+
+# -------------------------------------------------------------------------
+# SEGREDOS — só os nomes e a origem. Nenhum valor entra em arquivo versionado.
+# -------------------------------------------------------------------------
+segredos:
+  - nome: ORATIA_OPENAI_TOKEN
+    obrigatorio: false
+    origem: platform.openai.com → API keys
+    onde: Variável de ambiente da máquina (preferido) ou linha do .env do workspace.
+    # O código da aplicação conhece a chave como OPENAI_API_KEY; o Compose faz a
+    # ponte de um nome para o outro. Assim a chave nunca precisa virar arquivo
+    # dentro do clone do tronco.
+    consumido_como: OPENAI_API_KEY
+    sem_ele: O ambiente sobe e responde. Nenhuma jornada de entrevista, avaliação, STT ou TTS funciona.
+
+  - nome: SESSION_SECRET
+    obrigatorio: false
+    origem: Gerado por você — string aleatória qualquer.
+    onde: .env do workspace.
+    sem_ele: O servidor gera um segredo efêmero a cada boot e avisa no log; todo restart desloga quem estava logado.
+
+  - nome: INITIAL_USERS
+    obrigatorio: false
+    origem: Escolhido por você. Formato usuario:senha,usuario2:senha2.
+    onde: .env do workspace.
+    # Não é segredo de verdade — são credenciais descartáveis de desenvolvimento.
+    # Está listado aqui porque é material de autenticação e não deve ser
+    # reaproveitado em ambiente exposto.
+    sem_ele: Usa o default professor:senha123,admin:admin123.
+
+# -------------------------------------------------------------------------
+# BOOTSTRAP — a ordem canônica. Cada passo tem verificação própria.
+#
+# Todos os comandos rodam a partir da RAIZ DO WORKSPACE.
+# O roteiro comentado está em INSTALACAO.md.
+# -------------------------------------------------------------------------
+bootstrap:
+  - ordem: 1
+    passo: Clonar o tronco dentro do workspace
+    comando: git clone <url-do-tronco> super-ta
+    verificacao: test -f super-ta/package.json
+    pular_se: A pasta super-ta já existe com o clone.
+
+  - ordem: 2
+    passo: Criar a configuração local
+    comando: cp .env.example .env
+    verificacao: test -f .env
+    pular_se: O .env já existe — não o sobrescreva.
+
+  - ordem: 3
+    passo: Conferir os pré-requisitos
+    comando: node tools/verificar-prerequisitos.mjs
+    verificacao: Código de saída 0 e nenhuma linha FALTA.
+
+  - ordem: 4
+    passo: Construir a imagem da aplicação
+    comando: docker compose build app
+    verificacao: docker compose run --rm --no-deps app node --version
+
+  - ordem: 5
+    passo: Subir o banco
+    comando: docker compose up -d db
+    verificacao: docker compose ps db mostra o estado healthy.
+
+  - ordem: 6
+    passo: Instalar as dependências no volume do Linux
+    comando: docker compose run --rm deps
+    verificacao: Termina com "added N packages" e sem erro.
+
+  - ordem: 7
+    passo: Aplicar as migrations
+    comando: docker compose run --rm migrate
+    verificacao: docker compose run --rm migrate npm run db:migrate -- status termina em "0 pendentes".
+
+  - ordem: 8
+    passo: Subir a aplicação
+    comando: docker compose up -d app
+    verificacao: docker compose ps app mostra o estado healthy.
+
+  - ordem: 9
+    passo: Validar que a aplicação responde de fato
+    comando: curl -s http://localhost:5099/oral/ping
+    verificacao: Responde exatamente "ok".
+
+# -------------------------------------------------------------------------
+# VALIDAÇÃO FUNCIONAL — o que confirma que o ambiente está de pé de verdade,
+# além do health check.
+#
+# `requer_openai: false` marca o que dá para verificar sem a chave. Estes
+# passos foram executados nesta máquina; os que exigem a chave estão marcados
+# `verificado: false` e continuam por confirmar.
+# -------------------------------------------------------------------------
+validacao_funcional:
+  - id: health
+    o_que: A rota pública de saúde responde.
+    comando: curl -s http://localhost:5099/oral/ping
+    esperado: ok
+    requer_openai: false
+    verificado: true
+
+  - id: login
+    o_que: Login com um usuário semeado devolve sessão.
+    comando: "curl -s -X POST http://localhost:5099/login -H 'Content-Type: application/json' -d '{\"username\":\"professor\",\"password\":\"senha123\"}' -c cookie.txt"
+    esperado: JSON com ok true e o usuário.
+    requer_openai: false
+    verificado: true
+
+  - id: admin-global
+    o_que: O usuário autenticado é admin global.
+    comando: curl -s http://localhost:5099/me -b cookie.txt
+    esperado: is_global_admin true
+    # ATENÇÃO — o admin global é o PRIMEIRO usuário de INITIAL_USERS, que no
+    # default é `professor`, e NÃO o usuário chamado `admin`. Ver a armadilha
+    # registrada na skill oratia-conhecimento.
+    requer_openai: false
+    verificado: true
+
+  - id: escrita-no-banco
+    o_que: Criar um trabalho grava de verdade no banco.
+    comando: "curl -s -X POST http://localhost:5099/admin/works -H 'Content-Type: application/json' -b cookie.txt -d '{\"name\":\"Verificacao\",\"kind\":\"interview\"}'"
+    esperado: JSON com o work criado e um work_token.
+    requer_openai: false
+    verificado: true
+
+  - id: jornada-de-entrevista
+    o_que: Subir enunciado e trabalho em PDF e trocar turnos de entrevista.
+    comando: Pela interface, em /w/<work_token> e depois no link de aluno /s/<token>.
+    esperado: A entrevista avança turno a turno.
+    requer_openai: true
+    # Não executado — não havia chave da OpenAI no momento em que este
+    # ambiente foi montado e validado. Consome créditos de API.
+    verificado: false
