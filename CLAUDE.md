@@ -3,6 +3,11 @@
 Primeira leitura de qualquer sessão aberta aqui. Curto de propósito: o detalhe
 vive nos artefatos apontados no fim.
 
+Como se trabalha aqui — os dois ciclos, o portão de revisão e a propagação de
+produto para SDLC:
+
+@PRIMER.md
+
 ## Fronteira do compartimento — inegociável
 
 Esta máquina hospeda trabalho de organizações e clientes distintos. **Este
@@ -40,14 +45,10 @@ aparece em PR de produto.
 
 ## Regras invioláveis
 
-**Cada mudança pertence a um repositório só.** Mexeu em skill, manifesto,
-roteiro, Dockerfile ou compose do workspace → commit **na raiz**. Mexeu em
-código, migration, prompt ou teste da aplicação → commit **dentro de
-`super-ta/`**, em branch de feature. Antes de commitar, confirme onde está:
-
-```bash
-git rev-parse --show-toplevel && git branch --show-current
-```
+**Cada mudança pertence a um repositório só** — e todo plano ou implementação
+passa pela revisão independente antes de ser dado por entregue. Os dois ciclos,
+as branches de cada um, o que exige revisão e o que é isento estão no
+[PRIMER.md](PRIMER.md), carregado junto com este arquivo.
 
 **Verifique, não presuma.** Todo identificador de pacote, caminho, versão e
 comando escrito num artefato tem de ter sido **executado** antes. Não podendo
@@ -89,6 +90,7 @@ está em `bootstrap:` no [MANIFESTO.yaml](MANIFESTO.yaml).
 
 | Precisa de | Vá para |
 |---|---|
+| Submeter plano ou implementação ao portão de revisão | skill `oratia-revisao` |
 | Montar em máquina nova, diagnosticar falha de ambiente | skill `oratia-ambiente` |
 | Construir imagem, dependências, migrations | skill `oratia-build` |
 | Subir e validar a aplicação | skill `oratia-deploy` |
