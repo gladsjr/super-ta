@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/tools/verificar-atualizacao-sdlc.mjs\"",
+            "statusMessage": "Verificando atualização do ferramental de SDLC...",
+            "timeout": 45
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -27,3 +27,10 @@ node_modules/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Estado local do verificador de atualização do SDLC (marca de tempo da última
+# consulta ao remoto). Específico da máquina, gerado por script.
+.sdlc-ultima-verificacao
+
+# Resíduo do roteiro de validação (curl -c cookie.txt).
+cookie.txt
