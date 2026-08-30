@@ -26,6 +26,7 @@ Uma fonte por assunto. Antes de escrever, decida qual é:
 | Tipo de conhecimento | Onde vive |
 |---|---|
 | Armadilha de ambiente, build ou deploy **deste workspace** | esta skill |
+| Armadilha do **ferramental de agente** (skill, subagente, hook, carregamento) | esta skill |
 | Como montar, construir, subir | `oratia-ambiente`, `oratia-build`, `oratia-deploy` |
 | Pré-requisito, layout, segredo, ordem de bootstrap | `MANIFESTO.yaml` |
 | Comando de instalação e diagnóstico | `INSTALACAO.md` |
@@ -154,6 +155,37 @@ dependências no host.
 **`onnxruntime-node` baixa CUDA sem GPU.** O postinstall busca na nuget os
 providers nativos, CUDA e TensorRT inclusos. São centenas de megabytes: a
 primeira instalação demora, e numa rede restrita é aqui que ela falha.
+
+**Subagente novo não fica disponível na hora — e hook novo, só na próxima
+sessão.** São dois comportamentos diferentes, e confundi-los custa tempo.
+
+Verificado nesta ordem, na mesma sessão:
+
+1. `.claude/agents/oratia-revisor.md` foi criado;
+2. usá-lo imediatamente falhou com `Agent type 'oratia-revisor' not found`;
+3. **mais tarde, na mesma sessão, ele apareceu** — a plataforma anunciou
+   `New agent types are now available`.
+
+Ou seja: **a descoberta é diferida, não presa à sessão**. A primeira conclusão
+registrada aqui — "só vale na próxima sessão" — estava errada: generalizou a
+partir da falha do passo 2, antes de o passo 3 acontecer. Fica como exemplo do
+que a regra "verifique, não presuma" custa quando se conclui cedo demais.
+
+Skills, por contraste, valem assim que o arquivo é gravado.
+
+Consequências práticas:
+
+- Criando ou alterando um subagente, **não conte com ele em seguida**. Precisando
+  usá-lo já, chame um agente genérico mandando-o ler a definição em
+  `.claude/agents/<nome>.md` e proibindo-o explicitamente de escrever — a
+  independência se mantém; a garantia por ferramenta, não. Foi assim que a
+  primeira revisão deste workspace rodou.
+- **Configuração de hook (`.claude/settings.json`) é outra história**: um hook
+  de `SessionStart` declarado numa sessão não roda nela, porque o gancho já
+  passou. Só a sessão seguinte o executa.
+- O comportamento do hook de atualização foi verificado chamando o script
+  diretamente, com `CLAUDE_PROJECT_DIR` definido, e não pela via do hook —
+  que nesta sessão não tinha como disparar.
 
 **`npm run dev` não funciona dentro do container.** O `predev` chama `db:up`,
 que tenta iniciar o Docker Desktop **do host**. Use os serviços separados.

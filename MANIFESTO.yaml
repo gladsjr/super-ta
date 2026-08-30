@@ -43,7 +43,27 @@ workspace:
 layout:
   - caminho: CLAUDE.md
     origem: versionada
-    descricao: Steering — mapa do terreno e regras invioláveis. Primeira leitura de qualquer sessão.
+    descricao: Steering — mapa do terreno e regras invioláveis. Primeira leitura de qualquer sessão. Importa o PRIMER.md.
+
+  - caminho: PRIMER.md
+    origem: versionada
+    descricao: Conduta de trabalho — os dois ciclos (produto e SDLC), a propagação entre eles e o portão de revisão independente. Carregado em toda sessão junto do CLAUDE.md.
+
+  - caminho: METAS.md
+    origem: versionada
+    descricao: Metas do produto. Base normativa do revisor, ao lado do roadmap. Declarado pelo usuário — um agente propõe, não decide.
+
+  - caminho: .claude/agents
+    origem: versionada
+    descricao: Subagentes deste workspace. O oratia-revisor tem apenas ferramentas de leitura, por desenho — ele julga e não altera.
+
+  - caminho: .claude/settings.json
+    origem: versionada
+    descricao: Registra o hook de SessionStart que verifica atualização do ferramental.
+
+  - caminho: .sdlc-ultima-verificacao
+    origem: gerada
+    descricao: Marca de tempo da última consulta ao remoto. Específica da máquina, ignorada pelo git. Apagar só força uma verificação a mais.
 
   - caminho: MANIFESTO.yaml
     origem: versionada
@@ -173,11 +193,21 @@ prerequisitos:
     nivel: aviso
     teste: node --version
     versao_minima: "18.0.0"
-    # Requisito DO FERRAMENTAL, não da aplicação: é o que executa este
-    # verificador. A aplicação roda com o Node 20 da imagem, e a versão do host
-    # não a afeta em nada.
-    porque: Executa os scripts de tools/. A aplicação não usa o Node do host.
-    acao: Instale o Node 18 ou superior em nodejs.org. Sem ele, use o equivalente em container descrito no INSTALACAO.md.
+    # Requisito DO FERRAMENTAL, não da aplicação. A aplicação roda com o Node 20
+    # da imagem, e a versão do host não a afeta em nada — por isso `aviso` e não
+    # `bloqueio`: sem Node o ambiente sobe e a aplicação funciona.
+    #
+    # Mas o custo de não tê-lo é maior do que só perder este verificador: o hook
+    # de SessionStart também é Node, então a VERIFICAÇÃO AUTOMÁTICA DE
+    # ATUALIZAÇÃO DO SDLC não roda, e cada sessão abre com a falha do hook. Numa
+    # máquina sem Node, atualizar o ferramental passa a ser tarefa manual
+    # (`git pull --ff-only` na raiz).
+    #
+    # Não há substituto por container: estes scripts examinam o HOST — se o
+    # Docker responde, se o backend é WSL2, se a porta está livre. Rodando
+    # dentro de um container eles veriam o container.
+    porque: Executa os scripts de tools/ — o verificador de pré-requisitos e o hook que mantém o ferramental atualizado. A aplicação não usa o Node do host.
+    acao: Instale o Node 18 ou superior em nodejs.org. Sem ele, o ambiente sobe normalmente, mas a atualização do ferramental passa a ser manual — rode `git pull --ff-only` na raiz do workspace de tempos em tempos.
 
   - id: token-openai
     nome: Chave da API da OpenAI

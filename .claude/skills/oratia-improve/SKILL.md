@@ -112,8 +112,22 @@ Ao propor evolução, ancore na frente correspondente:
    upload de material da disciplina, geração de atividades → assistente de
    planejamento.
 2. **Modelo institucional** — instituições → unidades → turmas; papéis;
-   orçamento por unidade (hoje TODO usuário logado é admin — não há roles).
-3. **Autenticação** — login Google/federação (hoje: local + capability URLs).
+   orçamento por unidade. **EM GRANDE PARTE ENTREGUE** (verificado no schema em
+   30/08/2026): existem `units` (árvore + flag de turma), `roles` com quatro
+   papéis (`admin_global`, `admin_unidade`, `professor`, `aluno`),
+   `memberships`, `tenants`, `invites` e os pacotes/cotas
+   (`package_templates`, `package_allocations`, `entitlement_counters`,
+   `entitlement_consumption`) — migrations **055–069**, sendo `units` a 055,
+   `memberships` e `roles` a 056, os pacotes 062–065, `auth_providers` a 066,
+   `invites` a 067 e `tenants` a 069. Detalhe em
+   `docs/access-model.md`. **A afirmação anterior de que "todo usuário logado é
+   admin" está errada desde então**: o RBAC decide de fato, e criar trabalho
+   sem unidade exige `admin_global`. Falta confirmar o que resta da frente.
+3. **Autenticação** — login federado. **ENTREGUE como opcional** (verificado):
+   `routes/authFederated.js` com Google OIDC, tabelas `auth_providers` e
+   `user_identities`, configurável por `GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET` e `GOOGLE_REDIRECT_URI`. Convive com login local e
+   capability URLs.
 4. **Interfaces** — concluir cenários; Realtime nas entrevistas; vídeo nas 3
    modalidades.
 5. **Integração institucional** — API para gestão educacional, LMS.

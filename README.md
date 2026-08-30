@@ -40,15 +40,22 @@ próprio (neste branch) e, aninhado, um clone do tronco principal.
 ```
 <workspace>/                     # repositório deste branch (oratia-sdlc)
 ├── CLAUDE.md                    # steering: mapa e regras invioláveis
+├── PRIMER.md                    # conduta: os dois ciclos e o portão de revisão
+├── METAS.md                     # metas do produto (base do revisor)
 ├── MANIFESTO.yaml               # fonte da verdade do ambiente
 ├── INSTALACAO.md                # roteiro de instalação e diagnóstico
 ├── docker-compose.yml           # ambiente em containers (inclui o compose do tronco)
 ├── Dockerfile                   # imagem da aplicação (Node 20 + ffmpeg)
 ├── .env.example                 # modelo da configuração local
 ├── tools/
-│   └── verificar-prerequisitos.mjs
+│   ├── verificar-prerequisitos.mjs
+│   └── verificar-atualizacao-sdlc.mjs
 ├── .claude/
+│   ├── settings.json            # hook de atualização no início da sessão
+│   ├── agents/
+│   │   └── oratia-revisor.md    # revisor independente (só leitura)
 │   └── skills/                  # skills carregadas automaticamente
+│       ├── oratia-revisao/
 │       ├── oratia-ambiente/
 │       ├── oratia-build/
 │       ├── oratia-deploy/
@@ -58,7 +65,7 @@ próprio (neste branch) e, aninhado, um clone do tronco principal.
 │   └── analise-arquitetural.md  # visão técnica e análise crítica do sistema
 ├── .gitignore                   # ignora o clone do tronco
 ├── README.md
-└── super-ta/                    # repositório do TRONCO (main/release)
+└── super-ta/                    # repositório do TRONCO (main)
                                  # clone independente — ignorado por este branch
 ```
 
@@ -157,6 +164,7 @@ sobe o oratia localmente
 
 | Skill | Quando é acionada | O que entrega |
 |---|---|---|
+| **`oratia-revisao`** | Submeter plano ou implementação ao portão de revisão; entender um apontamento; decidir se está pronto | Como submeter ao `oratia-revisor`, como ler os graus BAIXO/MODERADO/CRÍTICO, o laço de reformulação e quando escalar |
 | **`oratia-ambiente`** | Montar em máquina nova, diagnosticar falha de ambiente, decidir onde mudar uma configuração | Pré-requisitos, Docker sobre WSL2, volumes e portas, e a **matriz de propagação** dos fatos que aparecem em mais de um arquivo |
 | **`oratia-build`** | Construir imagem, instalar dependências, aplicar migrations, validar empacotamento | Os três estágios do build com verificação própria, os módulos nativos e o porquê do volume |
 | **`oratia-deploy`** | Subir, rodar, reiniciar ou validar a aplicação | Sequência de validação real (health, login, escrita no banco), operação do dia a dia e diagnóstico |
@@ -177,8 +185,21 @@ só.**
 
 | Você mudou | Commit em | Branch |
 |---|---|---|
-| Uma skill, este README, documentação de processo | Raiz do workspace | `oratia-sdlc` |
-| Código, migrations, prompts, testes da aplicação | `super-ta/` | Branch de feature a partir de `main`/`release` → PR |
+| Uma skill, este README, documentação de processo, ferramental | Raiz do workspace | direto em `oratia-sdlc` |
+| Código, migrations, prompts, testes da aplicação | `super-ta/` | branch derivada de **`main`** → PR |
+
+Toda evolução de produto deriva de `main`, que é o default do repositório —
+nunca de `release`, nunca commitando direto em `main`.
+
+**Mudança de produto que altera como o ambiente é montado, construído, subido
+ou diagnosticado obriga a atualizar o SDLC na mesma entrega.** Os gatilhos
+concretos estão no [`PRIMER.md`](PRIMER.md).
+
+Além disso, **todo plano e toda implementação passam por revisão independente**
+antes de serem dados por entregues — o agente `oratia-revisor` julga contra o
+objetivo declarado e a base normativa, e devolve apontamentos BAIXO, MODERADO
+ou CRÍTICO. Um MODERADO ou CRÍTICO reprova. O procedimento está na skill
+`oratia-revisao`.
 
 Antes de commitar, confirme onde você está — o diretório de trabalho determina
 qual repositório recebe o commit:
