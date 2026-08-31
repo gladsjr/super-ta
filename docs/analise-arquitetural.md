@@ -3,6 +3,14 @@
 > Sistema de avaliação de aprendizagem por **entrevista**: em vez de apenas corrigir o texto entregue, conversa com o aluno sobre o trabalho submetido para aferir **autoria, compreensão e coerência conceitual**. Três modalidades: entrevista de defesa (texto/voz, com fiscalização por vídeo opcional), prova oral em tempo real (voz contínua via Realtime) e cenários multi-interação (experimental).
 >
 > Este documento foi produzido confrontando a documentação arquitetural oficial (`Oratia-Arquitetura-v2.pdf`, v1.4, jul/2026) com o código real do repositório `super-ta/`. Onde há divergência, o código prevalece e a divergência é apontada. **As seções de segurança, escalabilidade, dependências e riscos são deliberadamente críticas.**
+>
+> **Este é o retrato de um momento — e o código andou desde então.** A fonte do
+> **estado atual** de cada risco é a seção *Riscos abertos de escala e segurança*
+> da skill `oratia-improve`, que carrega o estado verificado; aqui está a análise
+> narrativa, com severidade e diagramas. Divergindo as duas, a skill manda e
+> **este documento deve ser corrigido** — foi o que se fez em 31/08/2026 com as
+> afirmações sobre papéis, fila de vídeo, chave da OpenAI e contagem de
+> migrations, marcadas no texto onde deixaram de valer.
 
 ---
 
@@ -28,7 +36,7 @@
 | Runtime | **Node.js 20 (ESM)** — processo único `node server.js` | Monólito deliberado; sem cluster, sem fila externa |
 | HTTP | **Express 4** + helmet + express-rate-limit | CSP **desligada** (débito); rate-limit só em `/login` |
 | Frontend | **HTML/JS puro**, uma página por papel, **sem build/framework** | CDN para KaTeX/marked (motivo da CSP off) |
-| Banco | **PostgreSQL 16** (44 migrations SQL forward-only, file-per-change) | Docker Compose em dev; acoplado ao deployment em prod |
+| Banco | **PostgreSQL 16** (79 migrations SQL forward-only, file-per-change) | Docker Compose em dev; acoplado ao deployment em prod |
 | Sessões | express-session + connect-pg-simple (tabela `app_session`) | Cookie httpOnly, sameSite=lax |
 | Senhas | bcrypt (custo 12) | |
 | IA (nuvem) | **OpenAI**: Responses, Conversations, Files, Vector Stores, STT (`gpt-4o-transcribe`), TTS (`gpt-4o-mini-tts`), **Realtime** (`gpt-realtime-2.1`) | Modelos principais: `gpt-5.4` (effort high) e `gpt-5.4-mini` — centralizados em `config/policy.yaml` |
@@ -187,7 +195,7 @@ erDiagram
 | **Infra compartilhada** | `lib/` | `db/` (Postgres), `sessionLifecycle` (rehidratação), `audio` (STT/TTS + LRU), `audioStore` (adaptador local/replit), `billing` (custo por evento), `oralRealtime` (relay), `proctor` (visão local), `rubric` (média ponderada em código), `superOrchestrator/actionSchema` (guardrails de esquema), `agentPreamble` (fronteira de confiança), `agentRun#runStructured`, `concurrency#mapPool`, `bench/` (benchmark de modelos) |
 | **Config de runtime** | `config/` | `policy.yaml` (**fonte única de modelos** + gates), `pricing.yaml`, personas YAML (`interviewers/`), templates de prompt `.txt`, `voices.js`, `benchmark.yaml` |
 | **Frontend** | `static/` | 1 página HTML por papel; `static/vision/` = MediaPipe Tasks WASM auto-hospedado (roda no navegador do aluno) |
-| **Migrations** | `migrations/` | 44 arquivos SQL numerados, forward-only, aplicados **só por CLI** (`npm run db:migrate`) — nunca no boot |
+| **Migrations** | `migrations/` | 79 arquivos SQL numerados, forward-only, aplicados **só por CLI** (`npm run db:migrate`) — nunca no boot |
 | **Sidecar Python** | `scripts/proctor_hands.py` | MediaPipe Hands sobre frames (ffmpeg); isolado do Node via child_process |
 | **Harnesses** | `tests/`, `scripts/`, `bench/` | Ver [seção 10](#10-como-testar-funcional-e-não-funcional) |
 
@@ -224,7 +232,7 @@ erDiagram
 1. **Cockpit do professor protegido só por capability URL.** `/w/:token/*` dá poder de professor (ver conversas, subir gabarito, publicar notas) a **qualquer portador do link** — token de 48 bits, **sem sessão, sem rate-limit de adivinhação, sem expiração, sem revogação**. Vazou por referer/histórico/print → escalada completa. Assimétrico com admin/benchmark (sessão). Aceito no piloto; **inaceitável em escala institucional** (frentes 2–3 do roadmap resolvem).
 2. **Prompt injection: defendido por prompt, não testado.** A fronteira de confiança existe, mas é uma instrução ao modelo — não há camada determinística (ex.: scanner de padrões no texto extraído dos PDFs antes de entrar no contexto) nem **bateria formal de red team** (frente 8 do roadmap). O vetor mais relevante segue sendo o PDF adversarial do aluno tentando manipular avaliador/entrevistador para inflar nota. Diagnóstico interno já mostrou fragilidade comportamental (entrevistador facilita sob insistência).
 3. **CSP desligada** (`helmet({contentSecurityPolicy:false})`) por dependência de CDN (KaTeX/marked) + scripts inline. Remove a rede de proteção contra qualquer XSS que escape do escaping manual. Correção barata: auto-hospedar as libs e religar CSP.
-4. **Sem roles**: todo usuário logado é admin (`requireAdmin` só checa `req.session.user`). Não há professor × admin de verdade no plano de sessão.
+4. ~~**Sem roles**: todo usuário logado é admin.~~ **CORRIGIDO NO CÓDIGO** (verificado em 31/08/2026): as migrations 055–069 criaram 16 tabelas da camada institucional, com `roles` trazendo quatro papéis (`admin_global`, `admin_unidade`, `professor`, `aluno`), `memberships` e RBAC decidindo de fato — criar trabalho sem unidade exige `admin_global`. A afirmação original valia quando este documento foi escrito e **deixou de valer**.
 5. **Rate-limit só em `/login`**: endpoints de token (inclusive os que geram custo de IA) não têm limitação de taxa própria — abuso de custo e enumeração de token ficam sem freio (o orçamento por trabalho é o único teto).
 6. **Uploads sem verificação antimalware nem `fileFilter` central** (validação de tipo ad-hoc por handler); vídeos de até 300 MB.
 7. **LGPD**: áudio/vídeo de menores potencialmente; há GC de retenção (180 dias) e auto-acesso, mas **falta política formal de retenção/eliminação e trilha de auditoria de acesso**; consentimento existe (termo + gesto "CIENTE"), mas a fiscalização por vídeo amplia a coleta.
@@ -254,8 +262,8 @@ flowchart TD
 
 1. **Processo único / VM única** — sem réplicas; o teto é a VM. O acoplamento é o estado em memória (deliberado, mas não modularizado para extração).
 2. **Custo e latência lineares por turno** — cada turno = 1 chamada `gpt-5.4` effort **high**. Turma inteira simultânea = pico linear de custo e fila. Não há teste de carga realizado (frente 11).
-3. **Uma chave OpenAI para tudo** — lote de avaliações do professor compete com entrevistas ao vivo pelos mesmos rate limits. Mitigação barata e ainda não feita: chaves/projetos separados por uso.
-4. **Proctoring na mesma VM** — ONNX em CPU + ffmpeg + Python em lote junto com tráfego ao vivo. Candidato óbvio a worker/fila (não existe fila no sistema).
+3. **Uma chave OpenAI para o caminho de sessão** — lote de avaliações do professor compete com entrevistas ao vivo pelos mesmos rate limits. **Parcialmente mitigado** (verificado em 31/08/2026): existe `OPENAI_API_KEY_BENCHMARK`, chave dedicada que isola o gasto dos trabalhos de benchmark, com fail-fast e sem fallback (`lib/openaiClient.js`, `lib/bench/adapters/openai.js`). Falta separação por ambiente e entre uso ao vivo × lote. A ressalva original de que a mitigação estava "ainda não feita" **deixou de valer em parte**.
+4. **Proctoring na mesma VM** — ONNX em CPU + ffmpeg + Python em lote junto com tráfego ao vivo. **Parcialmente mitigado** (verificado em 31/08/2026): já existe fila — tabela `jobs` com a lane `video_analysis` e janela ociosa (`lib/proctorQueue.js`, migrations 078–079). Segue na mesma VM, porém: o `jobRunner` declara que "o app é o próprio worker". A ressalva original de que "não existe fila no sistema" **deixou de valer**.
 5. **Onboarding por sessão** — cada submissão cria Vector Store + sobe 2 PDFs na OpenAI: latência e ponto de falha externo na entrada; em massa, gargalo.
 6. **Operações em lote seguram HTTP longo** (progresso via streaming) — em turmas grandes precisa de fila com progresso persistido.
 7. **Região única e permanente** — a prova oral por voz é sensível à perna longa navegador→servidor→OpenAI.
@@ -380,7 +388,7 @@ super-ta/
 ├── agents/              # 18 agentes cognitivos (Responses API, fail-fast, preâmbulo anti-injection)
 ├── lib/                 # db, sessão, áudio, billing, relay, proctor, rubrica, guardrails, bench
 ├── config/              # policy.yaml (fonte única de modelos), pricing.yaml, personas, templates
-├── migrations/          # 44 SQL forward-only, file-per-change, aplicadas só por CLI
+├── migrations/          # 79 SQL forward-only, file-per-change, aplicadas só por CLI
 ├── static/              # 1 HTML por papel, sem build; static/vision = MediaPipe WASM
 ├── models/              # YOLOv8n (.onnx) + MediaPipe (.task) — visão local
 ├── scripts/             # migrate, start-db, audio-gc, detect-ai-answers, proctor_hands.py, bench-run
