@@ -12,7 +12,7 @@ import { requireWorkToken, requireProfessorSubmission, requireWithinBudget, requ
 import { publicBaseUrl } from "../lib/publicUrl.js";
 import * as db from "../lib/db.js";
 import { pickRandomName } from "../lib/personas.js";
-import { VOICES, isValidVoice } from "../config/voices.js";
+import { VOICES, isValidVoice, isRealtimeVoice, voicesFor } from "../config/voices.js";
 import { personaDisplay, PERSONA_ORDER, PERSONAS } from "../config/personas.js";
 import { renderInterviewerAgenda } from "../lib/interviewerAgenda.js";
 import { AudioCache, synthesizeSpeech } from "../lib/audio.js";
@@ -142,8 +142,16 @@ router.patch("/w/:workToken/name", requireWorkToken, express.json({ limit: "8kb"
 // ============================================================================
 // Modo de interação (texto vs áudio) e voz
 // ============================================================================
+// #351: na variante em tempo real quem fala é o modelo Realtime, que não aceita
+// as vozes só-TTS. A lista já sai filtrada para o professor não escolher uma que
+// vai ser recusada lá na frente. `realtime` também é devolvido por voz, para a UI
+// poder sinalizar quando o professor troca de variante sem recarregar.
 router.get("/w/:workToken/voices", requireWorkToken, (req, res) => {
-    res.json({ voices: VOICES.map(v => ({ id: v.id, label: v.label, gender: v.gender })) });
+    const somenteRealtime = req.work.interview_variant === "realtime";
+    res.json({
+        voices: voicesFor({ realtime: somenteRealtime })
+            .map(v => ({ id: v.id, label: v.label, gender: v.gender, realtime: v.realtime })),
+    });
 });
 
 const PREVIEW_DEFAULT_TEXT = "Olá, sou seu entrevistador. Vamos começar?";
@@ -223,6 +231,11 @@ router.post("/w/:workToken/interaction", requireWorkToken, express.json({ limit:
     }
     if (mode === "audio" && !isValidVoice(voice)) {
         return res.status(400).json({ error: "voz inválida ou ausente para o modo áudio" });
+    }
+    // #351: na variante em tempo real quem fala é o modelo Realtime, que recusa
+    // vozes só-TTS — e recusa a configuração INTEIRA junto. Barrado no save.
+    if (mode === "audio" && req.work.interview_variant === "realtime" && !isRealtimeVoice(voice)) {
+        return res.status(400).json({ error: `a voz "${voice}" não funciona na entrevista em tempo real — escolha outra` });
     }
 
     try {
@@ -516,7 +529,9 @@ router.get("/w/:workToken/submissions/:subToken/proctor-video/:idx?", requireWor
         // #349: streaming parcial de verdade. O tamanho sai de object_sizes
         // (gravado no upload); sem ele, o helper serve inteiro em stream — nunca
         // carrega o arquivo em memória.
-        return serveVideo(req, res, key, `submission=${req.submission.submission_token}`);
+        // `await` (e não só `return`): sem ele o catch abaixo não captura a
+        // rejeição, e um erro vira unhandledRejection com a requisição pendurada.
+        return await serveVideo(req, res, key, `submission=${req.submission.submission_token}`);
     } catch (err) {
         log.error("WORK", `proctor-video serve failed: ${err.message}`);
         res.status(500).json({ error: "falha ao servir o vídeo" });

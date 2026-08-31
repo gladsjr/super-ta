@@ -25,7 +25,7 @@ import { scoreCalibration } from "../lib/speechCalib.js";
 import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp, soundCheckPending, soundCheckProgress, SC_SCRIPTS, SCRIPT_LEAK_MIN, scriptLeakMatches } from "../lib/soundCheck.js";
 import { buildAuditBlock, auditPromptBlock } from "../lib/auditTranscript.js";
 import { synthesizeSpeech } from "../lib/audio.js";
-import { VOICES, isValidVoice } from "../config/voices.js";
+import { VOICES, isValidVoice, isRealtimeVoice, voicesFor, FALLBACK_VOICE } from "../config/voices.js";
 import { isValidQuestionCount, REALTIME_MODEL, TTS_MODEL, ORAL_RUBRIC_BLOCK_SIZE } from "../lib/config.js";
 import { exceedsPageLimit } from "../lib/pdfPages.js";
 import { CONSENT_VERSION } from "../config/consent.js";
@@ -197,7 +197,8 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 sound_check: ladderState(s.oral_calibration_json),
                 transcript_alerts: transcriptAlertCount(s.oral_voice_json),
             })),
-            voices: VOICES,
+            // #351: a prova oral é Realtime — só oferece o que o modelo aceita.
+            voices: voicesFor({ realtime: true }),
         });
     } catch (err) {
         log.error("ORAL", `info failed: ${err.message}`);
@@ -293,6 +294,12 @@ router.post("/w/:workToken/oral/config", requireWorkToken, requireOral, async (r
     const voice = req.body?.voice;
     if (!isValidQuestionCount(n)) return res.status(400).json({ error: "question_count inválido (3 a 20)" });
     if (voice != null && voice !== "" && !isValidVoice(voice)) return res.status(400).json({ error: "voz inválida" });
+    // #351: a prova oral é Realtime. Voz que só a TTS aceita faz a OpenAI recusar
+    // o session.update INTEIRO — e a arguição rodava com o agente padrão dela.
+    // Barrar aqui, e não só na UI, porque a rejeição acontece longe daqui.
+    if (voice && !isRealtimeVoice(voice)) {
+        return res.status(400).json({ error: `a voz "${voice}" não funciona na prova oral (ao vivo) — escolha outra` });
+    }
     try {
         await db.setQuestionCount(req.work.id, n);
         if (voice) await db.setWorkVoice(req.work.id, voice);
@@ -846,7 +853,8 @@ router.post("/s/:submissionToken/oral/session", requireSubmissionToken, async (r
         if (!all.length) return res.status(409).json({ error: "a prova ainda não foi preparada pelo professor (sem perguntas)" });
         const n = Math.min(req.work.question_count || all.length, all.length);
         const sampled = sampleKeepingOrder(all, n);
-        const voice = isValidVoice(req.work.voice) ? req.work.voice : "verse";
+        // #351: incompatível com Realtime cai no fallback em vez de derrubar a sessão
+        const voice = isRealtimeVoice(req.work.voice) ? req.work.voice : FALLBACK_VOICE;
         const instructions = buildExamInstructions(sampled, req.work.name);
         const secret = await mintRealtimeSecret({ instructions, voice, apiKey: apiKeyForWork(req.work) });
         log.info("ORAL", `session minted submission=${req.submission.submission_token} n=${n}/${all.length} voice=${voice}`);

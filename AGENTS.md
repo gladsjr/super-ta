@@ -136,6 +136,12 @@ pendentes e `npm run db:migrate -- status` lista sem aplicar. Em dev o `predev`
 migra antes de subir; em produção quem materializa é o **Publish** do Replit
 (diff dev→prod).
 
+No dev do Replit a aplicação é levantada por `npm run db:migrate && node server.js`
+(workflow "Start application"), então subir já aplica as pendentes. **Ninguém roda
+migration em produção** e não existe janela entre publicar o código e migrar o
+banco — os dois vão no mesmo Publish. Alterar esse workflow derruba a garantia.
+Detalhes e armadilhas do diff: `.agents/memory/replit-publish-vs-boot-migrations.md`.
+
 Fluxo: veja o último número → crie `NNN+1` → escreva SQL direto, **sem**
 `IF NOT EXISTS` ou guardas de idempotência → aplique em dev → teste → commit.
 
