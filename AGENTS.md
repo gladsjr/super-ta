@@ -9,6 +9,28 @@ Panorama do sistema: [`replit.md`](replit.md).
 O que o produto faz: [`docs/capacidades/`](docs/capacidades/README.md).
 Por que as escolhas são estas: [`docs/decisoes/`](docs/decisoes/README.md).
 
+## Antes de implementar — regra permanente
+
+Um pedido de mudança quase nunca vem com o impacto conceitual junto. Descobri-lo
+é **sua** tarefa, e vem antes de escrever código:
+
+1. **Localize a capacidade afetada** no [índice](docs/capacidades/README.md).
+   Se a mudança não cabe em nenhuma, ou cabe em várias, isso já é informação —
+   diga.
+2. **Leia a página**, com atenção especial a **"o que NÃO faz"**: é ali que moram
+   os limites deliberados, que parecem lacunas e não são.
+3. **Abra as ADRs ligadas** na página. Uma delas pode já ter descartado
+   exatamente o que está sendo pedido, com o motivo registrado.
+
+**Se a mudança contradiz o que a página afirma — sobretudo a seção "o que NÃO
+faz" — pare e diga isso ao usuário ANTES de escrever código.** Nesse caso não é
+implementação, é **mudança de produto**: exige confirmação explícita, atualização
+da página no mesmo PR e, se a escolha tiver consequência duradoura, uma ADR nova.
+
+Não é burocracia: é o mecanismo que faz o pedido "muda isso aqui" revelar que
+mexe em três formas de arguição, ou que reabre uma decisão já tomada por um
+motivo que ninguém lembra.
+
 ## Divisão de ambientes — regra dura
 
 Três agentes mexem neste projeto. Cada um trabalha no SEU clone, com o SEU banco
@@ -153,6 +175,10 @@ navegação, e (c) o índice completo de prompts. Agente novo entra no diagrama 
 O diagrama é o ponto único de descoberta — não crie índices paralelos.
 
 ## Documentação — o que atualizar junto com o código
+
+Contraparte da regra [Antes de implementar](#antes-de-implementar--regra-permanente):
+lá se lê para saber o impacto, aqui se escreve o que mudou. **No mesmo PR** —
+documentação atualizada depois é documentação que não foi atualizada.
 
 | Se você mudou… | Atualize |
 |---|---|
