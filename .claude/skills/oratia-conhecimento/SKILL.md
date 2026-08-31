@@ -4,7 +4,7 @@ description: >-
   Conhecimento operacional do ORATIA que não é dedutível do código: topologia do
   ambiente local, credenciais de teste, armadilhas verificadas na prática,
   decisões do workspace e seu porquê, e divergências conhecidas entre a
-  documentação do tronco e a realidade. Use quando o pedido for entender por que
+  documentação (deste workspace e do tronco) e a realidade. Use quando o pedido for entender por que
   algo é como é, onde registrar uma lição aprendida, qual credencial usar em
   teste, ou quando um comportamento surpreendente precisar de explicação —
   frases como "por que isso é assim", "qual usuário uso para testar", "isso é
@@ -187,6 +187,58 @@ Consequências práticas:
   diretamente, com `CLAUDE_PROJECT_DIR` definido, e não pela via do hook —
   que nesta sessão não tinha como disparar.
 
+**O agent que autentica o push não é o que o Git Bash consulta.** Diretriz do
+usuário, nas palavras dele: o push usa *"sempre o ssh-agent que tem a chave
+registrada"*.
+
+Como isso funciona **nesta máquina** — e o que confunde o diagnóstico:
+
+- `ssh-add -l` no Git Bash responde `Could not open a connection to your
+  authentication agent`, e `SSH_AUTH_SOCK` vem vazio. Isso **não** significa
+  que falta chave: significa que não há agent do lado do Git Bash. Ele não
+  consultou o agent errado — não havia socket a consultar.
+- O git aqui usa `core.sshCommand = C:/Windows/System32/OpenSSH/ssh.exe`, ou
+  seja, o **ssh do Windows**, que conversa com o **ssh-agent service do
+  Windows** por named pipe. São implementações que não compartilham chaveiro.
+- Para enxergar as chaves desse agent:
+  `C:\Windows\System32\OpenSSH\ssh-add.exe -l`.
+
+**Confirme de onde a chave vem, em vez de supor.** Só `ssh -v` distingue: a
+linha de oferta traz `explicit` quando a identidade veio do `IdentityFile`, e
+`agent` quando é o agent que assina. Verificado aqui: sai `explicit agent` — as
+duas coisas. Note que **a chave privada também está em disco**: o agent é o
+caminho em uso, não o único possível; sem ele o ssh leria o arquivo. (Se isso
+pediria passphrase, não se verificou — não presuma que a ausência de prompt
+prova que o agent está no caminho. O que prova é a linha do `-v`.)
+
+```bash
+ssh -vT -o BatchMode=yes <host-alias>
+```
+
+Confira duas coisas na saída: o `Hi <conta>!` — exit code 1 é normal, o GitHub
+não dá shell — e **o nome da conta**, que é o que revela chave trocada.
+
+> **Como fixar a chave certa é assunto do `README.md`, seção 3.** Não repita a
+> prescrição aqui: ela tem duas partes, e uma cópia parcial engana mais que
+> nenhuma. Esta skill registra só **como diagnosticar**.
+>
+> Nesta máquina o mecanismo em vigor não é o do roteiro — `core.sshCommand` só
+> aponta o ssh do Windows, e `IdentitiesOnly`/`IdentityFile` vive no
+> `~/.ssh/config`, por host alias. Divergência registrada na tabela abaixo, com o
+> que os dois têm de diferente.
+
+**Ao ler o `~/.ssh/config` pelo Git Bash, não passe o caminho por `eval`.** No
+Git for Windows `HOME` é `%USERPROFILE%`, então `~/.ssh/config` e
+`%USERPROFILE%\.ssh\config` são **o mesmo arquivo** — não há dois configs a
+divergir. E `test -f` aceita caminho em forma Windows, sem conversão nenhuma.
+
+O que produz falso negativo é o `eval`: verificado que passar
+`C:\Users\<user>\.ssh\<chave>` por `$(eval echo "$var")` devolve
+`C:Users<user>.ssh<chave>` — o `eval` consome as barras invertidas, e o teste
+conclui que o arquivo não existe. Leia o valor direto, sem `eval`. Precisando
+converter para POSIX de fato, `cygpath -u` existe aqui (`/usr/bin/cygpath`) e
+resolve — mas para testar existência não é necessário.
+
 **`npm run dev` não funciona dentro do container.** O `predev` chama `db:up`,
 que tenta iniciar o Docker Desktop **do host**. Use os serviços separados.
 
@@ -194,7 +246,7 @@ que tenta iniciar o Docker Desktop **do host**. Use os serviços separados.
 contra 45.145 arquivos por segundo. Vale para qualquer operação com muitos
 arquivos pequenos.
 
-## Divergências entre a documentação do tronco e a realidade
+## Divergências entre a documentação e a realidade
 
 Verificadas por execução. Não "corrija" o ambiente para casar com elas.
 
@@ -204,6 +256,7 @@ Verificadas por execução. Não "corrija" o ambiente para casar com elas.
 | `.env.example` do tronco: `PORT=5099` | O default do código é 5000 (`lib/config.js`) | Ambos "certos": o código tem um default, o exemplo sugere outro. Aqui vale 5099, pelo AirPlay do macOS |
 | Skill antiga: "Node precisa ser 20.x" | O host tem 24 e o `npm install` passa | Irrelevante agora: a versão que importa é a da imagem |
 | `README.md` do workspace: clone por `git@github.com:…` | O remote real usa um alias SSH | O alias é configuração de máquina; a URL genérica no roteiro está correta |
+| `README.md` seção 3 prescreve fixar a chave por `core.sshCommand` no repositório (ver lá o comando, que tem duas partes) | Nesta máquina o `core.sshCommand` só aponta o ssh do Windows, e o `IdentitiesOnly`/`IdentityFile` vive no `~/.ssh/config`, por host alias | Nenhum está errado, e **os escopos não são os mesmos** — comparação por leitura, não medida: `core.sshCommand` fixa a identidade **do repositório** (vale para qualquer host que ele use, e **não** sobrevive a um clone novo); `IdentitiesOnly`/`IdentityFile` num bloco `Host` fixa **do alias** (vale para qualquer clone que use o alias, e **não** vale para remote escrito sem ele). Não "corrija" a máquina para casar com o roteiro — mas note que um clone cujo remote não use o alias fica sem proteção, que é o caso que o README endereça |
 
 ## Ao aprender algo novo
 
