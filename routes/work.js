@@ -529,7 +529,9 @@ router.get("/w/:workToken/submissions/:subToken/proctor-video/:idx?", requireWor
         // #349: streaming parcial de verdade. O tamanho sai de object_sizes
         // (gravado no upload); sem ele, o helper serve inteiro em stream — nunca
         // carrega o arquivo em memória.
-        return serveVideo(req, res, key, `submission=${req.submission.submission_token}`);
+        // `await` (e não só `return`): sem ele o catch abaixo não captura a
+        // rejeição, e um erro vira unhandledRejection com a requisição pendurada.
+        return await serveVideo(req, res, key, `submission=${req.submission.submission_token}`);
     } catch (err) {
         log.error("WORK", `proctor-video serve failed: ${err.message}`);
         res.status(500).json({ error: "falha ao servir o vídeo" });
