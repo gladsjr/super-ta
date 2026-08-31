@@ -39,6 +39,8 @@ workspace:
 #   clone       — repositório independente, aninhado e ignorado por esta branch.
 #   gerada      — produzida por comando; descartável e reconstruível.
 #   volume      — vive dentro do Docker, não no sistema de arquivos do host.
+#   local       — trazida pelo colaborador; NÃO versionada e NÃO reconstruível.
+#                 Perder é perder: nada no repositório a recria.
 # -------------------------------------------------------------------------
 layout:
   - caminho: CLAUDE.md
@@ -60,6 +62,10 @@ layout:
   - caminho: .claude/settings.json
     origem: versionada
     descricao: Registra o hook de SessionStart que verifica atualização do ferramental.
+
+  - caminho: temp
+    origem: local
+    descricao: Área de trabalho local do colaborador — material de referência que ele traz para consultar (PDF, export, rascunho). Ignorada pelo git e nunca fonte da verdade: o que precisa durar vira artefato versionado. O documento arquitetural que originou as metas vive aqui, e por isso NÃO chega a quem clona.
 
   - caminho: .sdlc-ultima-verificacao
     origem: gerada

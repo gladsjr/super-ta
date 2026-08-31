@@ -34,3 +34,8 @@ desktop.ini
 
 # Resíduo do roteiro de validação (curl -c cookie.txt).
 cookie.txt
+
+# Área de trabalho local: material de referência que o colaborador traz para
+# consultar (PDFs, exports, rascunhos). Nada aqui é fonte da verdade — o que
+# precisa durar vira artefato versionado.
+temp/
