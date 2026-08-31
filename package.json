@@ -16,6 +16,7 @@
     "test:batch-elig": "node --test tests/batch-eligibility.test.mjs",
     "test:proctor-axes": "node --test tests/proctor-axes.test.mjs",
     "test:proctor-review": "node --test tests/proctor-review.test.mjs",
+    "test:interview-resume": "node --test tests/interview-resume.test.mjs",
     "bench": "node scripts/bench-run.mjs",
     "bench:validate": "node scripts/bench-run.mjs --dry-run",
     "bench:export": "node scripts/bench-export.mjs",

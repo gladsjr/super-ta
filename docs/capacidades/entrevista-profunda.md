@@ -36,7 +36,10 @@ quando a resposta escorrega.
    vago, dar uma dica, pedir para repetir, ou encerrar.
 4. Ao fim, pode deixar um comentário ao professor.
 
-Se o servidor reiniciar no meio, a sessão é retomada de onde parou.
+Se o servidor reiniciar no meio, a sessão é retomada de onde parou. Se a falha
+acontecer **antes** de a conversa começar (provedor de IA fora do ar, conta sem
+saldo), o aluno volta para a tela de envio e recomeça sozinho assim que o
+serviço voltar — não precisa de um envio novo do professor.
 
 ## O que sai no fim
 
@@ -72,6 +75,10 @@ Se o servidor reiniciar no meio, a sessão é retomada de onde parou.
   reafirma o ponto objetivo e volta a pedir a reconciliação.
 - **Dado** que o servidor reiniciou no meio da entrevista, **quando** o aluno
   recarrega a página, **então** ele retoma do ponto em que parou.
+- **Dado** que a conta do provedor de IA ficou sem saldo no momento do envio,
+  **quando** o aluno tenta enviar o trabalho, **então** ele lê que o problema é
+  de saldo (não do arquivo dele) e continua na tela de envio — e, reposto o
+  saldo, recomeça pelo mesmo link, sem depender do professor.
 - **Dado** que a fiscalização por vídeo está ligada, **quando** o professor abre a
   configuração, **então** a opção de "resposta de cabeça" aparece desabilitada.
 

@@ -1886,13 +1886,23 @@
         .then(r => r.json())
         .catch(() => ({ __neterr: true }));
 
+      // Upload falhou: devolve o aluno à tela de envio, com o aviso visível.
+      // Com fiscalização ligada, o upload-area já tinha sido escondido para dar
+      // lugar ao setup e o chat podia estar escondido também — sem isto, uma
+      // falha do provedor deixava a página literalmente vazia e sem saída.
+      const backToUpload = () => {
+        document.getElementById('proctor-setup')?.classList.add('hidden');
+        document.getElementById('chat-area')?.classList.remove('hidden');
+        document.getElementById('upload-area')?.classList.remove('hidden');
+      };
+
       // Trata o resultado do upload e devolve releaseInterviewer() (ou null em erro).
       const finishUpload = (j) => {
         document.getElementById('fileRef').textContent = 'Arquivo enviado: ' + f.name;
         status.remove();
         sendBtn.disabled = false;
-        if (j.__neterr) { appendStatus('Não foi possível enviar o trabalho. Verifique sua conexão e tente novamente.', true); return null; }
-        if (j.error) { appendStatus(j.message || j.error, true); return null; }
+        if (j.__neterr) { backToUpload(); appendStatus('Não foi possível enviar o trabalho. Verifique sua conexão e tente novamente.', true); return null; }
+        if (j.error) { backToUpload(); appendStatus(j.message || j.error, true); return null; }
         if (!j.assistant) return null;
         document.getElementById('upload-area').classList.add('hidden');
         phase = 'intro';

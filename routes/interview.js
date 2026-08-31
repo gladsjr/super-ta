@@ -58,6 +58,7 @@ import {
     pregenSnapshot,
 } from "../lib/sessionLifecycle.js";
 import { attachNarratorAudio } from "../lib/narrator.js";
+import { isProviderQuotaError, PROVIDER_QUOTA, PROVIDER_QUOTA_MESSAGE } from "../lib/providerErrors.js";
 import { buildAuditBlock } from "../lib/auditTranscript.js";
 import { runMessageRetranscribeAuto } from "../lib/retranscribe.js";
 import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
@@ -660,8 +661,15 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
     // para reiniciar, o professor gera um novo envio. Fonte de verdade é o BD
     // (não o SESSIONS em memória), porque após restart a entrevista ainda existe
     // mesmo que a memória esteja vazia.
+    //
+    // A fase avançada só conta como entrevista em andamento se houver conversa
+    // gravada: uma falha do provedor entre "fase=intro" e a primeira persistência
+    // deixava fase sem conversa, e este gate transformava isso em beco sem saída
+    // ("peça um novo envio") para um aluno que nunca chegou a ser cumprimentado.
     const rt = await db.getSubmissionRuntimeState(req.submission.id);
-    if (rt && rt.current_phase && rt.current_phase !== "awaiting_upload") {
+    const started = rt && rt.current_phase && rt.current_phase !== "awaiting_upload"
+        && await db.hasConversationLog(req.submission.id);
+    if (started) {
         return res.status(409).json({
             error: "Uma entrevista já foi iniciada para este link. Para reiniciar, peça ao professor um novo envio.",
         });
@@ -846,6 +854,12 @@ router.post("/s/:submissionToken/upload", requireSubmissionToken, requireNotFina
         });
     } catch (error) {
         log.error("UPLOAD", `failed: ${error.message}`);
+        // Recusa por saldo não é erro do arquivo do aluno — dizer "erro ao
+        // processar arquivo" o mandava trocar de PDF atrás de uma solução que
+        // não existe do lado dele. Ver lib/providerErrors.js.
+        if (isProviderQuotaError(error)) {
+            return res.status(503).json({ error: PROVIDER_QUOTA, message: PROVIDER_QUOTA_MESSAGE });
+        }
         res.status(500).json({ error: "Erro ao processar arquivo com a IA" });
     }
 });
@@ -1288,8 +1302,14 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             }
 
             if (!sess.interviewPlan) {
-                const detail = sess.interviewPreparationError?.message || "plano indisponível";
+                const prepErr = sess.interviewPreparationError;
+                const detail = prepErr?.message || "plano indisponível";
                 log.error("INTRO", `begin aborted: ${detail}`);
+                // Mesmo tratamento do /upload: "tente novamente" é conselho
+                // inútil enquanto a conta do provedor estiver sem saldo.
+                if (isProviderQuotaError(prepErr)) {
+                    return res.status(503).json({ error: PROVIDER_QUOTA, message: PROVIDER_QUOTA_MESSAGE, detail });
+                }
                 return res.status(500).json({ error: "Falha ao preparar a entrevista. Tente novamente.", detail });
             }
         }
