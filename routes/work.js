@@ -39,7 +39,8 @@ import {
 } from "../lib/evaluationOps.js";
 import { workMarkdown } from "../lib/exportMarkdown.js";
 import { mapPool } from "../lib/concurrency.js";
-import { streamAudio, localFilePath, readAllBytes } from "../lib/audioStore.js";
+import { streamAudio } from "../lib/audioStore.js";
+import { serveVideo } from "../lib/serveVideo.js";
 import { enqueueProctor, enqueueProctorAndWait } from "../lib/proctorQueue.js";
 import { isBatchEligible, summarizeIneligible } from "../lib/batchEligibility.js";
 import { ladderState } from "../lib/soundCheck.js";
@@ -509,29 +510,13 @@ router.get("/w/:workToken/submissions/:subToken/proctor-video/:idx?", requireWor
     try {
         const parts = await db.getOralVideoParts(req.submission.id);
         const idx = req.params.idx != null ? parseInt(req.params.idx, 10) : 0;
-        const key = parts[Number.isFinite(idx) ? idx : 0];
+        const i = Number.isFinite(idx) ? idx : 0;
+        const key = parts[i];
         if (!key) return res.status(404).json({ error: "sem vídeo para esta submissão" });
-        const ext = key.split(".").pop();
-        const type = (ext === "mp4" || ext === "m4a") ? "video/mp4" : "video/webm";
-        const local = await localFilePath(key);
-        if (local) { res.type(type); return res.sendFile(local); }
-        const buf = await readAllBytes(key);
-        if (!buf) return res.status(404).json({ error: "vídeo indisponível no armazenamento" });
-        const total = buf.length;
-        res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("Content-Type", type);
-        const range = req.headers.range;
-        if (!range) { res.setHeader("Content-Length", total); return res.end(buf); }
-        const m = /bytes=(\d*)-(\d*)/.exec(range);
-        let start = m && m[1] ? parseInt(m[1], 10) : 0;
-        let end = m && m[2] ? parseInt(m[2], 10) : total - 1;
-        if (!Number.isFinite(start) || start < 0) start = 0;
-        if (!Number.isFinite(end) || end >= total) end = total - 1;
-        if (start > end) { res.status(416).setHeader("Content-Range", `bytes */${total}`); return res.end(); }
-        res.status(206);
-        res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
-        res.setHeader("Content-Length", end - start + 1);
-        return res.end(buf.subarray(start, end + 1));
+        // #349: streaming parcial de verdade. O tamanho sai de object_sizes
+        // (gravado no upload); sem ele, o helper serve inteiro em stream — nunca
+        // carrega o arquivo em memória.
+        return serveVideo(req, res, key, `submission=${req.submission.submission_token}`);
     } catch (err) {
         log.error("WORK", `proctor-video serve failed: ${err.message}`);
         res.status(500).json({ error: "falha ao servir o vídeo" });
