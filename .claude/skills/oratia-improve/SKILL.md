@@ -2,7 +2,7 @@
 name: oratia-improve
 description: >-
   Evolui a aplicação ORATIA (super-ta) respeitando a proposta arquitetural
-  declarada (Oratia-Arquitetura-v2.pdf + replit.md + CLAUDE.md): princípios
+  declarada (METAS.md + replit.md + AGENTS.md do tronco): princípios
   inegociáveis (fail-fast sem fallback, policy.yaml como fonte única, carga
   cognitiva no modelo / controle no código), roadmap de 12 frentes, invariantes
   de segurança e o processo de mudança (migration file-per-change, mapa de
@@ -27,8 +27,11 @@ com fiscalização por vídeo opcional), prova oral em tempo real (relay
 WebSocket) e cenários multi-interação (experimental).
 
 **Antes de qualquer mudança, leia nesta ordem:**
+0. `METAS.md`, na raiz do workspace — as metas do produto, com a medida de cada
+   uma. Toda proposta de evolução deve dizer qual meta move; movendo nenhuma,
+   diga isso explicitamente. Meta marcada `POR DECLARAR` não vale como critério.
 1. `replit.md` — visão arquitetural completa e atual (fonte executiva).
-2. `CLAUDE.md` — regras duras de processo (migrations, prompts, helpers, ambientes).
+2. `AGENTS.md` — regras duras de processo (migrations, prompts, helpers, ambientes). É o canônico; o `CLAUDE.md` do tronco é um ponteiro de três linhas para ele.
 3. `docs/architecture.md` — ciclo do turno + mapa de TODOS os prompts (ponto único de descoberta).
 4. Se for tocar orquestração: `docs/super-orchestrator-plan.md`.
 
@@ -68,7 +71,8 @@ WebSocket) e cenários multi-interação (experimental).
 
 ### Schema (banco)
 - **File-per-change:** novo arquivo `migrations/NNN_descricao.sql` (3 dígitos,
-  próximo número livre — hoje já passa de 044). SQL direto, SEM `IF NOT
+  próximo número livre — em 31/08/2026 a última é a 079, logo a próxima é 080;
+  confira o diretório em vez de confiar neste número). SQL direto, SEM `IF NOT
   EXISTS` (exceto a 001, que é bootstrap).
 - **NUNCA editar migration aplicada** — criar corretiva NNN+1. Migration que
   falhou no dev (rollback, não registrada) pode ser editada.
@@ -108,18 +112,29 @@ WebSocket) e cenários multi-interação (experimental).
 
 Ao propor evolução, ancore na frente correspondente:
 
-1. **Experiência do professor** (alta prioridade) — validação de enunciados,
-   upload de material da disciplina, geração de atividades → assistente de
-   planejamento.
+1. **Experiência do professor** (alta prioridade) — upload de material da
+   disciplina e geração de atividades a partir dele → assistente de
+   planejamento. **O que já existe** (verificado em 31/08/2026, para não ser
+   reconstruído): modo Simples é o **padrão** na configuração do arguidor —
+   galeria de personas, sem YAML (`static/professor.html`), com o editor YAML
+   como modo avançado opt-in; `ConfigAssistantAgent` é o assistente
+   conversacional de configuração; e `EnunciadoCoherenceAgent` roda a **checagem
+   mínima** do enunciado automaticamente no upload. **Cuidado**: o avaliador
+   *qualitativo* de enunciado foi **removido de propósito** (issue #133, decisão
+   de 06/08/2026) porque induzia o professor a consertar o que não era problema
+   — não o reintroduza sem ADR. O que de fato falta é o caminho do material da
+   disciplina (`docs/super-orchestrator-plan.md` o marca como FUTURO) → meta
+   M-01.
 2. **Modelo institucional** — instituições → unidades → turmas; papéis;
    orçamento por unidade. **EM GRANDE PARTE ENTREGUE** (verificado no schema em
    30/08/2026): existem `units` (árvore + flag de turma), `roles` com quatro
    papéis (`admin_global`, `admin_unidade`, `professor`, `aluno`),
    `memberships`, `tenants`, `invites` e os pacotes/cotas
    (`package_templates`, `package_allocations`, `entitlement_counters`,
-   `entitlement_consumption`) — migrations **055–069**, sendo `units` a 055,
-   `memberships` e `roles` a 056, os pacotes 062–065, `auth_providers` a 066,
-   `invites` a 067 e `tenants` a 069. Detalhe em
+   `entitlement_consumption`) — as migrations **055–069** criam **16 tabelas** ao
+   todo (contadas por `CREATE TABLE`; a enumeração acima é parcial), sendo
+   `units` a 055, `memberships` e `roles` a 056, os pacotes 062–065,
+   `auth_providers` a 066, `invites` a 067 e `tenants` a 069. Detalhe em
    `docs/access-model.md`. **A afirmação anterior de que "todo usuário logado é
    admin" está errada desde então**: o RBAC decide de fato, e criar trabalho
    sem unidade exige `admin_global`. Falta confirmar o que resta da frente.
@@ -141,6 +156,77 @@ Ao propor evolução, ancore na frente correspondente:
 10. **Qualidade** — suíte de regressão + CI (hoje NÃO há CI/.github).
 11. **Escalabilidade** — testes de carga; limites da infra atual.
 12. **Infra corporativa** — migração para organizações (GitHub/Replit/OpenAI).
+
+## Riscos abertos de escala e segurança
+
+Levantados no documento arquitetural e **confrontados com o código em
+31/08/2026**. São conhecimento normativo, não backlog priorizado: propor mudança
+que agrave qualquer um deles exige dizer por quê.
+
+O estado é o que foi verificado no código, não o que o documento afirma.
+
+Sobre a relação com o backlog: em 31/08/2026 havia **16 issues abertas** no
+tronco e nenhuma delas trata destes riscos — conferido por **título**, não por
+leitura integral de cada issue. Antes de abrir issue para qualquer um, procure
+no tracker: a conferência foi superficial de propósito, porque o backlog não tem
+cópia local e não é daqui que ele se administra.
+
+**Quatro artefatos falam destes riscos, e a divisão é esta:**
+
+1. **esta seção é a fonte do ESTADO** de cada risco (aberto, parcial, mitigado)
+   — divergindo de qualquer outro, ela manda;
+2. *Débitos conhecidos*, abaixo, é a lista curta de candidatos naturais de
+   melhoria, sem estado;
+3. [`docs/analise-arquitetural.md`](../../../docs/analise-arquitetural.md), na
+   raiz do workspace, é a **análise narrativa** dos mesmos riscos, com diagramas
+   e severidade — produzida do mesmo documento v1.4, e anterior a esta seção.
+   Envelhece: encontrando nele afirmação vencida, **corrija-a** e marque onde
+   deixou de valer;
+4. [`METAS.md`](../../../METAS.md), para os riscos que foram promovidos a
+   objetivo — ver a tabela risco → meta abaixo.
+
+**Mudando o estado de um risco, percorra os quatro.** A mesma lista, na mesma
+ordem, está na matriz de propagação da skill `oratia-ambiente`. Dois itens moram
+em todos de propósito: upload sem verificação central (M-09) e estado em memória
+prendendo a sessão à instância (M-07).
+
+### Escala
+
+| Risco | Estado verificado |
+|---|---|
+| Processo único em VM única, sem réplica horizontal | **Aberto.** `SESSIONS = new Map()` em `lib/sessionLifecycle.js`, cache de TTS em memória e conexões WebSocket/SSE vivas prendem a sessão à instância. Escalar horizontalmente exige refactor |
+| Custo e latência por turno crescem linearmente com alunos simultâneos | **Aberto.** Cada turno dispara uma chamada de raciocínio com effort alto |
+| Rate limit da OpenAI compartilhado entre lote do professor e entrevista ao vivo | **Parcialmente mitigado.** Existe `OPENAI_API_KEY_BENCHMARK`, que separa o benchmark. Não há separação por ambiente nem por uso ao vivo × lote |
+| Análise de vídeo competindo com tráfego ao vivo na mesma VM | **Mitigado, não resolvido.** Lane `video_analysis` na tabela `jobs` com janela ociosa (`lib/proctorQueue.js`, migrations 078–079). O `jobRunner` declara que "o app é o próprio worker": segue na mesma VM |
+| Preparação por sessão cria Vector Store e sobe 2 PDFs à OpenAI | **Aberto.** Latência e ponto de falha externo na entrada; em massa, vira gargalo de onboarding |
+| Região única; a prova oral é a mais sensível à distância | **Aberto.** O relay força uma perna longa de rede. Ver a nota de campo sobre a geografia do deploy em `super-ta/.agents/memory/` |
+| Operações em lote do professor seguram conexões HTTP longas | **Parcialmente mitigado.** Existe fila de jobs; as operações de lote com progresso por streaming continuam |
+
+### Segurança
+
+| Risco | Estado verificado |
+|---|---|
+| **Prompt injection indireto** — o vetor mais relevante | **Aberto.** Existe a fronteira de confiança (`lib/agentPreamble.js`), mas nenhum teste sistemático que prove que ela aguenta documento adversarial |
+| Injeção direta na conversa | **Aberto.** Guardrails de prompt e código, sem bateria de red team. Fragilidade comportamental já observada: o entrevistador pode facilitar demais sob insistência |
+| Link de capacidade é a credencial | **Aberto por decisão.** Aceitável no piloto; o login federado é o caminho — **entregue como opcional** para Google (ver frente 3 no roadmap), sem federação além dele |
+| Upload sem antimalware | **Aberto.** Verificado: não há `fileFilter` central nos handlers |
+| LGPD — retenção e auditoria de acesso | **Parcialmente coberto.** Existe GC (`npm run audio:gc`) e auto-acesso; faltam política formal e trilha de auditoria. A fiscalização por vídeo ampliou a coleta |
+| Observabilidade de segurança | **Aberto.** Logs locais ao processo, sem centralização nem alerta; detecção de abuso é reativa |
+
+Cada risco tem meta correspondente em [`METAS.md`](../../../METAS.md) quando foi
+promovido a objetivo:
+
+| Risco | Meta |
+|---|---|
+| Processo único em VM única | **M-07** |
+| Prompt injection direto e indireto | **M-03** |
+| Upload sem antimalware | **M-09** |
+| LGPD — retenção e auditoria | **M-06** |
+| Observabilidade de segurança | **M-04** |
+
+Mudando o estado de qualquer um destes, **confira a meta correspondente** — ela
+pode ter sido alcançada. Os riscos sem meta ao lado seguem como conhecimento,
+sem objetivo declarado.
 
 ## Débitos conhecidos (candidatos naturais de melhoria)
 
