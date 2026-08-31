@@ -605,6 +605,7 @@ router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUp
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.appendOralVideoPart(req.submission.id, key);
+        await db.setObjectSize(key, req.file.buffer.length);   // #349: Range sem baixar p/ medir
         // Gate de vídeo obrigatório: se a submissão estava aguardando o vídeo p/
         // concluir (encerrou antes de o vídeo subir), promove para concluída.
         const promoted = await db.promoteAwaitingVideo(req.submission.id);
