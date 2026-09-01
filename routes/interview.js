@@ -15,6 +15,8 @@
 
 import express from "express";
 import multer from "multer";
+import fs from "node:fs";
+import os from "node:os";
 import { requireSubmissionToken, requireWithinBudget, requireNotFinalized } from "../lib/middleware.js";
 import { sttTranscribe } from "../lib/stt.js";
 import { glossaryForSession } from "../lib/sttGlossary.js";
@@ -61,7 +63,7 @@ import { attachNarratorAudio } from "../lib/narrator.js";
 import { isProviderQuotaError, PROVIDER_QUOTA, PROVIDER_QUOTA_MESSAGE } from "../lib/providerErrors.js";
 import { buildAuditBlock } from "../lib/auditTranscript.js";
 import { runMessageRetranscribeAuto } from "../lib/retranscribe.js";
-import { putAudio, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
+import { putAudio, putAudioFromFile, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import { videoMandatory } from "../lib/proctor.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
 import log from "../lib/logger.js";
@@ -409,10 +411,15 @@ const audioUpload = multer({
 });
 // Vídeo do proctoring (entrevista): gravação contínua cam+mic, bitrate baixo (só
 // revisão humana). Limite generoso para entrevistas longas.
-const videoUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB
-});
+//
+// Em DISCO, não em memória (#357). Este era o último dos três fluxos com
+// memoryStorage — e o de maior volume. Com memoryStorage, cada upload segura o
+// arquivo inteiro na RAM durante toda a transferência (lenta no celular): uma
+// turma encerrando junto multiplica isso pelo número de alunos, numa VM que
+// hospeda o relay de voz no mesmo processo. Foi o que derrubou a produção em
+// 16/08/2026. Em disco a transferência não pesa na RAM, e o arquivo vai ao
+// storage por caminho (putAudioFromFile), sem virar Buffer no caminho.
+const videoUpload = multer({ dest: os.tmpdir(), limits: { fileSize: 200 * 1024 * 1024 } });
 
 // ============================================================================
 // POST /s/:submissionToken/start
@@ -597,20 +604,21 @@ router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload
 router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
     try {
         if (req.work.proctoring_enabled !== true) return res.status(400).json({ error: "proctoring desligado" });
-        if (!req.file || !req.file.buffer?.length) return res.status(400).json({ error: "envie um arquivo" });
+        if (!req.file || !req.file.path) return res.status(400).json({ error: "envie um arquivo" });
         const ext = extFromMimetype(req.file.mimetype) || "webm";
         const key = `proctor-video/${req.submission.submission_token}-${Date.now()}.${ext}`;
-        const r = await putAudio({ key, buffer: req.file.buffer, mimetype: req.file.mimetype });
+        // Do temporário em disco direto ao storage — sem virar Buffer (#357).
+        const r = await putAudioFromFile({ key, filePath: req.file.path, mimetype: req.file.mimetype });
         if (!r.stored) {
             log.error("SUBMISSION", `proctor-video não armazenado submission=${req.submission.submission_token}: ${r.reason}`);
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.appendOralVideoPart(req.submission.id, key);
-        await db.setObjectSize(key, req.file.buffer.length);   // #349: Range sem baixar p/ medir
+        await db.setObjectSize(key, r.byte_size);   // #349: Range sem baixar p/ medir
         // Gate de vídeo obrigatório: se a submissão estava aguardando o vídeo p/
         // concluir (encerrou antes de o vídeo subir), promove para concluída.
         const promoted = await db.promoteAwaitingVideo(req.submission.id);
-        log.info("SUBMISSION", `proctor-video armazenado submission=${req.submission.submission_token} key=${key} bytes=${req.file.buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
+        log.info("SUBMISSION", `proctor-video armazenado submission=${req.submission.submission_token} key=${key} bytes=${r.byte_size}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
         // Análise de vídeo AUTOMÁTICA (#210): dispara em background ao chegar o vídeo
         // (não espera o professor rodar "Avaliar entrevistas"). O lote segue como
         // backstop idempotente.
@@ -619,6 +627,8 @@ router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUp
     } catch (err) {
         log.error("SUBMISSION", `proctor-video failed: ${err.message}`);
         res.status(500).json({ error: "falha no upload do vídeo", detail: err.message });
+    } finally {
+        if (req.file && req.file.path) fs.promises.unlink(req.file.path).catch(() => {});
     }
 });
 

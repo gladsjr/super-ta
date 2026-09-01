@@ -18,7 +18,7 @@ import * as db from "../lib/db.js";
 import { wouldResume } from "../lib/resumeGate.js";
 import { openai, clientForWork, apiKeyForWork } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
-import { putAudio, extFromMimetype } from "../lib/audioStore.js";
+import { putAudioFromFile, extFromMimetype } from "../lib/audioStore.js";
 import { serveVideo } from "../lib/serveVideo.js";
 import { ensureConsolidatedVideo } from "../lib/videoConsolidate.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
@@ -1160,19 +1160,21 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUploa
         // preservados. Antes usava chave fixa por token → a retomada sobrescrevia
         // o segmento anterior e o professor só via a última gravação.
         const key = `oral-video/${req.submission.submission_token}-${Date.now()}.${ext}`;
-        const buffer = await fs.promises.readFile(req.file.path); // do temporário em disco
-        const r = await putAudio({ key, buffer, mimetype: req.file.mimetype });
+        // Do temporário em disco direto ao storage (#357): antes o arquivo era
+        // lido inteiro para um Buffer aqui, o que desfazia o ganho do multer
+        // em disco logo na linha seguinte.
+        const r = await putAudioFromFile({ key, filePath: req.file.path, mimetype: req.file.mimetype });
         if (!r.stored) {
             log.error("ORAL", `vídeo não armazenado submission=${req.submission.submission_token}: ${r.reason}`);
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.appendOralVideoPart(req.submission.id, key);
-        await db.setObjectSize(key, buffer.length);   // #349: Range sem baixar p/ medir
+        await db.setObjectSize(key, r.byte_size);   // #349: Range sem baixar p/ medir
         // Gate de vídeo obrigatório: a conclusão da prova é marcada no encerramento
         // da sessão de voz, ANTES do vídeo subir. Se ficou 'aguardando vídeo',
         // promove para concluída agora que o segmento chegou.
         const promoted = await db.promoteAwaitingVideo(req.submission.id);
-        log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
+        log.info("ORAL", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${r.byte_size}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
         // Análise de vídeo (proctoring) AUTOMÁTICA (#209): entra na FILA GLOBAL
         // (#262), sem bloquear a resposta (o aluno já encerrou). Analisa TODAS as
         // partes atuais; se uma retomada chegar depois, o novo upload re-enfileira
