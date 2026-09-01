@@ -99,7 +99,24 @@ function toAnchor(raw) {
     if (!Number.isFinite(s)) return 0;
     return ANCHORS.reduce((best, a) => (Math.abs(a - s) < Math.abs(best - s) ? a : best), 0);
 }
-function gradesFromReport(report, questions) {
+// Sessão INTERROMPIDA (#362): a pergunta que nunca chegou a ser feita não pode
+// valer zero nem sumir da conta.
+//
+// Antes ela sumia: o avaliador não a inclui em `per_question`, e o cálculo
+// caminhava só sobre as presentes. A média até saía certa — `weightedFinal`
+// ignora quem não tem nota —, mas de forma INVISÍVEL: o professor via uma prova
+// de 3 questões onde o aluno tinha 4 sorteadas, sem nada dizendo o que houve.
+// Numa nota que vai para o histórico do aluno, "parece certo" não basta.
+//
+// Agora a questão não realizada entra na lista com `score: null` e
+// `not_asked: true`. Não puxa a média (é o mesmo comportamento de antes) e
+// aparece no painel como o que é: neutralizada porque não foi perguntada.
+//
+// A distinção que importa: pergunta FEITA e não respondida continua sendo
+// avaliada (o aluno a ouviu e não soube responder — isso é desempenho). Só a
+// que nunca saiu da boca do examinador é neutralizada. Quem faz essa separação
+// é o avaliador, que leu a transcrição: o que ele não pontuou, não aconteceu.
+export function gradesFromReport(report, questions) {
     const pq = report && Array.isArray(report.per_question) ? report.per_question : [];
     if (!pq.length) return null;
     const wById = {};
@@ -108,7 +125,23 @@ function gradesFromReport(report, questions) {
         id: q.id, name: q.question, weight: wById[q.id] != null ? wById[q.id] : 1,
         score: toAnchor(q.score), justification: q.comment || "",
     }));
-    return { criteria, final: weightedFinal(criteria), computed_at: new Date().toISOString() };
+    const avaliadas = new Set(pq.map(q => q.id));
+    const naoRealizadas = (questions || []).filter(q => !avaliadas.has(q.id));
+    for (const q of naoRealizadas) {
+        criteria.push({
+            id: q.id, name: q.question, weight: wById[q.id] != null ? wById[q.id] : 1,
+            score: null, not_asked: true,
+            justification: "Não perguntada — a sessão foi interrompida antes. Neutralizada: não entra na média.",
+        });
+    }
+    return {
+        criteria,
+        final: weightedFinal(criteria),
+        // O painel e as exportações leem daqui para dizer "avaliada parcialmente"
+        // sem precisar recontar nada.
+        partial: naoRealizadas.length > 0 ? { not_asked: naoRealizadas.length, scored: pq.length } : null,
+        computed_at: new Date().toISOString(),
+    };
 }
 // Após avaliar: preenche a NOTA como default (= média ponderada da rubrica), sem
 // sobrescrever ajuste já feito pelo professor. Os alertas de proctoring NÃO mexem
@@ -177,6 +210,9 @@ router.get("/w/:workToken/oral/info", requireWorkToken, requireOral, async (req,
                 oral_student_turns: Number(s.oral_student_turns) || 0,
                 has_oral_eval: !!s.has_oral_eval,
                 grade: s.grade_final ?? null,
+                // #362: nº de questões neutralizadas por não terem sido feitas.
+                // > 0 significa nota apurada sobre uma prova INCOMPLETA.
+                grade_not_asked: Number(s.grade_not_asked) || 0,
                 devolutiva_published: !!s.evaluation_published_at,
                 grade_published: !!s.grade_published_at,
                 has_oral_proctor: !!s.has_oral_proctor,
