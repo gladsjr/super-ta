@@ -193,8 +193,41 @@
         // #260: a gravação caiu na sessão anterior e o professor ainda não
         // liberou a retomada — pausa aqui, antes de qualquer setup.
         else if (st.resume_blocked) { blocked = true; showResumeBlocked(); }
+        // Retomada liberada (#356): a tela de queda promete "continuar de onde
+        // parou" e o fluxo mandava refazer o termo de consentimento e o sound
+        // check inteiro. O termo já está aceito no banco — pedir de novo, no
+        // meio de uma avaliação, transforma o consentimento num clique reflexo
+        // para voltar à prova, que é o oposto de consentir. O sound check
+        // recente também não mede nada novo: mesmo equipamento, mesma sala.
+        else if (st.resuming && st.consent_ok) prepararRetomada(st);
       } catch {}
     })();
+
+    // Quanto tempo um sound check continua valendo (#356). Meia hora depois o
+    // aluno pode ter trocado de fone, de sala ou de rede — aí medir de novo é
+    // legítimo. Segundos depois de uma queda de rede, não.
+    const SOUND_CHECK_VALIDO_MS = 30 * 60 * 1000;
+    let retomando = false, pularSoundCheck = false, soundCheckAnterior = null;
+
+    function prepararRetomada(st) {
+      retomando = true;
+      const medidoEm = st.sound_check_at ? Date.parse(st.sound_check_at) : NaN;
+      const fresco = Number.isFinite(medidoEm) && (Date.now() - medidoEm) < SOUND_CHECK_VALIDO_MS;
+      // Só pula o teste se ele PASSOU e é recente. Sound check vermelho continua
+      // bloqueando o início (ADR 0023) — retomar não é atalho para furar gate.
+      pularSoundCheck = fresco && st.sound_check && st.sound_check.state !== 'vermelho';
+      if (pularSoundCheck) soundCheckAnterior = st.sound_check;
+      $('pre').querySelector('p').innerHTML =
+        'Você está <strong>voltando a uma prova que foi interrompida</strong>. O que você já respondeu está salvo — vamos continuar de onde parou.'
+        + (pularSoundCheck
+          ? ' Como o seu teste de som foi feito há pouco, não precisa refazê-lo.'
+          : ' Antes de retomar, vamos conferir rapidamente o som.');
+      // O termo já foi aceito: não se pede duas vezes.
+      $('consent-text').style.display = 'none';
+      $('pre').querySelector('.accept').style.display = 'none';
+      $('start-btn').textContent = 'Continuar a prova';
+      $('start-btn').disabled = false;
+    }
 
     // Tela de PAUSA pós-queda (#260): sem acusação — é infraestrutura, não
     // conduta. O professor libera (ou avalia o que já foi gravado).
@@ -287,7 +320,13 @@
         ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Sua fala, retranscrita com mais fidelidade</summary>`
           + `<p class="sub" style="text-align:left;margin:6px 0">A transcrição acima foi feita ao vivo e pode ter picotado a sua fala. Esta versão foi refeita do áudio contínuo, depois da prova, e é a que o professor também recebe na avaliação.</p>`
           + `<div class="card" style="text-align:left;max-height:280px;overflow:auto;white-space:pre-wrap">${esc(audit.text)}</div></details>`
-        : `<p class="sub" style="text-align:left;margin-top:10px">Esta transcrição foi feita <strong>ao vivo</strong> e pode conter erros pontuais. Ela será refinada automaticamente em alguns minutos — recarregue a página para ver a versão revisada, que é a que o professor recebe na avaliação.</p>`;
+        // Enquanto a retranscrição não chega, o BOX continua na tela, com o
+        // estado dito (#363). Antes ele simplesmente não existia e no lugar
+        // ficava um parágrafo solto: o aluno via a ausência de uma seção, não
+        // uma seção esperando conteúdo — e quem já tinha visto a versão
+        // completa em outra prova estranhava a falta.
+        : `<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:600">Sua fala, retranscrita com mais fidelidade <span class="sub" style="font-weight:400">— em andamento</span></summary>`
+          + `<p class="sub" style="text-align:left;margin:6px 0">A transcrição acima foi feita <strong>ao vivo</strong> e pode conter erros pontuais. Uma versão refeita do áudio contínuo está sendo preparada — costuma levar alguns minutos. <strong>Recarregue a página</strong> para vê-la. É a mesma versão que o professor recebe na avaliação.</p></details>`;
       el.innerHTML = `<h3 style="text-align:center">Transcrição da prova</h3><div class="card" style="text-align:left;max-height:320px;overflow:auto">${note}${rows}</div>${auditBlock}`;
     }
 
@@ -401,7 +440,16 @@
       pickAndShowPoses();
       connTest();       // conexão (em segundo plano)
       startNoiseMeter(); // silêncio: medidor contínuo, já na página 1
-      initCalibration(); // captação da fala (se o professor configurou)
+      // Retomada com teste de som recente (#356): não refaz a captação da fala.
+      // A verificação de POSIÇÃO continua — ela depende de onde o aluno está
+      // agora, não de onde estava antes da queda.
+      if (pularSoundCheck) {
+        // Herda o veredito da medição anterior em vez de deixar o gate no
+        // estado inicial: sem isto o "Continuar" barraria por teste pendente,
+        // e o aluno ficaria preso justamente na tela que queríamos poupar.
+        soundCheckState = soundCheckAnterior;
+        soundCheckPending = false;
+      } else initCalibration();
     }
     // Página 2: liga a câmera no preview e começa a verificação CONTÍNUA de
     // posição. Com posição ok (e silêncio, medido desde a página 1), a prova

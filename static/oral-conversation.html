@@ -204,8 +204,23 @@
   // Retranscrição de auditoria (#289): só a fala do ALUNO (o áudio contínuo do
   // tee não contém a voz do examinador, que toca no fone dele).
   function renderFinalTranscript(ft) {
-    if (!ft || (!ft.text && !ft.segments)) return;
-    document.getElementById('final-transcript-box').style.display = '';
+    const box = document.getElementById('final-transcript-box');
+    // Sem retranscrição, o box some INTEIRO — e o professor não tem como saber
+    // se ela está a caminho, se falhou, ou se este trabalho simplesmente não a
+    // tem (#363). Ele abre a avaliação, não encontra o bloco, e a ausência não
+    // diz nada. Melhor a seção existir dizendo o estado.
+    if (!ft || (!ft.text && !ft.segments)) {
+      box.style.display = '';
+      box.open = false;
+      document.getElementById('ft-meta').textContent = '— em andamento';
+      document.getElementById('final-transcript').innerHTML =
+        '<p class="hint">A retranscrição do áudio contínuo entra numa fila e roda na janela ociosa do servidor '
+        + '(<a href="https://github.com/gladsjr/super-ta/blob/main/docs/decisoes/0022-jobs-no-banco-janela-ociosa.md" target="_blank">ADR 0022</a>), '
+        + 'então costuma levar alguns minutos depois do fim da sessão. Recarregue a página para ver quando chegar. '
+        + 'A avaliação não depende dela: a transcrição ao vivo, acima, é a fonte primária.</p>';
+      return;
+    }
+    box.style.display = '';
     const dur = ft.tee?.duration_s ? ` · ${Math.round(ft.tee.duration_s / 60)} min de fala` : '';
     // Monitor de captação (#287/corte 4): íntegra exige 0 suspeitos E estrutura
     // compatível (#312 — trechos ≥ respostas do transcript ao vivo).

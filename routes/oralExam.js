@@ -916,18 +916,44 @@ router.get("/s/:submissionToken/oral/status", requireSubmissionToken, async (req
     if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
     const done = !!req.submission.completion_reason && !req.submission.is_test;
     let resumeBlocked = false;
+    let temSessaoAnterior = false;
     if (!done && !req.submission.is_test) {
         try {
             const prior = (await db.getOralTranscript(req.submission.id)) || [];
             const speechEvents = await db.getStudentSpeechEvents(req.submission.id).catch(() => 0);
-            resumeBlocked = wouldResume({ isTest: false, priorTranscript: prior, speechEvents })
-                && !(await db.hasResumeAllowance(req.submission.id));
+            temSessaoAnterior = wouldResume({ isTest: false, priorTranscript: prior, speechEvents });
+            resumeBlocked = temSessaoAnterior && !(await db.hasResumeAllowance(req.submission.id));
         } catch {}
     }
-    // completed: tentativa concluída, independente de is_test — o teste não
-    // "fecha" (refazível de propósito), mas a página usa isto p/ cair na
-    // REVISÃO como o aluno, com "Refazer o teste" explícito (#340).
-    res.json({ done, is_test: !!req.submission.is_test, completed: !!req.submission.completion_reason, resume_blocked: resumeBlocked });
+    // Retomada depois de uma queda (#356): a tela promete "continuar de onde
+    // parou" e o aluno era mandado refazer consentimento e sound check.
+    //
+    // Os dois estados JÁ existem no banco — só não chegavam à página, que sem
+    // eles não tinha como decidir e sempre entrava pelo começo. Aqui a decisão
+    // continua sendo do cliente; o servidor só conta o que sabe.
+    const detail = await db.getOralSubmissionDetail(req.submission.id).catch(() => null);
+    const calib = detail?.oral_calibration_json || null;
+    res.json({
+        done, is_test: !!req.submission.is_test,
+        // completed: tentativa concluída, independente de is_test — o teste não
+        // "fecha" (refazível de propósito), mas a página usa isto p/ cair na
+        // REVISÃO como o aluno, com "Refazer o teste" explícito (#340).
+        completed: !!req.submission.completion_reason,
+        resume_blocked: resumeBlocked,
+        // Consentimento: a comparação de VERSÃO é feita aqui, não na página —
+        // termo novo é outro termo, e o aceite anterior não vale para ele.
+        consent_ok: req.submission.consent_version === CONSENT_VERSION,
+        // A sessão anterior existiu? É o que distingue "primeira entrada" de
+        // "voltando depois de uma queda" — e só na segunda faz sentido pular
+        // gates já cumpridos.
+        resuming: temSessaoAnterior,
+        // Sound check: o veredito da ESCADA (ADR 0023) e QUANDO foi medido.
+        // Refazer o teste segundos depois de uma queda de rede não mede nada
+        // novo (mesmo equipamento, mesma sala); meia hora depois já pode ser
+        // outra história. Quem decide a janela é o cliente, com o carimbo daqui.
+        sound_check: calib ? ladderState(calib) : null,
+        sound_check_at: calib?.updated_at || calib?.echo?.at || null,
+    });
 });
 
 // --- Calibração de fala (pré-teste de captação, ANTES da sessão de voz) ---
