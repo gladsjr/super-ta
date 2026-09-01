@@ -60,6 +60,49 @@ abaixo continua valendo:
   legível ("cancelada/interrompida pelo admin …") — nunca some em silêncio, e o
   professor recupera com o Reprocessar.
 
+## Video ingest (#357)
+
+The mirror image of delivery: **receiving** a recording must never load it into
+memory either. The path from the browser to the object store has two places where
+the bytes can pile up, and both had failed.
+
+1. **multer.** The message interview used `memoryStorage` with a 200 MB cap — the
+   last of the three flows to do so, and the one with the most volume (145
+   submissions against the oral exam's 74, with a 52-minute recording already on
+   record). With `memoryStorage`, each upload holds the whole file in RAM for the
+   entire transfer, which on mobile is slow; a class finishing together multiplies
+   that by the number of students. All three flows now use `dest: os.tmpdir()`.
+
+2. **The read right after multer.** The oral exam and the simplified interview
+   already wrote to disk, then undid it on the next line: `readFile(req.file.path)`
+   into a Buffer, because `putAudio` only accepted bytes. `putAudioFromFile({ key,
+   filePath })` closes this — it hashes with a stream, takes the size from `stat`,
+   and hands the path to `uploadFromFilename` (the Replit SDK's; the local backend
+   mirrors it with `copyFile`). The bytes never exist all at once in the process.
+
+The professor-side consolidation (`lib/videoConsolidate.js`) followed the same rule:
+ffmpeg already writes to disk, so `buildConsolidatedVideoFile` returns the **path**
+and the caller uploads by path and deletes it. Ownership is explicit — only the
+success path transfers the output file to the caller.
+
+`objectExists` now returns `true | false | **null**`, the last meaning "could not
+tell". The distinction matters because the caller does something expensive when the
+answer is "no": returning `false` on a storage failure turned instability into a
+full re-download plus ffmpeg run. On `null` we serve the raw part instead.
+
+**Over the size cap.** There was no `MulterError` handling and no Express error
+handler anywhere in the repo, so an oversized file became a 500 HTML page. The
+client read that as "didn't work" and offered the only escape it knew — reload the
+page — which is the worst possible advice: the recording lives **only in the
+student's tab**, so reloading destroys the very video being sent. `lib/uploadErrors.js`
+wraps the multer middleware and answers `413` with JSON pointing at the real way out
+(the professor can waive the video). Clients stop retrying on 4xx — the file is the
+same size next time — and keep retrying genuine network failures.
+
+`tests/video-upload-disco.test.mjs` asserts the invariants against the route
+sources, because this defect survived for months by living in one of the three
+files and not the other two.
+
 ## Video delivery (#349)
 
 Serving a recording must **never** load the object into memory. A 60-minute

@@ -96,6 +96,31 @@ test("nenhuma rota de vídeo lê o arquivo inteiro para um Buffer antes de subir
     }
 });
 
+test("objectExists distingue existe, não existe e não sei", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oratia-357-"));
+    process.env.AUDIO_STORE_LOCAL_DIR = dir;
+    const store = await import("../lib/audioStore.js");
+    const origem = path.join(dir, "x.webm");
+    fs.writeFileSync(origem, crypto.randomBytes(32));
+    await store.putAudioFromFile({ key: "oral-video/existe.webm", filePath: origem });
+
+    assert.equal(await store.objectExists("oral-video/existe.webm"), true);
+    assert.equal(await store.objectExists("oral-video/nao-existe.webm"), false,
+        "ausência confirmada tem que ser false — é o que autoriza remontar");
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a consolidação não remonta o vídeo quando o storage não respondeu", () => {
+    // M6: objectExists devolvia false em QUALQUER falha, e o caller lia isso
+    // como "não existe" — remontando o vídeo inteiro (baixar todas as partes +
+    // ffmpeg) justamente quando o storage estava instável.
+    const txt = fonte("lib/videoConsolidate.js");
+    assert.ok(/existe === null/.test(txt),
+        "videoConsolidate precisa tratar o indeterminado de objectExists (#357)");
+    assert.ok(!/readFile\(out\)/.test(txt),
+        "o consolidado voltou a ser lido inteiro para a memória (#357)");
+});
+
 test("a SDK do Replit oferece uploadFromFilename", () => {
     // A correção inteira depende disto. Se a SDK remover o método, o adaptador
     // quebra em produção e em lugar nenhum antes — este teste é o alarme.
