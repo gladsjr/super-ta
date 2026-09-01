@@ -22,13 +22,14 @@ import { wouldResume } from "../lib/resumeGate.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
 import { clientForWork } from "../lib/openaiClient.js";
 import { prepBuilderAgent } from "../lib/agents.js";
-import { putAudio, extFromMimetype } from "../lib/audioStore.js";
+import { putAudioFromFile, extFromMimetype } from "../lib/audioStore.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp, soundCheckPending, soundCheckProgress, SC_SCRIPTS, SCRIPT_LEAK_MIN, scriptLeakMatches } from "../lib/soundCheck.js";
 import { synthesizeSpeech } from "../lib/audio.js";
 import { TTS_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
 import { isProviderQuotaError, mensagemParaOAluno } from "../lib/providerErrors.js";
+import { comErroTratado } from "../lib/uploadErrors.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -360,7 +361,7 @@ router.post("/s/:submissionToken/live/echo-check", requireSubmissionToken, requi
 // OpenAI). Multi-parte: original + cada retomada, chave única por segmento.
 // Reusa as colunas oral_video_parts/oral_proctor_json — o painel e a análise de
 // proctoring do professor (routes/work.js) já operam sobre elas.
-router.post("/s/:submissionToken/live/video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
+router.post("/s/:submissionToken/live/video", requireSubmissionToken, comErroTratado(videoUpload.single("file"), "LIVE"), async (req, res) => {
     try {
         if (req.work.kind !== "interview" || req.work.interview_variant !== "realtime") {
             return res.status(400).json({ error: "este trabalho não é uma entrevista em tempo real" });
@@ -368,18 +369,20 @@ router.post("/s/:submissionToken/live/video", requireSubmissionToken, videoUploa
         if (!req.file) return res.status(400).json({ error: "file required" });
         const ext = extFromMimetype(req.file.mimetype);
         const key = `live-video/${req.submission.submission_token}-${Date.now()}.${ext}`;
-        const buffer = await fs.promises.readFile(req.file.path); // do temporário em disco
-        const r = await putAudio({ key, buffer, mimetype: req.file.mimetype });
+        // Do temporário em disco direto ao storage (#357): antes o arquivo era
+        // lido inteiro para um Buffer aqui, o que desfazia o ganho do multer
+        // em disco logo na linha seguinte.
+        const r = await putAudioFromFile({ key, filePath: req.file.path, mimetype: req.file.mimetype });
         if (!r.stored) {
             log.error("LIVE", `vídeo não armazenado submission=${req.submission.submission_token}: ${r.reason}`);
             return res.status(502).json({ error: "falha ao armazenar o vídeo", detail: r.reason });
         }
         await db.appendOralVideoPart(req.submission.id, key);
-        await db.setObjectSize(key, buffer.length);   // #349: Range sem baixar p/ medir
+        await db.setObjectSize(key, r.byte_size);   // #349: Range sem baixar p/ medir
         // Gate de vídeo obrigatório: promove a submissão que aguardava vídeo p/
         // concluir (o vídeo sobe após o encerramento da sessão de voz).
         const promoted = await db.promoteAwaitingVideo(req.submission.id);
-        log.info("LIVE", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${buffer.length}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
+        log.info("LIVE", `segmento de vídeo armazenado submission=${req.submission.submission_token} key=${key} bytes=${r.byte_size}${promoted ? " (conclui: aguardava vídeo)" : ""}`);
         // Análise de vídeo AUTOMÁTICA (#210): dispara em background ao chegar o vídeo.
         runProctorAuto(req.submission.id, req.submission.submission_token);
         res.json({ ok: true });
