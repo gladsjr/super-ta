@@ -28,6 +28,7 @@ import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, pa
 import { synthesizeSpeech } from "../lib/audio.js";
 import { TTS_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
+import { isProviderQuotaError, mensagemParaOAluno } from "../lib/providerErrors.js";
 import { comErroTratado } from "../lib/uploadErrors.js";
 import log from "../lib/logger.js";
 
@@ -183,14 +184,19 @@ router.post("/s/:submissionToken/live/upload", requireSubmissionToken, requireLi
                 log.info("LIVE_PREP", `done submission=${token} questions=${prep.plan?.questions?.length}`);
             } catch (err) {
                 log.error("LIVE_PREP", `failed submission=${token}: ${err.message}`);
-                PREPARING.set(submissionId, { error: err.message });
+                // O `error` daqui vai PARA A TELA DO ALUNO pelo /live/prep-status.
+                // Guardar err.message cru entregava a ele texto técnico do
+                // provedor (#358) — que não orienta ninguém e ainda soa como
+                // defeito do arquivo que ele acabou de enviar.
+                PREPARING.set(submissionId, { error: mensagemParaOAluno(err) });
             }
         })();
 
         res.status(202).json({ ok: true, preparing: true });
     } catch (err) {
         log.error("LIVE", `upload failed submission=${token}: ${err.message}`);
-        res.status(500).json({ error: "falha no envio do trabalho", detail: err.message });
+        res.status(isProviderQuotaError(err) ? 503 : 500)
+           .json({ error: "falha no envio do trabalho", detail: mensagemParaOAluno(err) });
     }
 });
 

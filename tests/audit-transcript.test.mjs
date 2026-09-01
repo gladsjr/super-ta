@@ -51,9 +51,15 @@ test("buildAuditBlock", async (t) => {
         ] } });
         assert.equal(a.mode, "answers");
         const lines = a.text.split("\n");
-        assert.equal(lines.length, 2);
+        // A resposta que falhou era OMITIDA aqui, e o bloco saía com cara de
+        // completo (#359). Como o prompt manda confiar nele como fonte de maior
+        // fidelidade, a ausência era lida como "o aluno não disse nada" — e
+        // virava nota. Agora a lacuna aparece marcada e é contada.
+        assert.equal(lines.length, 3);
         assert.equal(lines[0], "[turno 0] primeira resposta");
         assert.equal(lines[1], "[turno 1 (intervenção)] réplica");
+        assert.match(lines[2], /^\[turno 2\] \(esta resposta não pôde ser retranscrita/);
+        assert.equal(a.lacunas, 1);
     });
     await t.test("humanLabels (#310): 1-based p/ gente; intro sem turno vira 'abertura'", () => {
         const a = buildAuditBlock({ final: { mode: "answers", text: "x", answers: [

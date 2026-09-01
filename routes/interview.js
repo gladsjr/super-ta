@@ -70,6 +70,13 @@ import { comErroTratado } from "../lib/uploadErrors.js";
 import log from "../lib/logger.js";
 import { generateStudentAnswer, STUDENT_PROFILES } from "../lib/studentSimulator.js";
 
+// Falhas SEGUIDAS do super-orquestrador antes de parar de pedir repetição
+// (#358). O fallback de erro é `ask_repeat`, que não conta turno: sem um teto
+// próprio, uma falha persistente vira um "pode repetir?" infinito, porque o cap
+// de turnos nunca chega a disparar. Três é folgado para um soluço transitório e
+// curto o bastante para o aluno não ficar preso.
+const MAX_ORCHESTRATOR_FAILS = 3;
+
 // Guardrails de turno do super-orquestrador. Antes fixos (30/5); agora derivam
 // do número de perguntas planejadas (works.question_count, materializado no
 // plano da sessão). Cap duro força finalize automático independentemente do que
@@ -162,7 +169,12 @@ async function archiveStudentAudio({ submissionId, submissionToken, buffer, mime
         const key = audioKeyFor(submissionToken, audioIdx, ext);
         const result = await putAudio({ key, buffer, mimetype });
         if (!result.stored) {
-            log.info("AUDIO_STORE", `put no-op submission=${submissionToken} idx=${audioIdx} reason=${result.reason}`);
+            // ERRO, não info (#359). O áudio do aluno é registro de uma
+            // avaliação: perdê-lo não é rotina. E como o artefato só é gravado
+            // quando stored=true, a perda ficava indistinguível de "este
+            // trabalho era modo texto" — quem for auditar depois não tem como
+            // saber que existiu fala. O nível certo é o que aparece na busca.
+            log.error("AUDIO_STORE", `ÁUDIO DO ALUNO PERDIDO submission=${submissionToken} idx=${audioIdx} turno=${turnIndex ?? "?"} bytes=${buffer.length} reason=${result.reason}`);
             return null;
         }
         await db.recordStudentAudioArtifact({
@@ -1128,6 +1140,13 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
         } catch (err) {
             log.error("CHAT", `STT failed: ${err.message}`);
             dedupAbort();
+            // Duas classes de recado, porque as saídas são opostas (#358):
+            // "não entendi o áudio" pede que o aluno REGRAVE; falta de saldo no
+            // provedor não melhora com regravação nenhuma — e mandá-lo tentar
+            // de novo o faz concluir que o problema é o microfone dele.
+            if (isProviderQuotaError(err)) {
+                return res.status(503).json({ error: PROVIDER_QUOTA, detail: PROVIDER_QUOTA_MESSAGE });
+            }
             return res.status(400).json({ error: "transcription_failed", detail: "Não consegui entender o áudio. Tente gravar de novo." });
         }
     } else {
@@ -1633,8 +1652,41 @@ router.post("/s/:submissionToken/chat", requireSubmissionToken, requireNotFinali
             } : null,
             onMessageReady: (useSSE && !hardCapArmed) ? onMessageReady : null,
         }));
+        // A série é CONSECUTIVA (#358): um soluço isolado no meio de uma
+        // entrevista longa não pode somar com outro vinte turnos depois e
+        // derrubar a sessão de quem estava indo bem. Zera SÓ aqui — no caminho
+        // de erro `parsed` também é preenchido (com o fallback), então testá-lo
+        // depois do try/catch não distinguiria sucesso de falha.
+        sess.orchestratorFailStreak = 0;
     } catch (err) {
         log.error("SUPER_ORQ", `agent failed: ${err.message}`);
+        // Falha do provedor NÃO pode virar um turno fingido (#358).
+        //
+        // O fallback abaixo devolve `ask_repeat`, que é indistinguível de uma
+        // intervenção legítima do entrevistador — e, por não marcar
+        // `answered_at`, não conta para o teto de turnos. Com uma falha
+        // PERSISTENTE (saldo acabado, por exemplo), o aluno entra num
+        // "pode repetir?" que nunca termina: cada tentativa falha igual e o cap
+        // nunca dispara, porque nenhum turno é contabilizado.
+        //
+        // Falta de saldo é sempre definitiva do ponto de vista do aluno: sai
+        // agora, com o recado certo. As demais falhas podem ser transitórias,
+        // então o ask_repeat continua valendo — mas contadas, para que a
+        // insistência tenha fim.
+        if (isProviderQuotaError(err)) {
+            dedupAbort();
+            if (useSSE) { try { res.write(`event: error\ndata: ${JSON.stringify({ error: PROVIDER_QUOTA, detail: PROVIDER_QUOTA_MESSAGE })}\n\n`); res.end(); } catch {} return; }
+            return res.status(503).json({ error: PROVIDER_QUOTA, detail: PROVIDER_QUOTA_MESSAGE });
+        }
+        sess.orchestratorFailStreak = (sess.orchestratorFailStreak ?? 0) + 1;
+        if (sess.orchestratorFailStreak >= MAX_ORCHESTRATOR_FAILS) {
+            log.error("SUPER_ORQ", `${sess.orchestratorFailStreak} falhas seguidas — parando de pedir repetição submission=${sess.submissionToken || ""}`);
+            dedupAbort();
+            const detail = "Estamos com um problema no nosso sistema — não é a sua resposta nem a sua conexão. "
+                + "Avise o(a) professor(a) e recarregue esta página mais tarde para continuar de onde parou.";
+            if (useSSE) { try { res.write(`event: error\ndata: ${JSON.stringify({ error: "orchestrator_unavailable", detail })}\n\n`); res.end(); } catch {} return; }
+            return res.status(503).json({ error: "orchestrator_unavailable", detail });
+        }
         if (earlyMessage && earlyKind) {
             // A fala JÁ foi emitida via streaming-parse antes de o JSON falhar
             // (ex.: truncamento após a message). Reconstrói uma ação coerente com
