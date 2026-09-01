@@ -853,14 +853,20 @@
         const form = new FormData(); form.append('file', blob, 'prova.webm');
         // Vídeo obrigatório: retenta (a conclusão só é liberada quando o servidor
         // recebe o vídeo — awaiting_video no backend).
-        let ok = false;
-        for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
-          try { const r = await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form }); ok = r.ok; } catch {}
-          if (!ok && attempt < 3) await new Promise(res => setTimeout(res, 800 * attempt));
+        let ok = false, recusa = null;
+        for (let attempt = 1; attempt <= 3 && !ok && !recusa; attempt++) {
+          try {
+            const r = await fetch(`/s/${SUB}/oral/video`, { method: 'POST', body: form });
+            ok = r.ok;
+            // 4xx é recusa, não instabilidade: o vídeo acima do teto tem o mesmo
+            // tamanho na tentativa seguinte (#357). Insistir só atrasa o aluno.
+            if (!ok && r.status >= 400 && r.status < 500) recusa = await r.json().catch(() => null);
+          } catch {}
+          if (!ok && !recusa && attempt < 3) await new Promise(res => setTimeout(res, 800 * attempt));
         }
-        note = ok ? 'Vídeo enviado.' : 'O envio do vídeo falhou. Recarregue a página para tentar de novo; se persistir, avise o professor.';
+        note = ok ? 'Vídeo enviado.' : (recusa && recusa.detail) ? recusa.detail : 'O envio do vídeo falhou. NÃO recarregue a página — isso apaga a gravação. Avise o professor: ele pode liberar a sua conclusão sem o vídeo.';
       } catch {
-        note = 'O envio do vídeo falhou. Recarregue a página para tentar de novo; se persistir, avise o professor.';
+        note = 'O envio do vídeo falhou. NÃO recarregue a página — isso apaga a gravação. Avise o professor: ele pode liberar a sua conclusão sem o vídeo.';
       } finally { stopTracks(); }
       if (droppedSession) { showDroppedEnd(note); return; } // queda: explica, não "encerrada" (#343)
       enterPostExam({ uploadNote: note });

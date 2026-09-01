@@ -28,6 +28,7 @@ import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, pa
 import { synthesizeSpeech } from "../lib/audio.js";
 import { TTS_MODEL } from "../lib/config.js";
 import { CONSENT_VERSION } from "../config/consent.js";
+import { comErroTratado } from "../lib/uploadErrors.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -354,7 +355,7 @@ router.post("/s/:submissionToken/live/echo-check", requireSubmissionToken, requi
 // OpenAI). Multi-parte: original + cada retomada, chave única por segmento.
 // Reusa as colunas oral_video_parts/oral_proctor_json — o painel e a análise de
 // proctoring do professor (routes/work.js) já operam sobre elas.
-router.post("/s/:submissionToken/live/video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
+router.post("/s/:submissionToken/live/video", requireSubmissionToken, comErroTratado(videoUpload.single("file"), "LIVE"), async (req, res) => {
     try {
         if (req.work.kind !== "interview" || req.work.interview_variant !== "realtime") {
             return res.status(400).json({ error: "este trabalho não é uma entrevista em tempo real" });

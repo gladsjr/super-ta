@@ -37,6 +37,7 @@ import { questionHasRubric } from "../lib/oralRubric.js";
 import { weightedFinal } from "../lib/rubric.js";
 import { deriveOralDevolutivaNow } from "../lib/oralFeedbackOps.js";
 import { REVIEW_WINDOW_DAYS, reviewWindowState } from "../lib/reviewWindow.js";
+import { comErroTratado } from "../lib/uploadErrors.js";
 import log from "../lib/logger.js";
 
 const MAX_COMMENT_LEN = 2000;
@@ -1151,7 +1152,7 @@ router.post("/s/:submissionToken/oral/consent", requireSubmissionToken, async (r
 });
 
 // Recebe o vídeo gravado da prova e guarda no object storage (não vai à OpenAI).
-router.post("/s/:submissionToken/oral/video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
+router.post("/s/:submissionToken/oral/video", requireSubmissionToken, comErroTratado(videoUpload.single("file"), "ORAL"), async (req, res) => {
     try {
         if (req.work.kind !== "oral_realtime") return res.status(400).json({ error: "não é prova oral" });
         if (!req.file) return res.status(400).json({ error: "file required" });

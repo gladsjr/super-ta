@@ -66,6 +66,7 @@ import { runMessageRetranscribeAuto } from "../lib/retranscribe.js";
 import { putAudio, putAudioFromFile, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
 import { videoMandatory } from "../lib/proctor.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
+import { comErroTratado } from "../lib/uploadErrors.js";
 import log from "../lib/logger.js";
 import { generateStudentAnswer, STUDENT_PROFILES } from "../lib/studentSimulator.js";
 
@@ -601,7 +602,7 @@ router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload
 // Armazena via putAudio (reusa o adaptador de storage) e acumula a chave em
 // submissions.oral_video_key (mesma coluna/parts da prova oral). O proctoring em
 // lote (Fase 4) analisa esse vídeo. Best-effort: falha aqui não quebra a entrevista.
-router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, videoUpload.single("file"), async (req, res) => {
+router.post("/s/:submissionToken/proctor-video", requireSubmissionToken, comErroTratado(videoUpload.single("file"), "SUBMISSION"), async (req, res) => {
     try {
         if (req.work.proctoring_enabled !== true) return res.status(400).json({ error: "proctoring desligado" });
         if (!req.file || !req.file.path) return res.status(400).json({ error: "envie um arquivo" });
