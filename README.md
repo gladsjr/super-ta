@@ -49,7 +49,8 @@ próprio (neste branch) e, aninhado, um clone do tronco principal.
 ├── .env.example                 # modelo da configuração local
 ├── tools/
 │   ├── verificar-prerequisitos.mjs
-│   └── verificar-atualizacao-sdlc.mjs
+│   ├── verificar-atualizacao-sdlc.mjs
+│   └── validar-jornada-ia.mjs      # jornada com IA (gasta API)
 ├── .claude/
 │   ├── settings.json            # hook de atualização no início da sessão
 │   ├── agents/

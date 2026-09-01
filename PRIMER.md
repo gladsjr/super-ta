@@ -119,6 +119,56 @@ tentado, e sua leitura de onde está o problema — na entrega ou no critério.
 Insistir além disso desperdiça a sessão e esconde o caso real: às vezes o
 apontamento é que está calibrado errado, e só o usuário decide isso.
 
+### Os dois modos de falha que o portão pega quase sempre
+
+Levantado das entregas que atravessaram este portão até aqui: **quase todo**
+apontamento de grau MODERADO caiu numa de duas classes, e nenhum deles foi
+divergência de critério. É observação de uma amostra, não lei — e de propósito
+não há log de revisões que a torne auditável depois (ver `oratia-revisao`).
+Vale como heurística de quem submete, **não** como argumento para descartar
+apontamento: quando o revisor sustentar que o critério é o problema, a cláusula
+de escalonamento acima é que decide.
+
+**1. Afirmei sem verificar.** O artefato diz um número, um caminho, uma
+contagem ou uma causa que ninguém executou. Exemplos reais: "nove sinais" onde o
+documento lista oito; "11 tabelas" onde são dezesseis; um prefixo de
+armazenamento que não existe no código; uma estatística de pico que a fonte não
+traz; e — o mais instrutivo — uma **causa inventada** para um sintoma real, que
+sobreviveria como armadilha registrada se ninguém tivesse ido ao código.
+
+*Antes de submeter:* releia o que escreveu procurando afirmação factual, e
+pergunte de cada uma "de qual comando isso saiu?". Não tendo resposta, execute
+ou marque como não verificado.
+
+**2. Propaguei pela metade.** O fato foi corrigido num lugar e ficou velho em
+outro. Isso é pior que não corrigir: o artefato passa a contradizer-se, e um
+cabeçalho pode até garantir que a correção foi feita. Aconteceu com uma
+contagem trocada em uma de três ocorrências, com uma regra ampliada numa linha
+da matriz e não na vizinha, e com uma afirmação corrigida em dois de três
+arquivos.
+
+*Antes de submeter:* para cada fato que você mudou, pergunte **qual é o fato** e
+**em quantos lugares ele está afirmado** — e procure por aí.
+
+E cuidado com a armadilha desta varredura, que já custou três rodadas seguidas
+numa entrega desta sessão: **o "valor antigo" não é a string que você editou.**
+Grepar `três turnos` acha onde você escreveu isso; não acha `por transitividade`
+nem `só isso prova`, que afirmam o **mesmo critério** com outras palavras. A
+correção entra onde o código está e para antes dos artefatos que declaram o
+contrato dele — manifesto, roteiro, skill. Liste os artefatos que afirmam o fato
+**antes** de editar o primeiro deles.
+
+E varra os arquivos **versionados** (`git ls-files`), não as pastas que você
+lembra de ter mexido: numa entrega desta sessão a varredura cobriu as skills, os
+artefatos de raiz e o script novo, e deixou `docs/` de fora por cinco rodadas —
+era onde estavam dois dos apontamentos.
+
+Um corolário que vale por si: **não use como fonte um artefato que você acabou
+de marcar como envelhecido.** Se o SDLC diz algo sobre o estado do produto,
+confirme no código antes de propagar — foi assim que uma nuance decisiva se
+perdeu (um mecanismo que existia e era deliberadamente barrado virou "mecanismo
+ausente" numa meta).
+
 ### O revisor não escreve
 
 O `oratia-revisor` **não altera plano nem implementa código** — não tem

@@ -165,10 +165,12 @@ que agrave qualquer um deles exige dizer por quê.
 
 O estado é o que foi verificado no código, não o que o documento afirma.
 
-Sobre a relação com o backlog: em 31/08/2026 havia **16 issues abertas** no
-tronco e nenhuma delas trata destes riscos — conferido por **título**, não por
-leitura integral de cada issue. Antes de abrir issue para qualquer um, procure
-no tracker: a conferência foi superficial de propósito, porque o backlog não tem
+Sobre a relação com o backlog: em 31/08/2026 nenhuma das issues abertas do
+tronco tratava destes riscos — conferido por **título**, não por leitura
+integral. **Não registro aqui quantas eram**: o número muda (entre duas
+contagens no mesmo dia passou de 16 para 20) e viraria afirmação falsa em
+artefato durável. Antes de abrir issue para qualquer um destes riscos, procure no
+tracker: a conferência foi superficial de propósito, porque o backlog não tem
 cópia local e não é daqui que ele se administra.
 
 **Quatro artefatos falam destes riscos, e a divisão é esta:**
@@ -223,6 +225,7 @@ promovido a objetivo:
 | Upload sem antimalware | **M-09** |
 | LGPD — retenção e auditoria | **M-06** |
 | Observabilidade de segurança | **M-04** |
+| Link de capacidade é a credencial | **M-14** |
 
 Mudando o estado de qualquer um destes, **confira a meta correspondente** — ela
 pode ter sido alcançada. Os riscos sem meta ao lado seguem como conhecimento,
@@ -234,7 +237,7 @@ sem objetivo declarado.
   sessão, sem rate-limit, sem expiração) — assimétrico com admin/benchmark.
 - CSP desligada (`helmet({contentSecurityPolicy:false})`) por causa de CDN
   KaTeX/marked + inline scripts — auto-hospedar e religar CSP.
-- Rate-limit só em `/login`.
+- Rate-limit **não cobre o cockpit do professor**. Existem três (`loginLimiter` em `server.js`, `activationLimiter` em `routes/activation.js` e um em `routes/analytics.js`), e nenhum alcança as rotas `/w/:workToken/*` — ver meta M-14.
 - `SESSION_SECRET` com fallback aleatório por boot se ausente.
 - `policy.yaml` usa `realtime_model: gpt-realtime-2.1` mas `pricing.yaml` só
   tem chave `gpt-realtime`; realtime fora do `validatePricingCoverage`.
@@ -251,7 +254,7 @@ sem objetivo declarado.
 | Mudança | Valide com |
 |---|---|
 | Lógica pura (rubrica, parser, upload) | `node tests/unit-*.mjs` e `node --test tests/*.test.mjs` (grátis, rápidos) |
-| Orquestrador / prompts de entrevista | `npm run test:ab-orchestrator` (gasta API) ou E2E texto `node tests/text-e2e-mineracao.mjs` |
+| Orquestrador / prompts de entrevista | `npm run test:ab-orchestrator` (gasta API). **Não use `tests/text-e2e-mineracao.mjs` nem `text-e2e-adversarial.mjs`** — dependem de PDFs num caminho absoluto da máquina do autor e falham em qualquer outra. O portável é `tests/text-e2e-sponsor-ancoragem.mjs`, que gera os PDFs |
 | Cadeia de voz (STT/TTS/SSE) | skill **testar-modo-audio** (`npm run test:audio`, gasta API) |
 | Prova oral / relay / ending | `RUN_ORAL_E2E=1 node tests/oral-e2e/run.mjs` (~US$0,09) e `node tests/oral-ending-e2e.mjs` |
 | Cenários | `node tests/scenario-eval.mjs --max-usd <cap>` (único com teto duro) |

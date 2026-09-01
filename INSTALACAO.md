@@ -223,20 +223,52 @@ para entrar com o usuário semeado.
 
 ---
 
-## O que fica por validar sem a chave da OpenAI
+## Passo 10 — Validar a jornada com IA
 
-Tudo acima funciona sem chave. **Não** foi validado, e depende dela:
+> **Fora do bootstrap, de propósito.** A ordem canônica em `bootstrap:` no
+> `MANIFESTO.yaml` vai de 1 a 9 e termina no ambiente de pé. Este passo **não**
+> entra lá porque consome créditos de API: montar o ambiente não deve custar
+> dinheiro. Ele vive em `validacao_funcional:` no manifesto, que é onde moram as
+> verificações opcionais.
 
-- subir enunciado e trabalho em PDF (indexação em Vector Store);
-- qualquer turno de entrevista, prova oral ou transcrição;
-- avaliação e devolutiva.
+Os nove passos anteriores não tocam a OpenAI. Este valida a cadeia cognitiva:
+indexação na OpenAI, PrepBuilder (análise e plano) e turnos do orquestrador.
+**Não cobre** avaliação, nota nem devolutiva.
 
-Com a chave em mãos, defina `ORATIA_OPENAI_TOKEN` no ambiente ou no `.env`,
-recrie o container (`docker compose up -d --force-recreate app`) e siga o
-fluxo pela interface: `/admin` → criar trabalho → `/w/<token>` para subir o
-enunciado → link de aluno `/s/<token>`. Consome créditos de API.
+**Consome créditos da API** — alguns centavos por execução.
 
----
+```bash
+docker compose exec app node /ferramental/validar-jornada-ia.mjs
+```
+
+**Aprovado exige cinco condições ao mesmo tempo**: nenhum turno falho; e
+`interview_plan`, `work_analysis` e `vector_store_id` observados em
+`submissions.runtime_state_json`, com `current_phase` chegando a
+`interviewing`. **Turno respondido não é critério** — o beat de introdução
+responde sem prep e sem orquestrador.
+
+A prova é lida do banco a cada turno, e acumulada: se o orquestrador finalizar,
+o handler zera o estado (comportamento correto), e uma consulta única no fim
+reprovaria uma execução que funcionou.
+
+O validador gera os próprios PDFs (reusando o gerador do tronco), então roda em
+qualquer máquina. Dois dos três harnesses `tests/text-e2e-*.mjs` do tronco
+dependem de arquivos num caminho absoluto da máquina do autor; o
+`text-e2e-sponsor-ancoragem.mjs` é portável.
+
+**Precisa da chave no container.** O Compose injeta `ORATIA_OPENAI_TOKEN` do
+ambiente de **quem o invoca**, e é aqui que quase todo mundo tropeça: variável
+de sistema definida agora **não chega** a um terminal já aberto, e o container
+sobe com a chave vazia sem reclamar. O validador detecta isso no passo 0 e diz o
+que fazer. Para corrigir, recrie o serviço de um shell que veja a variável:
+
+```bash
+docker compose up -d --force-recreate app
+```
+
+O validador roda em **modo texto**, que é desvio deliberado: a entrevista nasce
+por voz com fiscalização (decisão no código do tronco). Verde aqui **não**
+valida a cadeia de voz — para isso existe a skill `testar-modo-audio`, no tronco.
 
 ## Comandos do dia a dia
 
@@ -276,6 +308,10 @@ dependências somem. Para recomeçar, repita os passos 5 a 8.
 | `403 forbidden_tokenless_work` ao criar trabalho | 9 | Logado como `admin`, que não é o admin global. Use `professor`. |
 | Login com a senha do `.env` não funciona | — | O seed só cria usuário que ainda não existe; mudar a senha depois não a reaplica. Use a senha antiga ou remova o usuário do banco. |
 | Sessão cai a cada restart | 2 | `SESSION_SECRET` vazio: o servidor usa um segredo efêmero e avisa no log. Defina um valor no `.env`. |
-| Qualquer jornada de entrevista falha | — | Chave da OpenAI ausente ou sem crédito. Rode o verificador; investigue com `LOG_LEVEL=debug`. |
+| Qualquer jornada de entrevista falha | 10 | Chave ausente **no container**: o Compose herda o ambiente de quem o invoca, e terminal aberto antes de a variável existir não a vê. `docker compose up -d --force-recreate app` de um shell que a veja. |
+| Enunciado sobe com HTTP 200 mas a entrevista falha depois | 10 | A rota do enunciado responde 200 mesmo quando o upload à OpenAI é recusado — a falha só sai no log. `docker compose logs app \| grep openai-upload`. |
+| `O professor ainda não configurou o entrevistador` | 10 | Falta `POST /w/<token>/interviewer` com uma persona. O validador faz isso no passo 6. |
+| `sessão não iniciada — recarregue a página` | 10 | `/start` vem **antes** do upload do aluno, não depois. |
+| `esta entrevista está em modo áudio — envie uma gravação` | 10 | Entrevista nasce por voz por decisão de produto. Para testar em texto, `POST /w/<token>/interaction` com `{"mode":"text"}`. |
 | Tudo lento no Windows | — | Bind mount atravessando a fronteira Windows↔WSL2 (77x mais lento na escrita). Esperado. Mantenha `node_modules` no volume — nunca no bind mount. |
 | `npm run dev` falha tentando abrir o Docker Desktop | 8 | Não use `npm run dev` dentro do container: o `predev` chama `db:up`, que tenta iniciar o Docker do host. Os passos 5 a 8 fazem o equivalente, separados. |

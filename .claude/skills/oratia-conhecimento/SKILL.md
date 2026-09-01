@@ -239,6 +239,68 @@ conclui que o arquivo não existe. Leia o valor direto, sem `eval`. Precisando
 converter para POSIX de fato, `cygpath -u` existe aqui (`/usr/bin/cygpath`) e
 resolve — mas para testar existência não é necessário.
 
+**O Compose injeta no container o ambiente de QUEM O INVOCA — e chave vazia
+não faz barulho.** Verificado duas vezes, a segunda por eu mesmo cair nela:
+
+- variável de ambiente de **sistema** não chega a shell já aberto. Definindo
+  `ORATIA_OPENAI_TOKEN` agora, a sessão de terminal que já estava aberta segue
+  sem vê-la — e `docker compose up` dali injeta **vazio**;
+- o container sobe saudável, o health check passa, e o primeiro sintoma aparece
+  longe da causa: a rota do enunciado devolve **HTTP 200** mesmo quando o upload
+  à OpenAI é recusado (a falha só sai no log do servidor, como
+  `enunciado openai-upload failed`), e o erro visível vira um 500 no `/start`.
+
+Diagnóstico: `docker compose exec app node -e "console.log(!!process.env.OPENAI_API_KEY)"`.
+Correção: recriar o serviço de um shell que veja a variável —
+`docker compose up -d --force-recreate app`. O validador da jornada checa isso
+no passo 0, justamente para o sintoma não aparecer cinco passos adiante.
+
+**A entrevista nasce por VOZ, com fiscalização, e isso é decisão — não default
+de schema.** `lib/db/works.js#createWork` faz um UPDATE pós-insert:
+`interaction_mode = 'audio', proctoring_enabled = true` quando
+`kind = 'interview'`, com o comentário de que os dois são "FIXOS (o professor
+não configura mais isso)". O default da **coluna** segue `text`, e é por isso
+que consultar `information_schema` engana: ele diz `text` e o trabalho nasce
+`audio`.
+
+Consequência para quem testa: uma jornada em texto exige `POST
+/w/<token>/interaction` com `{"mode":"text"}` **antes** de o aluno subir o
+trabalho. Isso é desvio do produto, aceitável para validar a cadeia cognitiva —
+e verde em texto **não** valida a cadeia de voz.
+
+**A ordem da jornada não é a intuitiva**, e cada passo fora de ordem devolve um
+erro que não diz qual é a ordem certa:
+
+1. `POST /admin/works` — cria o trabalho;
+2. `POST /w/<t>/enunciado` — enunciado em PDF;
+3. `POST /w/<t>/interaction` — modo (só se quiser texto);
+4. `POST /w/<t>/interviewer` — persona em YAML. **Sem isto**, o upload do aluno
+   responde *"O professor ainda não configurou o entrevistador"*;
+5. `POST /w/<t>/submissions` — gera o link do aluno;
+6. `POST /s/<st>/start` — **antes** do upload. Fora de ordem, o upload responde
+   *"sessão não iniciada — recarregue a página"*;
+7. `POST /s/<st>/upload` — trabalho do aluno; é aqui que o PrepBuilder roda;
+8. `POST /s/<st>/chat` — turnos.
+
+**Dois dos três harnesses E2E de texto do tronco não rodam fora da máquina do
+autor** — e o terceiro roda. `tests/text-e2e-mineracao.mjs` e
+`tests/text-e2e-adversarial.mjs` têm um caminho absoluto de outro usuário e
+dependem de PDFs que vivem lá — em qualquer outra máquina falham antes de
+começar. A matriz de validação do `oratia-improve` **recomendava** o primeiro;
+foi corrigida em 31/08/2026 para desaconselhá-lo por nome e apontar o portável.
+
+**`tests/text-e2e-sponsor-ancoragem.mjs`, porém, é portável**: gera os PDFs na
+hora e usa `lib/scenarios/testWorkGen.js#textToPdfBuffer`. Considere-o antes de
+escrever driver novo. O `tools/validar-jornada-ia.mjs` deste workspace existe por
+outro motivo — validar o AMBIENTE, com prova lida do banco — o critério exato é o `const ok` do próprio script, descrito no `MANIFESTO.yaml` — e **reusa** aquele
+mesmo `textToPdfBuffer`, em vez de reimplementá-lo.
+
+**Ferramental do workspace roda dentro do container por `/ferramental`.** O
+compose monta `./tools` ali, só leitura. Um script em `/ferramental` que precise
+de dependência do tronco não a resolve pelo caminho normal — o resolvedor de ESM
+procuraria em `/ferramental/node_modules`, que não existe. A saída é
+`createRequire("/app/")`, que ancora a resolução onde as dependências estão.
+
 **`npm run dev` não funciona dentro do container.** O `predev` chama `db:up`,
 que tenta iniciar o Docker Desktop **do host**. Use os serviços separados.
 

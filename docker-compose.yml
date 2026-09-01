@@ -40,6 +40,15 @@ x-codigo-montado: &codigo-montado
   - type: volume
     source: node-modules-linux
     target: /app/node_modules
+  # Ferramental DESTE workspace, para rodar dentro do container quando precisa
+  # de módulos do tronco e da chave que o Compose injeta — é o caso do validador
+  # da jornada, que usa `lib/scenarios/testWorkGen.js` (geração de PDF) e `pg`
+  # (prova lida do banco). Só leitura: o container consome o ferramental, nunca
+  # o altera.
+  - type: bind
+    source: ./tools
+    target: /ferramental
+    read_only: true
 
 # Ambiente da aplicação. Fonte única: o `.env` da raiz do workspace (ignorado
 # pelo git), a partir do `.env.example`.

@@ -34,7 +34,7 @@
 | Camada | Tecnologia | Observação |
 |---|---|---|
 | Runtime | **Node.js 20 (ESM)** — processo único `node server.js` | Monólito deliberado; sem cluster, sem fila externa |
-| HTTP | **Express 4** + helmet + express-rate-limit | CSP **desligada** (débito); rate-limit só em `/login` |
+| HTTP | **Express 4** + helmet + express-rate-limit | CSP **desligada** (débito); rate-limit em `/login`, ativação e analytics — **nenhum no cockpit do professor** |
 | Frontend | **HTML/JS puro**, uma página por papel, **sem build/framework** | CDN para KaTeX/marked (motivo da CSP off) |
 | Banco | **PostgreSQL 16** (79 migrations SQL forward-only, file-per-change) | Docker Compose em dev; acoplado ao deployment em prod |
 | Sessões | express-session + connect-pg-simple (tabela `app_session`) | Cookie httpOnly, sameSite=lax |
@@ -233,7 +233,7 @@ erDiagram
 2. **Prompt injection: defendido por prompt, não testado.** A fronteira de confiança existe, mas é uma instrução ao modelo — não há camada determinística (ex.: scanner de padrões no texto extraído dos PDFs antes de entrar no contexto) nem **bateria formal de red team** (frente 8 do roadmap). O vetor mais relevante segue sendo o PDF adversarial do aluno tentando manipular avaliador/entrevistador para inflar nota. Diagnóstico interno já mostrou fragilidade comportamental (entrevistador facilita sob insistência).
 3. **CSP desligada** (`helmet({contentSecurityPolicy:false})`) por dependência de CDN (KaTeX/marked) + scripts inline. Remove a rede de proteção contra qualquer XSS que escape do escaping manual. Correção barata: auto-hospedar as libs e religar CSP.
 4. ~~**Sem roles**: todo usuário logado é admin.~~ **CORRIGIDO NO CÓDIGO** (verificado em 31/08/2026): as migrations 055–069 criaram 16 tabelas da camada institucional, com `roles` trazendo quatro papéis (`admin_global`, `admin_unidade`, `professor`, `aluno`), `memberships` e RBAC decidindo de fato — criar trabalho sem unidade exige `admin_global`. A afirmação original valia quando este documento foi escrito e **deixou de valer**.
-5. **Rate-limit só em `/login`**: endpoints de token (inclusive os que geram custo de IA) não têm limitação de taxa própria — abuso de custo e enumeração de token ficam sem freio (o orçamento por trabalho é o único teto).
+5. ~~**Rate-limit só em `/login`**~~ → **CORRIGIDO EM 31/08/2026**: existem três limitadores (`loginLimiter` em `server.js`, `activationLimiter` em `routes/activation.js`, e um em `routes/analytics.js`), mas **nenhum alcança as rotas `/w/:workToken/*`** do cockpit — ver meta M-14. Endpoints de token (inclusive os que geram custo de IA) não têm limitação de taxa própria — abuso de custo e enumeração de token ficam sem freio (o orçamento por trabalho é o único teto).
 6. **Uploads sem verificação antimalware nem `fileFilter` central** (validação de tipo ad-hoc por handler); vídeos de até 300 MB.
 7. **LGPD**: áudio/vídeo de menores potencialmente; há GC de retenção (180 dias) e auto-acesso, mas **falta política formal de retenção/eliminação e trilha de auditoria de acesso**; consentimento existe (termo + gesto "CIENTE"), mas a fiscalização por vídeo amplia a coleta.
 8. **`SESSION_SECRET` com fallback aleatório por boot** se a env faltar — não vaza, mas derruba todas as sessões a cada restart silenciosamente.
@@ -363,7 +363,7 @@ Ver seção seguinte — o princípio é **pirâmide de custo**: tudo que é gr�
 |---|---|---|---|
 | **Unitários** (parser de streaming, rubrica, upload, chunks de áudio, YAML de cenários) | `node tests/unit-*.mjs` · `node --test tests/*.test.mjs` | **Zero** (sem LLM, sem banco) | Sempre; candidatos imediatos a CI |
 | **Smoke local** | subir via skill `oratia-local-deploy` + fluxo mínimo (criar trabalho → upload → 2 turnos) | Centavos | A cada mudança relevante |
-| **E2E texto** | `tests/text-e2e-mineracao.mjs` (princípio "resposta de cabeça") · `text-e2e-adversarial.mjs` (A/B sob pressão do aluno) | Gasta API | Mudanças de prompt/orquestração |
+| **E2E texto** | `tests/text-e2e-sponsor-ancoragem.mjs` — o único **portável** (gera os PDFs). ~~`text-e2e-mineracao.mjs`, `text-e2e-adversarial.mjs`~~: **não rodam fora da máquina do autor** (caminho absoluto), verificado em 31/08/2026 | Gasta API | Mudanças de prompt/orquestração |
 | **E2E áudio** | `npm run test:audio` (Chrome + mic falso + aluno-LLM; salva mp3 p/ auditoria) — skill `testar-modo-audio` | Gasta API | Mudanças na cadeia STT/TTS/SSE |
 | **E2E prova oral** | `RUN_ORAL_E2E=1 node tests/oral-e2e/run.mjs` (~US$0,09) · `oral-ending-e2e.mjs` (a prova TERMINA com fala) | Baixo, opt-in | Mudanças no relay/ending |
 | **Qualidade por juiz-LLM** | `tests/scenario-eval.mjs --max-usd N` (único com **teto duro**) · `npm run test:ab-orchestrator` (forte × rápido, juiz cego) | Gasta API, com cap | Antes de trocar modelo/prompt central |

@@ -89,7 +89,7 @@ layout:
 
   - caminho: tools
     origem: versionada
-    descricao: Ferramental executável desta branch. Só Node puro, sem dependências.
+    descricao: Ferramental executável desta branch. Os verificadores são Node puro, sem dependências. Montado também DENTRO do container em /ferramental (só leitura), porque o validador da jornada precisa de módulos do tronco (`lib/scenarios/testWorkGen.js` e `pg`) e da chave que o Compose injeta.
 
   - caminho: .claude/skills
     origem: versionada
@@ -120,6 +120,10 @@ layout:
   - caminho: super-ta/.audio-store
     origem: gerada
     descricao: Áudio das sessões gravado localmente. Dados de runtime, descartáveis.
+
+  - caminho: super-ta/tmp
+    origem: gerada
+    descricao: Saídas temporárias dentro do clone — os PDFs que o validador da jornada gera, por exemplo. Ignorada pelo .gitignore do TRONCO, então nada daqui suja a árvore do produto. Descartável.
 
 # -------------------------------------------------------------------------
 # PRÉ-REQUISITOS — o que a máquina precisa ter.
@@ -309,9 +313,10 @@ bootstrap:
 # VALIDAÇÃO FUNCIONAL — o que confirma que o ambiente está de pé de verdade,
 # além do health check.
 #
-# `requer_openai: false` marca o que dá para verificar sem a chave. Estes
-# passos foram executados nesta máquina; os que exigem a chave estão marcados
-# `verificado: false` e continuam por confirmar.
+# `requer_openai: false` marca o que dá para verificar sem a chave. Todos os
+# passos abaixo foram executados nesta máquina — inclusive o que exige a chave,
+# desde 31/08/2026. `verificado:` é o campo que carrega essa honestidade: item
+# novo que não pôde ser executado nasce `false` e assim fica até rodar.
 # -------------------------------------------------------------------------
 validacao_funcional:
   - id: health
@@ -346,10 +351,17 @@ validacao_funcional:
     verificado: true
 
   - id: jornada-de-entrevista
-    o_que: Subir enunciado e trabalho em PDF e trocar turnos de entrevista.
-    comando: Pela interface, em /w/<work_token> e depois no link de aluno /s/<token>.
-    esperado: A entrevista avança turno a turno.
+    o_que: Cadeia cognitiva com IA — indexação na OpenAI, PrepBuilder (análise e plano) e turnos do orquestrador. NÃO cobre avaliação, nota nem devolutiva.
+    comando: docker compose exec app node /ferramental/validar-jornada-ia.mjs
+    # Uma linha só, entre aspas: o parser de `tools/verificar-prerequisitos.mjs`
+    # é um subconjunto declarado de YAML e NÃO suporta bloco multi-linha (| ou >).
+    esperado: "APROVADO, que exige as cinco condições juntas: nenhum turno falho; interview_plan, work_analysis e vector_store_id presentes em submissions.runtime_state_json; e current_phase = interviewing. Turno respondido NÃO é critério suficiente — o beat de introdução responde sem prep e sem orquestrador."
     requer_openai: true
-    # Não executado — não havia chave da OpenAI no momento em que este
-    # ambiente foi montado e validado. Consome créditos de API.
-    verificado: false
+    # Executado em 31/08/2026: 5 turnos, os três artefatos da prep no banco e
+    # fase `interviewing`. CONSOME créditos de API — alguns centavos.
+    #
+    # O validador força modo TEXTO, o que é desvio declarado do produto: a
+    # entrevista nasce por voz com fiscalização (decisão em lib/db/works.js).
+    # Verde aqui NÃO valida a cadeia de voz — para isso, a skill
+    # testar-modo-audio, no tronco.
+    verificado: true

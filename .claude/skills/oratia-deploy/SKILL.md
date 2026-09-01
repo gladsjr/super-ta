@@ -3,8 +3,8 @@ name: oratia-deploy
 description: >-
   Sobe o ORATIA em containers e valida que a aplicação responde de verdade:
   banco, aplicação, health check, login real e escrita no banco. Cobre também
-  logs, reinício, recriação após mudar configuração e o que fica por validar sem
-  a chave da OpenAI. Use quando o pedido for subir, rodar, iniciar, reiniciar,
+  logs, reinício, recriação após mudar configuração, a validação da jornada com
+  IA e o que ela não cobre. Use quando o pedido for subir, rodar, iniciar, reiniciar,
   parar ou validar a aplicação — frases como "sobe o oratia", "roda o super-ta",
   "deploy local", "a aplicação não responde", "o container reinicia sozinho",
   "não consigo logar", "está no ar?". NÃO use para preparar a máquina (use
@@ -88,24 +88,42 @@ docker exec superta-db psql -U superta -d superta -tAc "SELECT id, name FROM wor
 > `403 forbidden_tokenless_work`. A mecânica está na skill
 > `oratia-conhecimento`.
 
-## O que NÃO está validado sem a chave da OpenAI
+## Validar a jornada com IA
 
-Diga isto ao usuário em vez de afirmar que "está tudo funcionando":
-
-- upload de enunciado e de trabalho em PDF (indexação em Vector Store);
-- qualquer turno de entrevista, prova oral ou transcrição;
-- avaliação e devolutiva.
-
-Com a chave, defina `ORATIA_OPENAI_TOKEN` no ambiente ou no `.env` e **recrie**
-o container — reiniciar não basta, porque a variável é lida na criação:
+Os passos acima não tocam a OpenAI. Para validar a cadeia cognitiva:
 
 ```bash
-docker compose up -d --force-recreate app
+docker compose exec app node /ferramental/validar-jornada-ia.mjs
 ```
 
-Depois, pela interface: `/admin` → criar trabalho → `/w/<token>` para subir o
-enunciado → link de aluno `/s/<token>`. **Consome créditos de API** — avise o
-usuário antes.
+**Consome créditos de API.**
+
+**Aprovado exige cinco condições ao mesmo tempo**: nenhum turno falho; e
+`interview_plan`, `work_analysis` e `vector_store_id` observados em
+`submissions.runtime_state_json`, com `current_phase` chegando a
+`interviewing`. **Turno respondido não é critério** — o beat de introdução
+responde sem prep e sem orquestrador.
+
+A prova é lida do banco a cada turno, e acumulada: se o orquestrador finalizar,
+o handler zera o estado (comportamento correto), e uma consulta única no fim
+reprovaria uma execução que funcionou.
+
+**A armadilha que pega quase todo mundo**: o Compose injeta
+`ORATIA_OPENAI_TOKEN` do ambiente de **quem o invoca**. Terminal aberto antes de
+a variável existir não a vê, e o container sobe com a chave **vazia** sem
+reclamar — o health check passa, a rota do enunciado devolve 200 mesmo com o
+upload recusado, e o erro só aparece adiante. O validador detecta no passo 0.
+Correção: `docker compose up -d --force-recreate app` de um shell que veja a
+variável.
+
+### O que essa validação NÃO cobre
+
+- **A cadeia de voz.** O validador força modo texto, que é desvio declarado: a
+  entrevista nasce por voz com fiscalização (decisão em `lib/db/works.js`). Para
+  voz, a skill `testar-modo-audio`, no tronco.
+- **Avaliação, nota e devolutiva.** O validador não chama `/finalize` nem o
+  pipeline de avaliação, então a invariante de dupla sanitização da devolutiva
+  fica fora. Continua por validar.
 
 ## Operação
 
@@ -152,5 +170,7 @@ subir:
 - [ ] `/oral/ping` responde `ok`;
 - [ ] login com `professor` devolve sessão e `is_global_admin: true`;
 - [ ] uma escrita real chegou ao banco;
-- [ ] o que depende da OpenAI foi **declarado como não validado**, se não houver
-      chave.
+- [ ] a jornada com IA passou (`validar-jornada-ia.mjs`), ou o que depende da
+      OpenAI foi **declarado como não validado**;
+- [ ] avaliação, nota e devolutiva seguem **fora** do que o validador cobre — não
+      as dê por validadas.

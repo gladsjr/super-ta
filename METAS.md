@@ -244,6 +244,98 @@ O que o documento propõe e **já está entregue** não virou meta — está na 
 - **Frentes relacionadas**: 8.
 - **Estado**: ativa.
 
+### M-10 — A instituição usa o provedor de identidade que já tem
+
+- **Objetivo**: login federado além do Google, para que a instituição não seja
+  obrigada a criar contas locais nem a adotar um provedor que não usa.
+- **Por quê**: o Google OIDC está entregue (`routes/authFederated.js`), e o
+  documento arquitetural pede também Microsoft e Apple — que **não existem**
+  (verificado). Instituição em Microsoft Entra hoje só entra por conta local, e
+  conta local é justamente o que a camada institucional quer eliminar.
+  **O que falta é o handler, não a modelagem**: `lib/tenants.js` filtra os kinds
+  a `local/google/mock` justamente porque `oidc` e `saml` têm "schema pronto,
+  runtime ausente" (issue #149) — anunciar a porta sem o handler tornaria o
+  login impossível ao clicar.
+- **Como se mede**: um usuário de instituição que usa Microsoft Entra entra sem
+  que exista senha local para ele, e o vínculo com a pessoa é o mesmo do fluxo
+  Google — sem duplicar cadastro.
+- **Frentes relacionadas**: 3.
+- **Estado**: ativa.
+
+### M-11 — Cenários deixam de ser experimentais, e vídeo cobre as três modalidades
+
+- **Objetivo**: a modalidade de cenários multi-interação apta a uso real, e a
+  fiscalização por vídeo disponível nas três modalidades — que são
+  `interview`, `oral_realtime` e `scenario` (`works.kind`, migration 031).
+- **Por quê**: o `replit.md` do tronco declara cenários **experimental**, o que
+  na prática os mantém fora do que se oferece a uma turma. E a fiscalização,
+  onde está ligada, é bloqueante por decisão (ADR 0005) — cobertura desigual
+  entre modalidades significa que a escolha da modalidade decide o rigor
+  possível.
+  **A lacuna concreta é `scenario`**: verificado que ele não aparece em
+  `videoMandatory` (`lib/proctor.js`) e que `docs/scenarios.md` não menciona
+  vídeo. Cuidado ao cruzar com a ADR 0005: os "três **fluxos**" dela são
+  entrevista por mensagem, entrevista realtime e prova oral — conjunto diferente
+  das três **modalidades** desta meta. Ler um pelo outro faz a meta parecer
+  alcançada.
+- **Como se mede**: um professor conduz um cenário com turma real sem ressalva
+  de experimental em tela ou documentação; e as três modalidades aceitam ligar
+  fiscalização por vídeo, com o mesmo gate bloqueante.
+- **Frentes relacionadas**: 4.
+- **Estado**: ativa.
+
+### M-12 — A instituição integra turma e nota sem digitar
+
+- **Objetivo**: API que permita a um sistema de gestão educacional ou LMS criar
+  turmas e receber notas.
+- **Por quê**: a camada institucional existe no banco, mas o caminho de entrada
+  é a interface — alguém digita. Numa instituição com muitas turmas, isso é o
+  que impede a adoção, não a falta de recurso pedagógico.
+- **Como se mede**: um sistema externo **cria** uma turma com seus alunos, por
+  API autenticada, sem que ninguém preencha tela. *A leitura de notas já é
+  possível hoje* — `POST /api/analytics/query` com token de análise tem consulta
+  `grade_distribution` sobre `s.grade_final` —, então o alvo real desta meta é a
+  escrita: criar turma, matricular, receber o vínculo.
+- **Frentes relacionadas**: 5.
+- **Estado**: ativa.
+
+### M-13 — O aluno vê a marca da sua instituição
+
+- **Objetivo**: identidade visual por unidade — logo, cores, layout.
+- **Por quê**: **existe base, e ela é por unidade** — a migration 069 cria
+  `tenants` chaveada pela unidade-raiz, com `branding_json` e o comentário
+  explícito de que serve "a marca visual"; há escrita por admin
+  (`routes/tenantsAdmin.js`), leitura (`lib/tenants.js`) e um consumidor em tela
+  (`static/tenant-login.html`, cor de acento). O que **falta** é alcance: a
+  marca aparece na porta de entrada do tenant, não nas telas do aluno e do
+  professor. Para uma instituição que apresenta o sistema como serviço próprio,
+  a marca alheia na tela do aluno é obstáculo de adoção, não detalhe estético.
+- **Como se mede**: alunos de duas unidades distintas veem, na mesma
+  instalação e **nas telas de trabalho** (não só na porta de login), as marcas
+  das respectivas instituições — sem que uma veja a outra. Reusando
+  `tenants.branding_json`, não um mecanismo novo.
+- **Frentes relacionadas**: 6.
+- **Estado**: ativa.
+
+### M-14 — A área do professor é protegida como a do administrador
+
+- **Objetivo**: fechar a assimetria de proteção entre o cockpit do professor e
+  as áreas administrativas.
+- **Por quê**: registrado nos débitos conhecidos e confirmado no código — o
+  cockpit é protegido **só** por capability URL. Verificado: o token vem de
+  `crypto.randomBytes(6)`, ou seja **48 bits**; `requireWorkToken`
+  (`lib/middleware.js`) não consulta sessão; e **nenhum dos três** rate-limiters
+  do servidor alcança o cockpit — `loginLimiter` cobre `POST /login`
+  (`server.js`), `activationLimiter` cobre a ativação (`routes/activation.js`) e
+  há um em `routes/analytics.js`. Quem tem o link é o
+  professor, para todos os efeitos. As áreas de admin exigem sessão; a do
+  professor, não.
+- **Como se mede**: abrir o cockpit exige sessão autenticada com papel na
+  unidade; o link sozinho não dá acesso; e há limite de tentativas por origem.
+  Um link vazado deixa de ser credencial.
+- **Frentes relacionadas**: 8.
+- **Estado**: ativa.
+
 ---
 
 ## Alcançadas — não repropor
@@ -259,7 +351,7 @@ das duas, o roadmap manda — e corrija esta.
 |---|---|---|
 | Modelo institucional (frente 2) — **em grande parte**, com resto a confirmar | Unidades em árvore com flag de turma, 4 papéis, memberships, tenants, convites, pacotes e cotas | **16 tabelas** criadas pelas migrations 055–069 (contadas por `CREATE TABLE`); RBAC decidindo de fato — criar trabalho sem unidade exige `admin_global`. O roadmap registra que falta confirmar o que resta da frente |
 | Benchmark contínuo de modelos (frente 7) | Harness de comparação com resultado portátil | `lib/bench/`, `config/benchmark.yaml`, `npm run bench`, migrations 042–044, ADR 0013 |
-| Login federado (frente 3) — **entregue como opcional**; federação além do Google não | Google OIDC, convivendo com login local e capability URLs | `routes/authFederated.js`, tabelas `auth_providers` e `user_identities`, migration 066. **Microsoft e Apple não existem** — ver C-03 |
+| Login federado (frente 3) — **entregue como opcional**; federação além do Google não | Google OIDC, convivendo com login local e capability URLs | `routes/authFederated.js`, tabelas `auth_providers` e `user_identities`, migration 066. **Microsoft e Apple não existem** — ver meta M-10 |
 | Fila para a análise de vídeo (risco de escala) — **parcial** | Lane `video_analysis` na tabela `jobs`, com claim atômico e janela ociosa | `lib/proctorQueue.js`, migrations 078–079. **Mitigado, não extraído**: o `jobRunner` declara que "o app é o próprio worker" — segue na mesma VM |
 | Chave de API separada por uso — **parcial** | Chave dedicada de benchmark, isolando o gasto | `OPENAI_API_KEY_BENCHMARK`, `lib/bench/adapters/openai.js` (fail-fast, sem fallback). **Não há separação por ambiente** |
 
@@ -271,19 +363,12 @@ não existe no schema, que tem `admin_global`, `admin_unidade`, `professor` e
 
 ## Candidatas — POR DECLARAR
 
-Levantadas do documento arquitetural e das issues, **não confirmadas como
-metas**. Não são critério de revisão enquanto não forem promovidas acima.
+> Nenhuma. Todas as candidatas levantadas do documento arquitetural foram
+> promovidas a meta declarada ou movidas para *Alcançadas*.
 
-| # | Candidata | De onde veio | Falta |
-|---|---|---|---|
-| C-03 | Federação além do Google | Frente 3 (Microsoft, Apple, outros) | confirmar demanda real de instituição |
-| C-04 | Concluir cenários e vídeo nas três modalidades | Frente 4 | escopo do que falta; hoje cenários são declarados experimentais |
-| C-05 | Integração com LMS e sistemas de gestão | Frente 5 | qual LMS, e se há instituição pedindo |
-| C-06 | Identidade visual por unidade | Frente 6 | confirmar prioridade |
-| C-08 | Reduzir a assimetria de proteção do cockpit do professor | Débito conhecido em `oratia-improve`: protegido só por capability URL | confirmar prioridade; definir alvo |
-
-Promover uma candidata é decisão do usuário: mova para *Metas declaradas*,
-preencha `Como se mede` e remova a linha daqui.
+Aparecendo candidata nova, ela entra aqui **sem valer como critério** até o
+usuário a promover — e ganha identificador novo, nunca um aposentado (ver o
+registro de mudanças).
 
 ## Registro de mudanças
 
@@ -294,5 +379,7 @@ contra qual versão julgou.
 |---|---|---|
 | 2026-08-30 | Arquivo criado, sem metas declaradas | O portão de revisão passou a exigir base normativa explícita; as metas não estavam registradas em lugar nenhum |
 | 2026-08-31 | Nove metas declaradas (M-01 a M-09), cinco itens em *Alcançadas*, cinco candidatas | Extraídas do documento arquitetural v1.4 e confrontadas com o estado verificado do código. O que já está pronto foi separado para não ser reproposto. M-07, M-08 e M-09 promovidas de candidatas por decisão do usuário |
+| 2026-08-31 | **Todas** as candidatas restantes promovidas a meta (M-10 a M-14), por decisão do usuário | Federação além do Google, cenários e vídeo nas três modalidades, integração com sistema de gestão, identidade visual por unidade e proteção do cockpit do professor. A lista de candidatas ficou vazia |
 | 2026-08-31 | Identificadores de candidata **reatribuídos** | Ao promover três candidatas, as restantes foram renumeradas: o que era C-01 (idioma) virou M-08, C-02 (CI) foi absorvido por M-05, e o cockpit do professor saiu de C-03 para C-08. **Referência a "C-0N" anterior a esta data aponta para outro item.** Daqui em diante, identificador aposentado não é reutilizado |
+| 2026-08-31 | M-13 reescrita depois de reprovada na revisão | A primeira redação afirmava que não havia marca por unidade. Existe base, e é por unidade: `tenants.branding_json` (migration 069, "a marca visual"), com escrita, leitura e um consumidor em tela. A busca inicial, em `lib/units.js` e `routes/units.js`, não alcançava esse caminho. A meta passou a pedir **alcance** — a marca chegar às telas de aluno e professor —, reusando o mecanismo existente |
 | 2026-08-31 | M-01 reescrita depois de reprovada na revisão | A primeira redação afirmava que a preparação "exige entender a configuração do arguidor" — o código contradiz: o modo Simples sem YAML já é o padrão, há assistente de configuração e a checagem de enunciado já roda no upload. A medida original estava em parte cumprida, e "enunciado validado" apontava para uma validação qualitativa que o tronco **removeu de propósito**. A meta passou a cobrir só o que de fato falta: o caminho do material da disciplina |
