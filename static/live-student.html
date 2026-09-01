@@ -836,7 +836,7 @@
         } else if (m.type === 'wrapup') { endAfterPlayback(); }
         // 'ended' com motivo != normal = a sessão caiu do lado do provedor
         // (#343): o aluno precisa saber que foi técnico, não fim da entrevista.
-        else if (m.type === 'ended') { finish({ dropped: m.reason && m.reason !== 'normal' }); }
+        else if (m.type === 'ended') { droppedReason = m.reason || null; finish({ dropped: m.reason && m.reason !== 'normal' }); }
       };
       ws.onerror = () => setStatus('Erro de conexão', 'err');
       ws.onclose = () => {
@@ -932,6 +932,16 @@
     }
     // Tela final da QUEDA: diz o que houve e o que fazer (#343).
     function showDroppedEnd(note) {
+      // Falha do PROVEDOR não é problema de rede (#358): mandar o aluno procurar
+      // "uma rede mais estável" o faz caçar defeito onde não há, e é o mesmo
+      // erro de sempre — cobrar dele o que não está do lado dele.
+      if (droppedReason === 'provider_error') {
+        $('done-msg').textContent = 'A entrevista foi interrompida';
+        $('done-sub').innerHTML = 'Houve uma <strong>falha no nosso provedor de IA</strong> — não foi você, o seu equipamento nem a sua conexão. ' + esc(note)
+          + '<br><br>O que já foi gravado está guardado. <strong>Avise o professor</strong>: assim que ele resolver, recarregue esta página para continuar de onde parou.'
+          + '<div style="margin-top:14px"><button class="btn btn-primary" onclick="location.reload()">Recarregar e continuar</button></div>';
+        return;
+      }
       $('done-msg').textContent = 'A conexão caiu';
       $('done-sub').innerHTML = 'A entrevista foi interrompida por um <strong>problema de conexão</strong> — não foi você nem o seu equipamento. ' + esc(note)
         + '<br><br>Recarregue esta página para continuar de onde parou. Se a queda se repetir, procure uma rede mais estável ou avise o professor.'
@@ -960,6 +970,7 @@
 
     // dropped = a sessão CAIU (queda de rede/provedor), não terminou (#343).
     let droppedSession = false;
+    let droppedReason = null;   // motivo do 'ended' (#358): muda o recado da tela final
     function finish(opts) {
       if (ended) return;
       ended = true;

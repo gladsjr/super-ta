@@ -51,6 +51,7 @@ OpenAI (Responses, Realtime, transcrição e síntese de voz).
 - [Ciclo /chat e mapa de prompts](docs/architecture.md): todo prompt enviado à LLM é alcançável a partir deste diagrama.
 - [Prova oral em detalhe](docs/oral-exam.md): relay Realtime, encerramento garantido, calibração, agentes, schema.
 - [Fiscalização em detalhe](docs/video-proctoring.md): áreas de comando, gate de vídeo, schema.
+- [Falhas de provedor](docs/falhas-de-provedor.md): duas classes de recado ao aluno; nota nunca sai de insumo incompleto em silêncio.
 - [Modelo de acesso](docs/access-model.md): unidades, RBAC, identidade, portões de uso.
 - [Cenários](docs/scenarios.md): subsistema multiagente experimental.
 

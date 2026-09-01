@@ -30,6 +30,7 @@ bench, relatórios gerados (`tests/`, `bench/`, `reports/`).
 | [`architecture.md`](architecture.md) | Ciclo `/chat` e o mapa completo de prompts (diagrama Mermaid). Ponto único de descoberta de prompts. |
 | [`super-orchestrator-plan.md`](super-orchestrator-plan.md) | Racional do orquestrador de turno e o schema da ação. |
 | [`oral-exam.md`](oral-exam.md) | Prova oral: relay Realtime, encerramento garantido, portão de setup, calibração, proctoring, agentes e schema. |
+| [`falhas-de-provedor.md`](falhas-de-provedor.md) | O que o aluno lê quando a OpenAI falha, e por que avaliação sem insumo completo não produz nota em silêncio. |
 | [`video-proctoring.md`](video-proctoring.md) | Fiscalização por vídeo: áreas de comando, gate obrigatório em três camadas, liberação pelo professor. |
 | [`access-model.md`](access-model.md) | Camada institucional: unidades, RBAC por unidade, identidade/SSO, portões de uso. |
 | [`scenarios.md`](scenarios.md) | Cenários multiagente (experimental). |
