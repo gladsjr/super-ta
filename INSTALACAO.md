@@ -306,6 +306,7 @@ dependências somem. Para recomeçar, repita os passos 5 a 8.
 | Módulo nativo não carrega (`bcrypt`, `onnxruntime`) | 6 | Volume de `node_modules` populado pelo host. `docker compose down -v` e refaça do passo 5. |
 | `relation "..." does not exist` | 7 | Migrations não aplicadas. `docker compose run --rm migrate`. |
 | `403 forbidden_tokenless_work` ao criar trabalho | 9 | Logado como `admin`, que não é o admin global. Use `professor`. |
+| Nome de trabalho com `�`, ou travessão virado hífen | 9 | Acento morto **no envio**, não na tela. O `curl` do Git Bash (`/mingw64/bin/curl`) destrói acento passado em argumento: mande o corpo por `--data-binary @arquivo`, ou use `/c/Windows/System32/curl.exe`. No PowerShell o problema é outro — falta `charset=utf-8` no `-ContentType`. Bytes medidos na skill `oratia-conhecimento`. |
 | Login com a senha do `.env` não funciona | — | O seed só cria usuário que ainda não existe; mudar a senha depois não a reaplica. Use a senha antiga ou remova o usuário do banco. |
 | Sessão cai a cada restart | 2 | `SESSION_SECRET` vazio: o servidor usa um segredo efêmero e avisa no log. Defina um valor no `.env`. |
 | Qualquer jornada de entrevista falha | 10 | Chave ausente **no container**: o Compose herda o ambiente de quem o invoca, e terminal aberto antes de a variável existir não a vê. `docker compose up -d --force-recreate app` de um shell que a veja. |

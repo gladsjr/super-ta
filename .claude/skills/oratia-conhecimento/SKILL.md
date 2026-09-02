@@ -145,6 +145,79 @@ host. O idioma comum (`EADDRINUSE`) é inútil aqui: teste **conexão** primeiro
 `Cannot find module '/app/C:/Program Files/Git/...'`. Correção:
 `MSYS_NO_PATHCONV=1` antes do comando.
 
+**Acento vira `�`, ou um travessão vira hífen, ao criar dado pela linha de
+comando no Windows.** Sintoma observado: um trabalho criado por `curl` aparece
+na tela como `TESTE MANUAL � padr�o do produto (voz + v�deo)`. Não mexa em
+fonte, `<meta charset>` nem no encoding do Postgres — os três já estão em UTF-8.
+O dado está corrompido **no banco**, e a tela o exibe fielmente: a perda
+acontece antes de o servidor receber.
+
+São **dois problemas independentes**, com correções diferentes. As seis linhas
+abaixo são de uma **única corrida**, todas enviando o mesmo corpo
+`{"n":"padrão—vídeo"}` a um servidor de eco que imprime o hex do que recebeu. O
+resto dos bytes é ASCII e saiu idêntico em todas; a coluna mostra só os três
+caracteres que variam:
+
+| Cliente | Como o corpo foi enviado | `ã` `—` `í` na rede |
+|---|---|---|
+| `/mingw64/bin/curl` — o do Git Bash | `-d '…'` | `e3` `97` `ed` — Windows-1252 |
+| o mesmo binário | `--data-binary @arquivo` | `c3a3` `e28094` `c3ad` — **UTF-8** |
+| `C:\Windows\System32\curl.exe` | `-d '…'` | `c3a3` `e28094` `c3ad` — **UTF-8** |
+| `node.exe` do host | `process.argv` | `c3a3` `e28094` `c3ad` — **UTF-8** |
+| `Invoke-RestMethod` | `-ContentType "application/json"` | `e3` `2d` `ed` — Windows-1252 |
+| o mesmo | `+ "; charset=utf-8"` | `c3a3` `e28094` `c3ad` — **UTF-8** |
+
+**1. O `curl` do Git for Windows destrói acento passado em argumento.** Nesta
+máquina, `curl 8.7.1 (x86_64-w64-mingw32)`. Não é a fronteira do MSYS, não é
+"argumento para executável nativo" e não é a distribuição inteira: no mesmo
+shell, com o mesmo argumento, o `curl.exe` do Windows e o `node.exe` recebem
+UTF-8 intacto — e o próprio `git.exe`, que vem da **mesma** instalação do Git
+for Windows, guarda `c3a3 e28094 c3ad` numa mensagem passada por argumento
+(`git tag -m 'padrão—vídeo'`). Só este binário estraga. Note o que os
+controles fecham e o que deixam aberto: eles **localizam**
+a perda dentro dele, no caminho do argumento, mas não separam qual passo interno
+converte. Duas correções, ambas verificadas: mande o corpo por
+`--data-binary @arquivo` — heredoc e `printf` são builtins do shell e gravam
+UTF-8 correto —, ou chame `/c/Windows/System32/curl.exe`. Nenhuma das duas
+depende do build, então valem noutra máquina mesmo que o curl de lá seja outro;
+o que depende do build é o **diagnóstico**, e aí vale refazer esta tabela.
+
+**2. O `Invoke-RestMethod` codifica o corpo conforme o charset declarado.** Ele
+roda no processo e não monta argumento nenhum: o que muda entre as duas últimas
+linhas é só o `-ContentType`. Sem charset, usa a codepage; com `charset=utf-8`,
+UTF-8. Correção: **declare o charset**. Trocar argumento por arquivo aqui não
+resolve nada, porque o argumento não é o problema.
+
+A codepage de destino é a mesma nos dois casos, `Windows-1252` — o que
+`[System.Text.Encoding]::Default.WebName` responde nesta máquina. Para o caminho
+do `curl`, porém, a evidência são os próprios bytes da tabela, não o .NET:
+`e3`, `97` e `ed` são exatamente `ã`, `—` e `í` em CP1252. O `0xE3` solitário não
+é UTF-8 válido, e o valor chega ao banco como U+FFFD (`ef bf bd`).
+
+**Cuidado com o travessão, que corrompe sem parecer corrompido.** Pelo `curl` do
+Git Bash ele vira `0x97`, e daí U+FFFD, visível na tela. Pelo `Invoke-RestMethod`
+sofre *best-fit* e vira um hífen `-` comum: o nome fica plausível e ninguém
+percebe. Essa diferença serve de perícia — é a única coluna em que os dois
+caminhos divergem, e foi ela que apontou qual deles criou os nomes estragados
+desta sessão, depois de a suspeita inicial ter recaído sobre o PowerShell e os
+bytes a desmentirem.
+
+**Os bytes não voltam, mas o registro se reescreve.** U+FFFD não guarda o que
+substituiu. O dado gravado, porém, é só um dado: os nomes desta sessão foram
+corrigidos por `PATCH /admin/works/<token>/name`, com o corpo em arquivo, e o
+banco ficou com zero U+FFFD — conferido em todas as colunas de texto e `jsonb`,
+não só em `works.name`.
+
+**Dentro do container não há nenhum dos dois problemas** — mais uma razão para o
+ferramental que gera dado morar em `tools/` e rodar por `docker compose exec`.
+Verificado que o próprio `docker compose exec … node -e … 'ã—í'` entrega
+`c3a3 e28094 c3ad` ao container: o `docker.exe` não estraga o argumento.
+
+Nenhum comando registrado neste workspace passa texto não-ASCII por argumento —
+os únicos acentos dentro de bloco `bash` estão em comentários, que o shell
+descarta (verificado nos artefatos versionados e nos scripts de `tools/`). A
+armadilha aparece quando **alguém digita** um nome acentuado.
+
 **npm 11 bloqueia scripts de instalação.** No host com npm 11, `bcrypt` e
 `onnxruntime-node` têm o install script barrado pela política `allow-scripts`,
 com o aviso perdido no fim de um log longo. Aqui funcionaram por haver

@@ -160,6 +160,7 @@ subir:
 | `relation "..." does not exist` | Migrations pendentes → skill `oratia-build`. |
 | `Cannot find module 'express'` | Dependências ausentes no volume → skill `oratia-build`. |
 | `403 forbidden_tokenless_work` | Logado como `admin`. Use `professor`. |
+| Nome com `�`, ou travessão virado hífen | Acento morto **no envio**, não na tela. O `curl` do Git Bash (`/mingw64/bin/curl`) destrói acento passado em argumento: mande o corpo por `--data-binary @arquivo`, ou use `/c/Windows/System32/curl.exe`. No PowerShell o problema é outro — falta `charset=utf-8` no `-ContentType`. Bytes medidos na skill `oratia-conhecimento`. |
 | Sessão cai a cada restart | `SESSION_SECRET` vazio: o servidor usa segredo efêmero e avisa no log. Defina no `.env` e recrie. |
 | Login não aceita a senha do `.env` | O seed só cria usuário que ainda não existe; alterar a senha depois não a reaplica. Use a antiga ou remova o usuário do banco. |
 | Mudei o `.env` e nada mudou | Faltou `--force-recreate`. |
