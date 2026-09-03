@@ -51,6 +51,11 @@ test("valor não numérico não vaza para a tela", () => {
 test("nenhum SQL aplica operador JSON sobre grades_json", () => {
     // A causa raiz, guardada onde ela nasceu. `grades_json` é TEXT: `->` e `->>`
     // sobre ela quebram a consulta em tempo de execução, não em revisão.
+    //
+    // ESCOPO deliberado em lib/db (tabela `submissions`). O MESMO nome de coluna
+    // existe em `scenario_runs` como **jsonb**, e ali `->>` está correto
+    // (lib/scenarios/store.js) — é exatamente a armadilha que me pegou: o tipo
+    // não vem do nome da coluna nem do vizinho, vem da tabela.
     const dir = path.join(raiz, "lib", "db");
     for (const arquivo of fs.readdirSync(dir).filter(f => f.endsWith(".js"))) {
         const txt = fs.readFileSync(path.join(dir, arquivo), "utf8");
