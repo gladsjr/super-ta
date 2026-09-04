@@ -93,6 +93,16 @@ app.use("/static", express.static(path.join(__dirname, "static"), {
     setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
 }));
 
+// /favicon.ico na RAIZ (#366): é onde o navegador procura por conta própria
+// quando a página não declara `<link rel="icon">`. Os estáticos são servidos só
+// sob /static, então essa busca dava 404 e a aba caía no ícone genérico — ou no
+// que estivesse no cache. Todas as telas declaram o ícone hoje, mas isto cobre
+// a próxima que alguém criar esquecendo a tag.
+app.get("/favicon.ico", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type("image/png").sendFile(path.join(__dirname, "static", "branding", "favicon-32.v2.png"));
+});
+
 // Parser JSON global, teto apertado (2mb) — vale para praticamente tudo.
 // EXCEÇÃO: rotas que declaram o próprio teto por serem legitimamente grandes.
 // Sem essa exclusão o parser global roda ANTES do router e estoura
