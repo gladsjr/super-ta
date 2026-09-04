@@ -142,32 +142,15 @@
   .audio-row .audio-meta strong { color: var(--ink-700); font-size: var(--fs-sm); }
   .audio-row audio { flex: 1; max-width: 380px; height: 32px; }
 
-  details.skipped {
-    margin-top: var(--sp-4);
-    background: var(--bg-muted);
-    border: 1px solid var(--ink-100);
-    border-radius: var(--r-md);
-    padding: var(--sp-3);
-    font-size: var(--fs-sm);
-  }
-  details.skipped summary { color: var(--ink-700); cursor: pointer; font-weight: 500; }
-  details.skipped[open] summary { margin-bottom: var(--sp-2); }
-  .skipped-item { padding: var(--sp-2) 0; border-top: 1px dashed var(--ink-200); }
-  .skipped-item:first-of-type { border-top: none; padding-top: var(--sp-1); }
-  .skipped-q { color: var(--ink-700); }
-  .skipped-reason { color: var(--ink-500); margin-top: var(--sp-1); font-style: italic; }
-  .skipped-meta { color: var(--ink-400); font-size: var(--fs-xs); margin-top: var(--sp-1); }
-
   /* Tema escuro: os <details> auxiliares (apresentação, gravações fora dos
-     turnos, document map, perguntas puladas) e o cartão de encerramento são
-     ilhas cremes renderizadas direto no <main>, fora de card. Como os cards,
+     turnos, document map) e o cartão de encerramento são ilhas cremes
+     renderizadas direto no <main>, fora de card. Como os cards,
      reancoram a rampa ESCURA para o texto (summary em --ink-700 etc.) ficar
      navy sobre o creme, e não claro-sobre-claro (#242). Mesmos valores da
      lista de ilhas em css/app.css. */
   :root[data-theme="dark"] details.intro,
   :root[data-theme="dark"] details.student-audio,
   :root[data-theme="dark"] details.doc-map,
-  :root[data-theme="dark"] details.skipped,
   :root[data-theme="dark"] .finalization-card {
     --ink-900: #181f39; --ink-700: #2c3e55; --ink-600: #3f5570; --ink-500: #5a6b80;
     --ink-400: #7a8a9c; --ink-300: #a3aebc; --ink-200: #ced6de; --ink-100: #e4e9ee; --ink-50: #f3f5f8;
@@ -486,11 +469,6 @@
     <pre id="final-transcript-body" style="white-space:pre-wrap"></pre>
   </details>
 
-  <details class="skipped hidden" id="skipped">
-    <summary id="skipped-summary">Perguntas descartadas pelo agente de relevância</summary>
-    <div id="skipped-body"></div>
-  </details>
-
   <div id="finalization" class="finalization-card hidden">
     <div class="head" id="finalization-head"></div>
     <div id="finalization-body"></div>
@@ -501,8 +479,8 @@
   <section id="pending-section" class="pending-section hidden">
     <h2 class="pending-section-title" id="pending-section-title">Perguntas planejadas (ainda não feitas)</h2>
     <p class="pending-section-note">
-      Em ordem do plano. O agente de relevância decide turno a turno se pula
-      alguma por já ter sido coberta na conversa — então esta é a lista
+      Em ordem do plano. Quem conduz a entrevista decide turno a turno se
+      avança, insiste no mesmo ponto ou segue adiante — então esta é a lista
       candidata, não o roteiro garantido.
     </p>
     <div id="pending-body"></div>
@@ -787,23 +765,12 @@ const DEFENSE_LABEL = {
   weak: 'Defesa frágil',
   poor: 'Defesa insuficiente',
 };
-const AUTHORSHIP_LABEL = {
-  high: 'Autoria: confiança alta',
-  medium: 'Autoria: confiança média',
-  low: 'Autoria: confiança baixa',
-};
 const ASSESSMENT_LABEL = {
   convincing: 'convincente',
   partial: 'parcial',
   evasive: 'evasiva',
   inconsistent: 'inconsistente',
   unanswered: 'sem resposta',
-};
-const DELIVERY_LABEL = {
-  natural: 'Entrega: natural/espontânea',
-  mixed: 'Entrega: variou entre turnos',
-  scripted: 'Entrega: com cara de texto pronto',
-  inconclusive: 'Entrega: inconclusiva',
 };
 
 // Proctoring por vídeo (entrevista com proctoring ligado): alertas + botão de
@@ -1470,19 +1437,14 @@ async function load() {
     document.getElementById('student-audio').classList.remove('hidden');
   }
 
-  const skipped = Array.isArray(conv.skipped_questions) ? conv.skipped_questions : [];
-  if (skipped.length > 0) {
-    const sk = document.getElementById('skipped');
-    document.getElementById('skipped-summary').textContent =
-      `Perguntas descartadas pelo agente de relevância (${skipped.length})`;
-    document.getElementById('skipped-body').innerHTML = skipped.map(s => `
-      <div class="skipped-item">
-        <div class="skipped-q"><strong>Plan id ${escapeHtml(s.plan_id ?? '—')}</strong> — ${escapeHtml(s.question ?? '')}</div>
-        <div class="skipped-reason">Motivo: ${escapeHtml(s.reason ?? '—')}</div>
-        <div class="skipped-meta">Descartada em ${fmtTime(s.at)}</div>
-      </div>`).join('');
-    sk.classList.remove('hidden');
-  }
+  // #346: aqui existia a caixa "Perguntas descartadas pelo agente de
+  // relevância". Não havia agente de relevância (quem decide pular é o
+  // SuperOrchestratorAgent) e a caixa nunca aparecia: ela lia
+  // conversation_json.skipped_questions, que nasce de sess.skippedQuestions —
+  // zerada no upload e nunca preenchida em lugar nenhum (a entrevista em tempo
+  // real grava [] fixo). Promessa que a tela não cumpria: removida. Se um dia
+  // valer expor as puladas, a fonte viva é memory.questions_skipped do
+  // orquestrador, que precisa ser convertida em {plan_id, question, reason, at}.
 
   const fin = conv.finalization;
   if (fin) {

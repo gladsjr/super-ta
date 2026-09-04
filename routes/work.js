@@ -923,14 +923,16 @@ function publicBatchState(state) {
 //   (3) devolutiva automática (resumo do relatório + proctoring, sanitizada).
 // A ordem (vídeo → avaliação → devolutiva) garante que a devolutiva considere o
 // vídeo. Sem botão separado de "analisar vídeo" nem de "gerar devolutiva".
-// Candidatas: têm conversa e ainda não têm devolutiva (o produto final). A
-// elegibilidade fina é decidida item a item — não-prontas contam como "puladas".
+// Candidatas: entrevistas CONCLUÍDAS e não-teste que ainda não têm devolutiva
+// (o produto final) — desistência e em andamento ficam de fora, e `force` não
+// fura a regra (ADR 0019 / lib/batchEligibility.js). A elegibilidade fina é
+// decidida item a item — não-prontas contam como "puladas".
 router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, express.json({ limit: "8kb" }), startBatchRoute({
     map: batchEvalRuns,
     scope: "EVALUATION",
     queueFilter: (s, force) => force || !s.has_student_version, // elegibilidade já filtrada (#258)
     emptyError: force => force
-        ? "nenhuma entrevista com conversa para avaliar"
+        ? "nenhuma entrevista concluída (não-teste) para avaliar"
         : "nenhuma entrevista nova para avaliar — todas as elegíveis já foram avaliadas",
     itemFn: async (work, found, force) => {
         let videoFalhou = false;

@@ -209,7 +209,7 @@
 
     <div class="card">
       <h3 class="card-title">Voz e identidade do entrevistador</h3>
-      <p class="card-sub">A entrevista é sempre por <strong>voz</strong>, com <strong>câmera ligada e fiscalização por vídeo</strong>: o aluno responde falando e comanda a gravação por gestos na tela (fixo, não desligável).</p>
+      <p class="card-sub">A entrevista é sempre por <strong>voz</strong>, com <strong>câmera ligada e fiscalização por vídeo</strong> (fixo, não desligável). Na <strong>profunda</strong>, o aluno inicia e encerra a própria gravação mantendo a mão sobre as <strong>áreas de comando nos cantos da tela</strong>; na <strong>simplificada</strong>, a conversa é contínua e não há comando de gravação.</p>
       <div id="voice-row" class="row">
         <label class="label" for="voice-select" style="margin:0">Voz do entrevistador:</label>
         <select id="voice-select" class="select" style="flex:1; min-width:240px"></select>
@@ -332,11 +332,11 @@
 
     <div class="tab-panel hidden" id="tab-avaliacao" role="tabpanel" aria-labelledby="tab-btn-avaliacao">
     <details class="card card-collapsible" open>
-      <summary><span class="card-title" data-help="Um clique só, em lote: para cada entrevista com conversa ainda não avaliada, analisa o vídeo, gera a avaliação interna (só você vê) e o rascunho da devolutiva ao aluno (que já considera o vídeo). Depois é só revisar/editar na tela de cada aluno e publicar.">Avaliações</span></summary>
+      <summary><span class="card-title" data-help="Um clique só, em lote: para cada entrevista concluída (não-teste) ainda não avaliada, analisa o vídeo, gera a avaliação interna (só você vê) e o rascunho da devolutiva ao aluno (que já considera o vídeo). Depois é só revisar/editar na tela de cada aluno e publicar. Desistência, entrevista em andamento e envio de teste ficam de fora do lote — esses só se avalia individualmente.">Avaliações</span></summary>
       <div class="card-collapsible-body">
-      <p class="card-sub"><strong>Avaliar entrevistas</strong> roda o processo completo em lote (vídeo → avaliação → rascunho da devolutiva) das entrevistas com conversa ainda não avaliadas. Depois, publique as devolutivas para os alunos.</p>
+      <p class="card-sub"><strong>Avaliar entrevistas</strong> roda o processo completo em lote (vídeo → avaliação → rascunho da devolutiva) das entrevistas <strong>concluídas (não-teste)</strong> ainda não avaliadas — desistência, em andamento e envio de teste só se avaliam individualmente. Depois, publique as devolutivas para os alunos.</p>
       <div class="row" style="gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin-top: var(--sp-2)">
-        <button id="eval-new-btn" class="btn btn-primary" type="button" title="Processo em lote: analisa o vídeo, avalia e gera o rascunho da devolutiva de cada entrevista ainda não avaliada">Avaliar entrevistas</button>
+        <button id="eval-new-btn" class="btn btn-primary" type="button" title="Processo em lote: analisa o vídeo, avalia e gera o rascunho da devolutiva de cada entrevista concluída (não-teste) ainda não avaliada">Avaliar entrevistas</button>
         <button id="publish-all-btn" class="btn btn-primary" type="button" title="Torna visíveis na página de cada aluno as devolutivas já geradas">Publicar devolutivas</button>
         <button id="unpublish-all-btn" class="btn" type="button" title="Retira das páginas dos alunos todas as devolutivas publicadas (ficam guardadas)">Despublicar devolutivas</button>
         <!-- Exportação para leitura fora da tela (#247): tudo o que a tela
@@ -1500,7 +1500,7 @@ async function startBatch(path, body, confirmMsg) {
 // individual (a tela por-aluno só revisa/edita/publica o resultado).
 document.getElementById('eval-new-btn').onclick = () =>
   startBatch('evaluations', { force: false },
-    'Avaliar as entrevistas com conversa ainda não avaliadas?\n\nÉ um processo EM LOTE: para cada aluno, o sistema analisa o vídeo, gera a avaliação interna e o rascunho da devolutiva (que já considera o vídeo). Cada item leva por volta de um minuto. Você pode sair desta página e voltar.');
+    'Avaliar as entrevistas concluídas (não-teste) ainda não avaliadas?\n\nÉ um processo EM LOTE: para cada aluno, o sistema analisa o vídeo, gera a avaliação interna e o rascunho da devolutiva (que já considera o vídeo). Cada item leva por volta de um minuto. Você pode sair desta página e voltar.');
 document.getElementById('publish-all-btn').onclick = () =>
   startBatch('evaluations/publish', { force: false }, 'Publicar as devolutivas já geradas que ainda não foram publicadas? Elas ficam visíveis imediatamente na página de cada aluno. Não custa orçamento.');
 document.getElementById('unpublish-all-btn').onclick = () =>

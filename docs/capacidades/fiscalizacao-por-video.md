@@ -1,6 +1,6 @@
 # Fiscalização por vídeo
 
-> **Estado:** em produção · revisado em 2026-08-15
+> **Estado:** em produção · revisado em 2026-09-04
 > `works.proctoring_enabled` · vídeo obrigatório desde a migration 072 (2026-08-14)
 
 **Uma frase:** a câmera fica aberta durante toda a arguição, a gravação é
@@ -22,7 +22,14 @@ formas de arguição.
 
 ## O que o aluno vive
 
-- **Consentimento** antes de começar (LGPD).
+- **Consentimento** antes de começar (LGPD), e ele **declara a gravação de
+  vídeo**. Na prova oral e na entrevista simplificada a câmera é fixa, então o
+  vídeo está no corpo do próprio termo. Na entrevista por mensagens a
+  fiscalização é por trabalho, então o termo ganha um **adendo condicional**
+  (`CONSENT_VIDEO_ADDITION_HTML`), mostrado só quando `proctoring_enabled` está
+  ligado — o que se grava tem de estar no texto que o aluno aceita. Até
+  2026-09-04 esse adendo não existia e a entrevista por mensagens gravava vídeo
+  sob um termo que só falava de PDF, texto e voz (issue #346).
 - Um **portão de setup**: enquadramento (tronco à cabeça, ~1,5 m da câmera),
   mãos à vista, ausência de celular, ruído e conexão.
 - Na entrevista por mensagens em modo voz, o aluno comanda o turno por **áreas de
@@ -42,7 +49,12 @@ Vídeo é **obrigatório e bloqueante**. A regra vale nos três fluxos:
 | Meio | durante | Se a câmera cai (permissão revogada, webcam desconectada), a gravação de resposta trava e o áudio deixa de ser encaminhado até voltar. |
 | Fim | ao encerrar | O servidor não conclui sem vídeo: a submissão fica **aguardando vídeo** até o envio chegar. |
 
-A válvula de escape é o professor liberar o aluno individualmente.
+A válvula de escape é o professor liberar o aluno individualmente — mas ela age
+na **conclusão**, não no início: `video_waived` é consultado por
+`finalizeWithVideoGate`, e o botão "Liberar" só aparece quando a submissão já
+está em `aguardando vídeo`. Quem é barrado na camada de INÍCIO não tem essa
+saída; para esse aluno o caminho é combinar com o professor outro horário ou
+outra forma de avaliação, que é o que a tela de bloqueio agora diz.
 
 ## Cobertura da análise
 
