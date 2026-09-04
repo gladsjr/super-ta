@@ -53,6 +53,7 @@ import {
     MIN_QUESTION_COUNT,
     MAX_QUESTION_COUNT,
 } from "../lib/config.js";
+import { isProviderQuotaError, PROVIDER_QUOTA } from "../lib/providerErrors.js";
 import log from "../lib/logger.js";
 import { pool } from "../auth.js";
 import { reserveSeats, releaseForSubmission } from "../lib/packages.js";
@@ -609,6 +610,14 @@ router.post("/w/:workToken/submissions/:subToken/evaluation", requireWorkToken, 
     } catch (err) {
         if (err.notReady) return res.status(err.httpStatus ?? 409).json({ error: err.message });
         log.error("EVALUATION", `failed submission=${subToken}: ${err.message}`);
+        // "Sem saldo" e "deu erro" pedem ações diferentes do professor (#360):
+        // um ele resolve recarregando a conta, o outro é para reportar.
+        if (isProviderQuotaError(err)) {
+            return res.status(503).json({
+                error: PROVIDER_QUOTA,
+                detail: "A conta do provedor de IA está sem saldo. Recarregue-a e avalie de novo.",
+            });
+        }
         res.status(500).json({ error: "falha ao avaliar a entrevista", detail: err.message });
     }
 });
@@ -897,6 +906,8 @@ function publicBatchState(state) {
         skipped: state.skipped,
         failed: state.failed,
         stopped_reason: state.stopped_reason,
+        stopped_detail: state.stopped_detail || null,
+        video_failed: state.video_failed || [],   // #360: a CAUSA, em linguagem de professor
         ineligible: state.ineligible || {},
         started_at: state.started_at,
         finished_at: state.finished_at,
@@ -922,6 +933,7 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
         ? "nenhuma entrevista com conversa para avaliar"
         : "nenhuma entrevista nova para avaliar — todas as elegíveis já foram avaliadas",
     itemFn: async (work, found, force) => {
+        let videoFalhou = false;
         // (1) Vídeo: best-effort — falha na análise NÃO derruba a avaliação.
         // Passa pela FILA GLOBAL (#262) e AGUARDA a vez: respeita a concorrência
         // configurada (não fura o teto de CPU/RAM) e deduplica com o disparo
@@ -936,7 +948,14 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
                     await enqueueProctorAndWait(found.id, { tokenForLog: found.submission_token });
                 }
             } catch (e) {
-                log.error("EVALUATION", `proctor (lote) sub=${found.submission_token} falhou (ignorado): ${e.message}`);
+                // A avaliação segue — mas a falha deixa de ser só uma linha de
+                // log (#360). Antes o item era dado por processado e o professor
+                // terminava o lote sem saber que a fiscalização daquele aluno
+                // não existe; o estado 'failed' fica persistido na fila e o
+                // botão Reprocessar continua sendo o caminho, mas agora ele
+                // sabe que precisa usá-lo.
+                log.error("EVALUATION", `proctor (lote) sub=${found.submission_token} falhou (avaliação segue): ${e.message}`);
+                videoFalhou = true;
             }
         }
         // (2) Avaliação interna (idempotente; sem resposta → notReady → pulada).
@@ -944,7 +963,7 @@ router.post("/w/:workToken/evaluations", requireWorkToken, requireWithinBudget, 
         // (3) Devolutiva automática, com os defaults de visibilidade do trabalho.
         await db.setSubmissionSections(found.id, workSectionDefaults(work));
         const dv = await deriveStudentVersionNow(work, found, { force });
-        return { skipped: !dv.generated };
+        return { skipped: !dv.generated, videoFalhou, label: found.student_label || found.submission_token };
     },
     checkBudget: true,
 }));
@@ -983,6 +1002,7 @@ function newBatchState(force, total) {
         skipped: 0,
         failed: [],
         stopped_reason: null,
+        stopped_detail: null,
         started_at: new Date().toISOString(),
         finished_at: null,
     };
@@ -1003,12 +1023,29 @@ async function runBatchOver(scope, work, queue, state, itemFn, { checkBudget }) 
             const found = await db.findSubmissionByToken(sub.submission_token);
             if (!found || found.work_id !== work.id) { state.skipped++; continue; }
             const r = await itemFn(found);
+            // #360: analise de video que falhou nao pode sumir no log — o professor
+            // termina o lote achando que a fiscalizacao daquele aluno existe.
+            if (r && r.videoFalhou) (state.video_failed || (state.video_failed = [])).push(r.label);
             if (r?.skipped) state.skipped++;
             else state.ok++;
         } catch (err) {
             if (err.notReady) {
                 state.skipped++;
             } else {
+                // Falta de saldo interrompe o lote INTEIRO, com a causa dita (#360).
+                //
+                // Antes, cada item falhava igual e o professor via uma lista de
+                // nomes sem motivo. Ele reprocessava, falhava de novo, e não
+                // tinha como saber que precisava recarregar a conta — que é a
+                // única coisa capaz de resolver, e só ele pode fazer. Seguir o
+                // lote também queima os itens restantes à toa.
+                if (isProviderQuotaError(err)) {
+                    state.stopped_reason = PROVIDER_QUOTA;
+                    state.stopped_detail = "A conta do provedor de IA está sem saldo. Recarregue-a e rode o lote de novo — os alunos já processados não serão refeitos.";
+                    log.error(scope, `batch interrompido: provedor sem saldo work=${work.work_token} done=${state.done}/${state.total}`);
+                    state.failed.push({ submission_token: sub.submission_token, student_label: sub.student_label, error: "provedor sem saldo" });
+                    break;   // o finally já contabiliza este item
+                }
                 state.failed.push({ submission_token: sub.submission_token, student_label: sub.student_label, error: err.message });
                 log.error(scope, `batch item failed submission=${sub.submission_token}: ${err.message}`);
             }

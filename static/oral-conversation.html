@@ -418,7 +418,20 @@
       return;
     }
     const rows = Object.keys(FLAG_LABELS).map(k => {
-      const f = p.flags[k] || { count: 0, pct: 0, at: [] };
+      // Eixo AUSENTE do relatório não é "ok" (#360, ADR 0018): "não analisado"
+      // é um terceiro estado. Tratá-lo como zero pintava de verde um eixo que
+      // ninguém mediu — o painel afirmava uma coisa que não sabia. É o mesmo
+      // tratamento que mãos/enquadramento já recebem logo abaixo, e que a
+      // entrevista já faz certo (static/js/proctorAxes.js).
+      const bruto = p.flags[k];
+      if (!bruto) {
+        return `<div style="padding:8px 12px;border:1px solid var(--ink-200);background:var(--bg-muted);border-radius:var(--r-sm);margin-bottom:6px">
+          <div style="display:flex;align-items:baseline;gap:var(--sp-2)">
+            <span style="flex:1;font-weight:600">${FLAG_LABELS[k]}</span>
+            <strong style="white-space:nowrap;color:var(--ink-500)">não analisado</strong>
+          </div></div>`;
+      }
+      const f = bruto;
       const fired = f.count > 0;
       const color = fired ? (f.pct >= 30 ? '#fdeaea' : '#fff6e0') : '#eaf7ee';
       const border = fired ? (f.pct >= 30 ? '#e7b3b3' : '#ecc874') : '#9fd4af';
