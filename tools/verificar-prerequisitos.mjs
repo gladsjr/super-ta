@@ -39,6 +39,14 @@ function acharRaiz() {
     process.exit(2);
 }
 
+// Raiz resolvida uma vez, no carregamento. Serve de diretório de trabalho para
+// TODO comando de teste: sem isso o resultado dependeria de onde o script foi
+// chamado, e um `teste:` que fale de `origin` examinaria o remote do clone do
+// tronco quando invocado de dentro dele. Isto cumpre o que o comentário de
+// `acharRaiz` promete acima, e não é checagem nova: a lista continua vindo só
+// do manifesto.
+const RAIZ = acharRaiz();
+
 // ---------------------------------------------------------------------------
 // Parser de YAML — subconjunto restrito ao que o manifesto usa
 // ---------------------------------------------------------------------------
@@ -192,6 +200,7 @@ function rodar(comando) {
         const saida = execSync(comando, {
             stdio: ["ignore", "pipe", "pipe"],
             encoding: "utf8",
+            cwd: RAIZ,
             timeout: 30_000,
             windowsHide: true,
         });
@@ -371,7 +380,7 @@ const cor = process.stdout.isTTY
     : { verde: "", vermelho: "", amarelo: "", cinza: "", forte: "", zero: "" };
 
 async function main() {
-    const raiz = acharRaiz();
+    const raiz = RAIZ;
     const manifesto = parseYaml(readFileSync(join(raiz, "MANIFESTO.yaml"), "utf8"));
     const prerequisitos = manifesto?.prerequisitos;
 

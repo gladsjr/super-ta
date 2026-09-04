@@ -133,6 +133,12 @@ layout:
 # nivel:
 #   bloqueio — sem isto o ambiente não sobe; o verificador sai com código ≠ 0.
 #   aviso    — o ambiente sobe, mas alguma capacidade fica indisponível.
+#
+# CONTRATO DE EXECUÇÃO: todo `teste:` roda com a RAIZ DO WORKSPACE como
+# diretório de trabalho, qualquer que seja o diretório de onde o verificador
+# foi chamado. Escreva o comando contando com isso — e nunca contando com o
+# diretório de invocação, que não é o mesmo. Um `teste:` que fale de `origin`,
+# por exemplo, examina o remote DESTE repositório, nunca o do clone do tronco.
 # -------------------------------------------------------------------------
 prerequisitos:
   - id: docker-engine
@@ -180,7 +186,7 @@ prerequisitos:
       - super-ta/package.json
       - super-ta/docker-compose.yml
     porque: A aplicação chega por bind mount desta pasta, e o compose do workspace inclui o do tronco.
-    acao: Da raiz do workspace, rode `git clone <url-do-tronco> super-ta`. A pasta precisa se chamar exatamente `super-ta`.
+    acao: Da raiz do workspace, rode `git clone <url-do-tronco> super-ta`. A pasta precisa se chamar exatamente `super-ta`. Falhando na autenticação, o que falta não é o comando: é o item `acesso-ao-remoto` — ou, havendo várias chaves SSH, a chave certa não foi a oferecida. As mensagens de cada caso estão no README, na etapa de obter os repositórios.
 
   - id: arquivo-env
     nome: Arquivo .env do workspace
@@ -225,6 +231,45 @@ prerequisitos:
     teste_env_ou_dotenv: ORATIA_OPENAI_TOKEN
     porque: Toda a camada cognitiva depende dela. Ausente, o ambiente sobe e responde normalmente — só as jornadas que conversam com o modelo não funcionam.
     acao: Defina ORATIA_OPENAI_TOKEN como variável de ambiente da máquina, ou preencha a linha no .env. Obtenha a chave em platform.openai.com.
+
+  - id: acesso-ao-remoto
+    nome: Acesso de leitura e escrita ao repositório
+    nivel: aviso
+    teste: git ls-remote --exit-code origin HEAD
+    # `--exit-code origin HEAD` em vez de `ls-remote origin` puro por dois
+    # motivos: a saída cai a UMA linha, e a lista completa de refs traz nomes de
+    # tag que o verificador confundia com número de versão — imprimia
+    # "Acesso de leitura e escrita ao repositório — versão 0.1.0". Verificado.
+    # `ssh -T` NÃO serve como teste: retorna 1 mesmo quando autentica, porque o
+    # GitHub não dá shell. E prendê-lo a `saida_contem` obrigaria a fixar host ou
+    # alias aqui, contra a regra 1 do topo deste arquivo.
+    #
+    # Tempos medidos nesta máquina, COM O COMANDO ACIMA, por transporte — porque
+    # `origin` pode ser SSH ou HTTPS, e o custo difere:
+    #
+    #                          SSH        HTTPS
+    #     sucesso            1997 ms      944 ms
+    #     host não resolve    102 ms      123 ms
+    #     sem permissão      1612 ms     PENDUROU
+    #
+    # NÃO vale dizer que falhar é mais rápido que suceder: a falha por permissão
+    # em SSH (1612) é mais lenta que o sucesso em HTTPS (944).
+    #
+    # O caso que pendurou importa para quem usa HTTPS: sem credencial guardada, o
+    # credential.helper `manager` abre um diálogo GRÁFICO, e GIT_TERMINAL_PROMPT=0
+    # não o suprime — o comando espera interação indefinidamente. Medido: passou
+    # de 120 s e foi cortado de fora. Quem corta dentro do verificador é o
+    # `timeout: 30_000` de rodar(), confirmado por execução (execSync mata com
+    # SIGTERM ao vencer o prazo). Consequência: na máquina de quem usa HTTPS e
+    # ainda não autenticou, este teste custa os 30 s do prazo e reporta AVISO —
+    # desfecho correto, e lento. O corte no prazo foi medido inclusive com um
+    # processo neto vivo herdando a saída: retornou em 2008 ms para prazo de 2000.
+    #
+    # É `aviso`, e não `bloqueio`, porque o ambiente JÁ MONTADO sobe e roda sem
+    # tocar o remoto. Para quem está montando pela primeira vez o efeito é outro:
+    # ver `acao`.
+    porque: Sem isto não se obtém o clone do tronco nem se envia trabalho de volta. Note que isto NÃO é capacidade da máquina, e sim permissão concedida a uma conta — é o único item desta lista que depende de outra pessoa.
+    acao: Providencie acesso por um dos métodos que o Git aceita — chave SSH registrada na sua conta, ou credencial HTTPS guardada pelo credential.helper — e o acesso ao repositório concedido por quem o administra. O método é escolha de quem monta; o teste acima funciona nos dois. Antes do primeiro clone o VERIFICADOR não alcança este item, mas o teste alcança: rode o comando acima trocando `origin` pela URL do repositório — ele funciona fora de qualquer repositório (verificado). É o modo de conferir o acesso sem depender do clone. O README, na seção Acesso ao repositório e identidade de commit, diz o que cada método exige.
 
 # -------------------------------------------------------------------------
 # SEGREDOS — só os nomes e a origem. Nenhum valor entra em arquivo versionado.

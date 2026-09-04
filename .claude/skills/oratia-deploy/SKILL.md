@@ -18,8 +18,11 @@ Escopo: **ambiente local, em containers**. Rode tudo a partir da raiz do
 workspace.
 
 Este ambiente pressupõe imagem construída, dependências no volume e migrations
-aplicadas — se algum desses faltar, vá primeiro à skill `oratia-build`. Máquina
-nova: `INSTALACAO.md`, do começo.
+aplicadas — se algum desses faltar, vá primeiro à skill `oratia-build`.
+
+Máquina nova: comece pelo `README.md`, seção *Montar o ambiente*, que diz o que
+exige uma pessoa e o que o agente faz sozinho; então o `INSTALACAO.md`, **até o
+passo 9**. O passo 10 consome créditos de API e fica fora da montagem.
 
 ## Subir
 

@@ -17,8 +17,24 @@ pré-requisitos.
 ## Antes de começar
 
 Precisa existir na máquina: **Docker** (no Windows, com backend **WSL2**),
-**Git** e, para rodar o verificador, **Node 18+**. O passo 3 confere isso e
+**Git** e, para rodar o verificador, **Node 18+**. O passo 3 confere os três e
 diz o que fazer se faltar algo.
+
+Precisa existir **fora** da máquina, e é o único item que depende de **outra**
+pessoa além de você:
+**acesso de leitura e escrita ao repositório** — por SSH, com a chave registrada
+na sua conta; ou por HTTPS, com credencial guardada pelo `credential.helper` —
+e o acesso concedido por quem administra o repositório. O passo 3
+também confere isso, mas só depois que o passo 1 tiver passado: o verificador
+chega dentro do clone. **Antes do clone, confira com o comando avulso** — ele
+roda fora de qualquer repositório:
+
+```bash
+git ls-remote --exit-code <url-do-repositorio> HEAD
+```
+
+Responde `0` e imprime o hash de `HEAD`. Falhando aqui, o passo 1 falha igual —
+e a causa é acesso, não o comando de clone.
 
 ---
 
@@ -26,6 +42,13 @@ diz o que fazer se faltar algo.
 
 O workspace e o código são repositórios distintos. Este passo traz o segundo
 para dentro do primeiro.
+
+> **Precondição:** este comando fala com o repositório remoto e falha sem acesso.
+> Use a URL do método que você usa — SSH ou HTTPS. Falhando, o que falta não é
+> este comando: é o item `acesso-ao-remoto` do [`MANIFESTO.yaml`](MANIFESTO.yaml)
+> — ou, por SSH com várias chaves, a chave certa não foi a oferecida. Qual
+> mensagem corresponde a qual caso está no [`README.md`](README.md), na etapa de
+> obter os repositórios.
 
 ```bash
 git clone <url-do-tronco> super-ta
@@ -297,6 +320,10 @@ dependências somem. Para recomeçar, repita os passos 5 a 8.
 | `include is not supported` no `docker compose` | 3 | Compose anterior à v2.20. Atualize o Docker. O `docker-compose` com hífen é a v1 e não serve — use `docker compose`. |
 | Kernel sem `WSL2` no verificador (Windows) | 3 | Docker Desktop em backend Hyper-V. Settings → General → "Use the WSL 2 based engine". |
 | `no such file or directory: super-ta/package.json` | 1 | Clone ausente ou com outro nome. A pasta precisa se chamar exatamente `super-ta`. |
+| `Permission denied (publickey)` ao clonar | 1 | Por SSH, e a mensagem **não** distingue as duas causas: ou a chave não está registrada na conta e o acesso concedido (item `acesso-ao-remoto`), ou o cliente ofereceu a chave errada tendo várias. Descarte a segunda antes de concluir a primeira — ver *Acesso ao repositório e identidade de commit* no [`README.md`](README.md). |
+| `could not read Username` ou `Authentication failed` ao clonar | 1 | Por HTTPS: o `credential.helper` não tinha credencial guardada e não houve como pedi-la. Confira o helper com `git config --get credential.helper` e rode um `git ls-remote` da URL num terminal interativo para fornecê-la. Não é falta de acesso. |
+| Verificador trava perto do fim, ou abre um diálogo pedindo credencial | 3 | É o item `acesso-ao-remoto`, o único `teste:` que sai da máquina. Num remote HTTPS sem credencial guardada o `credential.helper` abre diálogo gráfico e o comando espera; o limite de 30 s do verificador o corta — o corte respeita o prazo mesmo com um processo **neto destacado** vivo segurando a saída — o filho é quem recebe o sinal, o neto é que podia estourar o prazo —, medido com um substituto do diálogo — e reporta AVISO. Autentique uma vez em terminal interativo (`git ls-remote --exit-code <url> HEAD`) e o helper guarda. Detalhe e tempos na skill `oratia-conhecimento`. |
+| `Repository not found` mesmo autenticando | 1 | O acesso não foi concedido a esta conta, ou você autenticou por outra — item `acesso-ao-remoto`, e não se resolve na sua máquina. |
 | `Cannot find module '/app/C:/Program Files/Git/...'` | — | Git Bash no Windows converteu o caminho do container em caminho Windows. Prefixe o comando com `MSYS_NO_PATHCONV=1`. |
 | `bind: address already in use` ao subir `app` | 2 | Porta ocupada. Mude `ORATIA_APP_PORT` no `.env` e recrie o container. |
 | Verificador diz "porta livre" e o `up` falha mesmo assim | — | Não deve mais ocorrer: o teste de porta usa conexão, não bind. No Windows o bind sucede mesmo com a porta publicada pelo Docker — por isso ele sozinho dava falso OK. |

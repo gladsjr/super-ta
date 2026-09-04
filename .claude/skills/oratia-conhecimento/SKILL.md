@@ -218,6 +218,38 @@ os únicos acentos dentro de bloco `bash` estão em comentários, que o shell
 descarta (verificado nos artefatos versionados e nos scripts de `tools/`). A
 armadilha aparece quando **alguém digita** um nome acentuado.
 
+**O verificador fica parado até 30 s, ou abre um diálogo, no item de acesso ao
+remoto.** Sintoma: `node tools/verificar-prerequisitos.mjs` trava perto do fim,
+e pode surgir uma janela pedindo credencial. Causa: o item `acesso-ao-remoto` é
+o **primeiro** `teste:` do manifesto que sai da máquina — todos os outros são
+locais. Ele roda `git ls-remote`, e num remote HTTPS sem credencial guardada o
+`credential.helper` abre diálogo **gráfico**; `GIT_TERMINAL_PROMPT=0` não
+suprime diálogo gráfico, então o comando espera interação indefinidamente.
+Medido: passou de 120 s antes de ser cortado de fora. Quem o corta no
+verificador é o `timeout: 30_000` de `rodar()`, e o item é `aviso`, então o
+verificador conclui e reporta.
+
+**O corte respeita o prazo, e isso foi medido — não deduzido.** Havia uma dúvida
+legítima: no Windows quem detém o pipe de saída é o processo morto, e um neto
+vivo poderia retardar o retorno do `execSync` além do prazo. Executado com um
+**substituto do diálogo** — um processo que pendura e gera um neto **destacado**
+herdando o `stdout`, que é a propriedade em dúvida —, o corte veio em **2008 ms**
+para prazo de **2000 ms**, com SIGTERM. O caso do diálogo gráfico em si não foi
+reproduzido: o que se mediu foi o mecanismo que ele aciona.
+
+**Correção:** autentique uma vez num terminal interativo, e o helper guarda a
+credencial:
+
+```bash
+git ls-remote --exit-code <url-https-do-repositorio> HEAD
+```
+
+Depois disso o teste responde em menos de um segundo. Custo medido do mesmo
+comando, por transporte: sucesso 1997 ms em SSH e 944 ms em HTTPS; host que não
+resolve 102 e 123 ms; repositório sem permissão 1612 ms em SSH. Note que **não**
+vale a intuição de que falhar é mais rápido que suceder: 1612 (falha em SSH) é
+mais lento que 944 (sucesso em HTTPS). Quem usa SSH não vê esta armadilha.
+
 **npm 11 bloqueia scripts de instalação.** No host com npm 11, `bcrypt` e
 `onnxruntime-node` têm o install script barrado pela política `allow-scripts`,
 com o aviso perdido no fim de um log longo. Aqui funcionaram por haver
@@ -245,6 +277,17 @@ partir da falha do passo 2, antes de o passo 3 acontecer. Fica como exemplo do
 que a regra "verifique, não presuma" custa quando se conclui cedo demais.
 
 Skills, por contraste, valem assim que o arquivo é gravado.
+
+**E há um terceiro caso, que NÃO foi medido:** uma sessão aberta **fora** do
+workspace, na qual a pasta passa a existir no meio dela — exatamente o que
+acontece quando alguém cola o prompt de montagem do `README.md` numa pasta
+vazia e o agente clona. Não se sabe se o `CLAUDE.md`, o `PRIMER.md` e as skills
+passam a valer ali. **Não confunda com a frase acima**: o "valem assim que o
+arquivo é gravado" foi observado numa sessão **já enraizada** na raiz, onde o
+steering estava carregado desde o início — é outro cenário. Por isso o prompt
+manda reabrir a sessão na raiz antes de prosseguir, e por isso ele carrega a
+fronteira do compartimento dentro de si: a garantia repousa no texto embutido,
+não no comportamento não medido.
 
 Consequências práticas:
 
@@ -291,14 +334,17 @@ ssh -vT -o BatchMode=yes <host-alias>
 Confira duas coisas na saída: o `Hi <conta>!` — exit code 1 é normal, o GitHub
 não dá shell — e **o nome da conta**, que é o que revela chave trocada.
 
-> **Como fixar a chave certa é assunto do `README.md`, seção 3.** Não repita a
-> prescrição aqui: ela tem duas partes, e uma cópia parcial engana mais que
-> nenhuma. Esta skill registra só **como diagnosticar**.
+> **Como fixar a chave certa é assunto da seção do `README.md` chamada
+> *Acesso ao repositório e identidade de commit*.**
+> Não repita a prescrição aqui. Ela é longa, cobre **dois métodos de acesso** e
+> tem partes que só valem para um deles — uma cópia parcial engana mais que
+> nenhuma, e por isso não damos aqui nem a contagem das partes: ela muda a cada
+> vez que o roteiro ganha um método. Esta skill registra só **como diagnosticar**.
 >
-> Nesta máquina o mecanismo em vigor não é o do roteiro — `core.sshCommand` só
-> aponta o ssh do Windows, e `IdentitiesOnly`/`IdentityFile` vive no
-> `~/.ssh/config`, por host alias. Divergência registrada na tabela abaixo, com o
-> que os dois têm de diferente.
+> O que **esta** máquina usa é o `~/.ssh/config` com alias de host, e desde que
+> o roteiro passou a prescrever os dois mecanismos isso **deixou de ser
+> divergência**: é uma das duas vias que ele indica, e a que vale antes de
+> existir clone. A comparação de escopo entre as duas segue na tabela abaixo.
 
 **Ao ler o `~/.ssh/config` pelo Git Bash, não passe o caminho por `eval`.** No
 Git for Windows `HOME` é `%USERPROFILE%`, então `~/.ssh/config` e
@@ -391,7 +437,7 @@ Verificadas por execução. Não "corrija" o ambiente para casar com elas.
 | `.env.example` do tronco: `PORT=5099` | O default do código é 5000 (`lib/config.js`) | Ambos "certos": o código tem um default, o exemplo sugere outro. Aqui vale 5099, pelo AirPlay do macOS |
 | Skill antiga: "Node precisa ser 20.x" | O host tem 24 e o `npm install` passa | Irrelevante agora: a versão que importa é a da imagem |
 | `README.md` do workspace: clone por `git@github.com:…` | O remote real usa um alias SSH | O alias é configuração de máquina; a URL genérica no roteiro está correta |
-| `README.md` seção 3 prescreve fixar a chave por `core.sshCommand` no repositório (ver lá o comando, que tem duas partes) | Nesta máquina o `core.sshCommand` só aponta o ssh do Windows, e o `IdentitiesOnly`/`IdentityFile` vive no `~/.ssh/config`, por host alias | Nenhum está errado, e **os escopos não são os mesmos** — comparação por leitura, não medida: `core.sshCommand` fixa a identidade **do repositório** (vale para qualquer host que ele use, e **não** sobrevive a um clone novo); `IdentitiesOnly`/`IdentityFile` num bloco `Host` fixa **do alias** (vale para qualquer clone que use o alias, e **não** vale para remote escrito sem ele). Não "corrija" a máquina para casar com o roteiro — mas note que um clone cujo remote não use o alias fica sem proteção, que é o caso que o README endereça |
+| ~~`README.md` prescreve fixar a chave por `core.sshCommand` no repositório, e esta máquina usa o `~/.ssh/config`~~ — **deixou de ser divergência**: o roteiro passou a prescrever os **dois** mecanismos, e o do `~/.ssh/config` é o que ele indica para antes do primeiro clone. A linha fica como registro de que a comparação de escopo abaixo continua valendo, e de que **não** há o que “corrigir” em nenhum dos lados | Nesta máquina o `core.sshCommand` só aponta o ssh do Windows, e o `IdentitiesOnly`/`IdentityFile` vive no `~/.ssh/config`, por host alias | Nenhum está errado, e **os escopos não são os mesmos** — comparação por leitura, não medida: `core.sshCommand` fixa a identidade **do repositório** (vale para qualquer host que ele use, e **não** sobrevive a um clone novo); `IdentitiesOnly`/`IdentityFile` num bloco `Host` fixa **do alias** (vale para qualquer clone que use o alias, e **não** vale para remote escrito sem ele). Não "corrija" a máquina para casar com o roteiro — mas note que um clone cujo remote não use o alias fica sem proteção, que é o caso que o README endereça |
 
 ## Ao aprender algo novo
 
