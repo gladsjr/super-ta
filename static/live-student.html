@@ -212,11 +212,25 @@
         // #260: a gravação caiu na sessão anterior e o professor ainda não
         // liberou a retomada — pausa aqui, antes de qualquer setup.
         if (st.resume_blocked) { blocked = true; showResumeBlocked(); return; }
+        // Sound check recente nao se refaz na retomada (#356): mesmo equipamento,
+        // mesma sala. Vermelho continua bloqueando (ADR 0023) — retomar nao e
+        // atalho para furar gate.
+        if (st.resuming) {
+          const medidoEm = st.sound_check_at ? Date.parse(st.sound_check_at) : NaN;
+          const fresco = Number.isFinite(medidoEm) && (Date.now() - medidoEm) < SOUND_CHECK_VALIDO_MS;
+          if (fresco && st.sound_check && st.sound_check.state !== 'vermelho') {
+            pularSoundCheck = true; soundCheckAnterior = st.sound_check;
+          }
+        }
       } catch {}
     })();
 
     // Tela de PAUSA pós-queda (#260): sem acusação — é infraestrutura, não
     // conduta. O professor libera (ou avalia o que já foi gravado).
+    // Janela de validade do sound check na retomada (#356).
+    const SOUND_CHECK_VALIDO_MS = 30 * 60 * 1000;
+    let pularSoundCheck = false, soundCheckAnterior = null;
+
     function showResumeBlocked() {
       const o = document.createElement('div');
       o.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#fdfaf4);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px';
@@ -465,7 +479,9 @@
       pollPrep();        // preparação (análise + plano) — banner com o andamento
       connTest();        // conexão (em segundo plano)
       startNoiseMeter(); // silêncio: medidor contínuo
-      initCalibration(); // captação da fala (se o professor configurou)
+      // Retomada com teste recente (#356): herda o veredito em vez de refazer.
+      if (pularSoundCheck) { soundCheckState = soundCheckAnterior; soundCheckPending = false; }
+      else initCalibration(); // captação da fala (se o professor configurou)
     }
     // Tela 2: liga a câmera no preview e começa a verificação CONTÍNUA de
     // posição. Com posição, silêncio E preparação ok, começa sozinha (1-2-3).

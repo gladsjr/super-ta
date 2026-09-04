@@ -70,14 +70,19 @@ router.get("/s/:submissionToken/live/status", requireSubmissionToken, requireLiv
         // resume_blocked (#260): sessão anterior caiu com fala do aluno e o
         // professor ainda não liberou — a página mostra a tela de pausa.
         let resumeBlocked = false;
+        let temSessaoAnterior = false;
         if (!done && !req.submission.is_test) {
             try {
                 const prior = (await db.getOralTranscript(req.submission.id)) || [];
                 const speechEvents = await db.getStudentSpeechEvents(req.submission.id).catch(() => 0);
-                resumeBlocked = wouldResume({ isTest: false, priorTranscript: prior, speechEvents })
-                    && !(await db.hasResumeAllowance(req.submission.id));
+                temSessaoAnterior = wouldResume({ isTest: false, priorTranscript: prior, speechEvents });
+                resumeBlocked = temSessaoAnterior && !(await db.hasResumeAllowance(req.submission.id));
             } catch {}
         }
+        // Retomada sem repetir gates já cumpridos (#356) — mesma mecânica da
+        // prova oral, que compartilha o sound check e o fluxo de retomada.
+        const detalhe = await db.getOralSubmissionDetail(req.submission.id).catch(() => null);
+        const calib = detalhe?.oral_calibration_json || null;
         res.json({
             work_name: req.work.name,
             student_label: req.submission.student_label || null,
@@ -88,6 +93,13 @@ router.get("/s/:submissionToken/live/status", requireSubmissionToken, requireLiv
             prep_status: prepStatus,
             question_count: prep?.plan?.questions?.length ?? null,
             resume_blocked: resumeBlocked,
+            // #356: o termo já aceito NA VERSÃO VIGENTE não se pede de novo, e
+            // um sound check recente não se refaz. A comparação de versão fica
+            // aqui — termo novo é outro termo.
+            consent_ok: req.submission.consent_version === CONSENT_VERSION,
+            resuming: temSessaoAnterior,
+            sound_check: calib ? ladderState(calib) : null,
+            sound_check_at: calib?.updated_at || calib?.echo?.at || null,
         });
     } catch (err) {
         log.error("LIVE", `status failed: ${err.message}`);
