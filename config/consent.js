@@ -4,8 +4,16 @@
 //
 // Versionamento: incrementar CONSENT_VERSION sempre que o texto mudar
 // (mesmo virgula). Submissions com versão antiga re-disparam o modal.
+//
+// A versão é UMA SÓ para os três fluxos. Subi-la custa: nos fluxos de voz o
+// aceite fica no banco (`submissions.consent_version`) e o `consent_ok` das
+// rotas de status compara com esta constante, então quem já aceitou aceita de
+// novo — inclusive na retomada de uma sessão caída. Na entrevista por
+// mensagens o aceite só vive no sessionStorage da aba, e a chave inclui a
+// versão: subir a versão é justamente o que garante que uma aba aberta desde
+// antes do deploy não pule o termo novo.
 
-export const CONSENT_VERSION = "3.0.0";
+export const CONSENT_VERSION = "3.1.0";
 
 // HTML do termo. Não usar `<script>` ou atributos `on*` aqui — é renderizado
 // direto com innerHTML no navegador, então mantenha apenas marcação semântica.
@@ -115,4 +123,25 @@ export const CONSENT_AUDIO_ADDITION_HTML = `
 <h4>Aviso adicional — modo áudio</h4>
 <p>Esta entrevista é em modo áudio. Sua voz será transcrita automaticamente por um serviço de speech-to-text da OpenAI. Após a transcrição, a OpenAI não retém o áudio enviado.</p>
 <p>Para fins de auditoria da entrevista (verificação da fidelidade do transcript e checagem de autoria), o ORATIA <strong>retém as gravações da sua voz por até 6 meses</strong> em armazenamento controlado, com acesso restrito ao(à) professor(a) responsável e administradores autorizados. Após esse prazo, as gravações são apagadas automaticamente. Você pode pedir exclusão antecipada ao(à) responsável pelo trabalho.</p>
+`.trim();
+
+// Parágrafo extra mostrado SÓ quando a entrevista por mensagens está com
+// FISCALIZAÇÃO POR VÍDEO ligada (`works.proctoring_enabled`). Concatenado
+// dentro do modal, antes do checkbox, como o adendo do modo áudio.
+//
+// Por que existe (issue #346): o termo-base cobre PDF, texto e voz, mas não
+// câmera. Com a fiscalização ligada, a entrevista por mensagens abre a câmera,
+// GRAVA o vídeo e o exige para começar e para concluir (ADR 0005) — ou seja,
+// gravava-se uma categoria de dado que o aluno nunca tinha visto declarada. Os
+// outros dois fluxos (prova oral e entrevista simplificada) já declaram o vídeo
+// no corpo do próprio termo, porque neles a câmera é fixa; aqui é opcional por
+// trabalho, então o texto tem de ser condicional. Redação alinhada com
+// CONSENT_ORAL_HTML/CONSENT_LIVE_HTML: mesma retenção, mesma restrição de
+// acesso, mesma promessa de que o vídeo NÃO vai à OpenAI.
+export const CONSENT_VIDEO_ADDITION_HTML = `
+<h4>Aviso adicional — fiscalização por vídeo</h4>
+<p>Nesta entrevista a <strong>câmera fica ligada do início ao fim</strong> e o <strong>vídeo é gravado e armazenado para avaliação posterior</strong> pelo(a) professor(a) (verificação da realização da entrevista e de autoria). Além do vídeo, são registrados os sinais de fiscalização extraídos dele (por exemplo, ausência prolongada, mais de uma pessoa em cena, uso de celular).</p>
+<p><strong>O vídeo NÃO é enviado à OpenAI</strong> — a análise é feita pelo próprio ORATIA e o arquivo fica em armazenamento controlado, com acesso restrito ao(à) professor(a) responsável e a administradores autorizados. A fiscalização <strong>não</strong> altera sua nota automaticamente nem gera acusação automática: ela produz sinais para o(a) professor(a) revisar.</p>
+<p>O vídeo é <strong>retido por até 6 meses</strong> após a entrevista, para auditoria, e depois apagado automaticamente. Você pode solicitar a exclusão antecipada ao(à) responsável pelo trabalho.</p>
+<p><strong>A gravação de vídeo é condição para realizar esta entrevista</strong>: sem ela a sessão não começa e não é concluída. Se você não concordar ou se o seu equipamento não conseguir gravar, fale com o(a) professor(a) — ele(a) pode combinar outro horário ou outra forma de avaliação.</p>
 `.trim();

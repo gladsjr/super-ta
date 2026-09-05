@@ -532,8 +532,8 @@ router.post("/w/:workToken/oral/submissions/:subToken/evaluate", requireWorkToke
             meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: req.submission.id },
         });
         await db.setOralEvaluation(req.submission.id, report);
-        await applyEvalDefaults(req.work, req.submission.id, detail, report, questions); // nota default (+ penalidade)
-        const grades = await db.getSubmissionGrades(req.submission.id); // já com penalidade, se ligada
+        await applyEvalDefaults(req.work, req.submission.id, detail, report, questions); // nota default pela rubrica
+        const grades = await db.getSubmissionGrades(req.submission.id); // sem desconto automático (ADR 0004)
         res.json({ ok: true, evaluation: report, grade: grades?.final ?? null, grades });
     } catch (err) {
         log.error("ORAL", `evaluate failed: ${err.message}`);
@@ -750,7 +750,7 @@ router.post("/w/:workToken/oral/evaluate-all", requireWorkToken, requireOral, re
                     meterCtx: { openai: clientForWork(req.work), workId: req.work.id, submissionId: s.id },
                 });
                 await db.setOralEvaluation(s.id, report);
-                await applyEvalDefaults(req.work, s.id, detail, report, questions); // nota default (+ penalidade)
+                await applyEvalDefaults(req.work, s.id, detail, report, questions); // nota default pela rubrica
                 evaluated++;
                 // Lê a nota efetivamente gravada (applyEvalDefaults não sobrescreve
                 // ajuste manual do professor, então o default pode não valer).

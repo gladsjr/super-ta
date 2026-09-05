@@ -570,7 +570,8 @@ router.get("/s/:submissionToken/setup-config", requireSubmissionToken, async (re
 });
 
 // Calibração de fala da ENTREVISTA: recebe a repetição gravada, transcreve com o
-// MESMO gpt-4o-transcribe da correção e pontua contra a frase-alvo. NUNCA bloqueia
+// MESMO motor da correção (lib/stt.js, modelo em config/policy.yaml) e pontua
+// contra a frase-alvo. NUNCA bloqueia
 // (após MAX_CALIB_ATTEMPTS o aluno segue). Reaproveita lib/speechCalib.js e as
 // colunas submissions.oral_calibration_json. Espelha /oral/calibrate (prova oral).
 router.post("/s/:submissionToken/calibrate", requireSubmissionToken, audioUpload.single("file"), async (req, res) => {

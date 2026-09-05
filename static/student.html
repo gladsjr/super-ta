@@ -631,8 +631,8 @@
         <div class="page-header-main">
           <div class="eyebrow">Arguição oral</div>
           <h1 id="work-name">—</h1>
-          <div class="subtitle" id="meta">Responda com clareza e profundidade. Você pode editar sua resposta antes de
-            enviar.</div>
+          <div class="subtitle" id="meta">Responda com clareza e profundidade. É uma conversa falada: ouça a pergunta
+            até o fim e responda com as suas próprias palavras.</div>
         </div>
         <div id="interview-actions" class="interview-actions hidden">
           <button id="btn-instructions" class="btn hidden" type="button">Instruções</button>
@@ -1684,7 +1684,22 @@
     function recordLocalConsent(token, version) {
       try { sessionStorage.setItem(consentKey(token, version), '1'); } catch { }
     }
-    async function ensureConsent(interactionMode) {
+    // setup-config é lido em três momentos (termo, setup da fiscalização,
+    // reentrada) e não muda durante a sessão — uma promessa só, reaproveitada.
+    let setupConfigPromise = null;
+    function fetchSetupConfig() {
+      if (!setupConfigPromise) {
+        setupConfigPromise = fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)
+          .then(r => r.json())
+          .catch(() => null);
+      }
+      return setupConfigPromise;
+    }
+
+    // `proctoringEnabled` decide o adendo de VÍDEO (#346): com fiscalização
+    // ligada a entrevista por mensagens grava a câmera, e o termo-base não
+    // declarava isso. Sem o adendo, gravava-se dado não consentido.
+    async function ensureConsent(interactionMode, proctoringEnabled) {
       let consent;
       try {
         const r = await fetch('/api/consent');
@@ -1703,7 +1718,8 @@
       const cancelBtn = document.getElementById('consent-cancel');
 
       const audioBlock = interactionMode === 'audio' ? (consent.audioAdditionHtml || '') : '';
-      textEl.innerHTML = (consent.textHtml || '') + audioBlock;
+      const videoBlock = proctoringEnabled ? (consent.videoAdditionHtml || '') : '';
+      textEl.innerHTML = (consent.textHtml || '') + audioBlock + videoBlock;
       checkbox.checked = false;
       acceptBtn.disabled = true;
 
@@ -1856,8 +1872,11 @@
         document.getElementById('upload-area').classList.add('hidden');
       } else {
         // Modal bloqueante de consentimento antes do upload. Se o aluno
-        // recusar, é redirecionado para /envio.
-        const ok = await ensureConsent(interactionMode);
+        // recusar, é redirecionado para /envio. O setup-config vem ANTES do
+        // termo porque é ele que diz se haverá gravação de vídeo — e o que se
+        // vai gravar tem de estar no texto que o aluno aceita (#346).
+        const cfg = await fetchSetupConfig();
+        const ok = await ensureConsent(interactionMode, !!(cfg && cfg.proctoring_enabled));
         if (!ok) return;
       }
 
@@ -1865,7 +1884,7 @@
       // gravação + áreas de comando (sem refazer o setup nem o consentimento). Fail-open.
       if (phase === 'intro' || phase === 'interviewing') {
         try {
-          const cfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json();
+          const cfg = await fetchSetupConfig();
           if (cfg && cfg.proctoring_enabled) startProctoring(null, null, null, true);
         } catch {}
       }
@@ -1915,9 +1934,9 @@
         };
       };
 
-      // setup-config (rápido) decide se há fiscalização por vídeo.
-      let setupCfg = null;
-      try { setupCfg = await (await fetch(`/s/${encodeURIComponent(submissionToken)}/setup-config`)).json(); } catch {}
+      // setup-config (rápido) decide se há fiscalização por vídeo. Mesma
+      // leitura já usada pelo termo de consentimento — cacheada.
+      const setupCfg = await fetchSetupConfig();
 
       if (setupCfg && setupCfg.proctoring_enabled && window.runProctoringSetup) {
         // Mostra o SETUP já, enquanto o upload roda em paralelo.

@@ -635,12 +635,24 @@ async function copyToken(btn, token) {
 
 // ---- Operações: fila de proctoring (#262/#263) ----
 const fmtMs = (ms) => { const sec = Math.round(ms/1000); return sec < 90 ? sec + 's' : Math.round(sec/60) + 'min'; };
-// Fila de jobs do banco (#289, corte 3): hoje só retranscrição de auditoria.
+// Lanes de RETRANSCRIÇÃO na tabela `jobs`. Desde o #338 a fila de vídeo mora na
+// MESMA tabela (type='video_analysis') como lane separada — por isso a contagem
+// abaixo filtra por tipo. Sem o filtro (regressão pega no #346), cada análise de
+// vídeo pendente era contada como "retranscrição pendente" aqui E aparecia de
+// novo no card "Fila de análises de vídeo" logo abaixo: o mesmo trabalho contado
+// duas vezes, com o nome errado numa delas.
+const RETRANSCRIBE_TYPES = ['retranscribe', 'retranscribe_message'];
+const TYPE_LABEL = { retranscribe: 'retranscrição (voz)', retranscribe_message: 'retranscrição (mensagem)' };
+
+// Fila de jobs do banco (#289, corte 3): aqui, só as lanes de retranscrição.
 // null = migration 078 ainda não aplicada neste ambiente — omite o bloco.
 function jobsSpan(jobs) {
   if (!jobs || !Array.isArray(jobs.rows)) return '';
   const by = {};
-  for (const r of jobs.rows) by[r.status] = (by[r.status] || 0) + r.n;
+  for (const r of jobs.rows) {
+    if (!RETRANSCRIBE_TYPES.includes(r.type)) continue; // vídeo tem card próprio
+    by[r.status] = (by[r.status] || 0) + r.n;
+  }
   const pend = (by.pending || 0) + (by.running || 0);
   const failed = by.failed || 0;
   const failedTxt = failed ? ` · <strong style="color:var(--danger,#b00020)">${failed}</strong> falha(s) ↓` : '';
@@ -653,7 +665,6 @@ function renderJobsFailures(jobs) {
   if (!el) return;
   const fails = (jobs && jobs.failures) || [];
   if (!fails.length) { el.innerHTML = ''; return; }
-  const TYPE_LABEL = { retranscribe: 'retranscrição (voz)', retranscribe_message: 'retranscrição (mensagem)' };
   const rows = fails.map(f => {
     const quem = escapeHtml(f.student_label || f.submission_token || '—');
     const link = f.work_token

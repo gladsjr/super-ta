@@ -64,7 +64,13 @@
   }
 
   // Painel de BLOQUEIO (barra o início). Diagnóstico + botão de nova tentativa +
-  // aviso da válvula de escape (o professor pode liberar). Preenche `container`.
+  // saída realista. Preenche `container`.
+  //
+  // O que NÃO se promete aqui (#346): a liberação do professor (`waive-video`)
+  // só age na CONCLUSÃO — `finalizeWithVideoGate` consulta `video_waived`, e o
+  // botão "Liberar" do painel só aparece em `awaiting_video`, estado posterior
+  // à arguição. Quem é barrado no INÍCIO não tem essa saída, então o texto
+  // aponta para a que existe de fato: combinar com o professor.
   function blockingCameraError(container, { reason, onRetry } = {}) {
     if (!container) return;
     container.innerHTML = `
@@ -73,7 +79,7 @@
         <h3 style="margin:0 0 8px;color:#7a1f1f">Câmera obrigatória para esta atividade</h3>
         <p style="margin:0 0 14px;line-height:1.5">${reasonText(reason)}</p>
         <button type="button" class="pg-retry" style="cursor:pointer;font:inherit;padding:10px 18px;border-radius:8px;border:none;background:#2563eb;color:#fff">Tentar de novo</button>
-        <p style="margin:14px 0 0;font-size:13px;color:#8a5a5a">Se o problema persistir no seu equipamento, fale com o professor — ele pode liberar você a fazer a atividade sem a gravação.</p>
+        <p style="margin:14px 0 0;font-size:13px;color:#8a5a5a">Se o problema persistir no seu equipamento, fale com o professor — ele pode combinar outro horário ou outra forma de avaliação.</p>
       </div>`;
     const btn = container.querySelector(".pg-retry");
     if (btn && typeof onRetry === "function") btn.addEventListener("click", () => onRetry(), { once: true });

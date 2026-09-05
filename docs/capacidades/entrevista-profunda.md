@@ -1,6 +1,6 @@
 # Entrevista profunda
 
-> **Estado:** em produção · revisado em 2026-08-15
+> **Estado:** em produção · revisado em 2026-09-04
 > `works.kind = 'interview'` · `works.interview_variant = 'messages'`
 
 **Uma frase:** o aluno é arguido sobre o trabalho que ele mesmo entregou, e o
@@ -20,16 +20,20 @@ quando a resposta escorrega.
 - **Número de perguntas** (3 a 20, padrão 6). Ele governa os limites da conversa:
   o encerramento é forçado em `perguntas × 3` turnos, e o encerramento antecipado
   é bloqueado antes da metade.
-- **Modo de interação** (texto ou voz) e a voz, quando for voz.
-- **Fiscalização por vídeo** e a **rubrica** de nota.
+- A **voz** do entrevistador. O modo de interação **não** é escolha: a
+  entrevista é sempre por voz, com **fiscalização por vídeo ligada** — os dois
+  são fixos na tela de configuração.
+- A **rubrica** de nota.
 - Opcionalmente, a expectativa de **resposta de cabeça** (sem material de apoio) —
   desligada automaticamente quando há fiscalização por vídeo, porque a câmera já
   cumpre esse papel.
 
 ## O que o aluno vive
 
-1. Abre o link individual e **envia o próprio trabalho** em PDF. Enquanto o
-   sistema analisa o documento e monta o plano de perguntas, ele passa pelo setup.
+1. Abre o link individual, **aceita o termo de consentimento** — que declara a
+   gravação de vídeo quando a fiscalização está ligada — e **envia o próprio
+   trabalho** em PDF. Enquanto o sistema analisa o documento e monta o plano de
+   perguntas, ele passa pelo setup.
 2. Passa por uma **introdução** conduzida pelo entrevistador.
 3. Responde às perguntas. Cada resposta é lida por um raciocínio que decide o
    próximo passo: perguntar o item seguinte do plano, **aprofundar** o que ficou
