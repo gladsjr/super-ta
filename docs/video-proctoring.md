@@ -124,5 +124,33 @@ voice relay. A ~40-minute video already caused a memory incident on 2026-08-16.
 `Content-Range` needs the total size, and the SDK's `StorageObject` only exposes
 `name`. So the size is written at upload time into `object_sizes` (migration 080),
 keyed by object key — which also covers the oral exam's **consolidated** video, whose
-key is not in `oral_video_parts`. Objects predating the migration have no recorded
-size: those are served whole with `200` (seek degrades, memory stays flat).
+key is not in `oral_video_parts`.
+
+**Objects that predate the migration (#376).** This note used to read "served whole
+with `200` — seek degrades, memory stays flat". That was wrong about the
+consequence, and the error cost real usage: **the video does not play at all**.
+A `MediaRecorder` WebM carries no duration in its header, so the browser must read
+the *end* of the file to find it. Without `Accept-Ranges` it never gets there and
+the player sits at `HAVE_NOTHING` — black, no error. In production this affected
+78 of 80 videos, meaning professors could not review the proctoring evidence that
+[ADR 0017](decisoes/0017-triagem-humana-da-fiscalizacao.md) requires before
+confirming or dismissing a flag.
+
+The size is now chased down three steps, so a missing row is no longer fatal:
+
+1. `object_sizes` — written at upload time (the normal path).
+2. **Measured on demand** and written back: `audioStore.objectSize(key)` now works
+   on the Replit backend too, via `getBucket()` → `file.getMetadata()`. That is a
+   **non-public** path: nothing in the published SDK returns a size (`list()` gives
+   only `name`, and `downloadAsStream` pipes through a `PassThrough` that discards
+   the GCS response headers). `getBucket` is `private` in the SDK's TypeScript,
+   which does not exist at runtime. `tests/video-legado-toca.test.mjs` fails loudly
+   if a version bump removes it — do not delete that guard.
+3. **Counted while serving**, as a last resort: the response still goes out without
+   Range (that one request may not play), but the total is stored so the *next*
+   request gets a proper `206`. Self-healing, and it announces itself in the log.
+
+`scripts/backfill-object-sizes.mjs` warms every known key at once — including the
+oral exam's consolidated video — so legacy recordings do not wait for a professor
+to open them. It only reads from storage and is idempotent; run it where the
+bucket lives.
