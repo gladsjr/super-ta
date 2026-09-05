@@ -37,6 +37,27 @@ const store = await import("../lib/audioStore.js");
 const db = await import("../lib/db.js");
 const { pool } = await import("../auth.js");
 
+// O banco pode não estar de pé (Postgres em Docker, no dev local). Sem esta
+// checagem os casos que dependem dele FICAM PENDURADOS na conexão — e teste que
+// trava é pior que teste que falha: some no meio da suíte e ninguém sabe se
+// passou. Aqui se descobre em 3s e os casos viram `skip`, com o motivo dito.
+// Os dois últimos casos (invariante de fonte e guarda da SDK) não tocam o banco
+// e rodam sempre.
+// A sonda usa um cliente PRÓPRIO, com prazo, e não o pool compartilhado — por
+// dois motivos. O pool do `pg` não rejeita quando o servidor não existe: ele
+// espera. E, pior, a tentativa pendente segura o loop de eventos, então o
+// processo de teste não termina nem depois de todos os casos passarem. Tocando
+// só um cliente descartável, o pool compartilhado permanece intocado (ele é
+// preguiçoso: sem query, sem socket).
+const { default: pg } = await import("pg");
+const bancoOk = await (async () => {
+    const sonda = new pg.Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 2500, max: 1 });
+    try { await sonda.query("SELECT 1"); return true; }
+    catch { return false; }
+    finally { await sonda.end().catch(() => {}); }
+})();
+const semBanco = bancoOk ? false : { skip: "Postgres indisponível — suba o banco para exercitar object_sizes" };
+
 const CHAVE = `proctor-video/teste-376-${crypto.randomBytes(6).toString("hex")}.webm`;
 const BYTES = crypto.randomBytes(300 * 1024);
 
@@ -55,7 +76,7 @@ async function subirApp() {
     return { base: `http://127.0.0.1:${srv.address().port}`, fechar: () => new Promise(r => srv.close(r)) };
 }
 
-test("legado sem tamanho: responde 206 com Content-Range correto", async () => {
+test("legado sem tamanho: responde 206 com Content-Range correto", semBanco, async () => {
     await subirObjeto();
     // object_sizes VAZIO para esta chave — a condição de todo vídeo anterior à 080.
     await pool.query("DELETE FROM object_sizes WHERE object_key = $1", [CHAVE]);
@@ -72,7 +93,7 @@ test("legado sem tamanho: responde 206 com Content-Range correto", async () => {
     } finally { await fechar(); }
 });
 
-test("a medição é GRAVADA — não se repete a cada requisição", async () => {
+test("a medição é GRAVADA — não se repete a cada requisição", semBanco, async () => {
     await subirObjeto();
     await pool.query("DELETE FROM object_sizes WHERE object_key = $1", [CHAVE]);
 
@@ -87,7 +108,7 @@ test("a medição é GRAVADA — não se repete a cada requisição", async () =
     } finally { await fechar(); }
 });
 
-test("sem Range, a resposta traz Content-Length e Accept-Ranges", async () => {
+test("sem Range, a resposta traz Content-Length e Accept-Ranges", semBanco, async () => {
     await subirObjeto();
     await pool.query("DELETE FROM object_sizes WHERE object_key = $1", [CHAVE]);
 
@@ -102,7 +123,7 @@ test("sem Range, a resposta traz Content-Length e Accept-Ranges", async () => {
     } finally { await fechar(); }
 });
 
-test("sufixo Range (os últimos bytes) funciona — é como o player busca a duração", async () => {
+test("sufixo Range (os últimos bytes) funciona — é como o player busca a duração", semBanco, async () => {
     // O caso que importa para o WebM: ler o FIM do arquivo, onde estão os Cues.
     await subirObjeto();
     await pool.query("DELETE FROM object_sizes WHERE object_key = $1", [CHAVE]);
@@ -150,7 +171,11 @@ test("a via da SDK que mede o objeto no Replit continua existindo", async () => 
 
 test.after(async () => {
     // A chave é só do teste; sai do banco e do disco sem deixar rastro.
-    await pool.query("DELETE FROM object_sizes WHERE object_key = $1", [CHAVE]).catch(() => {});
-    await pool.end().catch(() => {});
+    // O `pool.end()` também pendura quando a conexão nunca subiu — por isso só
+    // é chamado quando houve banco, e ainda assim com prazo.
+    if (bancoOk) {
+        await pool.query("DELETE FROM object_sizes WHERE object_key = $1", [CHAVE]).catch(() => {});
+        await Promise.race([pool.end().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
+    }
     fs.rmSync(dir, { recursive: true, force: true });
 });
