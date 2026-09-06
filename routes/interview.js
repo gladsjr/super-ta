@@ -63,10 +63,11 @@ import { attachNarratorAudio } from "../lib/narrator.js";
 import { isProviderQuotaError, PROVIDER_QUOTA, PROVIDER_QUOTA_MESSAGE } from "../lib/providerErrors.js";
 import { buildAuditBlock } from "../lib/auditTranscript.js";
 import { runMessageRetranscribeAuto } from "../lib/retranscribe.js";
-import { putAudio, putAudioFromFile, audioKeyFor, extFromMimetype, streamAudio } from "../lib/audioStore.js";
+import { putAudio, putAudioFromFile, audioKeyFor, extFromMimetype } from "../lib/audioStore.js";
 import { videoMandatory } from "../lib/proctor.js";
 import { runProctorAuto } from "../lib/proctorAuto.js";
 import { comErroTratado } from "../lib/uploadErrors.js";
+import { serveMedia } from "../lib/serveMedia.js";
 import log from "../lib/logger.js";
 import { generateStudentAnswer, STUDENT_PROFILES } from "../lib/studentSimulator.js";
 
@@ -2135,15 +2136,12 @@ router.get("/s/:submissionToken/student-audio/:audioIdx", requireSubmissionToken
     try {
         const artifact = await db.getStudentAudioArtifact({ submissionId: req.submission.id, audioIdx });
         if (!artifact) return res.status(404).json({ error: "audio not found" });
-        const stream = await streamAudio(artifact.object_key);
-        if (!stream) return res.status(503).json({ error: "audio_store_unavailable" });
-        if (artifact.mimetype) res.type(artifact.mimetype);
-        stream.on("error", err => {
-            log.error("REVIEW", `audio stream error key=${artifact.object_key}: ${err.message}`);
-            if (!res.headersSent) res.status(404).json({ error: "audio_not_in_store" });
-            else res.end();
+        // Com Range (#380) — mesma correção da tela do professor. O aluno revê a
+        // própria fala aqui; sem Range o player não sabia a duração e o Safari
+        // nem tocava.
+        return await serveMedia(req, res, artifact.object_key, `review=${req.submission.submission_token}`, {
+            tamanhoConhecido: Number(artifact.byte_size) || null,
         });
-        stream.pipe(res);
     } catch (err) {
         log.error("REVIEW", `audio fetch failed token=${req.submission.submission_token} idx=${audioIdx}: ${err.message}`);
         res.status(500).json({ error: "failed_to_fetch_audio" });
