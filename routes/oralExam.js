@@ -19,7 +19,7 @@ import { wouldResume } from "../lib/resumeGate.js";
 import { openai, clientForWork, apiKeyForWork } from "../lib/openaiClient.js";
 import { oralExamExtractorAgent, oralExamEvaluatorAgent, oralRubricBuilderAgent, oralCalibrationAgent } from "../lib/agents.js";
 import { putAudioFromFile, extFromMimetype } from "../lib/audioStore.js";
-import { serveVideo } from "../lib/serveVideo.js";
+import { serveMedia } from "../lib/serveMedia.js";
 import { ensureConsolidatedVideo } from "../lib/videoConsolidate.js";
 import { scoreCalibration } from "../lib/speechCalib.js";
 import { ECHO_SENTENCE, ECHO_LEAK_MIN_MATCHES, countEchoMatches, ladderState, parseHfp, soundCheckPending, soundCheckProgress, SC_SCRIPTS, SCRIPT_LEAK_MIN, scriptLeakMatches } from "../lib/soundCheck.js";
@@ -1255,7 +1255,7 @@ router.post("/s/:submissionToken/oral/video", requireSubmissionToken, comErroTra
 
 // Professor assiste ao vídeo gravado (avaliação posterior). Auth por token do
 // trabalho + submissão pertencente a ele.
-// #349: a entrega de vídeo virou lib/serveVideo.js — streaming parcial de
+// #349: a entrega de vídeo virou lib/serveMedia.js — streaming parcial de
 // verdade nos dois backends, em vez de ler o objeto inteiro num Buffer.
 router.get("/w/:workToken/oral/video/:subToken/:idx?", requireWorkToken, requireProfessorSubmission, async (req, res) => {
     try {
@@ -1269,10 +1269,10 @@ router.get("/w/:workToken/oral/video/:subToken/:idx?", requireWorkToken, require
             const idx = parseInt(req.params.idx, 10);
             const key = parts[Number.isFinite(idx) ? idx : 0];
             if (!key) return res.status(404).json({ error: "parte de vídeo inexistente" });
-            return await serveVideo(req, res, key, `oral=${req.submission.submission_token}`);
+            return await serveMedia(req, res, key, `oral=${req.submission.submission_token}`);
         }
         const consolidated = await ensureConsolidatedVideo(req.submission.submission_token, parts);
-        return await serveVideo(req, res, consolidated || parts[0], `oral=${req.submission.submission_token}`);
+        return await serveMedia(req, res, consolidated || parts[0], `oral=${req.submission.submission_token}`);
     } catch (err) {
         log.error("ORAL", `video serve failed: ${err.message}`);
         res.status(500).json({ error: "falha ao servir o vídeo" });

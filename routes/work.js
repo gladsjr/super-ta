@@ -39,8 +39,7 @@ import {
 } from "../lib/evaluationOps.js";
 import { workMarkdown } from "../lib/exportMarkdown.js";
 import { mapPool } from "../lib/concurrency.js";
-import { streamAudio } from "../lib/audioStore.js";
-import { serveVideo } from "../lib/serveVideo.js";
+import { serveMedia } from "../lib/serveMedia.js";
 import { enqueueProctor, enqueueProctorAndWait } from "../lib/proctorQueue.js";
 import { isBatchEligible, summarizeIneligible } from "../lib/batchEligibility.js";
 import { ladderState } from "../lib/soundCheck.js";
@@ -532,7 +531,7 @@ router.get("/w/:workToken/submissions/:subToken/proctor-video/:idx?", requireWor
         // carrega o arquivo em memória.
         // `await` (e não só `return`): sem ele o catch abaixo não captura a
         // rejeição, e um erro vira unhandledRejection com a requisição pendurada.
-        return await serveVideo(req, res, key, `submission=${req.submission.submission_token}`);
+        return await serveMedia(req, res, key, `submission=${req.submission.submission_token}`);
     } catch (err) {
         log.error("WORK", `proctor-video serve failed: ${err.message}`);
         res.status(500).json({ error: "falha ao servir o vídeo" });
@@ -552,15 +551,17 @@ router.get("/w/:workToken/submissions/:subToken/audio/:audioIdx", requireWorkTok
     try {
         const artifact = await db.getStudentAudioArtifact({ submissionId: found.id, audioIdx });
         if (!artifact) return res.status(404).json({ error: "audio not found" });
-        const stream = await streamAudio(artifact.object_key);
-        if (!stream) return res.status(503).json({ error: "audio store unavailable" });
-        if (artifact.mimetype) res.type(artifact.mimetype);
-        stream.on("error", err => {
-            log.error("WORK", `stream error key=${artifact.object_key}: ${err.message}`);
-            if (!res.headersSent) res.status(404).json({ error: "audio not found in store" });
-            else res.end();
+        // Com Range (#380). Antes ia arquivo cru: sem Content-Length, sem
+        // Accept-Ranges e ignorando o Range que o navegador manda. O Safari,
+        // que pede `bytes=0-1` ao abrir mídia e espera 206, errava; o Chrome
+        // tocava sem duração (00:00), porque o WebM do MediaRecorder não a traz
+        // no cabeçalho e sem Range não dá para ler o fim do arquivo.
+        //
+        // `byte_size` vem do arquivamento — não precisa medir nada.
+        return await serveMedia(req, res, artifact.object_key, `submission=${subToken}`, {
+            tamanhoConhecido: Number(artifact.byte_size) || null,
+            mimetype: artifact.mimetype || null,
         });
-        stream.pipe(res);
     } catch (err) {
         log.error("WORK", `audio fetch failed submission=${subToken}: ${err.message}`);
         res.status(500).json({ error: "failed to fetch audio" });

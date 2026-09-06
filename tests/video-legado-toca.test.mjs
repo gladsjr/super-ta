@@ -26,10 +26,10 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oratia-376-"));
 process.env.AUDIO_STORE_BACKEND = "local";
 process.env.AUDIO_STORE_LOCAL_DIR = dir;
 
-const { serveVideo } = await import("../lib/serveVideo.js");
+const { serveMedia } = await import("../lib/serveMedia.js");
 const store = await import("../lib/audioStore.js");
 
-// object_sizes vive no BANCO, e é ele que o serveVideo consulta. Em ESM não se
+// object_sizes vive no BANCO, e é ele que o serveMedia consulta. Em ESM não se
 // substitui export de módulo, então o teste usa o banco de dev de verdade — com
 // uma chave própria, apagada antes e depois. É também mais fiel: exercita o
 // caminho completo (consulta → medição → gravação → nova consulta), que é
@@ -50,7 +50,7 @@ async function subirObjeto() {
 // Sobe um app que serve pelo mesmo caminho da rota real.
 async function subirApp() {
     const app = express();
-    app.get("/v", (req, res) => serveVideo(req, res, CHAVE, "teste"));
+    app.get("/v", (req, res) => serveMedia(req, res, CHAVE, "teste"));
     const srv = await new Promise(ok => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
     return { base: `http://127.0.0.1:${srv.address().port}`, fechar: () => new Promise(r => srv.close(r)) };
 }
