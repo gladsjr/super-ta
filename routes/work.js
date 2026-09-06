@@ -560,6 +560,7 @@ router.get("/w/:workToken/submissions/:subToken/audio/:audioIdx", requireWorkTok
         // `byte_size` vem do arquivamento — não precisa medir nada.
         return await serveMedia(req, res, artifact.object_key, `submission=${subToken}`, {
             tamanhoConhecido: Number(artifact.byte_size) || null,
+            mimetype: artifact.mimetype || null,
         });
     } catch (err) {
         log.error("WORK", `audio fetch failed submission=${subToken}: ${err.message}`);

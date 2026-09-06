@@ -2141,6 +2141,7 @@ router.get("/s/:submissionToken/student-audio/:audioIdx", requireSubmissionToken
         // nem tocava.
         return await serveMedia(req, res, artifact.object_key, `review=${req.submission.submission_token}`, {
             tamanhoConhecido: Number(artifact.byte_size) || null,
+            mimetype: artifact.mimetype || null,
         });
     } catch (err) {
         log.error("REVIEW", `audio fetch failed token=${req.submission.submission_token} idx=${audioIdx}: ${err.message}`);

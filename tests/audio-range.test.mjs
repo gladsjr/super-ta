@@ -32,14 +32,14 @@ const BYTES = crypto.randomBytes(122 * 1024);   // o tamanho do caso relatado
 
 // Sobe o objeto e um app que serve como a rota real: com o tamanho vindo do
 // registro do artefato, não do storage.
-async function subir({ tamanhoConhecido }) {
+async function subir({ tamanhoConhecido, mimetype = "audio/webm" }) {
     const tmp = path.join(dir, "a.webm");
     fs.writeFileSync(tmp, BYTES);
     const r = await store.putAudioFromFile({ key: CHAVE, filePath: tmp, mimetype: "audio/webm" });
     assert.equal(r.stored, true, r.reason);
 
     const app = express();
-    app.get("/a", (req, res) => serveMedia(req, res, CHAVE, "teste", { tamanhoConhecido }));
+    app.get("/a", (req, res) => serveMedia(req, res, CHAVE, "teste", { tamanhoConhecido, mimetype }));
     const srv = await new Promise(ok => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
     return { base: `http://127.0.0.1:${srv.address().port}`, fechar: () => new Promise(r => srv.close(r)) };
 }
@@ -90,6 +90,39 @@ test("sem o tamanho no registro, ainda funciona — mede no storage", async () =
         assert.equal(r.status, 206);
         assert.equal(r.headers.get("content-range"), `bytes 0-1/${BYTES.length}`);
     } finally { await fechar(); }
+});
+
+test("áudio é servido como ÁUDIO, não como vídeo", async () => {
+    // Buraco que a primeira versão desta correção abriu e o teste não pegava: o
+    // helper derivava o tipo da EXTENSÃO, e áudio e vídeo compartilham `.webm`.
+    // A resposta saía `video/webm` para um arquivo de voz — o elemento <audio>
+    // recebendo um tipo que não é o dele. Só apareceu ao bater na rota real.
+    const { base, fechar } = await subir({ tamanhoConhecido: BYTES.length });
+    try {
+        for (const h of [{}, { Range: "bytes=0-1" }]) {
+            const r = await fetch(`${base}/a`, { headers: h });
+            assert.equal(r.headers.get("content-type"), "audio/webm",
+                "o mimetype do artefato tem de prevalecer sobre a extensão");
+        }
+    } finally { await fechar(); }
+});
+
+test("sem mimetype informado, cai na extensão (caminho do vídeo)", async () => {
+    const { base, fechar } = await subir({ tamanhoConhecido: BYTES.length, mimetype: null });
+    try {
+        const r = await fetch(`${base}/a`);
+        assert.equal(r.headers.get("content-type"), "video/webm",
+            "quem não informa o tipo mantém o comportamento anterior");
+    } finally { await fechar(); }
+});
+
+test("as rotas de áudio passam o mimetype do artefato", () => {
+    const raiz = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    for (const arquivo of ["routes/work.js", "routes/interview.js"]) {
+        const txt = fs.readFileSync(path.join(raiz, arquivo), "utf8");
+        assert.match(txt, /mimetype: artifact\.mimetype/,
+            `${arquivo}: sem passar o mimetype, o áudio sai como video/webm (#380)`);
+    }
 });
 
 test("nenhuma rota de mídia serve arquivo cru", () => {
