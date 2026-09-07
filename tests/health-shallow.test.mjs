@@ -2,15 +2,20 @@
 //
 // O que se protege aqui, em ordem de estrago se quebrar:
 //
-//   1. O check de migrations NÃO pode rodar DDL nem exigir o guard do CLI —
-//      o boot do servidor não cria tabela (ADR 0001). Se alguém "reaproveitar"
-//      listMigrationStatus, o health check passa a criar schema_migrations em
-//      produção pela porta dos fundos.
-//   2. Nenhum check pode pendurar. O pool do pg espera para sempre quando o
-//      banco não existe; um check sem prazo derruba a monitoração inteira.
-//   3. /healthz precisa estar ANTES do store de sessão no server.js — uma sonda
-//      de liveness que depende do banco de sessões não é liveness.
-//   4. O status HTTP reflete o pior resultado: é o que a monitoração lê.
+//   1. O check de schema NÃO pode rodar DDL nem exigir o guard do CLI (ADR
+//      0001) — e NÃO pode usar o ledger `schema_migrations` como verdade: em
+//      produção o Publish materializa o schema sem escrever nele (8 linhas no
+//      ledger contra 80 migrations, medido em 07/09/2026). Ledger como verdade
+//      = 503 permanente em produção.
+//   2. Nenhum check pode pendurar, e prazo estourado não pode deixar pedido
+//      pendurado no pool: os checks de banco vão por um pool próprio com prazo
+//      de conexão e transação READ ONLY com statement_timeout.
+//   3. Não medido não é ok: tabela ausente, banco fora, seleção vazia.
+//   4. Autenticar exige banco; se o banco não responde à validação do token, a
+//      resposta é o diagnóstico (503 em prazo), não um 500 nem espera sem fim.
+//   5. /healthz precisa estar ANTES do store de sessão no server.js, e é
+//      aberto: não conta o commit.
+//   6. O status HTTP reflete o pior resultado: é o que a monitoração lê.
 //
 //   node --test -r dotenv/config tests/health-shallow.test.mjs
 import { test } from "node:test";
@@ -23,7 +28,9 @@ const raiz = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "
 const fonte = (p) => fs.readFileSync(path.join(raiz, p), "utf8");
 
 const health = await import("../lib/health.js");
-const { worstStatus, runHealth, CHECK_IDS, CHECKS } = health;
+const { worstStatus, runHealth, CHECK_IDS, CHECKS, EXPECTED_SCHEMA, healthPool } = health;
+const { heartbeat } = await import("../lib/jobsHeartbeat.js");
+const { pool } = await import("../auth.js");
 
 // Sonda de banco com prazo e cliente próprio — o pool compartilhado pendura
 // quando o Postgres não existe (ver tests/video-legado-toca.test.mjs).
@@ -34,6 +41,9 @@ const bancoOk = await (async () => {
     finally { await sonda.end().catch(() => {}); }
 })();
 const semBanco = bancoOk ? false : { skip: "Postgres indisponível — suba o banco para exercitar os checks" };
+
+const check = (id) => CHECKS.find(c => c.id === id);
+const semTabela = (t) => Object.assign(new Error(`relation "${t}" does not exist`), { code: "42P01" });
 
 // ---------------------------------------------------------------- puro -----
 
@@ -46,27 +56,123 @@ test("o pior estado vence, e skip não pesa", () => {
     assert.equal(worstStatus([]), "ok");
 });
 
-test("todo check registrado tem id único, rótulo e nível conhecido", () => {
+test("todo check registrado tem id único, rótulo, nível conhecido e diz se usa banco", () => {
     const ids = new Set();
     for (const c of CHECKS) {
         assert.ok(c.id && c.label && typeof c.run === "function", `check malformado: ${JSON.stringify(c.id)}`);
         assert.ok(["shallow", "deep", "e2e"].includes(c.level), `${c.id}: nível ${c.level}`);
+        assert.equal(typeof c.db, "boolean", `${c.id}: falta a marca db`);
         assert.ok(!ids.has(c.id), `id repetido: ${c.id}`);
         ids.add(c.id);
     }
 });
 
-test("níveis deep e e2e são recusados com 501 neste corte, não fingidos", async () => {
+test("níveis deep e e2e são recusados com 501; depth/ids ruins e seleção vazia, 400", async () => {
     for (const depth of ["deep", "e2e"]) {
         await assert.rejects(runHealth({ depth }), (e) => e.httpStatus === 501, `${depth} deveria ser 501`);
     }
     await assert.rejects(runHealth({ depth: "abissal" }), (e) => e.httpStatus === 400);
     await assert.rejects(runHealth({ ids: ["db", "inexistente"] }), (e) => e.httpStatus === 400 && /inexistente/.test(e.message));
+    await assert.rejects(runHealth({ ids: [] }), (e) => e.httpStatus === 400 && /vazio/.test(e.message), "checks=,,, não pode virar relatório vazio com ok:true");
+});
+
+// ------------------------------------------ checks com banco simulado -----
+// Os checks recebem `ctx.q`; um `q` falso basta para exercitar os ramos que
+// só aparecem num banco quebrado — sem tocar em banco nenhum.
+
+test("seeds: memberships ausente não pode dar ok (admin_bootstrap nulo não é admin presente)", async () => {
+    const q = async (sql) => {
+        if (/FROM memberships/.test(sql)) throw semTabela("memberships");
+        return { rows: [{ n: 3 }] };
+    };
+    const r = await check("seeds").run({ q });
+    assert.equal(r.status, "fail");
+    assert.deepEqual(r.detail.missing, ["memberships"]);
+    assert.equal(r.detail.admin_bootstrap, null);
+});
+
+test("seeds: tudo presente e admin existente é ok; sem admin é fail", async () => {
+    const ok = await check("seeds").run({ q: async () => ({ rows: [{ n: 1 }] }) });
+    assert.equal(ok.status, "ok");
+    const semAdmin = await check("seeds").run({ q: async (sql) => ({ rows: [{ n: /FROM memberships/.test(sql) ? 0 : 1 }] }) });
+    assert.equal(semAdmin.status, "fail");
+    assert.equal(semAdmin.detail.admin_bootstrap, false);
+});
+
+test("consent: submissions ausente é fail, não ok com contagem nula", async () => {
+    const r = await check("consent").run({ q: async () => { throw semTabela("submissions"); } });
+    assert.equal(r.status, "fail");
+    assert.match(r.detail.reason, /submissions/);
+});
+
+test("jobs: pendente envelhecendo é aviso mesmo sem lease vencida nem falha", async () => {
+    const seteDias = new Date(Date.now() - 7 * 86400000);
+    const q = async () => ({ rows: [{ type: "video_analysis", status: "pending", n: 10, lease_vencida: 0, falhas_24h: 0, pendente_mais_antigo: seteDias }] });
+    const r = await check("jobs").run({ q });
+    assert.equal(r.status, "warn");
+    assert.ok(r.detail.oldest_pending_min > 60 * 24 * 6);
+    assert.ok(r.detail.warnings.some(w => /pendente há/.test(w)), JSON.stringify(r.detail.warnings));
+});
+
+test("jobs: executor ligado mas sem tique é aviso; com tique recente, ok", async () => {
+    const q = async () => ({ rows: [] });
+    const antes = { ...heartbeat };
+    try {
+        heartbeat.started_at = new Date(Date.now() - 3600_000);
+        heartbeat.last_tick_at = new Date(Date.now() - 3600_000);
+        const parado = await check("jobs").run({ q });
+        assert.equal(parado.status, "warn");
+        assert.ok(parado.detail.warnings.some(w => /executor sem tique/.test(w)));
+        heartbeat.last_tick_at = new Date();
+        const vivo = await check("jobs").run({ q });
+        assert.equal(vivo.status, "ok");
+        assert.ok(vivo.detail.runner.silent_s <= 1);
+    } finally { Object.assign(heartbeat, antes); }
+});
+
+test("jobs: tabela ausente é fail", async () => {
+    const r = await check("jobs").run({ q: async () => { throw semTabela("jobs"); } });
+    assert.equal(r.status, "fail");
+});
+
+test("schema: catálogo sem uma tabela e sem uma coluna acusa as duas, com a migration de origem", async () => {
+    // Catálogo = tudo o que se espera, menos object_sizes (080) e uma coluna.
+    const tabelas = new Set(EXPECTED_SCHEMA.tables.keys()); tabelas.delete("object_sizes");
+    const colunas = new Set(EXPECTED_SCHEMA.columns.keys()); colunas.delete("submissions.final_transcript");
+    const q = async (sql) => {
+        if (/information_schema\.tables/.test(sql)) return { rows: [...tabelas].map(name => ({ name })) };
+        if (/information_schema\.columns/.test(sql)) return { rows: [...colunas].map(name => ({ name })) };
+        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA.indexes.keys()].map(name => ({ name })) };
+        if (/pg_constraint/.test(sql)) return { rows: [...EXPECTED_SCHEMA.constraints.keys()].map(name => ({ name })) };
+        if (/schema_migrations/.test(sql)) return { rows: [] }; // ledger vazio, como em prod
+        throw new Error(`sql inesperado: ${sql}`);
+    };
+    const r = await check("migrations").run({ q });
+    assert.equal(r.status, "fail");
+    const nomes = r.detail.missing.map(m => `${m.kind}:${m.name}:${m.migration}`);
+    assert.ok(nomes.includes("table:object_sizes:080_object_sizes.sql"), nomes.join("\n"));
+    assert.ok(nomes.includes("column:submissions.final_transcript:077_final_transcript.sql"), nomes.join("\n"));
+    assert.equal(r.detail.missing.length, 2, "colunas de object_sizes não repetem a tabela");
+    assert.equal(r.detail.ledger.applied, 0, "o ledger vazio é informação, não o motivo do fail");
+});
+
+test("schema: ledger vazio com catálogo completo é ok — é o estado normal de produção", async () => {
+    const q = async (sql) => {
+        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA.tables.keys()].map(name => ({ name })) };
+        if (/information_schema\.columns/.test(sql)) return { rows: [...EXPECTED_SCHEMA.columns.keys()].map(name => ({ name })) };
+        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA.indexes.keys()].map(name => ({ name })) };
+        if (/pg_constraint/.test(sql)) return { rows: [...EXPECTED_SCHEMA.constraints.keys()].map(name => ({ name })) };
+        if (/schema_migrations/.test(sql)) return { rows: [] };
+        throw new Error(`sql inesperado: ${sql}`);
+    };
+    const r = await check("migrations").run({ q });
+    assert.equal(r.status, "ok");
+    assert.deepEqual(r.detail.missing, []);
 });
 
 // ---------------------------------------------------- invariantes de fonte ---
 
-test("o check de migrations é leitura pura: sem guard de CLI e sem DDL", () => {
+test("o check de schema é leitura pura: sem guard de CLI e sem DDL, e o ledger não decide", () => {
     const txt = fonte("lib/migrations.js");
     const i = txt.indexOf("export async function listMigrationStatusReadOnly");
     assert.ok(i > 0, "falta listMigrationStatusReadOnly");
@@ -74,10 +180,10 @@ test("o check de migrations é leitura pura: sem guard de CLI e sem DDL", () => 
     const corpo = txt.slice(i, fim > 0 ? fim : undefined);
     assert.ok(!/assertCliContext\(\)/.test(corpo), "o health check não pode exigir MIGRATIONS_CLI=1");
     assert.ok(!/ENSURE_TABLE_SQL|CREATE TABLE/i.test(corpo), "o health check não pode rodar DDL (ADR 0001)");
-    assert.ok(/schema_migrations.* does not exist/.test(corpo), "tabela ausente tem de ser RESULTADO, não exceção");
-    // e o health.js usa o irmão certo
-    assert.match(fonte("lib/health.js"), /listMigrationStatusReadOnly/);
-    assert.ok(!/\blistMigrationStatus\(/.test(fonte("lib/health.js")), "health.js chamou a versão de CLI");
+    const h = fonte("lib/health.js");
+    assert.match(h, /listMigrationStatusReadOnly/);
+    assert.ok(!/\blistMigrationStatus\(/.test(h), "health.js chamou a versão de CLI");
+    assert.match(h, /diffExpected\(EXPECTED_SCHEMA/, "o status vem do catálogo, não do ledger");
 });
 
 test("/healthz é montado ANTES do store de sessão", () => {
@@ -89,13 +195,19 @@ test("/healthz é montado ANTES do store de sessão", () => {
     assert.ok(txt.indexOf("app.use(healthRoutes)") < txt.indexOf('app.get("/:slug"'), "o router de saúde tem de vir antes da rota curinga");
 });
 
-test("nenhum check de shallow escreve, gasta ou chama provedor", () => {
+test("nenhum check de shallow escreve, gasta, chama provedor, bloqueia o loop ou fura a transação RO", () => {
     // Guarda contra o próximo check "só mais um pouquinho": no nível shallow
-    // não entra INSERT/UPDATE/DELETE, putAudio, openai, fetch a terceiros.
+    // não entra INSERT/UPDATE/DELETE, putAudio, openai, fetch a terceiros;
+    // nada síncrono de processo no caminho de uma chamada; e todo SQL de check
+    // passa por ctx.q (transação READ ONLY + statement_timeout), nunca pelo
+    // pool do app direto.
     const txt = fonte("lib/health.js");
-    for (const proibido of [/\bINSERT\b/, /\bUPDATE\b/, /\bDELETE\b/, /putAudio/, /openai\./i, /fetch\(\s*["']https?:/]) {
+    for (const proibido of [/\bINSERT\b/, /\bUPDATE\b/, /\bDELETE\b/, /putAudio/, /openai\./i, /fetch\(\s*["']https?:/, /spawnSync\("ffmpeg"/, /pool\.query\(/, /execSync/]) {
         assert.ok(!proibido.test(txt), `shallow não pode: ${proibido}`);
     }
+    assert.match(txt, /START TRANSACTION READ ONLY/);
+    assert.match(txt, /SET LOCAL statement_timeout/);
+    assert.match(txt, /connectionTimeoutMillis: SHALLOW_TIMEOUT_MS/, "o pool do health precisa de prazo de conexão");
 });
 
 test("cada check roda com prazo — nunca espera infinita", () => {
@@ -106,24 +218,27 @@ test("cada check roda com prazo — nunca espera infinita", () => {
 
 // ------------------------------------------------------------ com banco -----
 
-test("relatório shallow completo, com o contrato do endpoint", semBanco, async () => {
+test("relatório shallow completo, com o contrato do endpoint — e o dev migrado dá schema sem ausências", semBanco, async () => {
     const r = await runHealth();
     assert.equal(r.depth, "shallow");
     assert.ok(["ok", "warn", "fail"].includes(r.status));
     assert.equal(r.ok, r.status !== "fail");
     assert.ok(typeof r.duration_ms === "number");
     assert.equal(r.checks.length, CHECK_IDS.length, "sem filtro, rodam todos os de shallow");
+    assert.deepEqual(r.checks.map(c => c.id), CHECK_IDS, "ordem do registro");
     for (const c of r.checks) {
-        assert.ok(CHECK_IDS.includes(c.id));
         assert.ok(["ok", "warn", "fail", "skip"].includes(c.status), `${c.id}: status ${c.status}`);
         assert.equal(c.cost_usd, 0, `${c.id}: shallow custa zero`);
         assert.ok(c.duration_ms >= 0 && c.duration_ms < 3500, `${c.id}: ${c.duration_ms} ms`);
         assert.equal(typeof c.detail, "object");
     }
     const db = r.checks.find(c => c.id === "db");
-    assert.ok(db.detail.latency_ms >= 0 && db.detail.pool && "total" in db.detail.pool);
+    assert.ok(db.detail.latency_ms >= 0 && db.detail.pool && "waiting" in db.detail.pool);
     const mig = r.checks.find(c => c.id === "migrations");
-    assert.ok(mig.detail.total > 0 && Array.isArray(mig.detail.pending));
+    // O parser não pode ter alarme falso: o banco de dev é migrado por definição.
+    assert.equal(mig.status, "ok", JSON.stringify(mig.detail.missing));
+    assert.deepEqual(mig.detail.missing, []);
+    assert.ok(mig.detail.expected.tables >= 40 && mig.detail.files >= 80);
     const cfg = r.checks.find(c => c.id === "config");
     assert.ok(cfg.detail.principal_reasoning_model && cfg.detail.realtime_model && cfg.detail.stt_provider);
 });
@@ -133,7 +248,29 @@ test("seleção por id devolve só o pedido", semBanco, async () => {
     assert.deepEqual(r.checks.map(c => c.id).sort(), ["assets", "db"]);
 });
 
-test("o endpoint espelha o pior resultado no status HTTP e exige auth", semBanco, async () => {
+test("pool do health: chamadas concorrentes serializam na única conexão e nada fica esperando", semBanco, async () => {
+    const [a, b] = await Promise.all([runHealth({ ids: ["db"] }), runHealth({ ids: ["db"] })]);
+    assert.equal(a.checks[0].status, b.checks[0].status);
+    assert.equal(healthPool.waitingCount, 0);
+    assert.ok(healthPool.totalCount <= 1);
+});
+
+test("prazo de conexão estourado é fail com motivo E cancela o pedido — nada pendurado no pool", semBanco, async () => {
+    // Segura a única conexão do pool do health; o check tem de desistir no
+    // prazo e, ao desistir, o pedido sai da fila (connectionTimeoutMillis).
+    const preso = await healthPool.connect();
+    try {
+        const t0 = Date.now();
+        const r = await runHealth({ ids: ["db", "jobs"] });
+        const ms = Date.now() - t0;
+        assert.ok(ms < 4500, `desistiu em ${ms} ms`);
+        assert.equal(r.status, "fail");
+        for (const c of r.checks) assert.match(c.detail.error, /não medido|conexão com o banco/);
+        assert.equal(healthPool.waitingCount, 0, "pedido de conexão continuou na fila depois do prazo");
+    } finally { preso.release(); }
+});
+
+test("endpoint: /healthz aberto e sem commit; sem auth 401; token ruim 401; checks vazio 400", semBanco, async () => {
     const { default: healthRoutes, healthz } = await import("../routes/health.js");
     const app = express();
     app.get("/healthz", healthz);
@@ -153,12 +290,36 @@ test("o endpoint espelha o pior resultado no status HTTP e exige auth", semBanco
 
         const tokenRuim = await fetch(`${base}/admin/health`, { headers: { Authorization: "Bearer nao-existe" } });
         assert.equal(tokenRuim.status, 401, "token inválido, 401 — e não 500 nem 200");
+
+        // Autenticação com o banco fora: 503 em prazo, com o diagnóstico
+        // mínimo (db em fail) e sem relatório completo. Simulado no pool do
+        // app, que é por onde a validação do token passa.
+        const original = pool.query;
+        try {
+            pool.query = async (sql) => { if (/analytics_tokens/.test(String(sql?.text ?? sql))) throw new Error("ECONNREFUSED (simulado)"); return original.call(pool, sql); };
+            const caido = await fetch(`${base}/admin/health`, { headers: { Authorization: "Bearer qualquer" } });
+            assert.equal(caido.status, 503, "banco fora na validação do token é 503, não 500");
+            const cj = await caido.json();
+            assert.equal(cj.status, "fail");
+            assert.equal(cj.checks[0].id, "db");
+            assert.ok(cj.unauthenticated, "tem de dizer que o relatório completo não saiu");
+            assert.ok(!("commit" in cj), "não autenticado não recebe o commit");
+
+            pool.query = (sql) => /analytics_tokens/.test(String(sql?.text ?? sql)) ? new Promise(() => {}) : original.call(pool, sql);
+            const t0 = Date.now();
+            const pendurado = await fetch(`${base}/admin/health`, { headers: { Authorization: "Bearer qualquer" }, signal: AbortSignal.timeout(4500) });
+            assert.equal(pendurado.status, 503);
+            assert.ok(Date.now() - t0 < 4000, "validação pendurada tem de desistir no prazo");
+        } finally { pool.query = original; }
+
+        const vazio = await fetch(`${base}/admin/health?checks=,,,`, { headers: { Authorization: "Bearer nao-existe" } });
+        assert.equal(vazio.status, 401, "auth vem antes; com token válido seria 400 (coberto em runHealth)");
     } finally { await new Promise(r => srv.close(r)); }
 });
 
 test.after(async () => {
+    await Promise.race([healthPool.end().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
     if (bancoOk) {
-        const { pool } = await import("../auth.js");
         await Promise.race([pool.end().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
     }
 });

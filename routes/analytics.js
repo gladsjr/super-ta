@@ -36,9 +36,7 @@ const STATEMENT_TIMEOUT = "5s";
 
 // Autenticação por token do banco (gerado no admin). Bearer no Authorization
 // (ou X-Api-Key). O texto puro nunca é guardado — comparamos pelo hash.
-// Exportado porque o endpoint de saúde (#375) reaproveita o MESMO mecanismo —
-// decisão registrada lá: não inventar um segundo esquema de token.
-export async function requireAnalyticsToken(req, res, next) {
+async function requireAnalyticsToken(req, res, next) {
     const hdr = req.get("authorization") || "";
     const bearer = hdr.startsWith("Bearer ") ? hdr.slice(7) : "";
     const provided = bearer || req.get("x-api-key") || "";
