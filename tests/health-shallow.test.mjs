@@ -270,6 +270,88 @@ test("prazo de conexão estourado é fail com motivo E cancela o pedido — nada
     } finally { preso.release(); }
 });
 
+test("prazo TOTAL do check estourado não devolve ao pool uma conexão ainda ocupada, e o check seguinte mede normalmente", semBanco, async () => {
+    // Regressão da revisão do #388: statement_timeout vale por instrução; três
+    // consultas de 1,2 s cabem cada uma no limite e somadas estouram o prazo
+    // do check. O relatório volta, mas a transação continuava rodando na
+    // conexão que já tinha sido devolvida ao pool.
+    let pid = null, terminou = false;
+    const lento = { id: "lento_teste", label: "lento", level: "shallow", db: true, run: async ({ q }) => {
+        pid = (await q("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+        for (let i = 0; i < 3; i++) await q("SELECT pg_sleep(1.2)");
+        terminou = true;
+        return { status: "ok", detail: {} };
+    } };
+    const depois = { id: "depois_teste", label: "depois", level: "shallow", db: true, run: async ({ q }) => {
+        const r = await q("SELECT 1 AS um");
+        return { status: r.rows[0].um === 1 ? "ok" : "fail", detail: {} };
+    } };
+    CHECKS.push(lento, depois);
+    try {
+        const t0 = Date.now();
+        const r = await runHealth();
+        assert.ok(Date.now() - t0 < 4500);
+        const l = r.checks.find(c => c.id === "lento_teste");
+        assert.equal(l.status, "fail");
+        assert.match(l.detail.error, /prazo|estourado/);
+        assert.equal(terminou, false, "o corpo do check ainda estava rodando quando o relatório voltou — é o cenário");
+        const d = r.checks.find(c => c.id === "depois_teste");
+        assert.equal(d.status, "ok", "o check seguinte não pode herdar a conexão ocupada");
+        // A consulta órfã não pode continuar viva no servidor.
+        const act = await pool.query("SELECT state, query FROM pg_stat_activity WHERE pid = $1", [pid]);
+        assert.ok(!act.rows.some(x => x.state === "active" && /pg_sleep/.test(x.query)), `backend ${pid} ainda ativo: ${JSON.stringify(act.rows)}`);
+        assert.equal(healthPool.waitingCount, 0);
+        const de_novo = await runHealth({ ids: ["db"] });
+        assert.equal(de_novo.checks[0].status, "ok", "o pool tem de se recuperar sozinho");
+    } finally {
+        CHECKS.splice(CHECKS.indexOf(lento), 1);
+        CHECKS.splice(CHECKS.indexOf(depois), 1);
+        await new Promise(r => setTimeout(r, 200));
+    }
+});
+
+test("autenticação com o pool do APP saturado não enfileira nada nele, e com o pool do health preso responde 503 em prazo sem deixar pedido", semBanco, async () => {
+    // Regressão da revisão do #388: a validação do token ia pelo pool do app,
+    // sem prazo de conexão — cada chamada da monitoração deixava um pedido a
+    // mais na fila enquanto o banco não voltava.
+    const { default: healthRoutes } = await import("../routes/health.js");
+    const app = express();
+    app.use(healthRoutes);
+    const srv = await new Promise(ok => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const maxAntes = pool.options.max;
+    let presoApp = null, presoHealth = null;
+    try {
+        // 1) pool do app com uma conexão, e ela presa: a autenticação não pode
+        //    depender dele. Token inválido → 401 rápido, nada esperando.
+        pool.options.max = 1;
+        presoApp = await pool.connect();
+        for (let i = 0; i < 2; i++) {
+            const t0 = Date.now();
+            const r = await fetch(`${base}/admin/health?checks=db`, { headers: { Authorization: "Bearer nao-existe" }, signal: AbortSignal.timeout(4500) });
+            assert.equal(r.status, 401, `chamada ${i + 1}: ${r.status}`);
+            assert.ok(Date.now() - t0 < 1500, "não pode esperar o pool do app");
+            assert.equal(pool.waitingCount, 0, `chamada ${i + 1}: pedido pendurado no pool do app`);
+        }
+        presoApp.release(); presoApp = null;
+        // 2) pool do health preso: 503 em prazo, e o pedido de conexão da
+        //    autenticação sai da fila — duas vezes seguidas.
+        presoHealth = await healthPool.connect();
+        for (let i = 0; i < 2; i++) {
+            const t0 = Date.now();
+            const r = await fetch(`${base}/admin/health?checks=db`, { headers: { Authorization: "Bearer nao-existe" }, signal: AbortSignal.timeout(4500) });
+            const ms = Date.now() - t0;
+            assert.equal(r.status, 503, `chamada ${i + 1}: ${r.status}`);
+            assert.ok(ms < 4000, `chamada ${i + 1}: ${ms} ms`);
+            assert.equal(healthPool.waitingCount, 0, `chamada ${i + 1}: pedido pendurado no pool do health`);
+        }
+    } finally {
+        presoApp?.release(); presoHealth?.release();
+        pool.options.max = maxAntes;
+        await new Promise(r => srv.close(r));
+    }
+});
+
 test("endpoint: /healthz aberto e sem commit; sem auth 401; token ruim 401; checks vazio 400", semBanco, async () => {
     const { default: healthRoutes, healthz } = await import("../routes/health.js");
     const app = express();
@@ -293,10 +375,10 @@ test("endpoint: /healthz aberto e sem commit; sem auth 401; token ruim 401; chec
 
         // Autenticação com o banco fora: 503 em prazo, com o diagnóstico
         // mínimo (db em fail) e sem relatório completo. Simulado no pool do
-        // app, que é por onde a validação do token passa.
-        const original = pool.query;
+        // HEALTH, que é por onde a validação do token passa agora.
+        const original = healthPool.connect;
         try {
-            pool.query = async (sql) => { if (/analytics_tokens/.test(String(sql?.text ?? sql))) throw new Error("ECONNREFUSED (simulado)"); return original.call(pool, sql); };
+            healthPool.connect = async () => { throw new Error("ECONNREFUSED (simulado)"); };
             const caido = await fetch(`${base}/admin/health`, { headers: { Authorization: "Bearer qualquer" } });
             assert.equal(caido.status, 503, "banco fora na validação do token é 503, não 500");
             const cj = await caido.json();
@@ -305,12 +387,12 @@ test("endpoint: /healthz aberto e sem commit; sem auth 401; token ruim 401; chec
             assert.ok(cj.unauthenticated, "tem de dizer que o relatório completo não saiu");
             assert.ok(!("commit" in cj), "não autenticado não recebe o commit");
 
-            pool.query = (sql) => /analytics_tokens/.test(String(sql?.text ?? sql)) ? new Promise(() => {}) : original.call(pool, sql);
+            healthPool.connect = () => new Promise(() => {});
             const t0 = Date.now();
             const pendurado = await fetch(`${base}/admin/health`, { headers: { Authorization: "Bearer qualquer" }, signal: AbortSignal.timeout(4500) });
             assert.equal(pendurado.status, 503);
             assert.ok(Date.now() - t0 < 4000, "validação pendurada tem de desistir no prazo");
-        } finally { pool.query = original; }
+        } finally { healthPool.connect = original; }
 
         const vazio = await fetch(`${base}/admin/health?checks=,,,`, { headers: { Authorization: "Bearer nao-existe" } });
         assert.equal(vazio.status, 401, "auth vem antes; com token válido seria 400 (coberto em runHealth)");

@@ -81,3 +81,52 @@ test("as migrations reais produzem expectativa não trivial e só três arquivos
     // olhar — pode ser gramática que o parser não entende.
     assert.deepEqual(exp.withoutFacts, ["039_migrate_oral_rubric.sql", "046_reset_benchmark_case_schema_v3.sql", "071_question_count_default_5.sql"]);
 });
+
+test("colunas e constraints declaradas DENTRO do CREATE TABLE entram na expectativa (migration 080 real)", () => {
+    // Regressão apontada na revisão do #388: o parser só pegava o nome da
+    // tabela, e uma coluna ausente de uma tabela criada inteira numa migration
+    // passava verde. Constraint sem nome recebe o nome que o Postgres dá.
+    const exp = expectedSchema(readMigrationFiles(path.join(raiz, "migrations")));
+    for (const c of ["object_sizes.object_key", "object_sizes.bytes", "object_sizes.created_at"]) {
+        assert.equal(exp.columns.get(c), "080_object_sizes.sql", `faltou a coluna ${c}`);
+    }
+    assert.equal(exp.constraints.get("object_sizes.object_sizes_pkey")?.migration, "080_object_sizes.sql");
+    assert.equal(exp.constraints.get("object_sizes.object_sizes_bytes_check")?.migration, "080_object_sizes.sql");
+    const catalog = {
+        tables: new Set(exp.tables.keys()),
+        columns: new Set([...exp.columns.keys()].filter(c => c !== "object_sizes.bytes")),
+        indexes: new Set(exp.indexes.keys()),
+        constraints: new Set([...exp.constraints.keys()].filter(c => c !== "object_sizes.object_sizes_bytes_check")),
+    };
+    assert.deepEqual(diffExpected(exp, catalog).map(m => [m.kind, m.name, m.migration]).sort(), [
+        ["column", "object_sizes.bytes", "080_object_sizes.sql"],
+        ["constraint", "object_sizes.object_sizes_bytes_check", "080_object_sizes.sql"],
+    ]);
+});
+
+test("constraint sem nome recebe o nome que o Postgres dá — e ADD CHECK não vira coluna chamada 'check'", () => {
+    const f = factsFromStatement("ALTER TABLE works ADD CHECK (question_count BETWEEN 3 AND 10)");
+    assert.ok(!f.some(x => x.kind === "column"), JSON.stringify(f));
+    const exp = expectedSchema([mig("001_a.sql", `
+        CREATE TABLE pa (id INT PRIMARY KEY, granted INT NOT NULL CHECK (granted >= 0), delegated INT, unit_id INT REFERENCES units(id), code TEXT UNIQUE,
+                         CHECK (delegated <= granted), UNIQUE (unit_id, code));
+        ALTER TABLE pa ADD CHECK (delegated >= 0);
+        ALTER TABLE pa ADD COLUMN mode TEXT CHECK (mode IN ('a', 'b'));
+        ALTER TABLE pa ADD COLUMN owner_id INT REFERENCES users(id);`)]);
+    assert.deepEqual([...exp.constraints.keys()].sort(), [
+        "pa.pa_check",                 // duas colunas na expressão → sem coluna no nome
+        "pa.pa_code_key",
+        "pa.pa_delegated_check",       // ADD CHECK sem nome, uma coluna
+        "pa.pa_granted_check",
+        "pa.pa_mode_check",            // inline no ADD COLUMN
+        "pa.pa_owner_id_fkey",         // REFERENCES inline no ADD COLUMN
+        "pa.pa_pkey",
+        "pa.pa_unit_id_code_key",
+        "pa.pa_unit_id_fkey",
+    ]);
+});
+
+test("dois CHECK sem nome na mesma coluna: o segundo ganha sufixo 1, como no Postgres", () => {
+    const exp = expectedSchema([mig("001_a.sql", `CREATE TABLE t (a INT CHECK (a > 0)); ALTER TABLE t ADD CHECK (a < 100);`)]);
+    assert.deepEqual([...exp.constraints.keys()].sort(), ["t.t_a_check", "t.t_a_check1"]);
+});

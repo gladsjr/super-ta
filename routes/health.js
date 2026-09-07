@@ -32,7 +32,7 @@ import crypto from "node:crypto";
 import rateLimit from "express-rate-limit";
 import { requireAdmin } from "../lib/middleware.js";
 import { findValidAnalyticsToken } from "../lib/db.js";
-import { runHealth, comPrazo, CHECK_IDS, DEPTHS, SHALLOW_TIMEOUT_MS } from "../lib/health.js";
+import { runHealth, comClienteRO, CHECK_IDS, DEPTHS } from "../lib/health.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -64,9 +64,12 @@ function relatorioSemBanco(err) {
 
 async function autenticarToken(provided, req, res, next) {
     const hash = crypto.createHash("sha256").update(provided).digest("hex");
+    // Pelo pool do HEALTH, não pelo do app: prazo de conexão que cancela o
+    // pedido, transação somente-leitura com statement_timeout. Uma chamada da
+    // monitoração com o banco fora não deixa nada enfileirado em lugar nenhum.
     let row;
     try {
-        row = await comPrazo(findValidAnalyticsToken(hash), SHALLOW_TIMEOUT_MS, "validação do token");
+        row = await comClienteRO((q) => findValidAnalyticsToken(hash, q));
     } catch (err) {
         log.warn("HEALTH", `validação do token sem banco: ${err.message}`);
         res.set("Cache-Control", "no-store");

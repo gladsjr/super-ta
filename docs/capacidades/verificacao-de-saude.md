@@ -75,10 +75,13 @@ check que comparasse arquivos com o ledger acusaria 72 "pendentes" para sempre,
 e uma monitoração que grita para sempre é uma monitoração desligada.
 
 O que se confere é o **catálogo**: as migrations são lidas em ordem e dizem o
-que o schema deveria ter (tabelas, colunas, índices, constraints, com os DROPs e
-RENAMEs aplicados); o check pergunta ao banco o que existe e lista o que falta,
-apontando a migration que o criou. Em dev, onde o ledger é a verdade, ele
-aparece como informação. Detalhe em `lib/schemaExpectations.js`.
+que o schema deveria ter — tabelas, colunas (inclusive as declaradas dentro do
+`CREATE TABLE`), índices e constraints, com os DROPs e RENAMEs aplicados e com
+o nome que o Postgres dá às constraints sem nome; o check pergunta ao banco o
+que existe e lista o que falta, apontando a migration que o criou. Em dev, onde
+o ledger é a verdade, ele aparece como informação. O invariante que segura o
+parser é um teste: o banco de dev, migrado por definição, tem de dar zero
+ausências. Detalhe em `lib/schemaExpectations.js`.
 
 ## O que esta capacidade NÃO faz
 
@@ -117,6 +120,10 @@ aparece como informação. Detalhe em `lib/schemaExpectations.js`.
 - **Dado** um check que pendura (banco fora), **quando** o prazo estoura,
   **então** ele vira `fail` com motivo, o relatório inteiro ainda sai, e nenhum
   pedido fica pendurado no pool esperando o banco voltar.
+- **Dado** um check cujas consultas, somadas, passam do prazo, **quando** o
+  relatório volta, **então** a conexão não é devolvida ocupada ao pool: é
+  descartada, a consulta é cancelada no servidor, e o check seguinte mede numa
+  conexão nova.
 - **Dado** um robô configurado com `checks=,,,`, **quando** chama o endpoint,
   **então** recebe 400 — não um relatório vazio com `ok: true`.
 
