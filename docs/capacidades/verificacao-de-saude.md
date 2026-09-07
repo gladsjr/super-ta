@@ -83,6 +83,22 @@ o ledger é a verdade, ele aparece como informação. O invariante que segura o
 parser é um teste: o banco de dev, migrado por definição, tem de dar zero
 ausências. Detalhe em `lib/schemaExpectations.js`.
 
+Cada ausência acusada vem com o que o catálogo **tem** naquela tabela, do mesmo
+tipo — é o que distingue "falta" de "existe com outro nome", que foi a dúvida
+da primeira medição em produção (#389).
+
+## O que a primeira medição em produção ensinou (07/09/2026)
+
+- O deployment do Replit não leva o `.git`: o commit saía `null`. O passo de
+  `build` em `.replit` grava `.build-commit`, que o relatório lê.
+- A sonda do `ffmpeg` com 2 s estourava em toda chamada, com o binário
+  instalado e a fila de vídeo funcionando. A sonda passou a 8 s e diz o que
+  aconteceu (tempo, código do erro, sinal), porque "não achei" e "achei mas
+  demorou" pedem ações diferentes.
+- A latência de banco em produção é de ~90 ms por ida; os checks de banco em
+  série custam ~2 s por relatório. Está dentro do prazo, e é o preço de uma
+  conexão só.
+
 ## O que esta capacidade NÃO faz
 
 - **Não roda DDL.** O check de schema é leitura pura, numa transação READ

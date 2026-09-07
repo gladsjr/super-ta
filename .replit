@@ -37,6 +37,9 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "vm"
+# O deployment não leva o .git: grava o commit para o /admin/health responder
+# "qual código está rodando?" (#375). Nunca falha o build por isso.
+build = ["sh", "-c", "git rev-parse --short HEAD > .build-commit 2>/dev/null || true"]
 run = ["node", "server.js"]
 
 [userenv]

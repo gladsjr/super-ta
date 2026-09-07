@@ -154,6 +154,34 @@ test("schema: catálogo sem uma tabela e sem uma coluna acusa as duas, com a mig
     assert.ok(nomes.includes("column:submissions.final_transcript:077_final_transcript.sql"), nomes.join("\n"));
     assert.equal(r.detail.missing.length, 2, "colunas de object_sizes não repetem a tabela");
     assert.equal(r.detail.ledger.applied, 0, "o ledger vazio é informação, não o motivo do fail");
+    // Cada ausência diz o que a tabela TEM do mesmo tipo (#389: é o que
+    // distingue "falta" de "existe com outro nome").
+    const col = r.detail.missing.find(m => m.kind === "column");
+    assert.equal(col.table, "submissions");
+    assert.ok(col.present_on_table.includes("id") && !col.present_on_table.includes("final_transcript"), JSON.stringify(col.present_on_table.slice(0, 5)));
+    const tab = r.detail.missing.find(m => m.kind === "table");
+    assert.deepEqual(tab.present_on_table, []);
+});
+
+test("schema: constraint ausente lista as constraints presentes na mesma tabela", async () => {
+    const constraints = new Set(EXPECTED_SCHEMA.constraints.keys()); constraints.delete("submissions.submissions_proctor_review_fkey");
+    constraints.add("submissions.submissions_proctor_review_key_fk");
+    const q = async (sql) => {
+        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA.tables.keys()].map(name => ({ name })) };
+        if (/information_schema\.columns/.test(sql)) return { rows: [...EXPECTED_SCHEMA.columns.keys()].map(name => ({ name })) };
+        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA.indexes].map(([name, v]) => ({ name, table: v.table })) };
+        if (/pg_constraint/.test(sql)) return { rows: [...constraints].map(name => ({ name })) };
+        if (/schema_migrations/.test(sql)) return { rows: [] };
+        throw new Error(`sql inesperado: ${sql}`);
+    };
+    const r = await check("migrations").run({ q });
+    assert.equal(r.status, "fail");
+    assert.equal(r.detail.missing.length, 1);
+    const m = r.detail.missing[0];
+    assert.equal(m.name, "submissions.submissions_proctor_review_fkey");
+    assert.equal(m.migration, "074_proctor_review.sql");
+    assert.ok(m.present_on_table.includes("submissions_proctor_review_key_fk"), "a 'outra' FK tem de aparecer");
+    assert.ok(m.present_on_table.includes("submissions_pkey"));
 });
 
 test("schema: ledger vazio com catálogo completo é ok — é o estado normal de produção", async () => {
@@ -241,6 +269,9 @@ test("relatório shallow completo, com o contrato do endpoint — e o dev migrad
     assert.ok(mig.detail.expected.tables >= 40 && mig.detail.files >= 80);
     const cfg = r.checks.find(c => c.id === "config");
     assert.ok(cfg.detail.principal_reasoning_model && cfg.detail.realtime_model && cfg.detail.stt_provider);
+    const assets = r.checks.find(c => c.id === "assets");
+    assert.ok(assets.detail.ffmpeg_probe && typeof assets.detail.ffmpeg_probe.ms === "number", "a sonda do ffmpeg diz quanto demorou");
+    if (!assets.detail.ffmpeg) assert.ok(assets.detail.ffmpeg_probe.error, "sem versão, tem de dizer por quê");
 });
 
 test("seleção por id devolve só o pedido", semBanco, async () => {
