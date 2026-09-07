@@ -56,6 +56,7 @@ import diagRoutes from "./routes/diag.js";
 import benchmarkRoutes from "./routes/benchmark.js";
 import costAuditRoutes from "./routes/costAudit.js";
 import analyticsRoutes from "./routes/analytics.js";
+import healthRoutes, { healthz } from "./routes/health.js";
 import { requireAdmin } from "./lib/middleware.js";
 import { initAudioStore } from "./lib/audioStore.js";
 import log from "./lib/logger.js";
@@ -113,6 +114,11 @@ app.use((req, res, next) => {
     if (GLOBAL_JSON_SKIP.has(req.path)) return next();
     return globalJsonParser(req, res, next);
 });
+// Liveness (#375) ANTES do store de sessão: uma sonda de "o processo está
+// vivo?" não pode depender do banco de sessões que ela existe para vigiar.
+// Sem risco de escrita — a sessão está com saveUninitialized: false.
+app.get("/healthz", healthz);
+
 app.use(sessionMiddleware);
 
 // Auth (público). Rate limit no /login para travar força bruta de senha de
@@ -152,6 +158,7 @@ app.use(diagRoutes); // /diag/audio — diagnóstico do gate (dev; AUDIO_DIAG=1 
 app.use(benchmarkRoutes); // /api/benchmark/* — benchmark interno (requireAdmin por rota)
 app.use(costAuditRoutes); // /api/cost-audit/* — auditoria de custo (Usage/Costs API; requireAdmin por rota)
 app.use(analyticsRoutes); // /api/analytics/query — consulta somente-leitura p/ benchmark (auth por API key; NÃO sessão; ver migration 052)
+app.use(healthRoutes);    // /admin/health — verificação de saúde (#375): sessão de admin OU token de análise
 
 // PORTA DA INSTITUIÇÃO — rota CURINGA por slug (Fase 4). Fica por ÚLTIMO: só
 // captura caminhos de 1 segmento que nenhuma rota anterior atendeu. Serve a
