@@ -23,16 +23,21 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import { requireAdmin } from "../lib/middleware.js";
 import { requireAnalyticsToken } from "./analytics.js";
-import { runHealth, CHECK_IDS, DEPTHS, COMMIT } from "../lib/health.js";
+import { runHealth, CHECK_IDS, DEPTHS } from "../lib/health.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
 
 // Liveness puro: responde antes do store de sessão e sem tocar no banco. Uma
 // sonda de "o processo está vivo?" não pode depender daquilo que ela vigia.
+//
+// Sem autenticação de propósito, e por isso NÃO conta nada além de "estou
+// vivo": nem commit, nem versão. Exigir o token de análise aqui traria o banco
+// (o token vive em tabela) e a expiração de 30 dias para dentro da sonda — os
+// dois defeitos que ela existe para não ter. O commit fica no /admin/health.
 export function healthz(_req, res) {
     res.set("Cache-Control", "no-store");
-    res.json({ ok: true, commit: COMMIT, ts: new Date().toISOString() });
+    res.json({ ok: true, ts: new Date().toISOString() });
 }
 
 // Token, se veio; senão, sessão de admin. Sem nenhum dos dois, 401.

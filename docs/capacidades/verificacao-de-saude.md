@@ -46,7 +46,8 @@ colateral:
 Dois endpoints:
 
 - `GET /healthz` — liveness puro, sem autenticação e sem banco. Responde antes
-  do store de sessão; é o que um robô de uptime chama.
+  do store de sessão; é o que um robô de uptime chama. Por ser aberto, não conta
+  nada além de "estou vivo": nem commit, nem versão (isso fica no relatório).
 - `GET /admin/health?checks=db,jobs&depth=shallow` — o relatório. Aceita a
   **sessão de administrador** (tela) ou o **token de análise** (monitoração), o
   mesmo mecanismo do acesso analítico. O corpo vem sempre completo; o **status

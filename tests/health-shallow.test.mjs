@@ -145,7 +145,8 @@ test("o endpoint espelha o pior resultado no status HTTP e exige auth", semBanco
         assert.equal(z.status, 200);
         const zj = await z.json();
         assert.equal(zj.ok, true);
-        assert.ok("commit" in zj && zj.ts);
+        assert.ok(zj.ts);
+        assert.ok(!("commit" in zj), "/healthz é aberto: não conta o commit");
 
         const semAuth = await fetch(`${base}/admin/health`);
         assert.equal(semAuth.status, 401, "sem token nem sessão, 401");
