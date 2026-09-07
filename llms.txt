@@ -35,6 +35,7 @@ OpenAI (Responses, Realtime, transcrição e síntese de voz).
 - [Banco de casos e benchmark](docs/capacidades/banco-de-casos-e-benchmark.md): casos congelados por área, versionamento de setup/júri/release, pacote portátil entre ambientes, adaptadores por provedor e os testes cegos avaliados por juízes externos.
 - [Harness de teste ponta a ponta](docs/capacidades/harness-de-teste.md): conduz uma arguição inteira no navegador real com microfone falso e aluno simulado; inclui o A/B do orquestrador.
 - [Acesso analítico à produção](docs/capacidades/acesso-analitico-a-producao.md): endpoint somente-leitura sobre os dados reais, com token do admin, transação READ ONLY e auditoria.
+- [Verificação de saúde](docs/capacidades/verificacao-de-saude.md): `/healthz` sem auth e `/admin/health` com checks selecionáveis em três profundidades; o status HTTP reflete o pior resultado.
 
 ## Por que é assim
 
