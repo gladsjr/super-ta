@@ -16,3 +16,6 @@ bench/runs/
 bench/setup-generations/
 .tools/
 .claude/launch.json
+
+# commit gravado pelo build do deployment (health check, #375)
+.build-commit

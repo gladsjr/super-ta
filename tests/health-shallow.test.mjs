@@ -154,6 +154,34 @@ test("schema: catálogo sem uma tabela e sem uma coluna acusa as duas, com a mig
     assert.ok(nomes.includes("column:submissions.final_transcript:077_final_transcript.sql"), nomes.join("\n"));
     assert.equal(r.detail.missing.length, 2, "colunas de object_sizes não repetem a tabela");
     assert.equal(r.detail.ledger.applied, 0, "o ledger vazio é informação, não o motivo do fail");
+    // Cada ausência diz o que a tabela TEM do mesmo tipo (#389: é o que
+    // distingue "falta" de "existe com outro nome").
+    const col = r.detail.missing.find(m => m.kind === "column");
+    assert.equal(col.table, "submissions");
+    assert.ok(col.present_on_table.includes("id") && !col.present_on_table.includes("final_transcript"), JSON.stringify(col.present_on_table.slice(0, 5)));
+    const tab = r.detail.missing.find(m => m.kind === "table");
+    assert.deepEqual(tab.present_on_table, []);
+});
+
+test("schema: constraint ausente lista as constraints presentes na mesma tabela", async () => {
+    const constraints = new Set(EXPECTED_SCHEMA.constraints.keys()); constraints.delete("submissions.submissions_proctor_review_fkey");
+    constraints.add("submissions.submissions_proctor_review_key_fk");
+    const q = async (sql) => {
+        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA.tables.keys()].map(name => ({ name })) };
+        if (/information_schema\.columns/.test(sql)) return { rows: [...EXPECTED_SCHEMA.columns.keys()].map(name => ({ name })) };
+        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA.indexes].map(([name, v]) => ({ name, table: v.table })) };
+        if (/pg_constraint/.test(sql)) return { rows: [...constraints].map(name => ({ name })) };
+        if (/schema_migrations/.test(sql)) return { rows: [] };
+        throw new Error(`sql inesperado: ${sql}`);
+    };
+    const r = await check("migrations").run({ q });
+    assert.equal(r.status, "fail");
+    assert.equal(r.detail.missing.length, 1);
+    const m = r.detail.missing[0];
+    assert.equal(m.name, "submissions.submissions_proctor_review_fkey");
+    assert.equal(m.migration, "074_proctor_review.sql");
+    assert.ok(m.present_on_table.includes("submissions_proctor_review_key_fk"), "a 'outra' FK tem de aparecer");
+    assert.ok(m.present_on_table.includes("submissions_pkey"));
 });
 
 test("schema: ledger vazio com catálogo completo é ok — é o estado normal de produção", async () => {
@@ -241,6 +269,9 @@ test("relatório shallow completo, com o contrato do endpoint — e o dev migrad
     assert.ok(mig.detail.expected.tables >= 40 && mig.detail.files >= 80);
     const cfg = r.checks.find(c => c.id === "config");
     assert.ok(cfg.detail.principal_reasoning_model && cfg.detail.realtime_model && cfg.detail.stt_provider);
+    const assets = r.checks.find(c => c.id === "assets");
+    assert.ok(assets.detail.ffmpeg_probe && typeof assets.detail.ffmpeg_probe.ms === "number", "a sonda do ffmpeg diz quanto demorou");
+    if (!assets.detail.ffmpeg) assert.ok(assets.detail.ffmpeg_probe.error, "sem versão, tem de dizer por quê");
 });
 
 test("seleção por id devolve só o pedido", semBanco, async () => {
@@ -268,6 +299,52 @@ test("prazo de conexão estourado é fail com motivo E cancela o pedido — nada
         for (const c of r.checks) assert.match(c.detail.error, /não medido|conexão com o banco/);
         assert.equal(healthPool.waitingCount, 0, "pedido de conexão continuou na fila depois do prazo");
     } finally { preso.release(); }
+});
+
+test("sonda do ffmpeg: sucesso lento e sonda travada chegam ao relatório com diagnóstico — o orçamento do check comporta a sonda", async () => {
+    // Revisão do #390: a sonda ganhou 8 s, mas o prazo externo do check era
+    // 3 s — o diagnóstico nunca chegava. Aqui o caminho COMPLETO (runHealth),
+    // trocando só o execFile do child_process (builtin CJS sincronizado com a
+    // importação ESM via syncBuiltinESMExports).
+    const cp = await import("node:child_process");
+    const { syncBuiltinESMExports } = await import("node:module");
+    const original = cp.default.execFile;
+    const assets = check("assets");
+    assert.ok(assets.budget_ms > 8000, "o orçamento de assets tem de comportar a sonda de 8 s");
+    try {
+        // 1) sucesso em 3,5 s: acima do prazo padrão, dentro do orçamento
+        health._resetFfmpegProbe();
+        cp.default.execFile = (cmd, args, opts, cb) => { setTimeout(() => cb(null, "ffmpeg version 9.9.9-teste Copyright" + String.fromCharCode(10)), 3500); return { kill() {} }; };
+        syncBuiltinESMExports();
+        let r = await runHealth({ ids: ["assets"] });
+        let a = r.checks[0];
+        assert.equal(a.status, "ok", JSON.stringify(a.detail));
+        assert.equal(a.detail.ffmpeg, "9.9.9-teste");
+        assert.ok(a.detail.ffmpeg_probe.ms >= 3400, `probe em ${a.detail.ffmpeg_probe.ms} ms`);
+        // 2) sonda travada: o execFile honra o timeout pedido e devolve killed
+        health._resetFfmpegProbe();
+        cp.default.execFile = (cmd, args, opts, cb) => { setTimeout(() => cb(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), null), opts.timeout); return { kill() {} }; };
+        syncBuiltinESMExports();
+        const t0 = Date.now();
+        r = await runHealth({ ids: ["assets"] });
+        a = r.checks[0];
+        assert.equal(a.status, "fail");
+        assert.equal(a.detail.ffmpeg, null);
+        assert.equal(a.detail.ffmpeg_probe.timed_out, true, JSON.stringify(a.detail));
+        assert.equal(a.detail.ffmpeg_probe.signal, "SIGTERM");
+        assert.ok(!a.detail.error, "o motivo tem de ser o da sonda, não o prazo genérico do check");
+        assert.ok(Date.now() - t0 < 9500, "e o check ainda responde dentro do orçamento");
+        // 3) ENOENT: motivo imediato
+        health._resetFfmpegProbe();
+        cp.default.execFile = (cmd, args, opts, cb) => { setImmediate(() => cb(Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT" }), null)); return { kill() {} }; };
+        syncBuiltinESMExports();
+        r = await runHealth({ ids: ["assets"] });
+        assert.equal(r.checks[0].detail.ffmpeg_probe.error, "ENOENT");
+    } finally {
+        cp.default.execFile = original;
+        syncBuiltinESMExports();
+        health._resetFfmpegProbe();
+    }
 });
 
 test("prazo TOTAL do check estourado não devolve ao pool uma conexão ainda ocupada, e o check seguinte mede normalmente", semBanco, async () => {
