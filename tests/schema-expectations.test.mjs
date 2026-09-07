@@ -34,14 +34,51 @@ test("objetos fora do schema public (views/functions de analytics, ADR 0014) nã
     assert.deepEqual(factsFromStatement("CREATE FUNCTION analytics.try_jsonb(t text) RETURNS jsonb AS $$ BEGIN RETURN NULL; END $$ LANGUAGE plpgsql"), []);
 });
 
-test("CREATE TABLE por dentro: colunas, PRIMARY KEY inline e constraints NOMEADAS entram; sem nome vira aviso, não expectativa", () => {
+test("CREATE TABLE por dentro: colunas, PRIMARY KEY inline na coluna e constraints NOMEADAS entram; sem nome vira aviso, não expectativa", () => {
     const exp = expectedSchema([mig("081_a.sql", `
         CREATE TABLE t (id SERIAL PRIMARY KEY, a INT NOT NULL, b TEXT CONSTRAINT t_b_chk CHECK (b <> ''), c INT CHECK (c > 0), d INT REFERENCES u(id),
-                        CONSTRAINT t_a_uq UNIQUE (a), UNIQUE (b, c));`)]);
-    assert.deepEqual([...exp.columns.keys()].sort(), ["t.a", "t.b", "t.c", "t.d", "t.id"]);
+                        CONSTRAINT t_a_uq UNIQUE (a), UNIQUE (b, c));
+        CREATE TABLE v (id INT, PRIMARY KEY (id));
+        CREATE INDEX ON t (a);`)]);
+    assert.deepEqual([...exp.columns.keys()].sort(), ["t.a", "t.b", "t.c", "t.d", "t.id", "v.id"]);
     assert.deepEqual([...exp.constraints.keys()].sort(), ["t.t_a_uq", "t.t_b_chk", "t.t_pkey"]);
-    assert.deepEqual(exp.unnamed.map(u => u.what).sort(), ["CHECK", "REFERENCES", "UNIQUE"]);
-    assert.ok(exp.unnamed.every(u => u.migration === "081_a.sql" && u.table === "t"));
+    // PRIMARY KEY de TABELA sem nome e CREATE INDEX sem nome ferem a convenção
+    assert.deepEqual(exp.unnamed.map(u => `${u.table}:${u.what}`).sort(), ["t:CHECK", "t:INDEX", "t:REFERENCES", "t:UNIQUE", "v:PRIMARY"]);
+    assert.ok(exp.unnamed.every(u => u.migration === "081_a.sql"));
+    assert.equal(exp.indexes.size, 0, "índice sem nome não vira expectativa (não se inventa nome)");
+});
+
+test("RENAME depois da linha de base: o nome novo é esperado pela migration do rename", () => {
+    // Revisão do #391: preservar a origem antiga apagava a alteração nova do
+    // filtro — um rename que o Publish deixasse para trás passaria verde.
+    const full = expectedSchema([
+        mig("079_a.sql", `CREATE TABLE t (id INT, c INT); CREATE INDEX t_c_idx ON t (c); ALTER TABLE t ADD CONSTRAINT t_c_chk CHECK (c > 0);`),
+        mig("082_r.sql", `ALTER TABLE t RENAME COLUMN c TO d; ALTER TABLE t RENAME TO u;`),
+    ]);
+    const exp = afterBaseline(full, "080");
+    assert.equal(exp.tables.get("u"), "082_r.sql");
+    assert.deepEqual([...exp.columns.keys()].sort(), ["u.d", "u.id"]);
+    assert.equal(exp.constraints.get("u.t_c_chk").migration, "082_r.sql");
+    assert.equal(exp.indexes.get("t_c_idx").migration, "082_r.sql");
+    // catálogo ANTIGO (rename não materializado): tudo acusado
+    const antigo = { tables: new Set(["t"]), columns: new Set(["t.id", "t.c"]), indexes: new Set(["t_c_idx"]), constraints: new Set(["t.t_c_chk"]) };
+    assert.deepEqual(diffExpected(exp, antigo).map(m => [m.kind, m.name]), [["table", "u"]]);
+    // só o rename de coluna deixado para trás
+    const soColuna = { tables: new Set(["u"]), columns: new Set(["u.id", "u.c"]), indexes: new Set(["t_c_idx"]), constraints: new Set(["u.t_c_chk"]) };
+    assert.deepEqual(diffExpected(exp, soColuna).map(m => [m.kind, m.name, m.migration]), [["column", "u.d", "082_r.sql"]]);
+});
+
+test("tabela anterior à linha de base ausente não esconde o objeto novo dela: vira ausência de tabela, uma vez", () => {
+    const full = expectedSchema([
+        mig("079_a.sql", `CREATE TABLE t (id INT);`),
+        mig("082_n.sql", `ALTER TABLE t ADD COLUMN x INT, ADD COLUMN y INT; CREATE INDEX t_x_idx ON t (x);`),
+    ]);
+    const exp = afterBaseline(full, "080");
+    assert.equal(exp.tables.size, 0, "t é anterior à linha de base: não é esperada por si");
+    const semT = { tables: new Set(), columns: new Set(), indexes: new Set(), constraints: new Set() };
+    const missing = diffExpected(exp, semT);
+    assert.deepEqual(missing.map(m => [m.kind, m.name, m.migration]), [["table", "t", "082_n.sql"]]);
+    assert.match(missing[0].note, /anterior à linha de base/);
 });
 
 test("ADD COLUMN com REFERENCES/CHECK inline e ADD CHECK solto: coluna entra, o sem nome vira aviso", () => {
@@ -67,14 +104,14 @@ test("DROP COLUMN derruba junto índice e constraint que dependem da coluna (cas
     assert.ok(!exp.columns.has("users.civil_id_type"));
 });
 
-test("DROP TABLE leva colunas, índices e constraints; RENAME preserva a migration de origem", () => {
+test("DROP TABLE leva colunas, índices e constraints; RENAME move tudo para o nome novo, atribuído à migration do rename", () => {
     const exp = expectedSchema([
         mig("001_a.sql", `CREATE TABLE t (id INT); ALTER TABLE t ADD COLUMN c INT; CREATE INDEX t_c_idx ON t (c); ALTER TABLE t ADD CONSTRAINT t_chk CHECK (c > 0);`),
         mig("002_b.sql", `ALTER TABLE t RENAME COLUMN c TO d; ALTER TABLE t RENAME TO u;`),
         mig("003_c.sql", `CREATE TABLE lixo (id INT); CREATE INDEX lixo_idx ON lixo (id); DROP TABLE lixo;`),
     ]);
-    assert.equal(exp.tables.get("u"), "001_a.sql");
-    assert.equal(exp.columns.get("u.d"), "001_a.sql");
+    assert.equal(exp.tables.get("u"), "002_b.sql", "o nome novo é obra do rename");
+    assert.equal(exp.columns.get("u.d"), "002_b.sql");
     assert.equal(exp.indexes.get("t_c_idx").table, "u");
     assert.ok(exp.constraints.has("u.t_chk"));
     assert.ok(!exp.tables.has("lixo") && !exp.indexes.has("lixo_idx"));

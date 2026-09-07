@@ -164,6 +164,15 @@ test("schema: só o que veio depois da linha de base é conferido — e a ausên
     const ok = await check("migrations").run({ q: catalogo([...EXPECTED_SCHEMA_FULL.constraints.keys()]) });
     assert.equal(ok.status, "ok");
     assert.deepEqual(ok.detail.missing, []);
+    // tabela ANTERIOR à linha de base sumiu (submissions): não pode esconder
+    // a FK nova — vira ausência de tabela (revisão do #391)
+    const semSubmissions = async (sql) => {
+        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA_FULL.tables.keys()].filter(t => t !== "submissions").map(name => ({ name })) };
+        return catalogo([])(sql);
+    };
+    const r2 = await check("migrations").run({ q: semSubmissions });
+    assert.equal(r2.status, "fail");
+    assert.deepEqual(r2.detail.missing.map(m => [m.kind, m.name]), [["table", "submissions"]]);
 });
 
 // ---------------------------------------------------- invariantes de fonte ---
