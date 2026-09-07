@@ -1,6 +1,6 @@
 # Verificação de saúde
 
-> **Estado:** em construção · primeiro corte em 2026-09-07 (nível `shallow`)
+> **Estado:** em construção · nível `shallow` em produção desde 2026-09-07
 > Usuário desta capacidade: **a equipe que opera o sistema**, e a ferramenta de
 > monitoração que ela configurar.
 
@@ -32,11 +32,12 @@ Cada **componente** é um *check* com quatro estados possíveis, não dois:
 Os checks se organizam em três **profundidades**, por custo e por efeito
 colateral:
 
-- **`shallow`** — sem custo e sem efeito: configuração ativa, banco (latência e
-  pool), schema materializado, seeds e admin de bootstrap, filas de vídeo e
-  retranscrição (com o batimento do executor), binários e modelos, versão do
-  termo de consentimento. Alvo: menos de um segundo. É o nível da monitoração
-  externa. **É o que existe hoje.**
+- **`shallow`** — sem custo, sem efeito e sem processo filho: configuração
+  ativa, banco (latência e pool), schema materializado, seeds e admin de
+  bootstrap, filas de vídeo e retranscrição (com o batimento do executor),
+  modelos e arquivos de mídia, versão do termo de consentimento. Alvo: menos
+  de um segundo local, ~2 s em produção (banco remoto). É o nível da
+  monitoração externa. **É o que existe hoje.**
 - **`deep`** — uma ida real a cada dependência externa: storage, o modelo
   principal, transcrição com conferência do texto, síntese de voz, o módulo
   nativo de fiscalização, o sidecar de visão, e a perna servidor↔OpenAI do
@@ -62,7 +63,7 @@ Dois endpoints:
 | Schema materializado | o **mais valioso pós-Publish**: tabela, coluna, índice ou constraint que alguma migration cria e que **não existe no banco** — com a migration de origem. Confere o catálogo, não o ledger (ver abaixo) |
 | Seeds | o schema foi, mas os dados de bootstrap não; ou não há admin global |
 | Filas | executor parou (sem tique, lease vencida), falhas nas últimas 24 h, job pendente há mais de uma hora |
-| Binários e modelos | deploy sem `ffmpeg`, sem os ONNX, sem o WASM, sem os mp3 do sound check |
+| Modelos e arquivos de mídia | deploy sem os ONNX, sem o WASM, sem os mp3 do sound check (binários, como o `ffmpeg`, são do nível `deep`) |
 | Consentimento | quantos alunos vão reaceitar o termo depois de uma mudança de versão |
 
 ## Por que o check de schema não lê o ledger
@@ -74,14 +75,22 @@ materializa o schema por diff dev→prod e não escreve uma linha no ledger
 check que comparasse arquivos com o ledger acusaria 72 "pendentes" para sempre,
 e uma monitoração que grita para sempre é uma monitoração desligada.
 
-O que se confere é o **catálogo**: as migrations são lidas em ordem e dizem o
-que o schema deveria ter — tabelas, colunas (inclusive as declaradas dentro do
-`CREATE TABLE`), índices e constraints, com os DROPs e RENAMEs aplicados e com
-o nome que o Postgres dá às constraints sem nome; o check pergunta ao banco o
-que existe e lista o que falta, apontando a migration que o criou. Em dev, onde
-o ledger é a verdade, ele aparece como informação. O invariante que segura o
-parser é um teste: o banco de dev, migrado por definição, tem de dar zero
-ausências. Detalhe em `lib/schemaExpectations.js`.
+O que se confere é o **catálogo**, e só **daqui para frente**: as migrations
+são lidas em ordem e dizem o que o schema deveria ter — tabelas, colunas,
+índices e constraints, com os DROPs e RENAMEs aplicados —, mas o check só
+espera o que as migrations **posteriores à linha de base (080)** criaram. O
+histórico até ali foi validado uma vez, contra dev e contra produção
+(07/09/2026), e a única divergência virou a migration 081; daí em diante o
+passado é estado conhecido, e cada Publish novo é verificado sem reprocessar
+os anteriores.
+
+Isso só funciona com uma convenção, verificada por teste: **toda constraint e
+todo índice em migration nova têm nome explícito** (`AGENTS.md`). O parser não
+emula a nomenclatura automática do Postgres — objeto sem nome não é conferido,
+e o teste da convenção acusa antes do PR. Em dev, onde o ledger é a verdade,
+ele aparece como informação. O invariante que segura o parser é outro teste: o
+banco de dev, migrado por definição, dá zero ausências no replay completo.
+Detalhe em `lib/schemaExpectations.js`.
 
 Cada ausência acusada vem com o que o catálogo **tem** naquela tabela, do mesmo
 tipo — é o que distingue "falta" de "existe com outro nome", que foi a dúvida
@@ -91,14 +100,14 @@ da primeira medição em produção (#389).
 
 - O deployment do Replit não leva o `.git`: o commit saía `null`. O passo de
   `build` em `.replit` grava `.build-commit`, que o relatório lê.
-- A sonda do `ffmpeg` com 2 s estourava em toda chamada, com o binário
-  instalado e a fila de vídeo funcionando. A sonda passou a 8 s e diz o que
-  aconteceu (tempo, código do erro, sinal), porque "não achei" e "achei mas
-  demorou" pedem ações diferentes. Por isso o check `assets` tem orçamento
-  próprio de 9 s, acima do padrão de 3 s dos demais: **o cliente da
-  monitoração precisa esperar pelo menos 10 s** pela resposta. Com a sonda
-  bem-sucedida, a versão fica memorizada e as chamadas seguintes custam
-  milissegundos.
+- `ffmpeg -version` não respondeu em 8 s no deployment, com o binário
+  instalado e a fila de vídeo funcionando. Lançar binário não é coisa de
+  `shallow`: o check de arquivos passou a conferir só modelos e mídia, e o
+  ffmpeg vai ser exercitado de verdade no nível `deep`.
+- A FK da migration 074 (`submissions.proctor_review`) **não existia em
+  produção com nome nenhum** — o Publish não materializou uma FK para coluna
+  UNIQUE. A migration 081 a renomeia para o diff enxergar (#389). Foi o
+  achado que justificou o check.
 - A latência de banco em produção é de ~90 ms por ida; os checks de banco em
   série custam ~2 s por relatório. Está dentro do prazo, e é o preço de uma
   conexão só.

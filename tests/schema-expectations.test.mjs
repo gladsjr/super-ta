@@ -2,14 +2,15 @@
 //
 // O que se protege: o check de schema do health check NÃO pode acusar ausência
 // falsa (um 503 permanente em produção é o pior resultado possível — a
-// monitoração vira ruído e alguém a desliga). Cada caso abaixo é uma armadilha
-// real das migrations deste repositório.
+// monitoração vira ruído e alguém a desliga). E a convenção que o mantém
+// simples — constraint e índice com NOME explícito nas migrations novas — é
+// verificada aqui, não só escrita no AGENTS.md.
 //
 //   node --test -r dotenv/config tests/schema-expectations.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { splitStatements, factsFromStatement, expectedSchema, diffExpected, readMigrationFiles } from "../lib/schemaExpectations.js";
+import { splitStatements, factsFromStatement, expectedSchema, afterBaseline, diffExpected, readMigrationFiles, SCHEMA_BASELINE } from "../lib/schemaExpectations.js";
 
 const raiz = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const mig = (filename, sql) => ({ version: filename.slice(0, 3), filename, sql });
@@ -31,6 +32,25 @@ test("objetos fora do schema public (views/functions de analytics, ADR 0014) nã
     assert.deepEqual(factsFromStatement("CREATE TABLE analytics.works AS SELECT 1"), []);
     assert.deepEqual(factsFromStatement("CREATE VIEW analytics.works AS SELECT 1"), []);
     assert.deepEqual(factsFromStatement("CREATE FUNCTION analytics.try_jsonb(t text) RETURNS jsonb AS $$ BEGIN RETURN NULL; END $$ LANGUAGE plpgsql"), []);
+});
+
+test("CREATE TABLE por dentro: colunas, PRIMARY KEY inline e constraints NOMEADAS entram; sem nome vira aviso, não expectativa", () => {
+    const exp = expectedSchema([mig("081_a.sql", `
+        CREATE TABLE t (id SERIAL PRIMARY KEY, a INT NOT NULL, b TEXT CONSTRAINT t_b_chk CHECK (b <> ''), c INT CHECK (c > 0), d INT REFERENCES u(id),
+                        CONSTRAINT t_a_uq UNIQUE (a), UNIQUE (b, c));`)]);
+    assert.deepEqual([...exp.columns.keys()].sort(), ["t.a", "t.b", "t.c", "t.d", "t.id"]);
+    assert.deepEqual([...exp.constraints.keys()].sort(), ["t.t_a_uq", "t.t_b_chk", "t.t_pkey"]);
+    assert.deepEqual(exp.unnamed.map(u => u.what).sort(), ["CHECK", "REFERENCES", "UNIQUE"]);
+    assert.ok(exp.unnamed.every(u => u.migration === "081_a.sql" && u.table === "t"));
+});
+
+test("ADD COLUMN com REFERENCES/CHECK inline e ADD CHECK solto: coluna entra, o sem nome vira aviso", () => {
+    const exp = expectedSchema([mig("081_a.sql", `CREATE TABLE t (id INT); ALTER TABLE t ADD COLUMN x INT REFERENCES u(id); ALTER TABLE t ADD CHECK (x > 0);
+        ALTER TABLE t ADD COLUMN y INT, ADD CONSTRAINT t_y_fk FOREIGN KEY (y) REFERENCES u(id);`)]);
+    assert.deepEqual([...exp.columns.keys()].sort(), ["t.id", "t.x", "t.y"]);
+    assert.deepEqual([...exp.constraints.keys()], ["t.t_y_fk"]);
+    assert.deepEqual(exp.unnamed.map(u => u.what).sort(), ["CHECK", "REFERENCES"]);
+    assert.ok(!exp.columns.has("t.check"), "ADD CHECK não é coluna");
 });
 
 test("DROP COLUMN derruba junto índice e constraint que dependem da coluna (casos 068 e 073)", () => {
@@ -66,67 +86,41 @@ test("o diff acusa a ausência com a migration de origem, e não repete a tabela
         mig("080_b.sql", `CREATE TABLE object_sizes (key TEXT); ALTER TABLE submissions ADD COLUMN x INT;`),
     ]);
     const catalog = { tables: new Set(["jobs", "submissions"]), columns: new Set(["jobs.id"]), indexes: new Set(), constraints: new Set() };
-    const missing = diffExpected(exp, catalog);
-    assert.deepEqual(missing.map(m => [m.kind, m.name, m.migration]).sort(), [
+    assert.deepEqual(diffExpected(exp, catalog).map(m => [m.kind, m.name, m.migration]).sort(), [
         ["column", "submissions.x", "080_b.sql"],
         ["index", "jobs_idx", "079_a.sql"],
         ["table", "object_sizes", "080_b.sql"],
     ]);
 });
 
-test("as migrations reais produzem expectativa não trivial e só três arquivos sem fato estrutural", () => {
-    const exp = expectedSchema(readMigrationFiles(path.join(raiz, "migrations")));
-    assert.ok(exp.tables.size >= 40 && exp.columns.size >= 100 && exp.indexes.size >= 40 && exp.constraints.size >= 10, JSON.stringify({ t: exp.tables.size, c: exp.columns.size, i: exp.indexes.size, k: exp.constraints.size }));
-    // Migrations só de dados/ALTER COLUMN: conhecidas. Uma nova aqui merece um
-    // olhar — pode ser gramática que o parser não entende.
-    assert.deepEqual(exp.withoutFacts, ["039_migrate_oral_rubric.sql", "046_reset_benchmark_case_schema_v3.sql", "071_question_count_default_5.sql"]);
-});
-
-test("colunas e constraints declaradas DENTRO do CREATE TABLE entram na expectativa (migration 080 real)", () => {
-    // Regressão apontada na revisão do #388: o parser só pegava o nome da
-    // tabela, e uma coluna ausente de uma tabela criada inteira numa migration
-    // passava verde. Constraint sem nome recebe o nome que o Postgres dá.
-    const exp = expectedSchema(readMigrationFiles(path.join(raiz, "migrations")));
-    for (const c of ["object_sizes.object_key", "object_sizes.bytes", "object_sizes.created_at"]) {
-        assert.equal(exp.columns.get(c), "080_object_sizes.sql", `faltou a coluna ${c}`);
-    }
-    assert.equal(exp.constraints.get("object_sizes.object_sizes_pkey")?.migration, "080_object_sizes.sql");
-    assert.equal(exp.constraints.get("object_sizes.object_sizes_bytes_check")?.migration, "080_object_sizes.sql");
-    const catalog = {
-        tables: new Set(exp.tables.keys()),
-        columns: new Set([...exp.columns.keys()].filter(c => c !== "object_sizes.bytes")),
-        indexes: new Set(exp.indexes.keys()),
-        constraints: new Set([...exp.constraints.keys()].filter(c => c !== "object_sizes.object_sizes_bytes_check")),
-    };
-    assert.deepEqual(diffExpected(exp, catalog).map(m => [m.kind, m.name, m.migration]).sort(), [
-        ["column", "object_sizes.bytes", "080_object_sizes.sql"],
-        ["constraint", "object_sizes.object_sizes_bytes_check", "080_object_sizes.sql"],
+test("linha de base: só o que veio DEPOIS dela é esperado, mas o replay (DROP/RENAME) continua completo", () => {
+    const full = expectedSchema([
+        mig("079_a.sql", `CREATE TABLE velha (id INT, x INT); CREATE INDEX velha_x_idx ON velha (x);`),
+        mig("081_b.sql", `ALTER TABLE velha DROP COLUMN x; ALTER TABLE velha ADD COLUMN y INT; CREATE TABLE nova (id INT PRIMARY KEY);`),
     ]);
+    const exp = afterBaseline(full, "080");
+    assert.deepEqual([...exp.tables.keys()], ["nova"]);
+    assert.deepEqual([...exp.columns.keys()].sort(), ["nova.id", "velha.y"]);
+    assert.deepEqual([...exp.constraints.keys()], ["nova.nova_pkey"]);
+    assert.equal(exp.indexes.size, 0, "o índice da 079 dropado com a coluna não volta pela porta dos fundos");
+    assert.equal(exp.baseline, "080");
 });
 
-test("constraint sem nome recebe o nome que o Postgres dá — e ADD CHECK não vira coluna chamada 'check'", () => {
-    const f = factsFromStatement("ALTER TABLE works ADD CHECK (question_count BETWEEN 3 AND 10)");
-    assert.ok(!f.some(x => x.kind === "column"), JSON.stringify(f));
-    const exp = expectedSchema([mig("001_a.sql", `
-        CREATE TABLE pa (id INT PRIMARY KEY, granted INT NOT NULL CHECK (granted >= 0), delegated INT, unit_id INT REFERENCES units(id), code TEXT UNIQUE,
-                         CHECK (delegated <= granted), UNIQUE (unit_id, code));
-        ALTER TABLE pa ADD CHECK (delegated >= 0);
-        ALTER TABLE pa ADD COLUMN mode TEXT CHECK (mode IN ('a', 'b'));
-        ALTER TABLE pa ADD COLUMN owner_id INT REFERENCES users(id);`)]);
-    assert.deepEqual([...exp.constraints.keys()].sort(), [
-        "pa.pa_check",                 // duas colunas na expressão → sem coluna no nome
-        "pa.pa_code_key",
-        "pa.pa_delegated_check",       // ADD CHECK sem nome, uma coluna
-        "pa.pa_granted_check",
-        "pa.pa_mode_check",            // inline no ADD COLUMN
-        "pa.pa_owner_id_fkey",         // REFERENCES inline no ADD COLUMN
-        "pa.pa_pkey",
-        "pa.pa_unit_id_code_key",
-        "pa.pa_unit_id_fkey",
-    ]);
+test("migrations reais: o replay completo é coerente, e a linha de base é a 080", () => {
+    const full = expectedSchema(readMigrationFiles(path.join(raiz, "migrations")));
+    assert.ok(full.tables.size >= 45 && full.columns.size >= 480, JSON.stringify({ t: full.tables.size, c: full.columns.size }));
+    assert.deepEqual(full.withoutFacts, ["039_migrate_oral_rubric.sql", "046_reset_benchmark_case_schema_v3.sql", "071_question_count_default_5.sql"]);
+    assert.equal(SCHEMA_BASELINE, "080");
+    const exp = afterBaseline(full);
+    // A 081 renomeia a FK da 074 (#389): é o primeiro objeto conferido pelo check.
+    assert.equal(exp.constraints.get("submissions.submissions_proctor_review_level_fkey")?.migration, "081_rename_proctor_review_fkey.sql");
+    assert.ok(!exp.constraints.has("submissions.submissions_proctor_review_fkey"), "o nome antigo foi dropado");
 });
 
-test("dois CHECK sem nome na mesma coluna: o segundo ganha sufixo 1, como no Postgres", () => {
-    const exp = expectedSchema([mig("001_a.sql", `CREATE TABLE t (a INT CHECK (a > 0)); ALTER TABLE t ADD CHECK (a < 100);`)]);
-    assert.deepEqual([...exp.constraints.keys()].sort(), ["t.t_a_check", "t.t_a_check1"]);
+test("CONVENÇÃO: migration posterior à linha de base não cria constraint sem nome (AGENTS.md)", () => {
+    // Objeto sem nome não é conferido pelo health check — e o Publish já
+    // deixou constraint para trás (074). Quem quebrar isto vê a migration e o
+    // comando aqui, antes do PR.
+    const exp = afterBaseline(expectedSchema(readMigrationFiles(path.join(raiz, "migrations"))));
+    assert.deepEqual(exp.unnamed, [], "constraint sem nome em migration nova:\n" + exp.unnamed.map(u => `  ${u.migration} (${u.table}): ${u.def}`).join("\n"));
 });
