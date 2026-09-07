@@ -94,7 +94,11 @@ da primeira medição em produção (#389).
 - A sonda do `ffmpeg` com 2 s estourava em toda chamada, com o binário
   instalado e a fila de vídeo funcionando. A sonda passou a 8 s e diz o que
   aconteceu (tempo, código do erro, sinal), porque "não achei" e "achei mas
-  demorou" pedem ações diferentes.
+  demorou" pedem ações diferentes. Por isso o check `assets` tem orçamento
+  próprio de 9 s, acima do padrão de 3 s dos demais: **o cliente da
+  monitoração precisa esperar pelo menos 10 s** pela resposta. Com a sonda
+  bem-sucedida, a versão fica memorizada e as chamadas seguintes custam
+  milissegundos.
 - A latência de banco em produção é de ~90 ms por ida; os checks de banco em
   série custam ~2 s por relatório. Está dentro do prazo, e é o preço de uma
   conexão só.

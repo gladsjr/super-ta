@@ -301,6 +301,52 @@ test("prazo de conexão estourado é fail com motivo E cancela o pedido — nada
     } finally { preso.release(); }
 });
 
+test("sonda do ffmpeg: sucesso lento e sonda travada chegam ao relatório com diagnóstico — o orçamento do check comporta a sonda", async () => {
+    // Revisão do #390: a sonda ganhou 8 s, mas o prazo externo do check era
+    // 3 s — o diagnóstico nunca chegava. Aqui o caminho COMPLETO (runHealth),
+    // trocando só o execFile do child_process (builtin CJS sincronizado com a
+    // importação ESM via syncBuiltinESMExports).
+    const cp = await import("node:child_process");
+    const { syncBuiltinESMExports } = await import("node:module");
+    const original = cp.default.execFile;
+    const assets = check("assets");
+    assert.ok(assets.budget_ms > 8000, "o orçamento de assets tem de comportar a sonda de 8 s");
+    try {
+        // 1) sucesso em 3,5 s: acima do prazo padrão, dentro do orçamento
+        health._resetFfmpegProbe();
+        cp.default.execFile = (cmd, args, opts, cb) => { setTimeout(() => cb(null, "ffmpeg version 9.9.9-teste Copyright" + String.fromCharCode(10)), 3500); return { kill() {} }; };
+        syncBuiltinESMExports();
+        let r = await runHealth({ ids: ["assets"] });
+        let a = r.checks[0];
+        assert.equal(a.status, "ok", JSON.stringify(a.detail));
+        assert.equal(a.detail.ffmpeg, "9.9.9-teste");
+        assert.ok(a.detail.ffmpeg_probe.ms >= 3400, `probe em ${a.detail.ffmpeg_probe.ms} ms`);
+        // 2) sonda travada: o execFile honra o timeout pedido e devolve killed
+        health._resetFfmpegProbe();
+        cp.default.execFile = (cmd, args, opts, cb) => { setTimeout(() => cb(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), null), opts.timeout); return { kill() {} }; };
+        syncBuiltinESMExports();
+        const t0 = Date.now();
+        r = await runHealth({ ids: ["assets"] });
+        a = r.checks[0];
+        assert.equal(a.status, "fail");
+        assert.equal(a.detail.ffmpeg, null);
+        assert.equal(a.detail.ffmpeg_probe.timed_out, true, JSON.stringify(a.detail));
+        assert.equal(a.detail.ffmpeg_probe.signal, "SIGTERM");
+        assert.ok(!a.detail.error, "o motivo tem de ser o da sonda, não o prazo genérico do check");
+        assert.ok(Date.now() - t0 < 9500, "e o check ainda responde dentro do orçamento");
+        // 3) ENOENT: motivo imediato
+        health._resetFfmpegProbe();
+        cp.default.execFile = (cmd, args, opts, cb) => { setImmediate(() => cb(Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT" }), null)); return { kill() {} }; };
+        syncBuiltinESMExports();
+        r = await runHealth({ ids: ["assets"] });
+        assert.equal(r.checks[0].detail.ffmpeg_probe.error, "ENOENT");
+    } finally {
+        cp.default.execFile = original;
+        syncBuiltinESMExports();
+        health._resetFfmpegProbe();
+    }
+});
+
 test("prazo TOTAL do check estourado não devolve ao pool uma conexão ainda ocupada, e o check seguinte mede normalmente", semBanco, async () => {
     // Regressão da revisão do #388: statement_timeout vale por instrução; três
     // consultas de 1,2 s cabem cada uma no limite e somadas estouram o prazo
