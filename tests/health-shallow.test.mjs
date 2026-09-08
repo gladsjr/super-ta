@@ -68,14 +68,155 @@ test("todo check registrado tem id único, rótulo, nível conhecido e diz se us
     }
 });
 
-test("níveis deep e e2e são recusados com 501; depth/ids ruins e seleção vazia, 400", async () => {
-    for (const depth of ["deep", "e2e"]) {
-        await assert.rejects(runHealth({ depth }), (e) => e.httpStatus === 501, `${depth} deveria ser 501`);
-    }
+test("e2e é recusado com 501; depth/ids ruins e seleção vazia, 400; check de nível acima da profundidade, 400", async () => {
+    await assert.rejects(runHealth({ depth: "e2e" }), (e) => e.httpStatus === 501, "e2e deveria ser 501");
     await assert.rejects(runHealth({ depth: "abissal" }), (e) => e.httpStatus === 400);
     await assert.rejects(runHealth({ ids: ["db", "inexistente"] }), (e) => e.httpStatus === 400 && /inexistente/.test(e.message));
     await assert.rejects(runHealth({ ids: [] }), (e) => e.httpStatus === 400 && /vazio/.test(e.message), "checks=,,, não pode virar relatório vazio com ok:true");
+    // Pedir um check deep com depth=shallow não é "pular": é 400 — um relatório
+    // sem ele diria menos do que o robô pediu.
+    await assert.rejects(runHealth({ ids: ["config", "responses"] }), (e) => e.httpStatus === 400 && /responses/.test(e.message) && /depth=deep/.test(e.message));
+    // depth=deep inclui shallow: selecionar só um check shallow em deep é
+    // válido e não gasta nada.
+    const r = await runHealth({ depth: "deep", ids: ["config"] });
+    assert.equal(r.depth, "deep");
+    assert.deepEqual(r.checks.map(c => c.id), ["config"]);
+    assert.equal(r.checks[0].level, "shallow");
+    assert.equal(r.cost_usd, 0);
 });
+
+// ------------------------------------------------------------- deep -----
+
+test("registro deep: nove checks, todos com orçamento próprio e sem cliente de banco do health", async () => {
+    const { DEEP_CHECKS, DEEP_BUDGET_MS, estimateDeepCostUsd } = await import("../lib/healthDeep.js");
+    assert.deepEqual(DEEP_CHECKS.map(c => c.id), ["storage", "responses", "stt", "tts", "vision", "sidecar", "retranscribe_local", "ffmpeg", "realtime_a"]);
+    for (const c of DEEP_CHECKS) {
+        assert.equal(c.level, "deep");
+        assert.equal(c.budget_ms, DEEP_BUDGET_MS, `${c.id}: orçamento`);
+        assert.equal(c.db, false, `${c.id}: deep não segura a conexão única do health`);
+        assert.ok(CHECK_IDS.includes(c.id), `${c.id} tem de estar no registro geral`);
+    }
+    const est = estimateDeepCostUsd();
+    assert.ok(est > 0 && est < 0.05, `estimativa de custo do deep: US$ ${est}`);
+});
+
+test("invariantes do deep: escreve só em chave própria e apaga; Realtime nunca gera resposta; STT e TTS pela porta do produto", () => {
+    const txt = fonte("lib/healthDeep.js");
+    // storage: chave própria, e o delete faz parte do RESULTADO (falha = fail)
+    assert.match(txt, /const key = `health\/probe-/);
+    assert.match(txt, /const del = await store\.deleteAudio\(key\);\s*if \(!del\.deleted\)/);
+    // Realtime: session.update sim, response.create NUNCA (geraria fala e custo)
+    assert.match(txt, /type: "session\.update"/);
+    assert.ok(!/response\.create/.test(txt), "a perna A não pode pedir resposta ao Realtime");
+    assert.match(txt, /buildSessionConfig\(/, "o session.update tem de ser o MESMO do relay");
+    // portas únicas do produto
+    assert.match(txt, /sttTranscribe\(/);
+    assert.ok(!/audio\.transcriptions\.create/.test(txt), "STT só pela porta única (AGENTS.md)");
+    assert.match(txt, /synthesizeSpeech\(/);
+    // nada de DDL nem escrita em tabela
+    for (const proibido of [/\bINSERT\b/, /\bUPDATE\b/, /\bDELETE FROM\b/, /\bCREATE\b/]) assert.ok(!proibido.test(txt), `deep não pode: ${proibido}`);
+});
+
+test("storage: falha ao apagar reprova o check, mesmo com put/size/range ok; ciclo completo é ok", async () => {
+    const { Readable } = await import("node:stream");
+    const fake = (delOk) => ({
+        isAvailable: () => true,
+        putAudio: async ({ key }) => ({ stored: true, key }),
+        objectSize: async () => 1024,
+        streamRange: async () => Readable.from([Buffer.alloc(100, 1)]),
+        deleteAudio: async () => delOk ? { deleted: true } : { deleted: false, reason: "403 forbidden (simulado)" },
+    });
+    const ruim = await check("storage").run({ deps: { store: fake(false) } });
+    assert.equal(ruim.status, "fail");
+    assert.equal(ruim.detail.step, "delete");
+    assert.match(ruim.detail.delete_reason, /403/);
+    assert.match(ruim.detail.leftover, /^health\/probe-/);
+    const bom = await check("storage").run({ deps: { store: fake(true) } });
+    assert.equal(bom.status, "ok");
+    assert.ok(bom.detail.delete_ms >= 0);
+});
+
+test("realtime_a: socket que fecha ou silencia não pendura — rejeita; o prazo (signal) fecha o socket", async () => {
+    const { EventEmitter } = await import("node:events");
+    class FakeWS extends EventEmitter {
+        constructor(_url, _opts) { super(); FakeWS.last = this; this.fechado = 0; setTimeout(() => { this.emit("open"); this.emit("message", Buffer.from(JSON.stringify({ type: "session.created" }))); FakeWS.roteiro?.(this); }, 5); }
+        send() {}
+        close() { this.fechado++; this.emit("close", 1000); }
+    }
+    const deps = { WebSocket: FakeWS, vozes: async () => ["verse"] };
+    // 1) fecha logo depois do session.created, sem responder o update
+    FakeWS.roteiro = (ws) => setTimeout(() => ws.emit("close", 1006), 20);
+    const t0 = Date.now();
+    await assert.rejects(check("realtime_a").run({ deps, bancoLivre: Promise.resolve() }), /fechado/);
+    assert.ok(Date.now() - t0 < 1500, "não pode esperar o prazo do check");
+    // 2) silêncio: o prazo do check (signal) fecha o socket e a espera rejeita
+    FakeWS.roteiro = null;
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 100);
+    await assert.rejects(check("realtime_a").run({ deps, bancoLivre: Promise.resolve(), signal: ac.signal }), /prazo/);
+    assert.ok(FakeWS.last.fechado >= 1, "o socket tem de ser fechado no abort");
+    // 3) caminho feliz com o fake: updated para a voz
+    FakeWS.roteiro = (ws) => { ws.send = () => setTimeout(() => ws.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" }))), 5); };
+    const ok = await check("realtime_a").run({ deps, bancoLivre: Promise.resolve() });
+    assert.equal(ok.status, "ok");
+    assert.deepEqual(ok.detail.voices.map(v => [v.voice, v.ok]), [["verse", true]]);
+});
+
+test("deep em andamento (esperando provedor) NÃO segura a conexão do health: shallow concorrente responde", semBanco, async () => {
+    // Revisão do #394: a conexão única era devolvida só no fim do relatório —
+    // um deep esperando o Responses dava 503 falso à monitoração.
+    const lento = { id: "lento_ext_teste", label: "externo lento", level: "deep", db: false, budget_ms: 10_000, run: async () => { await new Promise(r => setTimeout(r, 2500)); return { status: "ok", detail: {} }; } };
+    CHECKS.push(lento); CHECK_IDS.push(lento.id);
+    try {
+        const deep = runHealth({ depth: "deep", ids: ["db", lento.id] });
+        await new Promise(r => setTimeout(r, 300));
+        const t0 = Date.now();
+        const shallow = await runHealth({ ids: ["db"] });
+        const ms = Date.now() - t0;
+        assert.equal(shallow.checks[0].status, "ok", JSON.stringify(shallow.checks[0].detail));
+        assert.ok(ms < 2000, `shallow esperou ${ms} ms pela conexão presa pelo deep`);
+        const r = await deep;
+        assert.equal(r.status, "ok");
+    } finally {
+        CHECKS.splice(CHECKS.indexOf(lento), 1);
+        CHECK_IDS.splice(CHECK_IDS.indexOf(lento.id), 1);
+    }
+});
+
+test("tela: entrar na aba Operações carrega SEMPRE shallow; deep só pelo botão com o seletor", () => {
+    const html = fonte("static/admin.html");
+    assert.match(html, /opsEstavaOculta\) loadHealth\('shallow'\)/, "entrada na aba tem de pedir shallow explicitamente");
+    assert.match(html, /health-refresh'\)\.onclick = \(\) => loadHealth\(document\.getElementById\('health-depth'\)\.value/, "só o botão lê o seletor");
+    const corpo = html.slice(html.indexOf("async function loadHealth("), html.indexOf("document.getElementById('health-refresh').onclick"));
+    assert.ok(!/health-depth/.test(corpo), "loadHealth não pode ler o seletor por conta própria");
+});
+
+test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {
+    const r = await check("retranscribe_local").run({});
+    const { RETRANSCRIBE_ENGINE } = await import("../lib/config.js");
+    if (RETRANSCRIBE_ENGINE !== "local") { assert.equal(r.status, "skip"); assert.match(r.detail.reason, /retranscribe_engine/); }
+    else assert.ok(["ok", "fail"].includes(r.status));
+});
+
+// O deep de verdade gasta dinheiro (~US$ 0,002) e exige chave da OpenAI: só
+// roda quando pedido — HEALTH_DEEP_TESTS=1. É o que se roda antes de um PR.
+const semDeep = process.env.HEALTH_DEEP_TESTS === "1" ? false : { skip: "HEALTH_DEEP_TESTS=1 para rodar o deep de verdade (gasta ~US$ 0,002)" };
+test("deep de verdade: modelo, STT com texto conferido, TTS, ONNX, ffmpeg e Realtime perna A", semDeep, async () => {
+    const { initAudioStore } = await import("../lib/audioStore.js");
+    await initAudioStore();
+    const r = await runHealth({ depth: "deep" });
+    assert.equal(r.depth, "deep");
+    assert.equal(r.checks.length, CHECK_IDS.length);
+    const por = Object.fromEntries(r.checks.map(c => [c.id, c]));
+    for (const id of ["storage", "responses", "stt", "tts", "vision", "ffmpeg", "realtime_a"]) {
+        assert.ok(["ok", "warn"].includes(por[id].status), `${id}: ${por[id].status} ${JSON.stringify(por[id].detail)}`);
+    }
+    assert.ok(por.stt.detail.wer <= 0.2, `wer ${por.stt.detail.wer}`);
+    assert.ok(por.realtime_a.detail.voices.every(v => v.ok), JSON.stringify(por.realtime_a.detail.voices));
+    assert.ok(r.cost_usd > 0 && r.cost_usd < 0.05, `custo US$ ${r.cost_usd}`);
+    assert.ok(por.responses.cost_usd > 0 && por.tts.cost_usd > 0 && por.stt.cost_usd > 0);
+});
+
 
 // ------------------------------------------ checks com banco simulado -----
 // Os checks recebem `ctx.q`; um `q` falso basta para exercitar os ramos que
@@ -287,8 +428,11 @@ test("relatório shallow completo, com o contrato do endpoint — e o dev migrad
     assert.ok(["ok", "warn", "fail"].includes(r.status));
     assert.equal(r.ok, r.status !== "fail");
     assert.ok(typeof r.duration_ms === "number");
-    assert.equal(r.checks.length, CHECK_IDS.length, "sem filtro, rodam todos os de shallow");
-    assert.deepEqual(r.checks.map(c => c.id), CHECK_IDS, "ordem do registro");
+    const shallowIds = CHECKS.filter(c => c.level === "shallow").map(c => c.id);
+    assert.equal(r.checks.length, shallowIds.length, "sem filtro, rodam todos os de shallow — e só eles");
+    assert.deepEqual(r.checks.map(c => c.id), shallowIds, "ordem do registro");
+    assert.equal(r.cost_usd, 0, "shallow custa zero, e diz isso");
+    assert.ok(r.checks.every(c => c.level === "shallow"));
     for (const c of r.checks) {
         assert.ok(["ok", "warn", "fail", "skip"].includes(c.status), `${c.id}: status ${c.status}`);
         assert.equal(c.cost_usd, 0, `${c.id}: shallow custa zero`);

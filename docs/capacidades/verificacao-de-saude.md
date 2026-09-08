@@ -38,12 +38,20 @@ colateral:
   modelos e arquivos de mídia, versão do termo de consentimento. Alvo: menos
   de um segundo local, ~2 s em produção (banco remoto). É o nível da
   monitoração externa. **É o que existe hoje.**
-- **`deep`** — uma ida real a cada dependência externa: storage, o modelo
-  principal, transcrição com conferência do texto, síntese de voz, o módulo
-  nativo de fiscalização, o sidecar de visão, e a perna servidor↔OpenAI do
-  Realtime. Poucos centavos. Roda depois do Publish. *(corte seguinte)*
+- **`deep`** — uma ida real a cada dependência externa, pela **mesma porta
+  que o produto usa**: storage (put, tamanho, leitura por faixa, apagar, numa
+  chave própria), o modelo principal com o effort configurado, transcrição de
+  um clip do sound check **com o texto conferido** (WER), síntese de voz, o
+  módulo nativo de fiscalização (uma inferência real), o sidecar Python
+  (MediaPipe), a retranscrição local (só se configurada; senão `skip`), o
+  `ffmpeg`, e a **perna A do Realtime**: abre a sessão e manda o mesmo
+  `session.update` do relay **com a voz de cada trabalho de voz ativo**,
+  esperando a confirmação — é o acidente do #351, pego antes do aluno. Inclui
+  o `shallow`. Cerca de US$ 0,002 e 10 s. Roda depois do Publish, pela tela
+  ou por um token de saúde; **limitado a 12 por hora**, porque gasta. **É o
+  que existe hoje.**
 - **`e2e`** — o relay de voz completo, em produção, sobre um trabalho de saúde
-  permanente. Só sob pedido explícito. *(corte seguinte)*
+  permanente. Só sob pedido explícito. *(corte seguinte; responde 501)*
 
 Dois endpoints e uma tela:
 
@@ -56,10 +64,11 @@ Dois endpoints e uma tela:
   sem falhas, 503 com alguma.
 - **Tela "Saúde do sistema"**, no topo da aba Operações do painel de
   administração: o mesmo relatório, com uma frase por verificação e o detalhe
-  completo atrás de um botão. Carrega ao **entrar** na aba e no botão
-  "Verificar agora" — nunca no temporizador da fila, porque cada relatório
-  são várias consultas em série. Depois de um Publish, é a primeira coisa a
-  olhar.
+  completo atrás de um botão. Carrega ao **entrar** na aba (nível `shallow`) e
+  no botão "Verificar agora" — nunca no temporizador da fila, porque cada
+  relatório são várias consultas em série. Um seletor escolhe a profundidade;
+  o `deep` mostra o **custo estimado antes** e o custo real depois. Depois de
+  um Publish, é a primeira coisa a olhar.
 
 **Tokens têm alcance.** O token de acesso programático (aba Tokens do admin)
 serve a **um** uso: `análise`, para o endpoint de consulta de dados, com 30
@@ -69,6 +78,20 @@ o token de análise é somente-leitura por construção, e o nível `deep` vai
 escrever e gastar; reaproveitar o mesmo token ampliaria em silêncio o que todo
 token já emitido pode fazer. Os tokens emitidos antes do alcance existir são
 de análise.
+
+## O que cada check de `deep` pega
+
+| Check | O que descobre |
+|---|---|
+| Storage | a SDK do Replit mudou e o tamanho ou a leitura por faixa pararam — hoje isso aparece no professor tentando assistir a um vídeo (#376) |
+| Modelo principal | chave, existência do modelo, aceitação do effort, latência |
+| Transcrição | **degradação de qualidade**, não só disponibilidade: o texto de um clip conhecido saiu errado |
+| Síntese de voz | modelo ou voz default recusados; bytes que não são áudio |
+| Módulo nativo | `onnxruntime-node` não carrega nesta arquitetura ou imagem — hoje só se descobre na primeira análise de vídeo pós-prova |
+| Sidecar Python | MediaPipe ausente — hoje o sidecar de mãos falha em silêncio |
+| Retranscrição local | `faster-whisper` ausente, quando o motor local está configurado; senão `skip` |
+| `ffmpeg` | binário ausente ou lento (em produção respondeu em 5,8 s) |
+| Realtime, perna A | a OpenAI **recusa o `session.update`** com a voz de algum trabalho ativo — a prova rodaria em inglês, sem as questões (#351) |
 
 ## O que cada check de `shallow` pega
 
@@ -139,8 +162,11 @@ da primeira medição em produção (#389).
   ONLY. Tabela ausente é resultado, não exceção. O boot não cria schema —
   [ADR 0001](../decisoes/0001-migrations-nao-rodam-no-boot.md).
 - **Não escreve, não gasta, não chama provedor no nível `shallow`.** O nível
-  `deep`, quando entrar, vai — por isso o token de saúde é um alcance próprio,
-  separado do token de análise, decidido antes do `deep` existir.
+  `deep` escreve só numa chave própria do storage (e apaga), gasta centavos e
+  **nunca gera fala no Realtime** (só `session.update`) — por isso o token de
+  saúde é um alcance próprio, separado do token de análise.
+- **Não roda o `deep` de minuto em minuto.** Teto de 12 por hora; a
+  monitoração usa o `shallow`.
 - **Não aceita token de análise.** Token é credencial de um uso só.
 - **Não pega a armadilha do Publish com constraint de mesmo nome** — o check
   confere constraint por **nome**, como o próprio diff do Publish, e mudar a
@@ -179,7 +205,8 @@ da primeira medição em produção (#389).
 ## Referência técnica
 
 `lib/health.js` (registro e execução; pool próprio de uma conexão com prazo,
-transação READ ONLY com `statement_timeout`), `lib/schemaExpectations.js` (o
+transação READ ONLY com `statement_timeout`), `lib/healthDeep.js` (os checks
+de nível `deep`), `lib/schemaExpectations.js` (o
 schema esperado a partir das migrations), `lib/jobsHeartbeat.js` (batimento do
 executor), `routes/health.js` (endpoints e autenticação com prazo),
 `lib/migrations.js#listMigrationStatusReadOnly` (ledger, informativo).

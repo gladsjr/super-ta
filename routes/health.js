@@ -31,7 +31,7 @@ import crypto from "node:crypto";
 import rateLimit from "express-rate-limit";
 import { requireAdmin } from "../lib/middleware.js";
 import { findValidAnalyticsToken } from "../lib/db.js";
-import { runHealth, comClienteRO, CHECK_IDS, DEPTHS } from "../lib/health.js";
+import { runHealth, comClienteRO, CHECK_IDS, DEPTHS, estimateDeepCostUsd } from "../lib/health.js";
 import log from "../lib/logger.js";
 
 const router = express.Router();
@@ -102,8 +102,25 @@ const limiter = rateLimit({
     legacyHeaders: false,
     message: { error: "muitas verificações — aguarde um instante" },
 });
+// O nível deep GASTA DINHEIRO (Responses, STT, TTS) e abre um WS no Realtime:
+// teto próprio, bem mais baixo. Um robô configurado por engano com depth=deep
+// a cada minuto pararia aqui, não na fatura.
+const limiterDeep = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 12,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => String(req.query.depth || "shallow").toLowerCase() === "shallow",
+    message: { error: "nível deep limitado a 12 verificações por hora — ele gasta dinheiro; use depth=shallow para monitoração" },
+});
 
-router.get("/admin/health", limiter, requireAdminOrToken, async (req, res) => {
+// Custo estimado do nível deep, para a tela dizer antes de rodar.
+router.get("/admin/health/estimate", limiter, requireAdminOrToken, (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ deep_estimate_usd: estimateDeepCostUsd() });
+});
+
+router.get("/admin/health", limiter, limiterDeep, requireAdminOrToken, async (req, res) => {
     res.set("Cache-Control", "no-store");
     const depth = String(req.query.depth || "shallow").toLowerCase();
     // `checks` ausente → todos. `checks=` presente mas vazio (ou só vírgulas) →
