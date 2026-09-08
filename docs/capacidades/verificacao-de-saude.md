@@ -45,15 +45,28 @@ colateral:
 - **`e2e`** — o relay de voz completo, em produção, sobre um trabalho de saúde
   permanente. Só sob pedido explícito. *(corte seguinte)*
 
-Dois endpoints:
+Dois endpoints e uma tela:
 
 - `GET /healthz` — liveness puro, sem autenticação e sem banco. Responde antes
   do store de sessão; é o que um robô de uptime chama. Por ser aberto, não conta
   nada além de "estou vivo": nem commit, nem versão (isso fica no relatório).
 - `GET /admin/health?checks=db,jobs&depth=shallow` — o relatório. Aceita a
-  **sessão de administrador** (tela) ou o **token de análise** (monitoração), o
-  mesmo mecanismo do acesso analítico. O corpo vem sempre completo; o **status
-  HTTP reflete o pior resultado**: 200 sem falhas, 503 com alguma.
+  **sessão de administrador** (tela) ou um **token de saúde** (monitoração). O
+  corpo vem sempre completo; o **status HTTP reflete o pior resultado**: 200
+  sem falhas, 503 com alguma.
+- **Tela "Saúde do sistema"**, no topo da aba Operações do painel de
+  administração: o mesmo relatório, com uma frase por verificação e o detalhe
+  completo atrás de um botão. Carrega ao abrir a aba e tem "Verificar agora".
+  Depois de um Publish, é a primeira coisa a olhar.
+
+**Tokens têm alcance.** O token de acesso programático (aba Tokens do admin)
+serve a **um** uso: `análise`, para o endpoint de consulta de dados, com 30
+dias de validade; ou `saúde`, para este relatório, com 365 dias — um monitor
+que morre todo mês é um monitor desligado. Um não serve ao outro (403). Motivo:
+o token de análise é somente-leitura por construção, e o nível `deep` vai
+escrever e gastar; reaproveitar o mesmo token ampliaria em silêncio o que todo
+token já emitido pode fazer. Os tokens emitidos antes do alcance existir são
+de análise.
 
 ## O que cada check de `shallow` pega
 
@@ -117,11 +130,10 @@ da primeira medição em produção (#389).
 - **Não roda DDL.** O check de schema é leitura pura, numa transação READ
   ONLY. Tabela ausente é resultado, não exceção. O boot não cria schema —
   [ADR 0001](../decisoes/0001-migrations-nao-rodam-no-boot.md).
-- **Não escreve, não gasta, não chama provedor no nível `shallow`.** Por isso o
-  token de análise, que é somente-leitura por construção, serve sem ampliar o
-  que ele já pode. Quando o nível `deep` entrar, isso muda — e a decisão sobre o
-  alcance do token (a proposta de `scope`, aprovada em 07/09) precisa vir
-  **antes**, com a tela de tokens do admin mudando junto.
+- **Não escreve, não gasta, não chama provedor no nível `shallow`.** O nível
+  `deep`, quando entrar, vai — por isso o token de saúde é um alcance próprio,
+  separado do token de análise, decidido antes do `deep` existir.
+- **Não aceita token de análise.** Token é credencial de um uso só.
 - **Não pega a armadilha do Publish com constraint de mesmo nome** — o check
   confere constraint por **nome**, como o próprio diff do Publish, e mudar a
   definição mantendo o nome passa verde nos dois. Também não confere tipo,

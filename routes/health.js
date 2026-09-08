@@ -16,12 +16,11 @@
 // espera sem fim. O relatório completo não sai (o chamador não se autenticou);
 // o que sai é só o que um 503 já diz: o banco está fora.
 //
-// Neste corte só existe o nível `shallow`, que não escreve, não gasta e não
-// chama provedor externo — por isso reaproveitar o token de análise (que é
-// somente-leitura por construção) não amplia o que ele pode fazer. Quando o
-// nível `deep` entrar, ele escreve no storage e gasta dinheiro: a issue propõe
-// um `scope` no token (decisão do Gladstone em 07/09: aprovado, com a tela de
-// tokens do admin mudando junto), e é ANTES do deep que isso entra.
+// O token precisa ter alcance `health` (migration 082): o token de análise é
+// somente-leitura por construção, e o nível `deep`, quando entrar, escreve no
+// storage e gasta dinheiro — reaproveitar o mesmo token ampliaria em silêncio
+// o que todo token já emitido pode fazer. Decisão do Gladstone em 07/09, com
+// a tela de tokens do admin mudando junto.
 //
 // O status HTTP reflete o pior resultado — é o que a ferramenta de monitoração
 // lê: 200 quando nenhum check falhou (avisos incluídos), 503 quando algum falhou.
@@ -76,6 +75,10 @@ async function autenticarToken(provided, req, res, next) {
         return res.status(503).json(relatorioSemBanco(err));
     }
     if (!row) return res.status(401).json({ error: "token inválido, revogado ou expirado" });
+    // Alcance (migration 082): o token de análise é somente-leitura por
+    // construção e o nível deep vai escrever e gastar — cada token serve a um
+    // uso. Os tokens já emitidos são de análise e não entram aqui.
+    if (row.scope !== "health") return res.status(403).json({ error: `token com alcance "${row.scope}" não serve para saúde — gere um token de saúde no painel` });
     req.analyticsToken = row;
     next();
 }

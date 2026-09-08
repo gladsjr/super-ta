@@ -264,29 +264,38 @@ router.delete("/admin/users/:id", requireAdmin, async (req, res) => {
     }
 });
 
-// --- Tokens do endpoint de análise (/api/analytics/query) ---
+// --- Tokens de acesso programático (análise e saúde) ---
 // Gerados AQUI, pelo admin logado (que já tem direito de acesso aos dados). O
 // texto puro do token é devolvido UMA vez (na geração); o banco guarda só o
-// hash. Validade fixa de 30 dias (migration 053). Ver routes/analytics.js.
+// hash. Cada token tem UM alcance (migration 082): `analytics` para o endpoint
+// de análise (30 dias) ou `health` para a verificação de saúde (365 dias — um
+// monitor que morre todo mês é um monitor desligado). O prefixo do texto diz o
+// alcance, para o humano não confundir. Ver routes/analytics.js e routes/health.js.
 router.post("/admin/analytics-tokens", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
     try {
         const label = (typeof req.body?.label === "string" ? req.body.label.trim() : "").slice(0, 120) || null;
-        const plaintext = "oratia_analytics_" + crypto.randomBytes(32).toString("hex");
+        const scope = typeof req.body?.scope === "string" ? req.body.scope.trim() : "analytics";
+        const scopes = await db.listTokenScopes();
+        if (!scopes.some(s => s.key === scope)) {
+            return res.status(400).json({ error: `alcance desconhecido: ${scope}`, scopes: scopes.map(s => s.key) });
+        }
+        const plaintext = `oratia_${scope}_` + crypto.randomBytes(32).toString("hex");
         const tokenHash = crypto.createHash("sha256").update(plaintext).digest("hex");
-        const tokenPrefix = plaintext.slice(0, 24); // "oratia_analytics_" + 7 chars
-        const info = await db.createAnalyticsToken({ tokenHash, tokenPrefix, label, createdBy: req.session.user.username });
-        log.info("ADMIN", `analytics token created id=${info.id} by=${req.session.user.username} expires=${info.expires_at}`);
+        const tokenPrefix = plaintext.slice(0, `oratia_${scope}_`.length + 7);
+        const info = await db.createAnalyticsToken({ tokenHash, tokenPrefix, label, createdBy: req.session.user.username, scope });
+        log.info("ADMIN", `token created id=${info.id} scope=${scope} by=${req.session.user.username} expires=${info.expires_at}`);
         // token (texto puro) só aqui, uma única vez.
         res.json({ token: plaintext, info });
     } catch (err) {
-        log.error("ADMIN", `create analytics token failed: ${err.message}`);
-        res.status(500).json({ error: "failed to create analytics token" });
+        log.error("ADMIN", `create token failed: ${err.message}`);
+        res.status(500).json({ error: "failed to create token" });
     }
 });
 
 router.get("/admin/analytics-tokens", requireAdmin, async (_req, res) => {
     try {
-        res.json({ tokens: await db.listAnalyticsTokens() });
+        const [tokens, scopes] = await Promise.all([db.listAnalyticsTokens(), db.listTokenScopes()]);
+        res.json({ tokens, scopes });
     } catch (err) {
         log.error("ADMIN", `list analytics tokens failed: ${err.message}`);
         res.status(500).json({ error: "failed to list analytics tokens" });

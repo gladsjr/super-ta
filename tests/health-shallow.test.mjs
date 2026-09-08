@@ -168,7 +168,7 @@ test("schema: só o que veio depois da linha de base é conferido — e a ausên
     // a FK nova — vira ausência de tabela (revisão do #391)
     const semSubmissions = async (sql) => {
         if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA_FULL.tables.keys()].filter(t => t !== "submissions").map(name => ({ name })) };
-        return catalogo([])(sql);
+        return catalogo([...EXPECTED_SCHEMA_FULL.constraints.keys()])(sql);
     };
     const r2 = await check("migrations").run({ q: semSubmissions });
     assert.equal(r2.status, "fail");
@@ -415,6 +415,34 @@ test("endpoint: /healthz aberto e sem commit; sem auth 401; token ruim 401; chec
 
         const vazio = await fetch(`${base}/admin/health?checks=,,,`, { headers: { Authorization: "Bearer nao-existe" } });
         assert.equal(vazio.status, 401, "auth vem antes; com token válido seria 400 (coberto em runHealth)");
+
+        // Alcance (migration 082): token de ANÁLISE não entra na saúde (403);
+        // token de SAÚDE entra (200) e não entra na análise (403). Linhas
+        // temporárias no banco de dev, removidas no finally.
+        const crypto = await import("node:crypto");
+        const mk = (scope) => { const txt = `teste_${scope}_${crypto.randomBytes(8).toString("hex")}`; return { txt, hash: crypto.createHash("sha256").update(txt).digest("hex") }; };
+        const tA = mk("analytics"), tH = mk("health");
+        try {
+            await pool.query(`INSERT INTO analytics_tokens (token_hash, token_prefix, label, scope, expires_at) VALUES ($1, 'teste_tmp', 'teste', 'analytics', now() + interval '5 minutes'), ($2, 'teste_tmp', 'teste', 'health', now() + interval '5 minutes')`, [tA.hash, tH.hash]);
+            const analise = await fetch(`${base}/admin/health?checks=config`, { headers: { Authorization: `Bearer ${tA.txt}` } });
+            assert.equal(analise.status, 403, "token de análise não serve para saúde");
+            assert.match((await analise.json()).error, /alcance/);
+            const saude = await fetch(`${base}/admin/health?checks=config`, { headers: { Authorization: `Bearer ${tH.txt}` } });
+            assert.equal(saude.status, 200, "token de saúde serve");
+            assert.equal((await saude.json()).checks[0].id, "config");
+            const vazioOk = await fetch(`${base}/admin/health?checks=,,,`, { headers: { Authorization: `Bearer ${tH.txt}` } });
+            assert.equal(vazioOk.status, 400, "com token válido, seleção vazia é 400");
+            // e o endpoint de análise recusa o token de saúde
+            const { default: analyticsRoutes } = await import("../routes/analytics.js");
+            const app2 = express(); app2.use(express.json()); app2.use(analyticsRoutes);
+            const srv2 = await new Promise(ok => { const s2 = app2.listen(0, "127.0.0.1", () => ok(s2)); });
+            try {
+                const q = await fetch(`http://127.0.0.1:${srv2.address().port}/api/analytics/query`, { method: "POST", headers: { Authorization: `Bearer ${tH.txt}`, "Content-Type": "application/json" }, body: JSON.stringify({ sql: "SELECT 1" }) });
+                assert.equal(q.status, 403, "token de saúde não lê dados de aluno");
+            } finally { await new Promise(r => srv2.close(r)); }
+        } finally {
+            await pool.query(`DELETE FROM analytics_tokens WHERE token_prefix = 'teste_tmp'`);
+        }
     } finally { await new Promise(r => srv.close(r)); }
 });
 
