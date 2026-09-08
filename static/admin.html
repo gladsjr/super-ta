@@ -289,7 +289,7 @@ function showSec(name) {
   // A saúde (#375) carrega só na ENTRADA da aba e no botão "Verificar agora" —
   // nunca no temporizador da fila (8 s): são várias consultas em série, e em
   // produção custam ~2 s cada relatório.
-  if (name === 'operacoes' && opsEstavaOculta) loadHealth();
+  if (name === 'operacoes' && opsEstavaOculta) loadHealth('shallow'); // entrada na aba: SEMPRE shallow; deep só pelo botão
 }
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('#admin-tabs .admin-tab[data-sec]').forEach(b =>
@@ -761,11 +761,15 @@ function healthSummary(c) {
 }
 window.healthToggle = (i) => { const el = document.getElementById('health-detail-' + i); if (el) el.classList.toggle('hidden'); };
 let healthEmCurso = false;
-async function loadHealth() {
+// `depthPedida` vem de quem chama: a entrada na aba passa 'shallow' e o botão
+// passa o seletor. O carregamento automático NUNCA lê o seletor — senão voltar
+// à aba com deep selecionado rodaria uma verificação paga sem clique
+// (revisão do #394).
+async function loadHealth(depthPedida) {
   if (healthEmCurso) return; // uma verificação de cada vez
   const msg = document.getElementById('health-msg');
   const btn = document.getElementById('health-refresh');
-  const depth = document.getElementById('health-depth').value || 'shallow';
+  const depth = depthPedida === 'deep' ? 'deep' : 'shallow';
   healthEmCurso = true; btn.disabled = true; msg.textContent = depth === 'deep' ? 'Verificando as dependências externas (até 30 s)…' : 'Verificando…';
   try {
     const r = await fetch('/admin/health?depth=' + encodeURIComponent(depth));
@@ -787,7 +791,7 @@ async function loadHealth() {
   } catch (e) { msg.textContent = 'Falha ao verificar: ' + e.message; }
   finally { btn.disabled = false; healthEmCurso = false; }
 }
-document.getElementById('health-refresh').onclick = loadHealth;
+document.getElementById('health-refresh').onclick = () => loadHealth(document.getElementById('health-depth').value || 'shallow');
 // Custo estimado do deep, dito ANTES de rodar (uma vez por carga da página).
 (async () => {
   try {

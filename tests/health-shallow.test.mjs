@@ -102,9 +102,9 @@ test("registro deep: nove checks, todos com orçamento próprio e sem cliente de
 
 test("invariantes do deep: escreve só em chave própria e apaga; Realtime nunca gera resposta; STT e TTS pela porta do produto", () => {
     const txt = fonte("lib/healthDeep.js");
-    // storage: chave própria, e o delete fica num finally
+    // storage: chave própria, e o delete faz parte do RESULTADO (falha = fail)
     assert.match(txt, /const key = `health\/probe-/);
-    assert.match(txt, /finally \{\s*const del = await deleteAudio\(key\)/);
+    assert.match(txt, /const del = await store\.deleteAudio\(key\);\s*if \(!del\.deleted\)/);
     // Realtime: session.update sim, response.create NUNCA (geraria fala e custo)
     assert.match(txt, /type: "session\.update"/);
     assert.ok(!/response\.create/.test(txt), "a perna A não pode pedir resposta ao Realtime");
@@ -115,6 +115,80 @@ test("invariantes do deep: escreve só em chave própria e apaga; Realtime nunca
     assert.match(txt, /synthesizeSpeech\(/);
     // nada de DDL nem escrita em tabela
     for (const proibido of [/\bINSERT\b/, /\bUPDATE\b/, /\bDELETE FROM\b/, /\bCREATE\b/]) assert.ok(!proibido.test(txt), `deep não pode: ${proibido}`);
+});
+
+test("storage: falha ao apagar reprova o check, mesmo com put/size/range ok; ciclo completo é ok", async () => {
+    const { Readable } = await import("node:stream");
+    const fake = (delOk) => ({
+        isAvailable: () => true,
+        putAudio: async ({ key }) => ({ stored: true, key }),
+        objectSize: async () => 1024,
+        streamRange: async () => Readable.from([Buffer.alloc(100, 1)]),
+        deleteAudio: async () => delOk ? { deleted: true } : { deleted: false, reason: "403 forbidden (simulado)" },
+    });
+    const ruim = await check("storage").run({ deps: { store: fake(false) } });
+    assert.equal(ruim.status, "fail");
+    assert.equal(ruim.detail.step, "delete");
+    assert.match(ruim.detail.delete_reason, /403/);
+    assert.match(ruim.detail.leftover, /^health\/probe-/);
+    const bom = await check("storage").run({ deps: { store: fake(true) } });
+    assert.equal(bom.status, "ok");
+    assert.ok(bom.detail.delete_ms >= 0);
+});
+
+test("realtime_a: socket que fecha ou silencia não pendura — rejeita; o prazo (signal) fecha o socket", async () => {
+    const { EventEmitter } = await import("node:events");
+    class FakeWS extends EventEmitter {
+        constructor(_url, _opts) { super(); FakeWS.last = this; this.fechado = 0; setTimeout(() => { this.emit("open"); this.emit("message", Buffer.from(JSON.stringify({ type: "session.created" }))); FakeWS.roteiro?.(this); }, 5); }
+        send() {}
+        close() { this.fechado++; this.emit("close", 1000); }
+    }
+    const deps = { WebSocket: FakeWS, vozes: async () => ["verse"] };
+    // 1) fecha logo depois do session.created, sem responder o update
+    FakeWS.roteiro = (ws) => setTimeout(() => ws.emit("close", 1006), 20);
+    const t0 = Date.now();
+    await assert.rejects(check("realtime_a").run({ deps, bancoLivre: Promise.resolve() }), /fechado/);
+    assert.ok(Date.now() - t0 < 1500, "não pode esperar o prazo do check");
+    // 2) silêncio: o prazo do check (signal) fecha o socket e a espera rejeita
+    FakeWS.roteiro = null;
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 100);
+    await assert.rejects(check("realtime_a").run({ deps, bancoLivre: Promise.resolve(), signal: ac.signal }), /prazo/);
+    assert.ok(FakeWS.last.fechado >= 1, "o socket tem de ser fechado no abort");
+    // 3) caminho feliz com o fake: updated para a voz
+    FakeWS.roteiro = (ws) => { ws.send = () => setTimeout(() => ws.emit("message", Buffer.from(JSON.stringify({ type: "session.updated" }))), 5); };
+    const ok = await check("realtime_a").run({ deps, bancoLivre: Promise.resolve() });
+    assert.equal(ok.status, "ok");
+    assert.deepEqual(ok.detail.voices.map(v => [v.voice, v.ok]), [["verse", true]]);
+});
+
+test("deep em andamento (esperando provedor) NÃO segura a conexão do health: shallow concorrente responde", semBanco, async () => {
+    // Revisão do #394: a conexão única era devolvida só no fim do relatório —
+    // um deep esperando o Responses dava 503 falso à monitoração.
+    const lento = { id: "lento_ext_teste", label: "externo lento", level: "deep", db: false, budget_ms: 10_000, run: async () => { await new Promise(r => setTimeout(r, 2500)); return { status: "ok", detail: {} }; } };
+    CHECKS.push(lento); CHECK_IDS.push(lento.id);
+    try {
+        const deep = runHealth({ depth: "deep", ids: ["db", lento.id] });
+        await new Promise(r => setTimeout(r, 300));
+        const t0 = Date.now();
+        const shallow = await runHealth({ ids: ["db"] });
+        const ms = Date.now() - t0;
+        assert.equal(shallow.checks[0].status, "ok", JSON.stringify(shallow.checks[0].detail));
+        assert.ok(ms < 2000, `shallow esperou ${ms} ms pela conexão presa pelo deep`);
+        const r = await deep;
+        assert.equal(r.status, "ok");
+    } finally {
+        CHECKS.splice(CHECKS.indexOf(lento), 1);
+        CHECK_IDS.splice(CHECK_IDS.indexOf(lento.id), 1);
+    }
+});
+
+test("tela: entrar na aba Operações carrega SEMPRE shallow; deep só pelo botão com o seletor", () => {
+    const html = fonte("static/admin.html");
+    assert.match(html, /opsEstavaOculta\) loadHealth\('shallow'\)/, "entrada na aba tem de pedir shallow explicitamente");
+    assert.match(html, /health-refresh'\)\.onclick = \(\) => loadHealth\(document\.getElementById\('health-depth'\)\.value/, "só o botão lê o seletor");
+    const corpo = html.slice(html.indexOf("async function loadHealth("), html.indexOf("document.getElementById('health-refresh').onclick"));
+    assert.ok(!/health-depth/.test(corpo), "loadHealth não pode ler o seletor por conta própria");
 });
 
 test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {
