@@ -157,6 +157,14 @@ Fluxo: veja o último número → crie `NNN+1` → escreva SQL direto, **sem**
   Migrations cuidam de schema; seeds, de dados de bootstrap.
 - **Enumerações que evoluem vão em tabela + FK**, não em `CHECK` de strings.
   → [ADR 0011](docs/decisoes/0011-enumeracoes-em-tabela.md)
+- **Toda constraint e todo índice recebem NOME explícito** (`CONSTRAINT
+  works_x_chk CHECK (...)`, nunca `CHECK (...)` solto; FK inline
+  `REFERENCES` vira `ADD CONSTRAINT ... FOREIGN KEY`). Motivo: o Publish
+  compara por nome, e o health check (#375) confere pelo nome o que cada
+  migration nova cria — objeto sem nome não é conferido, e um teste acusa. A
+  única exceção é `PRIMARY KEY` inline **na definição da coluna** (`id SERIAL
+  PRIMARY KEY`), que sempre se chama `{tabela}_pkey`; `PRIMARY KEY (id)` como
+  constraint de tabela e `CREATE INDEX ON t (c)` sem nome ferem a regra.
 - **Colisão de números entre branches:** se a `main` já tem `NNN`, renumere a sua.
 - `001_init.sql` é o snapshot de bootstrap (escrito com `IF NOT EXISTS` de
   propósito). Da `002` em diante são deltas puros.

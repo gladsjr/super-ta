@@ -28,7 +28,8 @@ const raiz = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "
 const fonte = (p) => fs.readFileSync(path.join(raiz, p), "utf8");
 
 const health = await import("../lib/health.js");
-const { worstStatus, runHealth, CHECK_IDS, CHECKS, EXPECTED_SCHEMA, healthPool } = health;
+const { worstStatus, runHealth, CHECK_IDS, CHECKS, EXPECTED_SCHEMA, EXPECTED_SCHEMA_FULL, healthPool } = health;
+const { diffExpected, readCatalog } = await import("../lib/schemaExpectations.js");
 const { heartbeat } = await import("../lib/jobsHeartbeat.js");
 const { pool } = await import("../auth.js");
 
@@ -135,67 +136,43 @@ test("jobs: tabela ausente é fail", async () => {
     assert.equal(r.status, "fail");
 });
 
-test("schema: catálogo sem uma tabela e sem uma coluna acusa as duas, com a migration de origem", async () => {
-    // Catálogo = tudo o que se espera, menos object_sizes (080) e uma coluna.
-    const tabelas = new Set(EXPECTED_SCHEMA.tables.keys()); tabelas.delete("object_sizes");
-    const colunas = new Set(EXPECTED_SCHEMA.columns.keys()); colunas.delete("submissions.final_transcript");
-    const q = async (sql) => {
-        if (/information_schema\.tables/.test(sql)) return { rows: [...tabelas].map(name => ({ name })) };
-        if (/information_schema\.columns/.test(sql)) return { rows: [...colunas].map(name => ({ name })) };
-        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA.indexes.keys()].map(name => ({ name })) };
-        if (/pg_constraint/.test(sql)) return { rows: [...EXPECTED_SCHEMA.constraints.keys()].map(name => ({ name })) };
+test("schema: só o que veio depois da linha de base é conferido — e a ausência vem com a origem e o que a tabela tem", async () => {
+    // Pós-linha de base (080) a expectativa é a FK renomeada pela 081 (#389).
+    assert.equal(EXPECTED_SCHEMA.baseline, "080");
+    assert.ok(EXPECTED_SCHEMA.constraints.has("submissions.submissions_proctor_review_level_fkey"));
+    assert.ok(EXPECTED_SCHEMA.columns.size < 50, "a linha de base tira o histórico do check");
+    const catalogo = (constraints) => async (sql) => {
+        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA_FULL.tables.keys()].map(name => ({ name })) };
+        if (/information_schema\.columns/.test(sql)) return { rows: [...EXPECTED_SCHEMA_FULL.columns.keys()].map(name => ({ name })) };
+        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA_FULL.indexes].map(([name, v]) => ({ name, table: v.table })) };
+        if (/pg_constraint/.test(sql)) return { rows: constraints.map(name => ({ name })) };
         if (/schema_migrations/.test(sql)) return { rows: [] }; // ledger vazio, como em prod
         throw new Error(`sql inesperado: ${sql}`);
     };
-    const r = await check("migrations").run({ q });
-    assert.equal(r.status, "fail");
-    const nomes = r.detail.missing.map(m => `${m.kind}:${m.name}:${m.migration}`);
-    assert.ok(nomes.includes("table:object_sizes:080_object_sizes.sql"), nomes.join("\n"));
-    assert.ok(nomes.includes("column:submissions.final_transcript:077_final_transcript.sql"), nomes.join("\n"));
-    assert.equal(r.detail.missing.length, 2, "colunas de object_sizes não repetem a tabela");
-    assert.equal(r.detail.ledger.applied, 0, "o ledger vazio é informação, não o motivo do fail");
-    // Cada ausência diz o que a tabela TEM do mesmo tipo (#389: é o que
-    // distingue "falta" de "existe com outro nome").
-    const col = r.detail.missing.find(m => m.kind === "column");
-    assert.equal(col.table, "submissions");
-    assert.ok(col.present_on_table.includes("id") && !col.present_on_table.includes("final_transcript"), JSON.stringify(col.present_on_table.slice(0, 5)));
-    const tab = r.detail.missing.find(m => m.kind === "table");
-    assert.deepEqual(tab.present_on_table, []);
-});
-
-test("schema: constraint ausente lista as constraints presentes na mesma tabela", async () => {
-    const constraints = new Set(EXPECTED_SCHEMA.constraints.keys()); constraints.delete("submissions.submissions_proctor_review_fkey");
-    constraints.add("submissions.submissions_proctor_review_key_fk");
-    const q = async (sql) => {
-        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA.tables.keys()].map(name => ({ name })) };
-        if (/information_schema\.columns/.test(sql)) return { rows: [...EXPECTED_SCHEMA.columns.keys()].map(name => ({ name })) };
-        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA.indexes].map(([name, v]) => ({ name, table: v.table })) };
-        if (/pg_constraint/.test(sql)) return { rows: [...constraints].map(name => ({ name })) };
-        if (/schema_migrations/.test(sql)) return { rows: [] };
-        throw new Error(`sql inesperado: ${sql}`);
-    };
-    const r = await check("migrations").run({ q });
+    // prod de HOJE: tem a FK antiga? não — tem nenhuma; falta a nova
+    const semNova = [...EXPECTED_SCHEMA_FULL.constraints.keys()].filter(c => c !== "submissions.submissions_proctor_review_level_fkey");
+    const r = await check("migrations").run({ q: catalogo(semNova) });
     assert.equal(r.status, "fail");
     assert.equal(r.detail.missing.length, 1);
     const m = r.detail.missing[0];
-    assert.equal(m.name, "submissions.submissions_proctor_review_fkey");
-    assert.equal(m.migration, "074_proctor_review.sql");
-    assert.ok(m.present_on_table.includes("submissions_proctor_review_key_fk"), "a 'outra' FK tem de aparecer");
-    assert.ok(m.present_on_table.includes("submissions_pkey"));
-});
-
-test("schema: ledger vazio com catálogo completo é ok — é o estado normal de produção", async () => {
-    const q = async (sql) => {
-        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA.tables.keys()].map(name => ({ name })) };
-        if (/information_schema\.columns/.test(sql)) return { rows: [...EXPECTED_SCHEMA.columns.keys()].map(name => ({ name })) };
-        if (/pg_indexes/.test(sql)) return { rows: [...EXPECTED_SCHEMA.indexes.keys()].map(name => ({ name })) };
-        if (/pg_constraint/.test(sql)) return { rows: [...EXPECTED_SCHEMA.constraints.keys()].map(name => ({ name })) };
-        if (/schema_migrations/.test(sql)) return { rows: [] };
-        throw new Error(`sql inesperado: ${sql}`);
+    assert.equal(m.name, "submissions.submissions_proctor_review_level_fkey");
+    assert.equal(m.migration, "081_rename_proctor_review_fkey.sql");
+    assert.equal(m.table, "submissions");
+    assert.ok(m.present_on_table.includes("submissions_pkey"), "diz o que a tabela TEM");
+    assert.equal(r.detail.ledger.applied, 0, "o ledger vazio é informação, não o motivo do fail");
+    // depois do Publish certo: ok, mesmo com ledger vazio
+    const ok = await check("migrations").run({ q: catalogo([...EXPECTED_SCHEMA_FULL.constraints.keys()]) });
+    assert.equal(ok.status, "ok");
+    assert.deepEqual(ok.detail.missing, []);
+    // tabela ANTERIOR à linha de base sumiu (submissions): não pode esconder
+    // a FK nova — vira ausência de tabela (revisão do #391)
+    const semSubmissions = async (sql) => {
+        if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA_FULL.tables.keys()].filter(t => t !== "submissions").map(name => ({ name })) };
+        return catalogo([])(sql);
     };
-    const r = await check("migrations").run({ q });
-    assert.equal(r.status, "ok");
-    assert.deepEqual(r.detail.missing, []);
+    const r2 = await check("migrations").run({ q: semSubmissions });
+    assert.equal(r2.status, "fail");
+    assert.deepEqual(r2.detail.missing.map(m => [m.kind, m.name]), [["table", "submissions"]]);
 });
 
 // ---------------------------------------------------- invariantes de fonte ---
@@ -226,11 +203,12 @@ test("/healthz é montado ANTES do store de sessão", () => {
 test("nenhum check de shallow escreve, gasta, chama provedor, bloqueia o loop ou fura a transação RO", () => {
     // Guarda contra o próximo check "só mais um pouquinho": no nível shallow
     // não entra INSERT/UPDATE/DELETE, putAudio, openai, fetch a terceiros;
-    // nada síncrono de processo no caminho de uma chamada; e todo SQL de check
-    // passa por ctx.q (transação READ ONLY + statement_timeout), nunca pelo
-    // pool do app direto.
+    // NENHUM processo filho no caminho de uma chamada (o spawnSync do git é
+    // só no boot; lançar ffmpeg é do nível deep); e todo SQL de check passa
+    // por ctx.q (transação READ ONLY + statement_timeout), nunca pelo pool do
+    // app direto.
     const txt = fonte("lib/health.js");
-    for (const proibido of [/\bINSERT\b/, /\bUPDATE\b/, /\bDELETE\b/, /putAudio/, /openai\./i, /fetch\(\s*["']https?:/, /spawnSync\("ffmpeg"/, /pool\.query\(/, /execSync/]) {
+    for (const proibido of [/\bINSERT\b/, /\bUPDATE\b/, /\bDELETE\b/, /putAudio/, /openai\./i, /fetch\(\s*["']https?:/, /\bexecFile\(/, /\bexec\(/, /\bspawn\(/, /execSync/, /pool\.query\(/]) {
         assert.ok(!proibido.test(txt), `shallow não pode: ${proibido}`);
     }
     assert.match(txt, /START TRANSACTION READ ONLY/);
@@ -266,12 +244,22 @@ test("relatório shallow completo, com o contrato do endpoint — e o dev migrad
     // O parser não pode ter alarme falso: o banco de dev é migrado por definição.
     assert.equal(mig.status, "ok", JSON.stringify(mig.detail.missing));
     assert.deepEqual(mig.detail.missing, []);
-    assert.ok(mig.detail.expected.tables >= 40 && mig.detail.files >= 80);
+    assert.equal(mig.detail.baseline, "080");
+    assert.ok(mig.detail.files >= 81);
     const cfg = r.checks.find(c => c.id === "config");
     assert.ok(cfg.detail.principal_reasoning_model && cfg.detail.realtime_model && cfg.detail.stt_provider);
     const assets = r.checks.find(c => c.id === "assets");
-    assert.ok(assets.detail.ffmpeg_probe && typeof assets.detail.ffmpeg_probe.ms === "number", "a sonda do ffmpeg diz quanto demorou");
-    if (!assets.detail.ffmpeg) assert.ok(assets.detail.ffmpeg_probe.error, "sem versão, tem de dizer por quê");
+    assert.ok(!("ffmpeg" in assets.detail), "shallow não lança binário");
+});
+
+test("o parser inteiro contra o dev real: o banco migrado por definição dá zero ausências (guarda contra alarme falso)", semBanco, async () => {
+    // Valida o REPLAY COMPLETO (não só o pós-linha de base): é o que garante
+    // que mover a linha de base no futuro não herda um parser errado.
+    const c = await healthPool.connect();
+    try {
+        const cat = await readCatalog((sql) => c.query(sql));
+        assert.deepEqual(diffExpected(EXPECTED_SCHEMA_FULL, cat), []);
+    } finally { c.release(); }
 });
 
 test("seleção por id devolve só o pedido", semBanco, async () => {
@@ -299,52 +287,6 @@ test("prazo de conexão estourado é fail com motivo E cancela o pedido — nada
         for (const c of r.checks) assert.match(c.detail.error, /não medido|conexão com o banco/);
         assert.equal(healthPool.waitingCount, 0, "pedido de conexão continuou na fila depois do prazo");
     } finally { preso.release(); }
-});
-
-test("sonda do ffmpeg: sucesso lento e sonda travada chegam ao relatório com diagnóstico — o orçamento do check comporta a sonda", async () => {
-    // Revisão do #390: a sonda ganhou 8 s, mas o prazo externo do check era
-    // 3 s — o diagnóstico nunca chegava. Aqui o caminho COMPLETO (runHealth),
-    // trocando só o execFile do child_process (builtin CJS sincronizado com a
-    // importação ESM via syncBuiltinESMExports).
-    const cp = await import("node:child_process");
-    const { syncBuiltinESMExports } = await import("node:module");
-    const original = cp.default.execFile;
-    const assets = check("assets");
-    assert.ok(assets.budget_ms > 8000, "o orçamento de assets tem de comportar a sonda de 8 s");
-    try {
-        // 1) sucesso em 3,5 s: acima do prazo padrão, dentro do orçamento
-        health._resetFfmpegProbe();
-        cp.default.execFile = (cmd, args, opts, cb) => { setTimeout(() => cb(null, "ffmpeg version 9.9.9-teste Copyright" + String.fromCharCode(10)), 3500); return { kill() {} }; };
-        syncBuiltinESMExports();
-        let r = await runHealth({ ids: ["assets"] });
-        let a = r.checks[0];
-        assert.equal(a.status, "ok", JSON.stringify(a.detail));
-        assert.equal(a.detail.ffmpeg, "9.9.9-teste");
-        assert.ok(a.detail.ffmpeg_probe.ms >= 3400, `probe em ${a.detail.ffmpeg_probe.ms} ms`);
-        // 2) sonda travada: o execFile honra o timeout pedido e devolve killed
-        health._resetFfmpegProbe();
-        cp.default.execFile = (cmd, args, opts, cb) => { setTimeout(() => cb(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), null), opts.timeout); return { kill() {} }; };
-        syncBuiltinESMExports();
-        const t0 = Date.now();
-        r = await runHealth({ ids: ["assets"] });
-        a = r.checks[0];
-        assert.equal(a.status, "fail");
-        assert.equal(a.detail.ffmpeg, null);
-        assert.equal(a.detail.ffmpeg_probe.timed_out, true, JSON.stringify(a.detail));
-        assert.equal(a.detail.ffmpeg_probe.signal, "SIGTERM");
-        assert.ok(!a.detail.error, "o motivo tem de ser o da sonda, não o prazo genérico do check");
-        assert.ok(Date.now() - t0 < 9500, "e o check ainda responde dentro do orçamento");
-        // 3) ENOENT: motivo imediato
-        health._resetFfmpegProbe();
-        cp.default.execFile = (cmd, args, opts, cb) => { setImmediate(() => cb(Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT" }), null)); return { kill() {} }; };
-        syncBuiltinESMExports();
-        r = await runHealth({ ids: ["assets"] });
-        assert.equal(r.checks[0].detail.ffmpeg_probe.error, "ENOENT");
-    } finally {
-        cp.default.execFile = original;
-        syncBuiltinESMExports();
-        health._resetFfmpegProbe();
-    }
 });
 
 test("prazo TOTAL do check estourado não devolve ao pool uma conexão ainda ocupada, e o check seguinte mede normalmente", semBanco, async () => {
