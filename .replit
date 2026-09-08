@@ -8,16 +8,7 @@ channel = "stable-25_05"
 packages = ["libGL", "libGLU"]
 
 [workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
+runButton = "Start application"
 
 [[workflows.workflow]]
 name = "Start application"

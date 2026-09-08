@@ -19,3 +19,11 @@ Exemplos já vistos:
 4. Fix: `restart_workflow("Start application")` e re-teste o endpoint.
 
 **Regra para o usuário (não-técnico):** toda vez que trocar de branch ou baixar versão nova do GitHub, reiniciar o workflow antes de testar.
+
+## Reiniciar não basta para validar o botão Run
+
+Uma porta respondendo não prova que o workflow atual controla o processo. Em falhas recorrentes de `EADDRINUSE`, validar o ciclo completo iniciar → parar → ausência de processo → iniciar novamente; conferir também se o alvo do Run corresponde ao workflow reconhecido pelo controle de execução.
+
+**Why:** já houve workflow marcado como falho enquanto o servidor da execução anterior seguia vivo. Encerrar manualmente o processo e usar `exec` permitiu subir, mas não impediu a recorrência pelo usuário. O workflow pai configurado no Run não aparecia no controle de execução.
+
+**How to apply:** para uma única aplicação, preferir um único workflow diretamente ligado ao Run. Não declarar o problema resolvido apenas porque um restart feito pelo agente abriu a porta; confirmar que Stop encerra de fato o processo e a próxima inicialização funciona.
