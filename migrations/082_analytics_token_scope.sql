@@ -10,16 +10,15 @@
 --
 -- Enumeração em tabela + FK (ADR 0011), com a validade padrão de cada alcance
 -- como dado: 30 dias para análise (como sempre foi), 365 para saúde — um
--- monitor que morre todo mês é um monitor desligado.
+-- monitor que morre todo mês é um monitor desligado. As LINHAS não vêm daqui:
+-- migration cuida de schema; os dados de bootstrap são seed idempotente no
+-- boot (auth.js#seedTokenScopes, a partir de TOKEN_SCOPE_DEFS), porque o
+-- Publish materializa o schema e não leva dados (ADR 0001).
 CREATE TABLE analytics_token_scopes (
     key      TEXT PRIMARY KEY,
     name     TEXT NOT NULL,
     ttl_days INTEGER NOT NULL
 );
-
-INSERT INTO analytics_token_scopes (key, name, ttl_days) VALUES
-    ('analytics', 'Análise (benchmark)', 30),
-    ('health',    'Saúde (monitoração)', 365);
 
 ALTER TABLE analytics_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'analytics';
 ALTER TABLE analytics_tokens ADD CONSTRAINT analytics_tokens_scope_fkey

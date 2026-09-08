@@ -131,6 +131,32 @@ export async function seedProctorReviewLevels() {
   );
 }
 
+// Alcances do token de acesso programático (#375, migration 082). Mesmo
+// padrão: a constante no código é a fonte, a tabela é reconciliada no boot —
+// o Publish leva o schema e não os dados. Remover um alcance em uso quebraria
+// a FK; o DELETE só vale para os que nenhum token usa.
+export async function seedTokenScopes() {
+  const { TOKEN_SCOPE_DEFS } = await import("./lib/db/analyticsTokens.js");
+  for (const def of TOKEN_SCOPE_DEFS) {
+    await pool.query(
+      `INSERT INTO analytics_token_scopes (key, name, ttl_days)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE
+         SET name = EXCLUDED.name, ttl_days = EXCLUDED.ttl_days
+       WHERE analytics_token_scopes.name IS DISTINCT FROM EXCLUDED.name
+          OR analytics_token_scopes.ttl_days IS DISTINCT FROM EXCLUDED.ttl_days`,
+      [def.key, def.name, def.ttl_days]
+    );
+  }
+  const keys = TOKEN_SCOPE_DEFS.map((d) => d.key);
+  await pool.query(
+    `DELETE FROM analytics_token_scopes s
+      WHERE s.key <> ALL($1::text[])
+        AND NOT EXISTS (SELECT 1 FROM analytics_tokens t WHERE t.scope = s.key)`,
+    [keys]
+  );
+}
+
 export async function seedRoles() {
   const { ROLE_DEFS } = await import("./lib/rbac.js");
   for (const def of ROLE_DEFS) {

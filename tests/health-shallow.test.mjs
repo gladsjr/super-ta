@@ -81,9 +81,14 @@ test("níveis deep e e2e são recusados com 501; depth/ids ruins e seleção vaz
 // Os checks recebem `ctx.q`; um `q` falso basta para exercitar os ramos que
 // só aparecem num banco quebrado — sem tocar em banco nenhum.
 
+// Alcances do token completos, para os cenários de seeds que não tratam deles.
+const SCOPES_OK = { rows: [{ key: "analytics", ttl_days: 30 }, { key: "health", ttl_days: 365 }] };
+const ehConsultaDeAlcances = (sql) => /SELECT key, ttl_days FROM analytics_token_scopes/.test(sql);
+
 test("seeds: memberships ausente não pode dar ok (admin_bootstrap nulo não é admin presente)", async () => {
     const q = async (sql) => {
         if (/FROM memberships/.test(sql)) throw semTabela("memberships");
+        if (ehConsultaDeAlcances(sql)) return SCOPES_OK;
         return { rows: [{ n: 3 }] };
     };
     const r = await check("seeds").run({ q });
@@ -93,11 +98,41 @@ test("seeds: memberships ausente não pode dar ok (admin_bootstrap nulo não é 
 });
 
 test("seeds: tudo presente e admin existente é ok; sem admin é fail", async () => {
-    const ok = await check("seeds").run({ q: async () => ({ rows: [{ n: 1 }] }) });
+    const ok = await check("seeds").run({ q: async (sql) => ehConsultaDeAlcances(sql) ? SCOPES_OK : ({ rows: [{ n: 1 }] }) });
     assert.equal(ok.status, "ok");
-    const semAdmin = await check("seeds").run({ q: async (sql) => ({ rows: [{ n: /FROM memberships/.test(sql) ? 0 : 1 }] }) });
+    assert.deepEqual(ok.detail.token_scopes_missing, []);
+    const semAdmin = await check("seeds").run({ q: async (sql) => ehConsultaDeAlcances(sql) ? SCOPES_OK : ({ rows: [{ n: /FROM memberships/.test(sql) ? 0 : 1 }] }) });
     assert.equal(semAdmin.status, "fail");
     assert.equal(semAdmin.detail.admin_bootstrap, false);
+});
+
+test("seeds: alcances do token ausentes ou parciais são fail — tabela com linhas não basta (revisão do #392)", async () => {
+    // Tabela existe e tem linhas (count > 0), mas falta o alcance `health`.
+    const parcial = async (sql) => ehConsultaDeAlcances(sql) ? ({ rows: [{ key: "analytics", ttl_days: 30 }] }) : ({ rows: [{ n: 1 }] });
+    const r = await check("seeds").run({ q: parcial });
+    assert.equal(r.status, "fail");
+    assert.deepEqual(r.detail.token_scopes_missing, ["health"]);
+    // Validade zerada também não vale: token nasceria expirado.
+    const zerada = async (sql) => ehConsultaDeAlcances(sql) ? ({ rows: [{ key: "analytics", ttl_days: 30 }, { key: "health", ttl_days: 0 }] }) : ({ rows: [{ n: 1 }] });
+    assert.deepEqual((await check("seeds").run({ q: zerada })).detail.token_scopes_missing, ["health"]);
+    // Tabela ausente: acusada como ausente, sem consultar os alcances.
+    const semTab = async (sql) => { if (/FROM analytics_token_scopes/.test(sql)) throw semTabela("analytics_token_scopes"); return { rows: [{ n: 1 }] }; };
+    const r3 = await check("seeds").run({ q: semTab });
+    assert.equal(r3.status, "fail");
+    assert.ok(r3.detail.missing.includes("analytics_token_scopes"));
+});
+
+test("seeds: a seed de alcances é idempotente e reconcilia a tabela a partir do código", semBanco, async () => {
+    const { seedTokenScopes } = await import("../auth.js");
+    const { TOKEN_SCOPE_DEFS } = await import("../lib/db/analyticsTokens.js");
+    await seedTokenScopes();
+    await seedTokenScopes(); // duas vezes: sem erro, sem duplicar
+    const { rows } = await pool.query(`SELECT key, name, ttl_days FROM analytics_token_scopes ORDER BY key`);
+    assert.deepEqual(rows.map(r => [r.key, r.ttl_days]), TOKEN_SCOPE_DEFS.map(d => [d.key, d.ttl_days]));
+    // Divergência é corrigida no próximo boot (validade mexida à mão volta).
+    await pool.query(`UPDATE analytics_token_scopes SET ttl_days = 1 WHERE key = 'health'`);
+    await seedTokenScopes();
+    assert.equal((await pool.query(`SELECT ttl_days FROM analytics_token_scopes WHERE key = 'health'`)).rows[0].ttl_days, 365);
 });
 
 test("consent: submissions ausente é fail, não ok com contagem nula", async () => {

@@ -275,12 +275,17 @@ let DEFAULT_BUDGET_USD = null;
 const SECS = ['trabalhos', 'usuarios', 'tokens', 'operacoes'];
 function showSec(name) {
   if (!SECS.includes(name)) name = 'trabalhos';
+  const opsEstavaOculta = document.getElementById('sec-operacoes').classList.contains('hidden-sec');
   for (const s of SECS) {
     document.getElementById('sec-' + s).classList.toggle('hidden-sec', s !== name);
   }
   document.querySelectorAll('#admin-tabs .admin-tab[data-sec]').forEach(b =>
     b.classList.toggle('active', b.dataset.sec === name));
   if (('#' + name) !== location.hash) history.replaceState(null, '', '#' + name);
+  // A saúde (#375) carrega só na ENTRADA da aba e no botão "Verificar agora" —
+  // nunca no temporizador da fila (8 s): são várias consultas em série, e em
+  // produção custam ~2 s cada relatório.
+  if (name === 'operacoes' && opsEstavaOculta) loadHealth();
 }
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('#admin-tabs .admin-tab[data-sec]').forEach(b =>
@@ -739,10 +744,12 @@ function healthSummary(c) {
   }
 }
 window.healthToggle = (i) => { const el = document.getElementById('health-detail-' + i); if (el) el.classList.toggle('hidden'); };
+let healthEmCurso = false;
 async function loadHealth() {
+  if (healthEmCurso) return; // uma verificação de cada vez
   const msg = document.getElementById('health-msg');
   const btn = document.getElementById('health-refresh');
-  btn.disabled = true; msg.textContent = 'Verificando…';
+  healthEmCurso = true; btn.disabled = true; msg.textContent = 'Verificando…';
   try {
     const r = await fetch('/admin/health');
     if (r.status === 401) return showLogin();
@@ -760,14 +767,13 @@ async function loadHealth() {
     </tr><tr id="health-detail-${i}" class="hidden"><td colspan="5"><pre class="hint" style="white-space:pre-wrap; margin:0">${escapeHtml(JSON.stringify(c.detail, null, 2))}</pre></td></tr>`).join('');
     msg.textContent = '';
   } catch (e) { msg.textContent = 'Falha ao verificar: ' + e.message; }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; healthEmCurso = false; }
 }
 document.getElementById('health-refresh').onclick = loadHealth;
 
 async function loadOps() {
   const secEl = document.getElementById('sec-operacoes');
   if (!secEl || secEl.classList.contains('hidden-sec')) return;
-  loadHealth();
   let j;
   try { const r = await fetch('/admin/proctor/queue'); j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); }
   catch (e) { document.getElementById('ops-msg').textContent = 'Falha ao ler a fila: ' + e.message; return; }

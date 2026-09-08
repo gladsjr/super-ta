@@ -56,8 +56,10 @@ Dois endpoints e uma tela:
   sem falhas, 503 com alguma.
 - **Tela "Saúde do sistema"**, no topo da aba Operações do painel de
   administração: o mesmo relatório, com uma frase por verificação e o detalhe
-  completo atrás de um botão. Carrega ao abrir a aba e tem "Verificar agora".
-  Depois de um Publish, é a primeira coisa a olhar.
+  completo atrás de um botão. Carrega ao **entrar** na aba e no botão
+  "Verificar agora" — nunca no temporizador da fila, porque cada relatório
+  são várias consultas em série. Depois de um Publish, é a primeira coisa a
+  olhar.
 
 **Tokens têm alcance.** O token de acesso programático (aba Tokens do admin)
 serve a **um** uso: `análise`, para o endpoint de consulta de dados, com 30
@@ -74,7 +76,7 @@ de análise.
 |---|---|
 | Configuração ativa | qual `policy.yaml` produção está de fato rodando |
 | Schema materializado | o **mais valioso pós-Publish**: tabela, coluna, índice ou constraint que alguma migration cria e que **não existe no banco** — com a migration de origem. Confere o catálogo, não o ledger (ver abaixo) |
-| Seeds | o schema foi, mas os dados de bootstrap não; ou não há admin global |
+| Seeds | o schema foi, mas os dados de bootstrap não (enumerações vazias, alcances do token ausentes ou parciais); ou não há admin global |
 | Filas | executor parou (sem tique, lease vencida), falhas nas últimas 24 h, job pendente há mais de uma hora |
 | Modelos e arquivos de mídia | deploy sem os ONNX, sem o WASM, sem os mp3 do sound check (binários, como o `ffmpeg`, são do nível `deep`) |
 | Consentimento | quantos alunos vão reaceitar o termo depois de uma mudança de versão |
@@ -118,8 +120,11 @@ da primeira medição em produção (#389).
   `shallow`: o check de arquivos passou a conferir só modelos e mídia, e o
   ffmpeg vai ser exercitado de verdade no nível `deep`.
 - A FK da migration 074 (`submissions.proctor_review`) **não existia em
-  produção com nome nenhum** — o Publish não materializou uma FK para coluna
-  UNIQUE. A migration 081 a renomeia para o diff enxergar (#389). Foi o
+  produção com nome nenhum** — e, descobriu-se depois, também não existia no
+  dev do Replit: o Publish era inocente, e a divergência era entre a migration
+  e os bancos do Replit, por causa desconhecida. A migration 081 recria a FK
+  com nome novo e `DROP ... IF EXISTS`, exceção deliberada à regra "sem
+  guardas", porque precisava rodar onde a FK existia e onde não (#389). Foi o
   achado que justificou o check.
 - A latência de banco em produção é de ~90 ms por ida; os checks de banco em
   série custam ~2 s por relatório. Está dentro do prazo, e é o preço de uma
