@@ -183,6 +183,29 @@ test("deep em andamento (esperando provedor) NÃO segura a conexão do health: s
     }
 });
 
+test("deep: os checks externos só começam DEPOIS de a sequência de banco devolver o cliente; no shallow correm em paralelo", semBanco, async () => {
+    // Medido em prod (08/09): o `db` deu warn com 2,5 s durante os spawns do
+    // próprio deep. O número do banco tem de ser do banco.
+    let clienteVisto = "nunca-rodou";
+    const espiao = { id: "espiao_ext_teste", label: "espião", level: "deep", db: false, run: async (ctx) => { clienteVisto = ctx.client; return { status: "ok", detail: {} }; } };
+    CHECKS.push(espiao); CHECK_IDS.push(espiao.id);
+    try {
+        await runHealth({ depth: "deep", ids: ["db", "seeds", espiao.id] });
+        assert.equal(clienteVisto, null, "no deep, o externo só roda com o cliente de banco já devolvido");
+    } finally {
+        CHECKS.splice(CHECKS.indexOf(espiao), 1);
+        CHECK_IDS.splice(CHECK_IDS.indexOf(espiao.id), 1);
+    }
+});
+
+test("aquecimento do boot: dispara em segundo plano, nunca lança, e usa spawnLow (nice) — nada síncrono", () => {
+    const txt = fonte("lib/warmup.js");
+    assert.match(txt, /spawnLow\(/);
+    assert.ok(!/spawnSync|execSync/.test(txt), "aquecimento não pode bloquear o boot");
+    assert.match(txt, /setTimeout\(/, "dispara depois do boot, não durante");
+    assert.match(fonte("server.js"), /warmUpNativeDeps\(\)/, "server.js chama o aquecimento");
+});
+
 test("tela: entrar na aba Operações carrega SEMPRE shallow; deep só pelo botão com o seletor", () => {
     const html = fonte("static/admin.html");
     assert.match(html, /opsEstavaOculta\) loadHealth\('shallow'\)/, "entrada na aba tem de pedir shallow explicitamente");
