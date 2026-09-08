@@ -244,6 +244,17 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     } catch (err) {
         log.error("BOOT", `initAudioStore failed: ${err.message}`);
     }
+    log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
+    // Toca ffmpeg e python+mediapipe ANTES de ligar a fila de vídeo: o primeiro
+    // spawn depois de um Publish paga ~30 s de cache frio no deployment (#375,
+    // 08/09), e um reinício com análises pendentes reivindica trabalho no
+    // primeiro tique da fila. O HTTP já está de pé; espera com teto.
+    try {
+        const aq = await warmUpNativeDeps();
+        log.info("BOOT", `aquecimento ${aq.capped ? "no teto" : "completo"} em ${aq.ms} ms`);
+    } catch (err) {
+        log.warn("BOOT", `aquecimento falhou (segue): ${err.message}`);
+    }
     // Fila global de proctoring (#262): carrega a concorrência persistida e
     // RECONCILIA — 'queued'/'running' órfãos de reinício e legado com vídeo sem
     // relatório voltam para a fila (substitui o antigo "órfã vira failed" do #220:
@@ -256,10 +267,6 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
     // Executor da fila de jobs (#289, corte 3): retranscrição na janela ociosa.
     // Também recupera jobs órfãos de reinício (lease vencida volta a elegível).
     startJobRunner();
-    // Toca ffmpeg e python+mediapipe em segundo plano: o primeiro spawn depois
-    // de um Publish paga ~30 s de cache frio no deployment (#375, 08/09).
-    warmUpNativeDeps();
-    log.info("BOOT", `server listening http://0.0.0.0:${PORT} log_level=${log.level} model=${PRINCIPAL_REASONING_MODEL}`);
 });
 
 // Relay WebSocket da prova oral (Realtime) — navegador ↔ servidor ↔ OpenAI.
