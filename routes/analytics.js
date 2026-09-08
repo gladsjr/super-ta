@@ -45,6 +45,8 @@ async function requireAnalyticsToken(req, res, next) {
         const hash = crypto.createHash("sha256").update(provided).digest("hex");
         const row = await db.findValidAnalyticsToken(hash);
         if (!row) return res.status(401).json({ error: "token inválido, revogado ou expirado" });
+        // Alcance (migration 082): um token de saúde não lê dados de aluno.
+        if (row.scope !== "analytics") return res.status(403).json({ error: `token com alcance "${row.scope}" não serve para análise — gere um token de análise no painel` });
         req.analyticsToken = row;
         next();
     } catch (e) {

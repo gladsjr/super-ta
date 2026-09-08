@@ -23,6 +23,7 @@ import {
     seedCivilIdTypes,
     seedUnitLabels,
     seedAuthProviders,
+    seedTokenScopes,
     seedBootstrapAdmin,
     seedInterviewerTemplates,
     seedPackageTemplates,
@@ -212,6 +213,11 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedAuthProviders();
     } catch (err) {
         log.error("BOOT", `seedAuthProviders failed: ${err.message}`);
+    }
+    try {
+        await seedTokenScopes();
+    } catch (err) {
+        log.error("BOOT", `seedTokenScopes failed: ${err.message}`);
     }
     try {
         await seedBootstrapAdmin();

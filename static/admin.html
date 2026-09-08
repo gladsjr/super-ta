@@ -81,7 +81,7 @@
       <button class="admin-tab" data-sec="trabalhos">Trabalhos</button>
       <a class="admin-tab" href="/unidades" title="Unidades em árvore, papéis, tetos e pacotes de avaliação">Unidades ↗</a>
       <button class="admin-tab" data-sec="usuarios">Usuários e senha</button>
-      <button class="admin-tab" data-sec="tokens">Tokens de análise</button>
+      <button class="admin-tab" data-sec="tokens" title="Tokens de acesso programático: análise (benchmark) e saúde (monitoração)">Tokens</button>
       <button class="admin-tab" data-sec="operacoes" title="Fila de análises de vídeo (proctoring), concorrência e saúde">Operações</button>
     </nav>
 
@@ -165,11 +165,12 @@
     </section>
 
     <section id="sec-tokens" class="admin-sec hidden-sec">
-    <h3>Análise (benchmark)</h3>
+    <h3>Tokens de acesso</h3>
     <div class="card">
-      <h3 class="card-title">Tokens de análise</h3>
-      <p class="card-sub">Geram acesso somente-leitura ao endpoint de consulta de dados (<code>POST /api/analytics/query</code>) para benchmark. Como você já tem direito aos dados, o token apenas estende esse acesso a um canal programático — <strong>expira em 30 dias</strong> e fica registrado no seu nome. O texto do token aparece <strong>uma única vez</strong>, na geração: copie e guarde.</p>
+      <h3 class="card-title">Gerar token</h3>
+      <p class="card-sub">Cada token serve a <strong>um alcance</strong>: <strong>análise</strong> dá acesso somente-leitura ao endpoint de consulta de dados (<code>POST /api/analytics/query</code>, para benchmark; expira em 30 dias); <strong>saúde</strong> dá acesso ao relatório de verificação (<code>GET /admin/health</code>, para a ferramenta de monitoração; expira em 365 dias, porque um monitor que morre todo mês é um monitor desligado). Um token não serve ao outro uso. Fica registrado no seu nome, e o texto aparece <strong>uma única vez</strong>, na geração: copie e guarde.</p>
       <div class="row">
+        <select id="tok-scope" class="input" style="min-width:220px" title="alcance do token"></select>
         <input id="tok-label" class="input" placeholder="descrição (opcional, ex.: benchmark custo jul/26)" style="flex:1; min-width:240px"/>
         <button id="tok-generate" class="btn btn-primary">Gerar token</button>
       </div>
@@ -184,7 +185,7 @@
     </div>
     <div class="card">
       <table id="tokens-table" class="table">
-        <thead><tr><th>Prefixo</th><th>Descrição</th><th>Criado por</th><th>Expira em</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
+        <thead><tr><th>Prefixo</th><th>Alcance</th><th>Descrição</th><th>Criado por</th><th>Expira em</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
         <tbody></tbody>
       </table>
       <div id="tokens-empty" class="table-empty hidden">Nenhum token ainda.</div>
@@ -193,6 +194,24 @@
 
     <section id="sec-operacoes" class="admin-sec hidden-sec">
     <h3>Operações</h3>
+    <!-- Verificação de saúde (#375): o mesmo relatório que a monitoração lê
+         (GET /admin/health), aqui pela sessão. Depois de um Publish, é a
+         primeira coisa a olhar. -->
+    <div class="card">
+      <div class="row" style="align-items:center; gap: var(--sp-3); flex-wrap: wrap">
+        <h3 class="card-title" style="margin:0">Saúde do sistema</h3>
+        <span id="health-summary"></span>
+        <span class="spacer"></span>
+        <span id="health-meta" class="hint"></span>
+        <button id="health-refresh" class="btn btn-sm" type="button">↻ Verificar agora</button>
+      </div>
+      <p class="card-sub" style="margin-top: var(--sp-2)">Sete verificações sem custo e sem efeito (nível <code>shallow</code>): configuração ativa, banco, schema materializado pelo Publish, seeds, filas, modelos e mídia, termo de consentimento. <code>ok</code> é medido e bem; <code>aviso</code> pede atenção; <code>falha</code> é o que um robô de monitoração alarmaria. A ferramenta de monitoração lê o mesmo relatório com um token de saúde.</p>
+      <table class="table" id="health-table">
+        <thead><tr><th>Verificação</th><th>Estado</th><th>Tempo</th><th>Resumo</th><th style="text-align:right"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="health-msg" class="hint"></div>
+    </div>
     <!-- Fila GLOBAL de análises de vídeo (issues #262/#263). A análise dispara
          sozinha ao fim de cada prova/entrevista; aqui a equipe observa e ajusta. -->
     <div class="card">
@@ -256,12 +275,17 @@ let DEFAULT_BUDGET_USD = null;
 const SECS = ['trabalhos', 'usuarios', 'tokens', 'operacoes'];
 function showSec(name) {
   if (!SECS.includes(name)) name = 'trabalhos';
+  const opsEstavaOculta = document.getElementById('sec-operacoes').classList.contains('hidden-sec');
   for (const s of SECS) {
     document.getElementById('sec-' + s).classList.toggle('hidden-sec', s !== name);
   }
   document.querySelectorAll('#admin-tabs .admin-tab[data-sec]').forEach(b =>
     b.classList.toggle('active', b.dataset.sec === name));
   if (('#' + name) !== location.hash) history.replaceState(null, '', '#' + name);
+  // A saúde (#375) carrega só na ENTRADA da aba e no botão "Verificar agora" —
+  // nunca no temporizador da fila (8 s): são várias consultas em série, e em
+  // produção custam ~2 s cada relatório.
+  if (name === 'operacoes' && opsEstavaOculta) loadHealth();
 }
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('#admin-tabs .admin-tab[data-sec]').forEach(b =>
@@ -688,6 +712,67 @@ window.opsJobDiscard = async (id) => {
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert('Falha: ' + (j.error || 'ao descartar')); }
   loadOps();
 };
+// ---- Operações: verificação de saúde (#375) ----
+const HEALTH_STATUS = {
+  ok:   { cls: 'badge-completed', txt: 'ok' },
+  warn: { cls: 'badge-in_progress', txt: 'aviso' },
+  fail: { cls: 'badge-gave_up', txt: 'falha' },
+  skip: { cls: 'badge-pending', txt: 'não se aplica' },
+};
+const healthBadge = (s) => { const m = HEALTH_STATUS[s] || HEALTH_STATUS.fail; return `<span class="badge ${m.cls}">${m.txt}</span>`; };
+// Uma frase por check, a partir do detalhe — o JSON completo fica atrás do
+// botão. Quem lê isto não abre o código; quem investiga abre o JSON.
+function healthSummary(c) {
+  const d = c.detail || {};
+  if (d.error) return escapeHtml(d.error);
+  const avisos = Array.isArray(d.warnings) && d.warnings.length ? ' — ' + escapeHtml(d.warnings.join('; ')) : '';
+  switch (c.id) {
+    case 'config': return `modelo ${escapeHtml(d.principal_reasoning_model || '?')} · STT ${escapeHtml(d.stt_provider || '?')} · Realtime ${escapeHtml(d.realtime_model || '?')} · Node ${escapeHtml(d.node || '?')}`;
+    case 'db': return `${d.latency_ms} ms · pool do app: ${d.pool?.total ?? '?'} conexões, ${d.pool?.waiting ?? '?'} esperando${avisos}`;
+    case 'migrations': {
+      const falta = (d.missing || []).map(m => `${m.kind} ${m.name} (${m.migration})`).join('; ');
+      return falta ? `faltando no banco: ${escapeHtml(falta)}` : `${d.files} migrations no código; tudo o que veio depois da ${escapeHtml(d.baseline || '?')} está no banco`;
+    }
+    case 'seeds': {
+      const probs = [...(d.missing || []).map(t => `tabela ${t} ausente`), ...(d.empty || []).map(t => `${t} vazia`),
+        ...((d.token_scopes_missing || []).length ? [`alcance(s) de token ausente(s): ${d.token_scopes_missing.join(', ')}`] : []),
+        ...(d.admin_bootstrap === false ? ['sem admin global'] : [])];
+      return probs.length ? escapeHtml(probs.join('; ')) : 'enumerações povoadas, alcances de token completos e admin global presente';
+    }
+    case 'jobs': return `${d.pending ?? 0} pendente(s)` + (d.runner ? ` · executor com tique há ${d.runner.silent_s} s` : ' · executor não ligado neste processo') + avisos;
+    case 'assets': return (d.missing || []).length ? `faltando: ${escapeHtml(d.missing.join(', '))}` : `modelos presentes · ${d.soundcheck_mp3}/${d.soundcheck_expected} áudios do sound check`;
+    case 'consent': return `termo v${escapeHtml(d.version || '?')} · ${d.submissions_on_older_version ?? '?'} envio(s) em versão anterior`;
+    default: return '';
+  }
+}
+window.healthToggle = (i) => { const el = document.getElementById('health-detail-' + i); if (el) el.classList.toggle('hidden'); };
+let healthEmCurso = false;
+async function loadHealth() {
+  if (healthEmCurso) return; // uma verificação de cada vez
+  const msg = document.getElementById('health-msg');
+  const btn = document.getElementById('health-refresh');
+  healthEmCurso = true; btn.disabled = true; msg.textContent = 'Verificando…';
+  try {
+    const r = await fetch('/admin/health');
+    if (r.status === 401) return showLogin();
+    const j = await r.json();
+    if (!Array.isArray(j.checks)) throw new Error(j.error || ('HTTP ' + r.status));
+    const geral = { ok: 'Tudo de pé', warn: 'De pé, com avisos', fail: 'Há falhas' }[j.status] || j.status;
+    document.getElementById('health-summary').innerHTML = healthBadge(j.status) + ` <strong>${geral}</strong>`;
+    document.getElementById('health-meta').textContent = `commit ${j.commit || '?'} · ${j.env || ''} · ${j.duration_ms} ms · ${new Date(j.ts).toLocaleTimeString('pt-BR')}`;
+    document.querySelector('#health-table tbody').innerHTML = j.checks.map((c, i) => `<tr>
+      <td><strong>${escapeHtml(c.label)}</strong><div class="hint">${escapeHtml(c.id)}</div></td>
+      <td>${healthBadge(c.status)}</td>
+      <td class="muted">${c.duration_ms} ms</td>
+      <td class="hint" style="max-width:520px">${healthSummary(c)}</td>
+      <td style="text-align:right"><button class="btn btn-ghost btn-sm" onclick="healthToggle(${i})" title="detalhe completo (JSON)">…</button></td>
+    </tr><tr id="health-detail-${i}" class="hidden"><td colspan="5"><pre class="hint" style="white-space:pre-wrap; margin:0">${escapeHtml(JSON.stringify(c.detail, null, 2))}</pre></td></tr>`).join('');
+    msg.textContent = '';
+  } catch (e) { msg.textContent = 'Falha ao verificar: ' + e.message; }
+  finally { btn.disabled = false; healthEmCurso = false; }
+}
+document.getElementById('health-refresh').onclick = loadHealth;
+
 async function loadOps() {
   const secEl = document.getElementById('sec-operacoes');
   if (!secEl || secEl.classList.contains('hidden-sec')) return;
@@ -921,11 +1006,16 @@ document.getElementById('pwd-new').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('change-pwd').click();
 });
 
-// ---- Tokens de análise (benchmark) ----
+// ---- Tokens de acesso (análise e saúde) ----
 async function loadAnalyticsTokens() {
   const r = await fetch('/admin/analytics-tokens');
   if (r.status === 401) return showLogin();
   const j = await r.json().catch(() => ({}));
+  // Alcances disponíveis (tabela analytics_token_scopes), com a validade de cada um.
+  const sel = document.getElementById('tok-scope');
+  if (sel && Array.isArray(j.scopes) && j.scopes.length && !sel.options.length) {
+    sel.innerHTML = j.scopes.map(s => `<option value="${escapeHtml(s.key)}">${escapeHtml(s.name)} — ${s.ttl_days} dias</option>`).join('');
+  }
   const tbody = document.querySelector('#tokens-table tbody');
   const table = document.getElementById('tokens-table');
   const empty = document.getElementById('tokens-empty');
@@ -940,6 +1030,7 @@ async function loadAnalyticsTokens() {
       : `<button class="btn btn-danger-ghost btn-sm" onclick="revokeToken(${t.id})">Revogar</button>`;
     return `<tr>
       <td><code class="token-chip">${escapeHtml(t.token_prefix)}…</code></td>
+      <td>${escapeHtml(t.scope_name || t.scope || '—')}</td>
       <td>${t.label ? escapeHtml(t.label) : '<span class="muted">—</span>'}</td>
       <td class="muted">${escapeHtml(t.created_by || '—')}</td>
       <td class="muted">${fmtDateShort(t.expires_at)}</td>
@@ -950,12 +1041,13 @@ async function loadAnalyticsTokens() {
 }
 document.getElementById('tok-generate').onclick = async () => {
   const label = document.getElementById('tok-label').value.trim();
+  const scope = document.getElementById('tok-scope').value || 'analytics';
   const msg = document.getElementById('tok-msg');
   msg.textContent = '';
   try {
     const r = await fetch('/admin/analytics-tokens', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label })
+      body: JSON.stringify({ label, scope })
     });
     if (r.status === 401) return showLogin();
     const j = await r.json().catch(() => ({}));

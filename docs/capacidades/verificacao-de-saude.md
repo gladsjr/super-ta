@@ -45,15 +45,30 @@ colateral:
 - **`e2e`** — o relay de voz completo, em produção, sobre um trabalho de saúde
   permanente. Só sob pedido explícito. *(corte seguinte)*
 
-Dois endpoints:
+Dois endpoints e uma tela:
 
 - `GET /healthz` — liveness puro, sem autenticação e sem banco. Responde antes
   do store de sessão; é o que um robô de uptime chama. Por ser aberto, não conta
   nada além de "estou vivo": nem commit, nem versão (isso fica no relatório).
 - `GET /admin/health?checks=db,jobs&depth=shallow` — o relatório. Aceita a
-  **sessão de administrador** (tela) ou o **token de análise** (monitoração), o
-  mesmo mecanismo do acesso analítico. O corpo vem sempre completo; o **status
-  HTTP reflete o pior resultado**: 200 sem falhas, 503 com alguma.
+  **sessão de administrador** (tela) ou um **token de saúde** (monitoração). O
+  corpo vem sempre completo; o **status HTTP reflete o pior resultado**: 200
+  sem falhas, 503 com alguma.
+- **Tela "Saúde do sistema"**, no topo da aba Operações do painel de
+  administração: o mesmo relatório, com uma frase por verificação e o detalhe
+  completo atrás de um botão. Carrega ao **entrar** na aba e no botão
+  "Verificar agora" — nunca no temporizador da fila, porque cada relatório
+  são várias consultas em série. Depois de um Publish, é a primeira coisa a
+  olhar.
+
+**Tokens têm alcance.** O token de acesso programático (aba Tokens do admin)
+serve a **um** uso: `análise`, para o endpoint de consulta de dados, com 30
+dias de validade; ou `saúde`, para este relatório, com 365 dias — um monitor
+que morre todo mês é um monitor desligado. Um não serve ao outro (403). Motivo:
+o token de análise é somente-leitura por construção, e o nível `deep` vai
+escrever e gastar; reaproveitar o mesmo token ampliaria em silêncio o que todo
+token já emitido pode fazer. Os tokens emitidos antes do alcance existir são
+de análise.
 
 ## O que cada check de `shallow` pega
 
@@ -61,7 +76,7 @@ Dois endpoints:
 |---|---|
 | Configuração ativa | qual `policy.yaml` produção está de fato rodando |
 | Schema materializado | o **mais valioso pós-Publish**: tabela, coluna, índice ou constraint que alguma migration cria e que **não existe no banco** — com a migration de origem. Confere o catálogo, não o ledger (ver abaixo) |
-| Seeds | o schema foi, mas os dados de bootstrap não; ou não há admin global |
+| Seeds | o schema foi, mas os dados de bootstrap não (enumerações vazias, alcances do token ausentes ou parciais); ou não há admin global |
 | Filas | executor parou (sem tique, lease vencida), falhas nas últimas 24 h, job pendente há mais de uma hora |
 | Modelos e arquivos de mídia | deploy sem os ONNX, sem o WASM, sem os mp3 do sound check (binários, como o `ffmpeg`, são do nível `deep`) |
 | Consentimento | quantos alunos vão reaceitar o termo depois de uma mudança de versão |
@@ -105,9 +120,15 @@ da primeira medição em produção (#389).
   `shallow`: o check de arquivos passou a conferir só modelos e mídia, e o
   ffmpeg vai ser exercitado de verdade no nível `deep`.
 - A FK da migration 074 (`submissions.proctor_review`) **não existia em
-  produção com nome nenhum** — o Publish não materializou uma FK para coluna
-  UNIQUE. A migration 081 a renomeia para o diff enxergar (#389). Foi o
-  achado que justificou o check.
+  produção com nome nenhum**, nem no dev do Replit. A explicação mais
+  provável apareceu no corte 2 (#392): a FK apontava para uma enumeração
+  **semeada no boot**, e o Publish leva o schema antes de o boot semear — o
+  diff tenta criar a FK com a tabela-alvo vazia e linhas já apontando para
+  ela, e falha. Regra que fica: **FK para enumeração semeada no boot vai numa
+  migration separada, num Publish posterior ao que cria a tabela.** A 081
+  recria a FK com nome novo e `DROP ... IF EXISTS`, exceção deliberada à regra
+  "sem guardas", porque precisava rodar onde a FK existia e onde não (#389).
+  Foi o achado que justificou o check.
 - A latência de banco em produção é de ~90 ms por ida; os checks de banco em
   série custam ~2 s por relatório. Está dentro do prazo, e é o preço de uma
   conexão só.
@@ -117,11 +138,10 @@ da primeira medição em produção (#389).
 - **Não roda DDL.** O check de schema é leitura pura, numa transação READ
   ONLY. Tabela ausente é resultado, não exceção. O boot não cria schema —
   [ADR 0001](../decisoes/0001-migrations-nao-rodam-no-boot.md).
-- **Não escreve, não gasta, não chama provedor no nível `shallow`.** Por isso o
-  token de análise, que é somente-leitura por construção, serve sem ampliar o
-  que ele já pode. Quando o nível `deep` entrar, isso muda — e a decisão sobre o
-  alcance do token (a proposta de `scope`, aprovada em 07/09) precisa vir
-  **antes**, com a tela de tokens do admin mudando junto.
+- **Não escreve, não gasta, não chama provedor no nível `shallow`.** O nível
+  `deep`, quando entrar, vai — por isso o token de saúde é um alcance próprio,
+  separado do token de análise, decidido antes do `deep` existir.
+- **Não aceita token de análise.** Token é credencial de um uso só.
 - **Não pega a armadilha do Publish com constraint de mesmo nome** — o check
   confere constraint por **nome**, como o próprio diff do Publish, e mudar a
   definição mantendo o nome passa verde nos dois. Também não confere tipo,

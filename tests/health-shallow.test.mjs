@@ -81,9 +81,14 @@ test("níveis deep e e2e são recusados com 501; depth/ids ruins e seleção vaz
 // Os checks recebem `ctx.q`; um `q` falso basta para exercitar os ramos que
 // só aparecem num banco quebrado — sem tocar em banco nenhum.
 
+// Alcances do token completos, para os cenários de seeds que não tratam deles.
+const SCOPES_OK = { rows: [{ key: "analytics", ttl_days: 30 }, { key: "health", ttl_days: 365 }] };
+const ehConsultaDeAlcances = (sql) => /SELECT key, ttl_days FROM analytics_token_scopes/.test(sql);
+
 test("seeds: memberships ausente não pode dar ok (admin_bootstrap nulo não é admin presente)", async () => {
     const q = async (sql) => {
         if (/FROM memberships/.test(sql)) throw semTabela("memberships");
+        if (ehConsultaDeAlcances(sql)) return SCOPES_OK;
         return { rows: [{ n: 3 }] };
     };
     const r = await check("seeds").run({ q });
@@ -93,11 +98,63 @@ test("seeds: memberships ausente não pode dar ok (admin_bootstrap nulo não é 
 });
 
 test("seeds: tudo presente e admin existente é ok; sem admin é fail", async () => {
-    const ok = await check("seeds").run({ q: async () => ({ rows: [{ n: 1 }] }) });
+    const ok = await check("seeds").run({ q: async (sql) => ehConsultaDeAlcances(sql) ? SCOPES_OK : ({ rows: [{ n: 1 }] }) });
     assert.equal(ok.status, "ok");
-    const semAdmin = await check("seeds").run({ q: async (sql) => ({ rows: [{ n: /FROM memberships/.test(sql) ? 0 : 1 }] }) });
+    assert.deepEqual(ok.detail.token_scopes_missing, []);
+    const semAdmin = await check("seeds").run({ q: async (sql) => ehConsultaDeAlcances(sql) ? SCOPES_OK : ({ rows: [{ n: /FROM memberships/.test(sql) ? 0 : 1 }] }) });
     assert.equal(semAdmin.status, "fail");
     assert.equal(semAdmin.detail.admin_bootstrap, false);
+});
+
+test("seeds: alcances do token ausentes ou parciais são fail — tabela com linhas não basta (revisão do #392)", async () => {
+    // Tabela existe e tem linhas (count > 0), mas falta o alcance `health`.
+    const parcial = async (sql) => ehConsultaDeAlcances(sql) ? ({ rows: [{ key: "analytics", ttl_days: 30 }] }) : ({ rows: [{ n: 1 }] });
+    const r = await check("seeds").run({ q: parcial });
+    assert.equal(r.status, "fail");
+    assert.deepEqual(r.detail.token_scopes_missing, ["health"]);
+    // Validade zerada também não vale: token nasceria expirado.
+    const zerada = async (sql) => ehConsultaDeAlcances(sql) ? ({ rows: [{ key: "analytics", ttl_days: 30 }, { key: "health", ttl_days: 0 }] }) : ({ rows: [{ n: 1 }] });
+    assert.deepEqual((await check("seeds").run({ q: zerada })).detail.token_scopes_missing, ["health"]);
+    // Tabela ausente: acusada como ausente, sem consultar os alcances.
+    const semTab = async (sql) => { if (/FROM analytics_token_scopes/.test(sql)) throw semTabela("analytics_token_scopes"); return { rows: [{ n: 1 }] }; };
+    const r3 = await check("seeds").run({ q: semTab });
+    assert.equal(r3.status, "fail");
+    assert.ok(r3.detail.missing.includes("analytics_token_scopes"));
+});
+
+test("migration 082 atualiza um banco que JÁ tem tokens (fluxo de dev: migration antes do servidor)", semBanco, async () => {
+    // Revisão do #392: uma versão da 082 criava a FK dentro da migration, com
+    // a tabela de alcances vazia — em banco com qualquer token, 23503. Aqui a
+    // 082 real roda numa transação com tabelas TEMPORÁRIAS de mesmo nome (que
+    // sombreiam as públicas no search_path) e um token pré-existente; rollback
+    // no fim. Nada do banco real é tocado.
+    const sql = fs.readFileSync(path.join(raiz, "migrations/082_analytics_token_scope.sql"), "utf8")
+        .replace(/CREATE TABLE analytics_token_scopes/, "CREATE TEMP TABLE analytics_token_scopes");
+    assert.ok(!/ADD CONSTRAINT|FOREIGN KEY|REFERENCES/i.test(sql.replace(/--[^\n]*/g, "")), "a FK não pode estar na 082 — vai na migration seguinte, num Publish posterior (ver o cabeçalho da 082)");
+    const c = await pool.connect();
+    try {
+        await c.query("BEGIN");
+        await c.query(`CREATE TEMP TABLE analytics_tokens (id BIGSERIAL PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, token_prefix TEXT NOT NULL, label TEXT, created_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ)`);
+        await c.query(`INSERT INTO analytics_tokens (token_hash, token_prefix, expires_at) VALUES ('h081', 'oratia_analytics_x', now() + interval '1 day')`);
+        for (const stmt of sql.replace(/--[^\n]*/g, "").split(";").map(x => x.trim()).filter(Boolean)) await c.query(stmt);
+        const t = await c.query(`SELECT scope FROM analytics_tokens`);
+        assert.deepEqual(t.rows.map(r => r.scope), ["analytics"], "token anterior à 082 nasce com alcance de análise");
+        const sc = await c.query(`SELECT key, ttl_days FROM analytics_token_scopes ORDER BY key`);
+        assert.deepEqual(sc.rows.map(r => [r.key, r.ttl_days]), [["analytics", 30], ["health", 365]]);
+    } finally { await c.query("ROLLBACK").catch(() => {}); c.release(); }
+});
+
+test("seeds: a seed de alcances é idempotente e reconcilia a tabela a partir do código", semBanco, async () => {
+    const { seedTokenScopes } = await import("../auth.js");
+    const { TOKEN_SCOPE_DEFS } = await import("../lib/db/analyticsTokens.js");
+    await seedTokenScopes();
+    await seedTokenScopes(); // duas vezes: sem erro, sem duplicar
+    const { rows } = await pool.query(`SELECT key, name, ttl_days FROM analytics_token_scopes ORDER BY key`);
+    assert.deepEqual(rows.map(r => [r.key, r.ttl_days]), TOKEN_SCOPE_DEFS.map(d => [d.key, d.ttl_days]));
+    // Divergência é corrigida no próximo boot (validade mexida à mão volta).
+    await pool.query(`UPDATE analytics_token_scopes SET ttl_days = 1 WHERE key = 'health'`);
+    await seedTokenScopes();
+    assert.equal((await pool.query(`SELECT ttl_days FROM analytics_token_scopes WHERE key = 'health'`)).rows[0].ttl_days, 365);
 });
 
 test("consent: submissions ausente é fail, não ok com contagem nula", async () => {
@@ -168,7 +225,7 @@ test("schema: só o que veio depois da linha de base é conferido — e a ausên
     // a FK nova — vira ausência de tabela (revisão do #391)
     const semSubmissions = async (sql) => {
         if (/information_schema\.tables/.test(sql)) return { rows: [...EXPECTED_SCHEMA_FULL.tables.keys()].filter(t => t !== "submissions").map(name => ({ name })) };
-        return catalogo([])(sql);
+        return catalogo([...EXPECTED_SCHEMA_FULL.constraints.keys()])(sql);
     };
     const r2 = await check("migrations").run({ q: semSubmissions });
     assert.equal(r2.status, "fail");
@@ -415,6 +472,34 @@ test("endpoint: /healthz aberto e sem commit; sem auth 401; token ruim 401; chec
 
         const vazio = await fetch(`${base}/admin/health?checks=,,,`, { headers: { Authorization: "Bearer nao-existe" } });
         assert.equal(vazio.status, 401, "auth vem antes; com token válido seria 400 (coberto em runHealth)");
+
+        // Alcance (migration 082): token de ANÁLISE não entra na saúde (403);
+        // token de SAÚDE entra (200) e não entra na análise (403). Linhas
+        // temporárias no banco de dev, removidas no finally.
+        const crypto = await import("node:crypto");
+        const mk = (scope) => { const txt = `teste_${scope}_${crypto.randomBytes(8).toString("hex")}`; return { txt, hash: crypto.createHash("sha256").update(txt).digest("hex") }; };
+        const tA = mk("analytics"), tH = mk("health");
+        try {
+            await pool.query(`INSERT INTO analytics_tokens (token_hash, token_prefix, label, scope, expires_at) VALUES ($1, 'teste_tmp', 'teste', 'analytics', now() + interval '5 minutes'), ($2, 'teste_tmp', 'teste', 'health', now() + interval '5 minutes')`, [tA.hash, tH.hash]);
+            const analise = await fetch(`${base}/admin/health?checks=config`, { headers: { Authorization: `Bearer ${tA.txt}` } });
+            assert.equal(analise.status, 403, "token de análise não serve para saúde");
+            assert.match((await analise.json()).error, /alcance/);
+            const saude = await fetch(`${base}/admin/health?checks=config`, { headers: { Authorization: `Bearer ${tH.txt}` } });
+            assert.equal(saude.status, 200, "token de saúde serve");
+            assert.equal((await saude.json()).checks[0].id, "config");
+            const vazioOk = await fetch(`${base}/admin/health?checks=,,,`, { headers: { Authorization: `Bearer ${tH.txt}` } });
+            assert.equal(vazioOk.status, 400, "com token válido, seleção vazia é 400");
+            // e o endpoint de análise recusa o token de saúde
+            const { default: analyticsRoutes } = await import("../routes/analytics.js");
+            const app2 = express(); app2.use(express.json()); app2.use(analyticsRoutes);
+            const srv2 = await new Promise(ok => { const s2 = app2.listen(0, "127.0.0.1", () => ok(s2)); });
+            try {
+                const q = await fetch(`http://127.0.0.1:${srv2.address().port}/api/analytics/query`, { method: "POST", headers: { Authorization: `Bearer ${tH.txt}`, "Content-Type": "application/json" }, body: JSON.stringify({ sql: "SELECT 1" }) });
+                assert.equal(q.status, 403, "token de saúde não lê dados de aluno");
+            } finally { await new Promise(r => srv2.close(r)); }
+        } finally {
+            await pool.query(`DELETE FROM analytics_tokens WHERE token_prefix = 'teste_tmp'`);
+        }
     } finally { await new Promise(r => srv.close(r)); }
 });
 

@@ -165,6 +165,11 @@ Fluxo: veja o último número → crie `NNN+1` → escreva SQL direto, **sem**
   única exceção é `PRIMARY KEY` inline **na definição da coluna** (`id SERIAL
   PRIMARY KEY`), que sempre se chama `{tabela}_pkey`; `PRIMARY KEY (id)` como
   constraint de tabela e `CREATE INDEX ON t (c)` sem nome ferem a regra.
+- **FK para enumeração semeada no boot vai em migration separada, num Publish
+  posterior** ao que cria a tabela. O Publish leva o schema antes de o boot
+  semear: a FK criada no mesmo diff encontra a tabela-alvo vazia e linhas já
+  apontando para ela, e falha em silêncio (caso da 074/#389; regra fixada no
+  #392).
 - **Colisão de números entre branches:** se a `main` já tem `NNN`, renumere a sua.
 - `001_init.sql` é o snapshot de bootstrap (escrito com `IF NOT EXISTS` de
   propósito). Da `002` em diante são deltas puros.

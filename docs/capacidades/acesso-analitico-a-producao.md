@@ -21,8 +21,10 @@ direta, com o Postgres — e não o código — garantindo que nada seja escrito
   motivos de encerramento, trabalhos recentes, submissões caras, amostra de
   conversa) e **SQL livre** para o resto.
 - **Autenticação por token gerado no painel de administração**, com validade
-  fixa. O banco guarda apenas o hash; o valor em claro aparece uma única vez, na
-  geração, e pode ser revogado. Toda consulta é auditada.
+  fixa de 30 dias e **alcance `análise`** — o mesmo painel emite tokens de
+  alcance `saúde` para a [verificação de saúde](verificacao-de-saude.md), e um
+  não serve ao outro. O banco guarda apenas o hash; o valor em claro aparece
+  uma única vez, na geração, e pode ser revogado. Toda consulta é auditada.
 - **Barreiras em camadas**, com a garantia dura no banco e não no código:
 
 | Camada | O que impede |
