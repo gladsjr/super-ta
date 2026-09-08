@@ -203,9 +203,13 @@
         <span id="health-summary"></span>
         <span class="spacer"></span>
         <span id="health-meta" class="hint"></span>
+        <select id="health-depth" class="input" style="width:auto" title="profundidade">
+          <option value="shallow">shallow — sem custo</option>
+          <option value="deep">deep — dependências externas</option>
+        </select>
         <button id="health-refresh" class="btn btn-sm" type="button">↻ Verificar agora</button>
       </div>
-      <p class="card-sub" style="margin-top: var(--sp-2)">Sete verificações sem custo e sem efeito (nível <code>shallow</code>): configuração ativa, banco, schema materializado pelo Publish, seeds, filas, modelos e mídia, termo de consentimento. <code>ok</code> é medido e bem; <code>aviso</code> pede atenção; <code>falha</code> é o que um robô de monitoração alarmaria. A ferramenta de monitoração lê o mesmo relatório com um token de saúde.</p>
+      <p class="card-sub" style="margin-top: var(--sp-2)"><strong>shallow</strong>: sete verificações sem custo e sem efeito — configuração ativa, banco, schema materializado pelo Publish, seeds, filas, modelos e mídia, termo de consentimento; é o que a monitoração lê de minuto em minuto. <strong>deep</strong>: inclui o shallow e faz uma ida real a cada dependência externa — storage, modelo principal, transcrição com o texto conferido, síntese de voz, módulo nativo de fiscalização, sidecar Python, ffmpeg e a perna servidor↔OpenAI do Realtime com a voz de cada trabalho ativo; <span id="health-estimate">custa centavos</span> e é o que se roda depois de um Publish. <code>ok</code> é medido e bem; <code>aviso</code> pede atenção; <code>falha</code> é o que um robô alarmaria.</p>
       <table class="table" id="health-table">
         <thead><tr><th>Verificação</th><th>Estado</th><th>Tempo</th><th>Resumo</th><th style="text-align:right"></th></tr></thead>
         <tbody></tbody>
@@ -742,6 +746,16 @@ function healthSummary(c) {
     case 'jobs': return `${d.pending ?? 0} pendente(s)` + (d.runner ? ` · executor com tique há ${d.runner.silent_s} s` : ' · executor não ligado neste processo') + avisos;
     case 'assets': return (d.missing || []).length ? `faltando: ${escapeHtml(d.missing.join(', '))}` : `modelos presentes · ${d.soundcheck_mp3}/${d.soundcheck_expected} áudios do sound check`;
     case 'consent': return `termo v${escapeHtml(d.version || '?')} · ${d.submissions_on_older_version ?? '?'} envio(s) em versão anterior`;
+    // nível deep
+    case 'storage': return d.reason ? escapeHtml(d.reason) : (d.step ? `falhou em ${escapeHtml(d.step)}` : `put ${d.put_ms} ms · tamanho ${d.size_ms} ms · faixa ${d.range_ms} ms`);
+    case 'responses': return `${escapeHtml(d.model || '?')} (effort ${escapeHtml(d.effort || '—')}) · ${d.latency_ms} ms · resposta "${escapeHtml(d.output || '')}"`;
+    case 'stt': return `${escapeHtml(d.model || '?')} · ${d.latency_ms} ms · WER ${d.wer} — ouviu "${escapeHtml(d.got || '')}"`;
+    case 'tts': return `${escapeHtml(d.model || '?')} voz ${escapeHtml(d.voice || '?')} · ${d.bytes} bytes em ${d.latency_ms} ms`;
+    case 'vision': return `${escapeHtml(d.model || '?')} · inferência em ${d.ms} ms`;
+    case 'sidecar': return d.mediapipe ? `mediapipe ${escapeHtml(d.mediapipe)} em ${d.ms} ms` : escapeHtml(d.error || 'ausente');
+    case 'retranscribe_local': return d.reason ? `não se aplica: ${escapeHtml(d.reason)}` : (d.faster_whisper ? `faster-whisper ${escapeHtml(d.faster_whisper)}` : escapeHtml(d.error || 'ausente'));
+    case 'ffmpeg': return d.version ? `${escapeHtml(d.version)} em ${d.ms} ms` : escapeHtml(d.error || 'sem resposta');
+    case 'realtime_a': return `${escapeHtml(d.model || '?')} · conexão ${d.connect_ms} ms · vozes: ` + (d.voices || []).map(v => `${escapeHtml(v.voice)} ${v.ok ? '✓' : '✗ ' + escapeHtml(v.error || '')}`).join(', ');
     default: return '';
   }
 }
@@ -751,15 +765,17 @@ async function loadHealth() {
   if (healthEmCurso) return; // uma verificação de cada vez
   const msg = document.getElementById('health-msg');
   const btn = document.getElementById('health-refresh');
-  healthEmCurso = true; btn.disabled = true; msg.textContent = 'Verificando…';
+  const depth = document.getElementById('health-depth').value || 'shallow';
+  healthEmCurso = true; btn.disabled = true; msg.textContent = depth === 'deep' ? 'Verificando as dependências externas (até 30 s)…' : 'Verificando…';
   try {
-    const r = await fetch('/admin/health');
+    const r = await fetch('/admin/health?depth=' + encodeURIComponent(depth));
     if (r.status === 401) return showLogin();
     const j = await r.json();
     if (!Array.isArray(j.checks)) throw new Error(j.error || ('HTTP ' + r.status));
     const geral = { ok: 'Tudo de pé', warn: 'De pé, com avisos', fail: 'Há falhas' }[j.status] || j.status;
     document.getElementById('health-summary').innerHTML = healthBadge(j.status) + ` <strong>${geral}</strong>`;
-    document.getElementById('health-meta').textContent = `commit ${j.commit || '?'} · ${j.env || ''} · ${j.duration_ms} ms · ${new Date(j.ts).toLocaleTimeString('pt-BR')}`;
+    const custo = j.depth === 'deep' ? ` · custou US$ ${Number(j.cost_usd || 0).toFixed(4)}` : '';
+    document.getElementById('health-meta').textContent = `${j.depth} · commit ${j.commit || '?'} · ${j.env || ''} · ${j.duration_ms} ms${custo} · ${new Date(j.ts).toLocaleTimeString('pt-BR')}`;
     document.querySelector('#health-table tbody').innerHTML = j.checks.map((c, i) => `<tr>
       <td><strong>${escapeHtml(c.label)}</strong><div class="hint">${escapeHtml(c.id)}</div></td>
       <td>${healthBadge(c.status)}</td>
@@ -772,6 +788,16 @@ async function loadHealth() {
   finally { btn.disabled = false; healthEmCurso = false; }
 }
 document.getElementById('health-refresh').onclick = loadHealth;
+// Custo estimado do deep, dito ANTES de rodar (uma vez por carga da página).
+(async () => {
+  try {
+    const r = await fetch('/admin/health/estimate');
+    if (!r.ok) return;
+    const j = await r.json();
+    const el = document.getElementById('health-estimate');
+    if (el && typeof j.deep_estimate_usd === 'number') el.textContent = `custa cerca de US$ ${j.deep_estimate_usd.toFixed(4)} por execução`;
+  } catch { /* sem estimativa, sem drama */ }
+})();
 
 async function loadOps() {
   const secEl = document.getElementById('sec-operacoes');

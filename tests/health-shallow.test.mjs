@@ -68,14 +68,81 @@ test("todo check registrado tem id único, rótulo, nível conhecido e diz se us
     }
 });
 
-test("níveis deep e e2e são recusados com 501; depth/ids ruins e seleção vazia, 400", async () => {
-    for (const depth of ["deep", "e2e"]) {
-        await assert.rejects(runHealth({ depth }), (e) => e.httpStatus === 501, `${depth} deveria ser 501`);
-    }
+test("e2e é recusado com 501; depth/ids ruins e seleção vazia, 400; check de nível acima da profundidade, 400", async () => {
+    await assert.rejects(runHealth({ depth: "e2e" }), (e) => e.httpStatus === 501, "e2e deveria ser 501");
     await assert.rejects(runHealth({ depth: "abissal" }), (e) => e.httpStatus === 400);
     await assert.rejects(runHealth({ ids: ["db", "inexistente"] }), (e) => e.httpStatus === 400 && /inexistente/.test(e.message));
     await assert.rejects(runHealth({ ids: [] }), (e) => e.httpStatus === 400 && /vazio/.test(e.message), "checks=,,, não pode virar relatório vazio com ok:true");
+    // Pedir um check deep com depth=shallow não é "pular": é 400 — um relatório
+    // sem ele diria menos do que o robô pediu.
+    await assert.rejects(runHealth({ ids: ["config", "responses"] }), (e) => e.httpStatus === 400 && /responses/.test(e.message) && /depth=deep/.test(e.message));
+    // depth=deep inclui shallow: selecionar só um check shallow em deep é
+    // válido e não gasta nada.
+    const r = await runHealth({ depth: "deep", ids: ["config"] });
+    assert.equal(r.depth, "deep");
+    assert.deepEqual(r.checks.map(c => c.id), ["config"]);
+    assert.equal(r.checks[0].level, "shallow");
+    assert.equal(r.cost_usd, 0);
 });
+
+// ------------------------------------------------------------- deep -----
+
+test("registro deep: nove checks, todos com orçamento próprio e sem cliente de banco do health", async () => {
+    const { DEEP_CHECKS, DEEP_BUDGET_MS, estimateDeepCostUsd } = await import("../lib/healthDeep.js");
+    assert.deepEqual(DEEP_CHECKS.map(c => c.id), ["storage", "responses", "stt", "tts", "vision", "sidecar", "retranscribe_local", "ffmpeg", "realtime_a"]);
+    for (const c of DEEP_CHECKS) {
+        assert.equal(c.level, "deep");
+        assert.equal(c.budget_ms, DEEP_BUDGET_MS, `${c.id}: orçamento`);
+        assert.equal(c.db, false, `${c.id}: deep não segura a conexão única do health`);
+        assert.ok(CHECK_IDS.includes(c.id), `${c.id} tem de estar no registro geral`);
+    }
+    const est = estimateDeepCostUsd();
+    assert.ok(est > 0 && est < 0.05, `estimativa de custo do deep: US$ ${est}`);
+});
+
+test("invariantes do deep: escreve só em chave própria e apaga; Realtime nunca gera resposta; STT e TTS pela porta do produto", () => {
+    const txt = fonte("lib/healthDeep.js");
+    // storage: chave própria, e o delete fica num finally
+    assert.match(txt, /const key = `health\/probe-/);
+    assert.match(txt, /finally \{\s*const del = await deleteAudio\(key\)/);
+    // Realtime: session.update sim, response.create NUNCA (geraria fala e custo)
+    assert.match(txt, /type: "session\.update"/);
+    assert.ok(!/response\.create/.test(txt), "a perna A não pode pedir resposta ao Realtime");
+    assert.match(txt, /buildSessionConfig\(/, "o session.update tem de ser o MESMO do relay");
+    // portas únicas do produto
+    assert.match(txt, /sttTranscribe\(/);
+    assert.ok(!/audio\.transcriptions\.create/.test(txt), "STT só pela porta única (AGENTS.md)");
+    assert.match(txt, /synthesizeSpeech\(/);
+    // nada de DDL nem escrita em tabela
+    for (const proibido of [/\bINSERT\b/, /\bUPDATE\b/, /\bDELETE FROM\b/, /\bCREATE\b/]) assert.ok(!proibido.test(txt), `deep não pode: ${proibido}`);
+});
+
+test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {
+    const r = await check("retranscribe_local").run({});
+    const { RETRANSCRIBE_ENGINE } = await import("../lib/config.js");
+    if (RETRANSCRIBE_ENGINE !== "local") { assert.equal(r.status, "skip"); assert.match(r.detail.reason, /retranscribe_engine/); }
+    else assert.ok(["ok", "fail"].includes(r.status));
+});
+
+// O deep de verdade gasta dinheiro (~US$ 0,002) e exige chave da OpenAI: só
+// roda quando pedido — HEALTH_DEEP_TESTS=1. É o que se roda antes de um PR.
+const semDeep = process.env.HEALTH_DEEP_TESTS === "1" ? false : { skip: "HEALTH_DEEP_TESTS=1 para rodar o deep de verdade (gasta ~US$ 0,002)" };
+test("deep de verdade: modelo, STT com texto conferido, TTS, ONNX, ffmpeg e Realtime perna A", semDeep, async () => {
+    const { initAudioStore } = await import("../lib/audioStore.js");
+    await initAudioStore();
+    const r = await runHealth({ depth: "deep" });
+    assert.equal(r.depth, "deep");
+    assert.equal(r.checks.length, CHECK_IDS.length);
+    const por = Object.fromEntries(r.checks.map(c => [c.id, c]));
+    for (const id of ["storage", "responses", "stt", "tts", "vision", "ffmpeg", "realtime_a"]) {
+        assert.ok(["ok", "warn"].includes(por[id].status), `${id}: ${por[id].status} ${JSON.stringify(por[id].detail)}`);
+    }
+    assert.ok(por.stt.detail.wer <= 0.2, `wer ${por.stt.detail.wer}`);
+    assert.ok(por.realtime_a.detail.voices.every(v => v.ok), JSON.stringify(por.realtime_a.detail.voices));
+    assert.ok(r.cost_usd > 0 && r.cost_usd < 0.05, `custo US$ ${r.cost_usd}`);
+    assert.ok(por.responses.cost_usd > 0 && por.tts.cost_usd > 0 && por.stt.cost_usd > 0);
+});
+
 
 // ------------------------------------------ checks com banco simulado -----
 // Os checks recebem `ctx.q`; um `q` falso basta para exercitar os ramos que
@@ -287,8 +354,11 @@ test("relatório shallow completo, com o contrato do endpoint — e o dev migrad
     assert.ok(["ok", "warn", "fail"].includes(r.status));
     assert.equal(r.ok, r.status !== "fail");
     assert.ok(typeof r.duration_ms === "number");
-    assert.equal(r.checks.length, CHECK_IDS.length, "sem filtro, rodam todos os de shallow");
-    assert.deepEqual(r.checks.map(c => c.id), CHECK_IDS, "ordem do registro");
+    const shallowIds = CHECKS.filter(c => c.level === "shallow").map(c => c.id);
+    assert.equal(r.checks.length, shallowIds.length, "sem filtro, rodam todos os de shallow — e só eles");
+    assert.deepEqual(r.checks.map(c => c.id), shallowIds, "ordem do registro");
+    assert.equal(r.cost_usd, 0, "shallow custa zero, e diz isso");
+    assert.ok(r.checks.every(c => c.level === "shallow"));
     for (const c of r.checks) {
         assert.ok(["ok", "warn", "fail", "skip"].includes(c.status), `${c.id}: status ${c.status}`);
         assert.equal(c.cost_usd, 0, `${c.id}: shallow custa zero`);
