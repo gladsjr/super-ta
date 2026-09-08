@@ -28,7 +28,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run db:migrate && node server.js"
+args = "npm run db:migrate && exec node server.js"
 waitForPort = 5000
 
 [[ports]]
