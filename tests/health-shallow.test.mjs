@@ -183,6 +183,53 @@ test("deep em andamento (esperando provedor) NÃO segura a conexão do health: s
     }
 });
 
+test("deep: os checks externos só começam DEPOIS de a sequência de banco devolver o cliente; no shallow correm em paralelo", semBanco, async () => {
+    // Medido em prod (08/09): o `db` deu warn com 2,5 s durante os spawns do
+    // próprio deep. O número do banco tem de ser do banco.
+    let clienteVisto = "nunca-rodou";
+    const espiao = { id: "espiao_ext_teste", label: "espião", level: "deep", db: false, run: async (ctx) => { clienteVisto = ctx.client; return { status: "ok", detail: {} }; } };
+    CHECKS.push(espiao); CHECK_IDS.push(espiao.id);
+    try {
+        await runHealth({ depth: "deep", ids: ["db", "seeds", espiao.id] });
+        assert.equal(clienteVisto, null, "no deep, o externo só roda com o cliente de banco já devolvido");
+    } finally {
+        CHECKS.splice(CHECKS.indexOf(espiao), 1);
+        CHECK_IDS.splice(CHECK_IDS.indexOf(espiao.id), 1);
+    }
+});
+
+test("aquecimento do boot: o boot ESPERA por ele (com teto) antes de ligar a fila de vídeo; nunca lança; nada síncrono", async () => {
+    const txt = fonte("lib/warmup.js");
+    assert.ok(!/spawnSync|execSync/.test(txt), "aquecimento não pode bloquear o loop");
+    // Ordem no server.js: listen já aconteceu; aquecimento ANTES da fila
+    // (revisão do #395 — reinício com backlog reivindica no primeiro tique).
+    const srv = fonte("server.js");
+    const iAq = srv.indexOf("await warmUpNativeDeps(");
+    const iFila = srv.indexOf("await initProctorQueue()");
+    const iListen = srv.indexOf("server listening");
+    assert.ok(iAq > 0 && iFila > 0 && iListen > 0);
+    assert.ok(iListen < iAq && iAq < iFila, "listen → aquecimento (aguardado) → fila");
+    // Comportamento com spawn injetado: resolve depois dos DOIS toques…
+    const { EventEmitter } = await import("node:events");
+    const { warmUpNativeDeps } = await import("../lib/warmup.js");
+    const lancados = [];
+    const spawnFake = (cmd, args) => { const p = new EventEmitter(); p.kill = () => {}; lancados.push(cmd); setTimeout(() => p.emit("close", 0), 30); return p; };
+    const r = await warmUpNativeDeps({ spawn: spawnFake, python: "py-fake" });
+    assert.deepEqual(lancados, ["ffmpeg", "py-fake"], "ffmpeg primeiro, depois python, em série");
+    assert.equal(r.capped, false);
+    assert.ok(r.ffmpeg.ok && r.python.ok);
+    // …e um binário pendurado não segura a fila além do teto
+    const pendurado = () => { const p = new EventEmitter(); p.kill = () => {}; return p; };
+    const t0 = Date.now();
+    const c = await warmUpNativeDeps({ spawn: pendurado, python: "py-fake", capMs: 200 });
+    assert.equal(c.capped, true);
+    assert.ok(Date.now() - t0 < 1000);
+    // …e binário ausente (error) não lança
+    const ausente = () => { const p = new EventEmitter(); p.kill = () => {}; setTimeout(() => p.emit("error", new Error("ENOENT")), 5); return p; };
+    const a = await warmUpNativeDeps({ spawn: ausente, python: "py-fake" });
+    assert.equal(a.ffmpeg.ok, false);
+});
+
 test("tela: entrar na aba Operações carrega SEMPRE shallow; deep só pelo botão com o seletor", () => {
     const html = fonte("static/admin.html");
     assert.match(html, /opsEstavaOculta\) loadHealth\('shallow'\)/, "entrada na aba tem de pedir shallow explicitamente");

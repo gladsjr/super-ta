@@ -155,6 +155,14 @@ da primeira medição em produção (#389).
 - A latência de banco em produção é de ~90 ms por ida; os checks de banco em
   série custam ~2 s por relatório. Está dentro do prazo, e é o preço de uma
   conexão só.
+- **O primeiro spawn depois de um Publish é muito lento** (primeiro `deep` em
+  prod, 08/09: `ffmpeg -version` 15 s, `import mediapipe` 14 s; em regime,
+  0,8 s e 2,8 s): o sistema de arquivos do deployment carrega binários sob
+  demanda. Por isso o boot **aquece** ffmpeg e Python (`lib/warmup.js`) e
+  **espera** por isso, com teto, antes de ligar a fila de vídeo — um reinício
+  com análises pendentes reivindica trabalho no primeiro tique. E o `deep`
+  roda os checks externos **depois** da sequência de banco — senão o `db`
+  mede a carga que o próprio relatório gerou.
 
 ## O que esta capacidade NÃO faz
 
