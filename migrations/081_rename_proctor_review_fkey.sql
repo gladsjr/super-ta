@@ -7,6 +7,7 @@
 -- novo e a mesma definição) faz o diff ver uma constraint nova e criá-la em
 -- produção — mesma técnica do caso 022→029. Nome explícito, pela convenção de
 -- migrations do AGENTS.md; o health check confere a partir daqui.
-ALTER TABLE submissions DROP CONSTRAINT submissions_proctor_review_fkey;
+-- Alguns bancos de teste também não possuem a FK antiga.
+ALTER TABLE submissions DROP CONSTRAINT IF EXISTS submissions_proctor_review_fkey;
 ALTER TABLE submissions ADD CONSTRAINT submissions_proctor_review_level_fkey
     FOREIGN KEY (proctor_review) REFERENCES proctor_review_levels(key);
