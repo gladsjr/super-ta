@@ -120,12 +120,15 @@ da primeira medição em produção (#389).
   `shallow`: o check de arquivos passou a conferir só modelos e mídia, e o
   ffmpeg vai ser exercitado de verdade no nível `deep`.
 - A FK da migration 074 (`submissions.proctor_review`) **não existia em
-  produção com nome nenhum** — e, descobriu-se depois, também não existia no
-  dev do Replit: o Publish era inocente, e a divergência era entre a migration
-  e os bancos do Replit, por causa desconhecida. A migration 081 recria a FK
-  com nome novo e `DROP ... IF EXISTS`, exceção deliberada à regra "sem
-  guardas", porque precisava rodar onde a FK existia e onde não (#389). Foi o
-  achado que justificou o check.
+  produção com nome nenhum**, nem no dev do Replit. A explicação mais
+  provável apareceu no corte 2 (#392): a FK apontava para uma enumeração
+  **semeada no boot**, e o Publish leva o schema antes de o boot semear — o
+  diff tenta criar a FK com a tabela-alvo vazia e linhas já apontando para
+  ela, e falha. Regra que fica: **FK para enumeração semeada no boot vai numa
+  migration separada, num Publish posterior ao que cria a tabela.** A 081
+  recria a FK com nome novo e `DROP ... IF EXISTS`, exceção deliberada à regra
+  "sem guardas", porque precisava rodar onde a FK existia e onde não (#389).
+  Foi o achado que justificou o check.
 - A latência de banco em produção é de ~90 ms por ida; os checks de banco em
   série custam ~2 s por relatório. Está dentro do prazo, e é o preço de uma
   conexão só.

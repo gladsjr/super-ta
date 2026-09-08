@@ -122,6 +122,28 @@ test("seeds: alcances do token ausentes ou parciais são fail — tabela com lin
     assert.ok(r3.detail.missing.includes("analytics_token_scopes"));
 });
 
+test("migration 082 atualiza um banco que JÁ tem tokens (fluxo de dev: migration antes do servidor)", semBanco, async () => {
+    // Revisão do #392: uma versão da 082 criava a FK dentro da migration, com
+    // a tabela de alcances vazia — em banco com qualquer token, 23503. Aqui a
+    // 082 real roda numa transação com tabelas TEMPORÁRIAS de mesmo nome (que
+    // sombreiam as públicas no search_path) e um token pré-existente; rollback
+    // no fim. Nada do banco real é tocado.
+    const sql = fs.readFileSync(path.join(raiz, "migrations/082_analytics_token_scope.sql"), "utf8")
+        .replace(/CREATE TABLE analytics_token_scopes/, "CREATE TEMP TABLE analytics_token_scopes");
+    assert.ok(!/ADD CONSTRAINT|FOREIGN KEY|REFERENCES/i.test(sql.replace(/--[^\n]*/g, "")), "a FK não pode estar na 082 — vai na migration seguinte, num Publish posterior (ver o cabeçalho da 082)");
+    const c = await pool.connect();
+    try {
+        await c.query("BEGIN");
+        await c.query(`CREATE TEMP TABLE analytics_tokens (id BIGSERIAL PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, token_prefix TEXT NOT NULL, label TEXT, created_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ)`);
+        await c.query(`INSERT INTO analytics_tokens (token_hash, token_prefix, expires_at) VALUES ('h081', 'oratia_analytics_x', now() + interval '1 day')`);
+        for (const stmt of sql.replace(/--[^\n]*/g, "").split(";").map(x => x.trim()).filter(Boolean)) await c.query(stmt);
+        const t = await c.query(`SELECT scope FROM analytics_tokens`);
+        assert.deepEqual(t.rows.map(r => r.scope), ["analytics"], "token anterior à 082 nasce com alcance de análise");
+        const sc = await c.query(`SELECT key, ttl_days FROM analytics_token_scopes ORDER BY key`);
+        assert.deepEqual(sc.rows.map(r => [r.key, r.ttl_days]), [["analytics", 30], ["health", 365]]);
+    } finally { await c.query("ROLLBACK").catch(() => {}); c.release(); }
+});
+
 test("seeds: a seed de alcances é idempotente e reconcilia a tabela a partir do código", semBanco, async () => {
     const { seedTokenScopes } = await import("../auth.js");
     const { TOKEN_SCOPE_DEFS } = await import("../lib/db/analyticsTokens.js");

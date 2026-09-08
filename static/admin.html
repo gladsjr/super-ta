@@ -734,8 +734,10 @@ function healthSummary(c) {
       return falta ? `faltando no banco: ${escapeHtml(falta)}` : `${d.files} migrations no código; tudo o que veio depois da ${escapeHtml(d.baseline || '?')} está no banco`;
     }
     case 'seeds': {
-      const probs = [...(d.missing || []).map(t => `tabela ${t} ausente`), ...(d.empty || []).map(t => `${t} vazia`), ...(d.admin_bootstrap === false ? ['sem admin global'] : [])];
-      return probs.length ? escapeHtml(probs.join('; ')) : 'enumerações povoadas e admin global presente';
+      const probs = [...(d.missing || []).map(t => `tabela ${t} ausente`), ...(d.empty || []).map(t => `${t} vazia`),
+        ...((d.token_scopes_missing || []).length ? [`alcance(s) de token ausente(s): ${d.token_scopes_missing.join(', ')}`] : []),
+        ...(d.admin_bootstrap === false ? ['sem admin global'] : [])];
+      return probs.length ? escapeHtml(probs.join('; ')) : 'enumerações povoadas, alcances de token completos e admin global presente';
     }
     case 'jobs': return `${d.pending ?? 0} pendente(s)` + (d.runner ? ` · executor com tique há ${d.runner.silent_s} s` : ' · executor não ligado neste processo') + avisos;
     case 'assets': return (d.missing || []).length ? `faltando: ${escapeHtml(d.missing.join(', '))}` : `modelos presentes · ${d.soundcheck_mp3}/${d.soundcheck_expected} áudios do sound check`;
