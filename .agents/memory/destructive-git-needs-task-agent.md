@@ -20,3 +20,11 @@ Tentar `git reset`, `git commit`, `git checkout`, `git restore`, `git clean`, `g
 **Por que o task agent isolado é o caminho certo, não scripts pro usuário rodar:** como contorno, foi gerado um script (`scripts/finish-reconcile.sh`) pro usuário rodar no Shell — funcionou, mas (a) a plataforma desencoraja o agente criar scripts de execução pro usuário, e (b) ESTE usuário (Gladstone) NÃO consegue copy-paste do chat pro Shell. Logo: para git destrutivo, prefira sempre o **agente de tarefa isolado**; só caia em comandos manuais no Shell se o usuário pedir, e mantenha-os curtos/digitáveis.
 
 **Cuidado com os checkpoints automáticos do Replit:** eles commitam (`git`) periodicamente e disputam o `index.lock` com o git do usuário — daí os erros "Another git process / File exists" no meio de scripts. O checkpoint automático também já COMMITA a working tree (foi ele, e não o `git commit` do script, que salvou os keepers); então às vezes só falta o `push`. Efeito colateral: o `main` local vive ~1 commit à frente do GitHub (último checkpoint), o que é benigno.
+
+## Autenticação do Git não equivale à do conector
+
+Diagnosticar separadamente a autenticação do push pelo Git e a integração GitHub usada pela API; não reconectar um conector funcional para tentar reparar automaticamente o Git nativo.
+
+**Why:** um push normal retornou `Invalid username or token`, enquanto a mesma conta via conector retornava HTTP 200 e permissão `push`. A leitura de um repositório público por fetch não confirma autenticação de escrita.
+
+**How to apply:** se a API está saudável e só o Git falha, seguir a documentação atual de Git Providers/painel Git para reparar a autorização do Git. Preservar commits existentes; não recriá-los pela API só para contornar a autenticação.
