@@ -88,12 +88,23 @@ a reconciliação com a fatura fecham, e o gasto da monitoração aparece nas
 telas de custo com nome próprio. Não se reaproveita a marca de benchmark, que
 roteia pela chave de benchmark e tiraria o gasto da conta normal.
 
+Esse trabalho não pode ser excluído pelo painel nem pela API administrativa
+(resposta 409); a operação de exclusão também o protege no acesso ao banco.
+Assim, o histórico de custos e o teto mensal sobrevivem às ações do admin.
+
 O freio é **mensal**, não acumulado: `policy.yaml#health.monthly_budget_usd`
 (US$ 1,00 de partida, ~900 execuções de `deep`). Antes de qualquer check pago,
 o relatório soma o ledger do mês corrente. Acima de 80% o check `budget`
 avisa; em 100% os checks pagos viram `skip` com o motivo, e voltam no dia 1 —
 a virada de mês zera sozinha, ninguém reseta nada, ninguém toma susto. O
 `shallow` não custa e nunca é afetado.
+
+Sem conseguir ler o orçamento, ou sem o trabalho de saúde, os checks pagos
+ficam em `skip` sem chamar provedores, e `budget` falha. Selecionar um check
+pago inclui `budget` automaticamente no relatório. Após as chamadas, o gasto
+mensal é lido novamente: avisos e bloqueios já refletem o custo desta execução.
+Falha nessa leitura final também resulta em `fail`, sem apresentar saldo antigo
+como atual.
 
 ## O que cada check de `deep` pega
 

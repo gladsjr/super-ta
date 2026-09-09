@@ -140,6 +140,7 @@ router.delete("/admin/works/:workToken", requireAdmin, async (req, res) => {
     try {
         const work = await db.getWorkByToken(workToken);
         if (!work) return res.status(404).json({ error: "work not found" });
+        if (work.is_health) return res.status(409).json({ error: "O trabalho de saúde é permanente e não pode ser excluído." });
         // Devolve ao pool os assentos dos tokens NÃO usados ANTES de apagar (o
         // cascade removeria as reservas sem creditar de volta). Devolução + delete
         // numa ÚNICA transação (issue #145): falha no delete desfaz a devolução —
