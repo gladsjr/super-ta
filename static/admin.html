@@ -206,6 +206,7 @@
         <select id="health-depth" class="input" style="width:auto" title="profundidade">
           <option value="shallow">shallow — sem custo</option>
           <option value="deep">deep — dependências externas</option>
+          <option value="e2e">e2e — inclui a prova oral pelo relay (gera fala)</option>
         </select>
         <button id="health-refresh" class="btn btn-sm" type="button">↻ Verificar agora</button>
       </div>
@@ -757,6 +758,7 @@ function healthSummary(c) {
     case 'sidecar': return d.mediapipe ? `mediapipe ${escapeHtml(d.mediapipe)} em ${d.ms} ms` : escapeHtml(d.error || 'ausente');
     case 'retranscribe_local': return d.reason ? `não se aplica: ${escapeHtml(d.reason)}` : (d.faster_whisper ? `faster-whisper ${escapeHtml(d.faster_whisper)}` : escapeHtml(d.error || 'ausente'));
     case 'ffmpeg': return d.version ? `${escapeHtml(d.version)} em ${d.ms} ms` : escapeHtml(d.error || 'sem resposta');
+    case 'realtime_b': return d.reason ? escapeHtml(d.reason) : `primeiro som em ${d.first_audio_ms} ms · ${d.audio_seconds} s de fala do examinador · conexão ${d.connect_ms} ms · envio de teste ${escapeHtml(d.submission_token || '')}`;
     case 'realtime_a': return `${escapeHtml(d.model || '?')} · conexão ${d.connect_ms} ms · vozes: ` + (d.voices || []).map(v => `${escapeHtml(v.voice)} ${v.ok ? '✓' : '✗ ' + escapeHtml(v.error || '')}`).join(', ');
     default: return '';
   }
@@ -771,8 +773,8 @@ async function loadHealth(depthPedida) {
   if (healthEmCurso) return; // uma verificação de cada vez
   const msg = document.getElementById('health-msg');
   const btn = document.getElementById('health-refresh');
-  const depth = depthPedida === 'deep' ? 'deep' : 'shallow';
-  healthEmCurso = true; btn.disabled = true; msg.textContent = depth === 'deep' ? 'Verificando as dependências externas (até 30 s)…' : 'Verificando…';
+  const depth = depthPedida === 'e2e' ? 'e2e' : depthPedida === 'deep' ? 'deep' : 'shallow';
+  healthEmCurso = true; btn.disabled = true; msg.textContent = depth === 'e2e' ? 'Verificando tudo, inclusive a prova oral pelo relay (até 60 s; gera fala e custa centavos)…' : depth === 'deep' ? 'Verificando as dependências externas (até 30 s)…' : 'Verificando…';
   try {
     const r = await fetch('/admin/health?depth=' + encodeURIComponent(depth));
     if (r.status === 401) return showLogin();
@@ -781,7 +783,7 @@ async function loadHealth(depthPedida) {
     const geral = { ok: 'Tudo de pé', warn: 'De pé, com avisos', fail: 'Há falhas' }[j.status] || j.status;
     document.getElementById('health-summary').innerHTML = healthBadge(j.status) + ` <strong>${geral}</strong>`;
     const orc = j.checks.find(c => c.id === 'budget')?.detail;
-    const custo = j.depth === 'deep' ? ` · custou US$ ${Number(j.cost_usd || 0).toFixed(4)}` + (orc && orc.monthly_budget_usd != null ? ` · mês: US$ ${Number(orc.month_spent_usd).toFixed(4)} de ${Number(orc.monthly_budget_usd).toFixed(2)}` : '') : '';
+    const custo = j.depth !== 'shallow' ? ` · custou US$ ${Number(j.cost_usd || 0).toFixed(4)}` + (orc && orc.monthly_budget_usd != null ? ` · mês: US$ ${Number(orc.month_spent_usd).toFixed(4)} de ${Number(orc.monthly_budget_usd).toFixed(2)}` : '') : '';
     document.getElementById('health-meta').textContent = `${j.depth} · commit ${j.commit || '?'} · ${j.env || ''} · ${j.duration_ms} ms${custo} · ${new Date(j.ts).toLocaleTimeString('pt-BR')}`;
     document.querySelector('#health-table tbody').innerHTML = j.checks.map((c, i) => `<tr>
       <td><strong>${escapeHtml(c.label)}</strong><div class="hint">${escapeHtml(c.id)}</div></td>

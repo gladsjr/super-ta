@@ -1,6 +1,6 @@
 # Verificação de saúde
 
-> **Estado:** em construção · nível `shallow` em produção desde 2026-09-07
+> **Estado:** em produção · `shallow` desde 2026-09-07, `deep` e `e2e` desde 2026-09-09 (resta o corte opcional de invariantes de schema)
 > Usuário desta capacidade: **a equipe que opera o sistema**, e a ferramenta de
 > monitoração que ela configurar.
 
@@ -50,8 +50,15 @@ colateral:
   o `shallow`. Cerca de US$ 0,002 e 10 s. Roda depois do Publish, pela tela
   ou por um token de saúde; **limitado a 12 por hora**, porque gasta. **É o
   que existe hoje.**
-- **`e2e`** — o relay de voz completo, em produção, sobre um trabalho de saúde
-  permanente. Só sob pedido explícito. *(corte seguinte; responde 501)*
+- **`e2e`** — inclui os dois anteriores e a **perna B do Realtime**: abre o
+  **nosso relay** como aluno, num envio de teste do trabalho de saúde
+  permanente, e mede o **tempo até o primeiro som do examinador**. É o que
+  testa a autenticação por token de envio, o sorteio, o `session.update` do
+  relay com a voz do trabalho e a primeira fala — os primeiros segundos de
+  uma prova oral, sem aluno. Gera fala de verdade (centavos, lançados pelo
+  relay no trabalho de saúde) e cria um envio de teste, apagado na execução
+  seguinte. Só sob pedido explícito; **limitado a 4 por hora**. Não testa o
+  navegador. **É o que existe hoje.**
 
 Dois endpoints e uma tela:
 
@@ -120,6 +127,12 @@ como atual.
 | Retranscrição local | `faster-whisper` ausente, quando o motor local está configurado; senão `skip` |
 | `ffmpeg` | binário ausente ou lento (em produção respondeu em 5,8 s) |
 | Realtime, perna A | a OpenAI **recusa o `session.update`** com a voz de algum trabalho ativo — a prova rodaria em inglês, sem as questões (#351) |
+
+## O que o check de `e2e` pega
+
+| Check | O que descobre |
+|---|---|
+| Realtime, perna B | o relay recusa a conexão (token, consentimento, exame não preparado), a sessão abre mas o examinador **não fala**, ou demora mais de 8 s para o primeiro som — o que o aluno viveria nos primeiros segundos |
 
 ## O que cada check de `shallow` pega
 
@@ -214,8 +227,9 @@ da primeira medição em produção (#389).
 - **Não entrega o relatório sem autenticar.** Validar o token exige o banco; se
   o banco não responde à validação, a resposta é um 503 em prazo com o check de
   banco em falha — o diagnóstico que um 503 já dá — e nada mais.
-- **Não testa o navegador.** Nem o `e2e` testará `getUserMedia`, câmera ou
-  `MediaRecorder`; isso segue sendo a skill `testar-modo-audio`.
+- **Não testa o navegador.** O `e2e` não testa `getUserMedia`, câmera nem
+  `MediaRecorder`, e não envia áudio de aluno; isso segue sendo a skill
+  `testar-modo-audio`.
 - **Não substitui os testes ponta a ponta.** Mede disponibilidade e integridade
   de dependência, não comportamento pedagógico.
 - **Não guarda histórico.** O valor é imediato; histórico exigiria migration e
@@ -244,7 +258,7 @@ da primeira medição em produção (#389).
 
 `lib/health.js` (registro e execução; pool próprio de uma conexão com prazo,
 transação READ ONLY com `statement_timeout`), `lib/healthDeep.js` (os checks
-de nível `deep`), `lib/schemaExpectations.js` (o
+de nível `deep`), `lib/healthE2e.js` (a perna B), `lib/schemaExpectations.js` (o
 schema esperado a partir das migrations), `lib/jobsHeartbeat.js` (batimento do
 executor), `routes/health.js` (endpoints e autenticação com prazo),
 `lib/migrations.js#listMigrationStatusReadOnly` (ledger, informativo).

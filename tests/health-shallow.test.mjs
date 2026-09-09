@@ -68,9 +68,13 @@ test("todo check registrado tem id único, rótulo, nível conhecido e diz se us
     }
 });
 
-test("e2e é recusado com 501; depth/ids ruins e seleção vazia, 400; check de nível acima da profundidade, 400", async () => {
-    await assert.rejects(runHealth({ depth: "e2e" }), (e) => e.httpStatus === 501, "e2e deveria ser 501");
+test("depth/ids ruins e seleção vazia, 400; check de nível acima da profundidade, 400; e2e inclui os três níveis", async () => {
     await assert.rejects(runHealth({ depth: "abissal" }), (e) => e.httpStatus === 400);
+    // e2e existe (corte 4b): pedir realtime_b com depth=deep é 400 apontando depth=e2e
+    await assert.rejects(runHealth({ depth: "deep", ids: ["realtime_b"] }), (e) => e.httpStatus === 400 && /depth=e2e/.test(e.message));
+    const e2e = await runHealth({ depth: "e2e", ids: ["config"] });
+    assert.equal(e2e.depth, "e2e");
+    assert.equal(e2e.cost_usd, 0);
     await assert.rejects(runHealth({ ids: ["db", "inexistente"] }), (e) => e.httpStatus === 400 && /inexistente/.test(e.message));
     await assert.rejects(runHealth({ ids: [] }), (e) => e.httpStatus === 400 && /vazio/.test(e.message), "checks=,,, não pode virar relatório vazio com ok:true");
     // Pedir um check deep com depth=shallow não é "pular": é 400 — um relatório
@@ -86,6 +90,71 @@ test("e2e é recusado com 501; depth/ids ruins e seleção vazia, 400; check de 
 });
 
 // ------------------------------------------------------------- deep -----
+
+test("registro e2e: só a perna B, paga, com orçamento próprio, sem cliente de banco do health", async () => {
+    const { E2E_CHECKS } = await import("../lib/healthE2e.js");
+    assert.deepEqual(E2E_CHECKS.map(c => [c.id, c.level, c.paid, c.db]), [["realtime_b", "e2e", true, false]]);
+    assert.ok(CHECK_IDS.includes("realtime_b"));
+});
+
+test("realtime_b: orçamento esgotado ou ausente → skip sem abrir o relay nem criar envio", async () => {
+    let abriu = 0, criou = 0;
+    const deps = { WebSocket: class { constructor() { abriu++; } }, ops: { limparSondasAntigas: async () => 0, criarSonda: async () => { criou++; return { id: 1, submission_token: "x" }; }, custoDaSonda: async () => ({ cost_usd: 0, events: 0 }), registrarEstimativa: async () => {} } };
+    for (const orcamento of [null, { work_id: null }, { work_id: 7, exceeded: true, month_spent_usd: 1.1, monthly_budget_usd: 1 }]) {
+        const r = await check("realtime_b").run({ deps, orcamento });
+        assert.equal(r.status, "skip");
+    }
+    assert.equal(abriu + criou, 0, "nem envio nem socket sem orçamento");
+});
+
+test("realtime_b: cria envio de teste, escuta o relay e mede o primeiro som; sem fala é fail; recusa é fail; abort fecha", async () => {
+    const { EventEmitter } = await import("node:events");
+    const ordem = [];
+    let estimativas = [];
+    const ops = {
+        limparSondasAntigas: async () => { ordem.push("limpar"); return 2; },
+        criarSonda: async (workId) => { ordem.push("criar"); return { id: 99, submission_token: "sonda-teste", work_id: workId }; },
+        // 1ª leitura: o relay não mediu (fala cortada antes do response.done);
+        // depois da estimativa, o ledger tem o evento.
+        custoDaSonda: async () => estimativas.length ? ({ cost_usd: 0.0123, events: 1 }) : ({ cost_usd: 0, events: 0 }),
+        registrarEstimativa: async (x) => { estimativas.push(x); },
+    };
+    class FakeWS extends EventEmitter {
+        constructor(url) { super(); FakeWS.url = url; FakeWS.last = this; this.fechado = 0; setTimeout(() => { this.emit("open"); FakeWS.roteiro?.(this); }, 5); }
+        close() { this.fechado++; this.emit("close", 1000); }
+    }
+    const orcamento = { work_id: 7, exceeded: false, month_spent_usd: 0, monthly_budget_usd: 1 };
+    // 1) examinador fala: eventos de estado, depois áudio binário
+    FakeWS.roteiro = (ws) => {
+        setTimeout(() => ws.emit("message", Buffer.from(JSON.stringify({ type: "state", state: "intro" })), false), 5);
+        setTimeout(() => { for (let i = 0; i < 12; i++) ws.emit("message", Buffer.alloc(4800, 1), true); }, 30);
+    };
+    let r = await check("realtime_b").run({ deps: { WebSocket: FakeWS, ops, baseWs: "ws://fake", settleMs: 10 }, orcamento });
+    assert.equal(r.status, "ok", JSON.stringify(r.detail));
+    assert.equal(FakeWS.url, "ws://fake/s/sonda-teste/oral/relay");
+    assert.deepEqual(ordem, ["limpar", "criar"], "limpa as sondas antigas ANTES de criar a nova");
+    assert.ok(r.detail.first_audio_ms >= 0 && r.detail.audio_bytes === 12 * 4800);
+    assert.equal(r.detail.probes_cleaned, 2);
+    assert.equal(r.detail.billed_to_work, 7);
+    assert.equal(r.cost_usd, 0.0123, "o custo vem do ledger");
+    assert.equal(r.detail.cost_estimated, true, "fala cortada → o relay não mediu → estimativa gravada e marcada");
+    assert.deepEqual(estimativas.map(e => [e.workId, e.submissionId, Math.round(e.audioSeconds * 10) / 10]), [[7, 99, 1.2]]);
+    assert.ok(FakeWS.last.fechado >= 1, "fecha o socket ao terminar");
+    // 2) relay recusa (close sem open) → fail com motivo
+    class Recusa extends EventEmitter { constructor() { super(); setTimeout(() => this.emit("close", 1006), 5); } close() {} }
+    r = await check("realtime_b").run({ deps: { WebSocket: Recusa, ops, baseWs: "ws://fake", settleMs: 10 }, orcamento });
+    assert.equal(r.status, "fail");
+    assert.match(r.detail.reason, /não aceitou/);
+    // 3) abre mas o examinador não fala: abort do check fecha e é fail
+    FakeWS.roteiro = null;
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 60);
+    r = await check("realtime_b").run({ deps: { WebSocket: FakeWS, ops, baseWs: "ws://fake", settleMs: 10 }, orcamento, signal: ac.signal });
+    assert.equal(r.status, "fail");
+    assert.match(r.detail.reason, /não falou/);
+    assert.ok(r.detail.events.includes("abort:prazo do check"));
+    assert.ok(FakeWS.last.fechado >= 1);
+});
 
 test("registro deep: dez checks, todos com orçamento próprio e sem cliente de banco do health", async () => {
     const { DEEP_CHECKS, DEEP_BUDGET_MS, estimateDeepCostUsd } = await import("../lib/healthDeep.js");
@@ -293,11 +362,27 @@ test("seedHealthWork: cria uma vez, é idempotente, inativo, sem is_benchmark, e
     assert.equal(await seedHealthWork(), id);
     const w = (await pool.query(`SELECT is_health, is_active, is_benchmark, kind, budget_usd::float8 AS b FROM works WHERE id = $1`, [id])).rows[0];
     assert.equal(w.is_health, true);
-    assert.equal(w.is_active, false, "não é trabalho de aluno");
+    assert.equal(w.is_active, true, "ATIVO: o relay recusa trabalho inativo, e a perna B abre o relay como aluno");
     assert.equal(w.is_benchmark, false, "nunca pela chave de benchmark");
+    const q = (await pool.query(`SELECT jsonb_array_length(oral_questions) AS n, question_count FROM works WHERE id = $1`, [id])).rows[0];
+    assert.ok(q.n >= 3 && q.question_count === 3, "exame preparado para a sonda");
+    // reconcilia: desativado à mão volta a ativo no boot seguinte
+    await pool.query(`UPDATE works SET is_active = false WHERE id = $1`, [id]);
+    await seedHealthWork();
+    assert.equal((await pool.query(`SELECT is_active FROM works WHERE id = $1`, [id])).rows[0].is_active, true);
     assert.ok(w.b >= 100, "teto acumulado alto: o freio real é o mensal");
     assert.equal((await pool.query(`SELECT count(*)::int n FROM works WHERE is_health`)).rows[0].n, 1);
     await assert.rejects(pool.query(`UPDATE works SET is_health = true WHERE id = (SELECT min(id) FROM works WHERE NOT is_health)`), /works_is_health_uidx/);
+});
+
+test("invariantes do e2e: nunca envia áudio de aluno, fecha o socket sempre, limpa só sondas ANTIGAS, e não roda no deep", () => {
+    const txt = fonte("lib/healthE2e.js");
+    assert.ok(!/ws\.send\(/.test(txt), "a sonda só escuta — nenhum áudio de aluno");
+    assert.match(txt, /finally \{[\s\S]*ws\.close\(1000/);
+    assert.match(txt, /created_at < now\(\) - interval '2 minutes'/, "a sonda atual nunca é apagada na própria execução");
+    assert.match(txt, /is_test = true/);
+    assert.match(txt, /orcamentoPermite\(ctx\)/, "paga: passa pelo orçamento mensal");
+    assert.match(txt, /recordRealtimeCost\(/, "gasto do Realtime cortado antes do response.done é ESTIMADO e lançado — nunca fica fora do ledger");
 });
 
 test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {

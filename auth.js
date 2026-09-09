@@ -164,14 +164,33 @@ export async function seedTokenScopes() {
 // real é o teto MENSAL de policy.yaml#health.monthly_budget_usd, somado do
 // ledger no mês corrente, que vira sozinho. Nunca is_benchmark: aquela marca
 // roteia pela chave de benchmark e tiraria o gasto da conta normal.
+//
+// O trabalho fica ATIVO (o relay da prova oral recusa trabalho inativo, e a
+// perna B do e2e abre o relay como aluno) e com três perguntas fixas — a
+// sonda precisa de um exame preparado; o conteúdo é irrelevante, a sonda
+// fecha no primeiro som do examinador. Reconciliado a cada boot.
+export const HEALTH_ORAL_QUESTIONS = [
+  { question: "Em uma frase, o que é fotossíntese?", answer: "Processo das plantas que converte luz, água e CO2 em glicose e oxigênio.", aspects: ["luz", "água e CO2", "glicose e oxigênio"] },
+  { question: "Qual é a capital do Brasil?", answer: "Brasília.", aspects: ["Brasília"] },
+  { question: "Quanto é dois mais dois?", answer: "Quatro.", aspects: ["quatro"] },
+];
 export async function seedHealthWork() {
-  const { rows } = await pool.query(`SELECT id FROM works WHERE is_health = true LIMIT 1`);
-  if (rows[0]) return rows[0].id;
   const db = await import("./lib/db.js");
-  const w = await db.createWork("Verificação de saúde (sistema)", 100, "oral_realtime");
-  await pool.query(`UPDATE works SET is_health = true, is_active = false, updated_at = now() WHERE id = $1`, [w.id]);
-  console.log(`[BOOT] trabalho de saúde criado id=${w.id} token=${w.work_token}`);
-  return w.id;
+  let { rows } = await pool.query(`SELECT id, is_active, oral_questions FROM works WHERE is_health = true LIMIT 1`);
+  if (!rows[0]) {
+    const w = await db.createWork("Verificação de saúde (sistema)", 100, "oral_realtime");
+    await pool.query(`UPDATE works SET is_health = true, updated_at = now() WHERE id = $1`, [w.id]);
+    console.log(`[BOOT] trabalho de saúde criado id=${w.id} token=${w.work_token}`);
+    rows = [{ id: w.id, is_active: true, oral_questions: null }];
+  }
+  const id = rows[0].id;
+  if (rows[0].is_active === false) await pool.query(`UPDATE works SET is_active = true, updated_at = now() WHERE id = $1`, [id]);
+  const perguntas = Array.isArray(rows[0].oral_questions) ? rows[0].oral_questions : [];
+  if (perguntas.length < HEALTH_ORAL_QUESTIONS.length) {
+    await db.setOralQuestions(id, HEALTH_ORAL_QUESTIONS);
+    await db.setQuestionCount(id, HEALTH_ORAL_QUESTIONS.length);
+  }
+  return id;
 }
 
 export async function seedRoles() {
