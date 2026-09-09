@@ -157,6 +157,23 @@ export async function seedTokenScopes() {
   );
 }
 
+// Trabalho de saúde permanente (#375, migration 084): o trabalho em que o
+// health check pendura o custo dos checks pagos. Criado UMA vez, no boot;
+// idempotente pelo índice parcial único de is_health. Inativo (não aparece
+// como trabalho de aluno) e com teto acumulado alto de propósito — o freio
+// real é o teto MENSAL de policy.yaml#health.monthly_budget_usd, somado do
+// ledger no mês corrente, que vira sozinho. Nunca is_benchmark: aquela marca
+// roteia pela chave de benchmark e tiraria o gasto da conta normal.
+export async function seedHealthWork() {
+  const { rows } = await pool.query(`SELECT id FROM works WHERE is_health = true LIMIT 1`);
+  if (rows[0]) return rows[0].id;
+  const db = await import("./lib/db.js");
+  const w = await db.createWork("Verificação de saúde (sistema)", 100, "oral_realtime");
+  await pool.query(`UPDATE works SET is_health = true, is_active = false, updated_at = now() WHERE id = $1`, [w.id]);
+  console.log(`[BOOT] trabalho de saúde criado id=${w.id} token=${w.work_token}`);
+  return w.id;
+}
+
 export async function seedRoles() {
   const { ROLE_DEFS } = await import("./lib/rbac.js");
   for (const def of ROLE_DEFS) {

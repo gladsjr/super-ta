@@ -87,9 +87,9 @@ test("e2e é recusado com 501; depth/ids ruins e seleção vazia, 400; check de 
 
 // ------------------------------------------------------------- deep -----
 
-test("registro deep: nove checks, todos com orçamento próprio e sem cliente de banco do health", async () => {
+test("registro deep: dez checks, todos com orçamento próprio e sem cliente de banco do health", async () => {
     const { DEEP_CHECKS, DEEP_BUDGET_MS, estimateDeepCostUsd } = await import("../lib/healthDeep.js");
-    assert.deepEqual(DEEP_CHECKS.map(c => c.id), ["storage", "responses", "stt", "tts", "vision", "sidecar", "retranscribe_local", "ffmpeg", "realtime_a"]);
+    assert.deepEqual(DEEP_CHECKS.map(c => c.id), ["budget", "storage", "responses", "stt", "tts", "vision", "sidecar", "retranscribe_local", "ffmpeg", "realtime_a"]);
     for (const c of DEEP_CHECKS) {
         assert.equal(c.level, "deep");
         assert.equal(c.budget_ms, DEEP_BUDGET_MS, `${c.id}: orçamento`);
@@ -238,6 +238,68 @@ test("tela: entrar na aba Operações carrega SEMPRE shallow; deep só pelo bot�
     assert.ok(!/health-depth/.test(corpo), "loadHealth não pode ler o seletor por conta própria");
 });
 
+// ------------------------------------------ contabilidade e teto mensal -----
+
+test("orçamento mensal: ok abaixo de 80%, aviso acima, fail em 100%, fail sem trabalho de saúde", async () => {
+    const base = { work_id: 7, monthly_budget_usd: 1, exceeded: false };
+    let r = await check("budget").run({ orcamento: { ...base, month_spent_usd: 0.3, pct: 0.3 } });
+    assert.equal(r.status, "ok");
+    r = await check("budget").run({ orcamento: { ...base, month_spent_usd: 0.85, pct: 0.85 } });
+    assert.equal(r.status, "warn");
+    r = await check("budget").run({ orcamento: { ...base, month_spent_usd: 1.0, pct: 1, exceeded: true } });
+    assert.equal(r.status, "fail");
+    r = await check("budget").run({ orcamento: { work_id: null, month_spent_usd: 0, monthly_budget_usd: 1, pct: 0, exceeded: false } });
+    assert.equal(r.status, "fail");
+    assert.match(r.detail.reason, /seedHealthWork/);
+    r = await check("budget").run({});
+    assert.equal(r.status, "fail", "sem leitura do banco, não se declara orçamento");
+});
+
+test("orçamento esgotado: os checks pagos viram skip SEM chamar o provedor; os gratuitos seguem", async () => {
+    // Se qualquer um chamasse a OpenAI, este teste gastaria — e falharia por
+    // rede/chave onde não há; o skip tem de vir ANTES da chamada.
+    const esgotado = { orcamento: { work_id: 7, month_spent_usd: 1.2, monthly_budget_usd: 1, pct: 1.2, exceeded: true } };
+    for (const id of ["responses", "stt", "tts"]) {
+        const r = await check(id).run(esgotado);
+        assert.equal(r.status, "skip", id);
+        assert.match(r.detail.reason, /esgotado/);
+        assert.equal(r.cost_usd, 0);
+    }
+    const livre = await check("retranscribe_local").run(esgotado);
+    assert.equal(livre.status, "skip", "este é skip por outro motivo (motor api), não pelo orçamento");
+});
+
+test("healthBudgetStatus: soma o ledger do MÊS corrente do trabalho de saúde; sem trabalho, work_id nulo", async () => {
+    const { healthBudgetStatus } = await import("../lib/healthDeep.js");
+    const { HEALTH_MONTHLY_BUDGET_USD } = await import("../lib/config.js");
+    const q = async (sql) => /FROM works/.test(sql) ? { rows: [{ id: 42 }] } : { rows: [{ spent: 0.25 }] };
+    const o = await healthBudgetStatus(q);
+    assert.equal(o.work_id, 42);
+    assert.equal(o.month_spent_usd, 0.25);
+    assert.equal(o.monthly_budget_usd, HEALTH_MONTHLY_BUDGET_USD);
+    assert.equal(o.exceeded, 0.25 >= HEALTH_MONTHLY_BUDGET_USD);
+    const sem = await healthBudgetStatus(async (sql) => /FROM works/.test(sql) ? { rows: [] } : { rows: [{ spent: 0 }] });
+    assert.equal(sem.work_id, null);
+    assert.equal(sem.month_spent_usd, 0);
+    // a consulta do gasto olha o mês corrente, não o acumulado
+    const sqls = [];
+    await healthBudgetStatus(async (sql) => { sqls.push(sql); return /FROM works/.test(sql) ? { rows: [{ id: 1 }] } : { rows: [{ spent: 0 }] }; });
+    assert.ok(sqls.some(x => /date_trunc\('month', now\(\)\)/.test(x)), "a soma tem de ser do mês corrente");
+});
+
+test("seedHealthWork: cria uma vez, é idempotente, inativo, sem is_benchmark, e o índice parcial impede um segundo", semBanco, async () => {
+    const { seedHealthWork } = await import("../auth.js");
+    const id = await seedHealthWork();
+    assert.equal(await seedHealthWork(), id);
+    const w = (await pool.query(`SELECT is_health, is_active, is_benchmark, kind, budget_usd::float8 AS b FROM works WHERE id = $1`, [id])).rows[0];
+    assert.equal(w.is_health, true);
+    assert.equal(w.is_active, false, "não é trabalho de aluno");
+    assert.equal(w.is_benchmark, false, "nunca pela chave de benchmark");
+    assert.ok(w.b >= 100, "teto acumulado alto: o freio real é o mensal");
+    assert.equal((await pool.query(`SELECT count(*)::int n FROM works WHERE is_health`)).rows[0].n, 1);
+    await assert.rejects(pool.query(`UPDATE works SET is_health = true WHERE id = (SELECT min(id) FROM works WHERE NOT is_health)`), /works_is_health_uidx/);
+});
+
 test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {
     const r = await check("retranscribe_local").run({});
     const { RETRANSCRIBE_ENGINE } = await import("../lib/config.js");
@@ -262,6 +324,14 @@ test("deep de verdade: modelo, STT com texto conferido, TTS, ONNX, ffmpeg e Real
     assert.ok(por.realtime_a.detail.voices.every(v => v.ok), JSON.stringify(por.realtime_a.detail.voices));
     assert.ok(r.cost_usd > 0 && r.cost_usd < 0.05, `custo US$ ${r.cost_usd}`);
     assert.ok(por.responses.cost_usd > 0 && por.tts.cost_usd > 0 && por.stt.cost_usd > 0);
+    // Contabilidade: cada check pago deixou linha no ledger do trabalho de saúde.
+    assert.ok(["ok", "warn"].includes(por.budget.status), JSON.stringify(por.budget.detail));
+    const wid = por.budget.detail.work_id;
+    assert.ok(wid, "há trabalho de saúde");
+    assert.equal(por.responses.detail.billed_to_work, wid);
+    const ev = (await pool.query(`SELECT event_type, count(*)::int n FROM work_cost_events WHERE work_id = $1 AND created_at > now() - interval '2 minutes' GROUP BY 1`, [wid])).rows;
+    const tipos = new Set(ev.map(e => e.event_type));
+    for (const t of ["responses", "stt", "tts"]) assert.ok(tipos.has(t), `faltou ${t} no ledger: ${JSON.stringify(ev)}`);
 });
 
 
