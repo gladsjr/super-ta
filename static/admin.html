@@ -747,6 +747,7 @@ function healthSummary(c) {
     case 'assets': return (d.missing || []).length ? `faltando: ${escapeHtml(d.missing.join(', '))}` : `modelos presentes · ${d.soundcheck_mp3}/${d.soundcheck_expected} áudios do sound check`;
     case 'consent': return `termo v${escapeHtml(d.version || '?')} · ${d.submissions_on_older_version ?? '?'} envio(s) em versão anterior`;
     // nível deep
+    case 'budget': return d.reason ? escapeHtml(d.reason) : `US$ ${Number(d.month_spent_usd).toFixed(4)} de ${Number(d.monthly_budget_usd).toFixed(2)} neste mês (${Math.round(d.pct * 100)}%) · trabalho #${d.work_id}`;
     case 'storage': return d.reason ? escapeHtml(d.reason) : (d.step ? `falhou em ${escapeHtml(d.step)}` : `put ${d.put_ms} ms · tamanho ${d.size_ms} ms · faixa ${d.range_ms} ms`);
     case 'responses': return `${escapeHtml(d.model || '?')} (effort ${escapeHtml(d.effort || '—')}) · ${d.latency_ms} ms · resposta "${escapeHtml(d.output || '')}"`;
     case 'stt': return `${escapeHtml(d.model || '?')} · ${d.latency_ms} ms · WER ${d.wer} — ouviu "${escapeHtml(d.got || '')}"`;
@@ -778,7 +779,8 @@ async function loadHealth(depthPedida) {
     if (!Array.isArray(j.checks)) throw new Error(j.error || ('HTTP ' + r.status));
     const geral = { ok: 'Tudo de pé', warn: 'De pé, com avisos', fail: 'Há falhas' }[j.status] || j.status;
     document.getElementById('health-summary').innerHTML = healthBadge(j.status) + ` <strong>${geral}</strong>`;
-    const custo = j.depth === 'deep' ? ` · custou US$ ${Number(j.cost_usd || 0).toFixed(4)}` : '';
+    const orc = j.checks.find(c => c.id === 'budget')?.detail;
+    const custo = j.depth === 'deep' ? ` · custou US$ ${Number(j.cost_usd || 0).toFixed(4)}` + (orc && orc.monthly_budget_usd != null ? ` · mês: US$ ${Number(orc.month_spent_usd).toFixed(4)} de ${Number(orc.monthly_budget_usd).toFixed(2)}` : '') : '';
     document.getElementById('health-meta').textContent = `${j.depth} · commit ${j.commit || '?'} · ${j.env || ''} · ${j.duration_ms} ms${custo} · ${new Date(j.ts).toLocaleTimeString('pt-BR')}`;
     document.querySelector('#health-table tbody').innerHTML = j.checks.map((c, i) => `<tr>
       <td><strong>${escapeHtml(c.label)}</strong><div class="hint">${escapeHtml(c.id)}</div></td>

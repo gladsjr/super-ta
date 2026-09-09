@@ -24,6 +24,7 @@ import {
     seedUnitLabels,
     seedAuthProviders,
     seedTokenScopes,
+    seedHealthWork,
     seedBootstrapAdmin,
     seedInterviewerTemplates,
     seedPackageTemplates,
@@ -219,6 +220,11 @@ const httpServer = app.listen(PORT, "0.0.0.0", async () => {
         await seedTokenScopes();
     } catch (err) {
         log.error("BOOT", `seedTokenScopes failed: ${err.message}`);
+    }
+    try {
+        await seedHealthWork();
+    } catch (err) {
+        log.error("BOOT", `seedHealthWork failed: ${err.message}`);
     }
     try {
         await seedBootstrapAdmin();

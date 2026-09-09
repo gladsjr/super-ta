@@ -79,10 +79,27 @@ escrever e gastar; reaproveitar o mesmo token ampliaria em silêncio o que todo
 token já emitido pode fazer. Os tokens emitidos antes do alcance existir são
 de análise.
 
+## Quanto custa, e quem paga
+
+Todo check pago pendura o custo no **trabalho de saúde permanente**
+(`works.is_health`, criado pela seed no boot), pelas mesmas funções de medição
+dos agentes. Nenhuma chamada paga fica solta: o ledger (`work_cost_events`) e
+a reconciliação com a fatura fecham, e o gasto da monitoração aparece nas
+telas de custo com nome próprio. Não se reaproveita a marca de benchmark, que
+roteia pela chave de benchmark e tiraria o gasto da conta normal.
+
+O freio é **mensal**, não acumulado: `policy.yaml#health.monthly_budget_usd`
+(US$ 1,00 de partida, ~900 execuções de `deep`). Antes de qualquer check pago,
+o relatório soma o ledger do mês corrente. Acima de 80% o check `budget`
+avisa; em 100% os checks pagos viram `skip` com o motivo, e voltam no dia 1 —
+a virada de mês zera sozinha, ninguém reseta nada, ninguém toma susto. O
+`shallow` não custa e nunca é afetado.
+
 ## O que cada check de `deep` pega
 
 | Check | O que descobre |
 |---|---|
+| Orçamento | quanto a monitoração gastou neste mês, e se a seed do trabalho de saúde rodou |
 | Storage | a SDK do Replit mudou e o tamanho ou a leitura por faixa pararam — hoje isso aparece no professor tentando assistir a um vídeo (#376) |
 | Modelo principal | chave, existência do modelo, aceitação do effort, latência |
 | Transcrição | **degradação de qualidade**, não só disponibilidade: o texto de um clip conhecido saiu errado |
@@ -173,8 +190,10 @@ da primeira medição em produção (#389).
   `deep` escreve só numa chave própria do storage (e apaga), gasta centavos e
   **nunca gera fala no Realtime** (só `session.update`) — por isso o token de
   saúde é um alcance próprio, separado do token de análise.
-- **Não roda o `deep` de minuto em minuto.** Teto de 12 por hora; a
-  monitoração usa o `shallow`.
+- **Não roda o `deep` de minuto em minuto.** Teto de 12 por hora e teto
+  mensal em dólar; a monitoração usa o `shallow`.
+- **Não tem teto acumulado que estoure um dia.** O trabalho de saúde tem teto
+  alto de propósito; o freio é o mês.
 - **Não aceita token de análise.** Token é credencial de um uso só.
 - **Não pega a armadilha do Publish com constraint de mesmo nome** — o check
   confere constraint por **nome**, como o próprio diff do Publish, e mudar a
