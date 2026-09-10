@@ -113,11 +113,11 @@ test("realtime_b: cria envio de teste, escuta o relay e mede o primeiro som; sem
     let estimativas = [];
     const ops = {
         limparSondasAntigas: async () => { ordem.push("limpar"); return 2; },
-        criarSonda: async (workId) => { ordem.push("criar"); return { id: 99, submission_token: "sonda-teste", work_id: workId }; },
+        criarSonda: async (_q, workId) => { ordem.push("criar"); return { id: 99, submission_token: "sonda-teste", work_id: workId }; },
         // 1ª leitura: o relay não mediu (fala cortada antes do response.done);
         // depois da estimativa, o ledger tem o evento.
         custoDaSonda: async () => estimativas.length ? ({ cost_usd: 0.0123, events: 1 }) : ({ cost_usd: 0, events: 0 }),
-        registrarEstimativa: async (x) => { estimativas.push(x); },
+        registrarEstimativa: async (_q, x) => { estimativas.push(x); },
     };
     class FakeWS extends EventEmitter {
         constructor(url) { super(); FakeWS.url = url; FakeWS.last = this; this.fechado = 0; setTimeout(() => { this.emit("open"); FakeWS.roteiro?.(this); }, 5); }
@@ -401,10 +401,12 @@ test("realtime_b: sinal já abortado ou abortado durante o banco → nem envio n
     setTimeout(() => { ac.abort(); liberar(); }, 30);
     await assert.rejects(corrida, /antes de criar o envio/);
     assert.equal(criou + abriu, 0, "corpo abandonado não pode gerar custo depois do relatório");
-    // 3) operação de banco pendurada além do prazo próprio → rejeita, sem criar
-    const pendurada = ops({ limparSondasAntigas: () => new Promise(() => {}) });
+    // 3) o executor com prazo vem do runHealth (ctx.escritaComPrazo); a
+    //    regressão com banco real está no teste seguinte
     const txt = fonte("lib/healthE2e.js");
     assert.match(txt, /OPS_TIMEOUT_MS = 5000/);
+    assert.match(txt, /ctx\.escritaComPrazo/);
+    assert.ok(!/recordRealtimeCost\(/.test(txt), "a estimativa vai pelo executor com prazo, não pelo pool do app (recordCost não tem prazo)");
     // 4) contabilidade: leitura falha / estimativa não persiste → fail mesmo com fala
     for (const [nome, extra, re] of [
         ["leitura falha", { custoDaSonda: async () => { throw new Error("banco fora (teste)"); } }, /banco fora/],
@@ -415,7 +417,41 @@ test("realtime_b: sinal já abortado ou abortado durante o banco → nem envio n
         assert.match(r.detail.reason, /gasto não ficou confirmado/);
         assert.match(r.detail.accounting_error, re);
     }
-    void pendurada;
+});
+
+test("sonda e2e com o banco preso: desiste no prazo, NADA fica na fila do pool, e nada acontece tarde no banco", semBanco, async () => {
+    // Revisão do #399 (2ª rodada): Promise.race só larga a espera — a consulta
+    // continuava na fila e rodava depois. Aqui as operações REAIS da sonda vão
+    // por comClienteRW no pool do health, cuja única conexão está PRESA.
+    const { comClienteRW } = health;
+    const wid = (await pool.query(`SELECT id FROM works WHERE is_health`)).rows[0]?.id;
+    assert.ok(wid, "seed do trabalho de saúde");
+    const antes = (await pool.query(`SELECT count(*)::int n FROM submissions WHERE work_id = $1 AND is_test`, [wid])).rows[0].n;
+    const preso = await healthPool.connect();
+    try {
+        const { EventEmitter } = await import("node:events");
+        class WS extends EventEmitter { constructor() { super(); WS.abriu = (WS.abriu || 0) + 1; } close() {} }
+        const t0 = Date.now();
+        await assert.rejects(
+            check("realtime_b").run({ deps: { WebSocket: WS, settleMs: 5 }, escritaComPrazo: (fn, ms) => comClienteRW(fn, ms), orcamento: { work_id: wid, exceeded: false, month_spent_usd: 0, monthly_budget_usd: 1 } }),
+            /conexão com o banco|timeout exceeded when trying to connect/);
+        assert.ok(Date.now() - t0 < 4500, "desiste no prazo de aquisição");
+        assert.equal(healthPool.waitingCount, 0, "pedido de conexão não pode ficar na fila");
+        assert.ok(!WS.abriu, "sem banco, não abre o relay");
+    } finally { preso.release(); }
+    await new Promise(r => setTimeout(r, 500));
+    const depois = (await pool.query(`SELECT count(*)::int n FROM submissions WHERE work_id = $1 AND is_test`, [wid])).rows[0].n;
+    assert.equal(depois, antes, "nenhuma operação tardia criou envio depois de a conexão voltar");
+});
+
+test("comClienteRW: escreve numa transação com prazo do servidor e devolve o cliente; prazo estourado descarta", semBanco, async () => {
+    const { comClienteRW } = health;
+    const r = await comClienteRW(async (q) => (await q("SELECT current_setting('statement_timeout') AS st, now() AS t")).rows[0]);
+    assert.notEqual(r.st, "0", "statement_timeout tem de estar ligado na transação");
+    assert.equal(healthPool.waitingCount, 0);
+    await assert.rejects(comClienteRW(async (q) => q("SELECT pg_sleep(3)"), 1500), /prazo|timeout|cancel/i);
+    const ok = await comClienteRW(async (q) => (await q("SELECT 1 AS um")).rows[0].um);
+    assert.equal(ok, 1, "o pool se recupera depois do descarte");
 });
 
 test("trabalho de saúde não pode ser desativado: 409 na API, SQL protege, painel sem o botão", async () => {
@@ -444,7 +480,8 @@ test("invariantes do e2e: nunca envia áudio de aluno, fecha o socket sempre, li
     assert.match(txt, /created_at < now\(\) - interval '2 minutes'/, "a sonda atual nunca é apagada na própria execução");
     assert.match(txt, /is_test = true/);
     assert.match(txt, /orcamentoPermite\(ctx\)/, "paga: passa pelo orçamento mensal");
-    assert.match(txt, /recordRealtimeCost\(/, "gasto do Realtime cortado antes do response.done é ESTIMADO e lançado — nunca fica fora do ledger");
+    assert.match(txt, /INSERT INTO work_cost_events/, "gasto do Realtime cortado antes do response.done é ESTIMADO e lançado — nunca fica fora do ledger");
+    assert.match(txt, /UPDATE works SET spent_usd = spent_usd \+ \$1/, "a estimativa também soma no spent_usd do trabalho, como o recordCost faria");
 });
 
 test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {
