@@ -50,7 +50,7 @@ falham em silêncio, e por isso o campo "o que NÃO faz" importa ainda mais ali.
 | [Banco de casos e benchmark](banco-de-casos-e-benchmark.md) | Casos congelados e versionados que medem os modelos, mais os testes cegos por fora. | em produção |
 | [Harness de teste ponta a ponta](harness-de-teste.md) | Conduz uma arguição inteira no sistema real, com aluno simulado e microfone falso. | em produção |
 | [Acesso analítico à produção](acesso-analitico-a-producao.md) | Consulta somente-leitura aos dados reais, sem passar pelo Replit. | em produção |
-| [Verificação de saúde](verificacao-de-saude.md) | Endpoint (e, em corte seguinte, tela) que pergunta ao sistema o que está de pé, depois do Publish e de minuto em minuto. | em construção |
+| [Verificação de saúde](verificacao-de-saude.md) | Endpoint e tela que perguntam ao sistema o que está de pé — de minuto em minuto sem custo, depois do Publish com uma ida real a cada dependência, e sob pedido com a prova oral pelo relay. | em produção |
 
 ## Como as três formas de arguição se relacionam
 

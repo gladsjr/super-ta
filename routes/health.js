@@ -114,13 +114,24 @@ const limiterDeep = rateLimit({
     message: { error: "nível deep limitado a 12 verificações por hora — ele gasta dinheiro; use depth=shallow para monitoração" },
 });
 
+// O nível e2e gera FALA de verdade no Realtime (centavos por execução) e cria
+// um envio de teste: só sob pedido explícito, e poucas vezes por hora.
+const limiterE2e = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 4,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => String(req.query.depth || "shallow").toLowerCase() !== "e2e",
+    message: { error: "nível e2e limitado a 4 verificações por hora — ele gera fala no Realtime e custa centavos" },
+});
+
 // Custo estimado do nível deep, para a tela dizer antes de rodar.
 router.get("/admin/health/estimate", limiter, requireAdminOrToken, (_req, res) => {
     res.set("Cache-Control", "no-store");
     res.json({ deep_estimate_usd: estimateDeepCostUsd() });
 });
 
-router.get("/admin/health", limiter, limiterDeep, requireAdminOrToken, async (req, res) => {
+router.get("/admin/health", limiter, limiterDeep, limiterE2e, requireAdminOrToken, async (req, res) => {
     res.set("Cache-Control", "no-store");
     const depth = String(req.query.depth || "shallow").toLowerCase();
     // `checks` ausente → todos. `checks=` presente mas vazio (ou só vírgulas) →

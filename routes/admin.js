@@ -124,6 +124,9 @@ router.patch("/admin/works/:workToken/active", requireAdmin, express.json({ limi
     try {
         const work = await db.getWorkByToken(workToken);
         if (!work) return res.status(404).json({ error: "work not found" });
+        // O trabalho de saúde fica ativo por construção: o relay recusa
+        // trabalho inativo, e a sonda e2e abre o relay como aluno (#375).
+        if (work.is_health) return res.status(409).json({ error: "O trabalho de saúde é permanente e fica ativo; não pode ser desativado." });
         const newValue = await db.setWorkActive(work.id, req.body.is_active);
         log.info("ADMIN", `work ${newValue ? "activated" : "deactivated"} token=${workToken} by=${req.session.user.username}`);
         res.json({ ok: true, work_token: workToken, is_active: newValue });

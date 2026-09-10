@@ -68,9 +68,13 @@ test("todo check registrado tem id único, rótulo, nível conhecido e diz se us
     }
 });
 
-test("e2e é recusado com 501; depth/ids ruins e seleção vazia, 400; check de nível acima da profundidade, 400", async () => {
-    await assert.rejects(runHealth({ depth: "e2e" }), (e) => e.httpStatus === 501, "e2e deveria ser 501");
+test("depth/ids ruins e seleção vazia, 400; check de nível acima da profundidade, 400; e2e inclui os três níveis", async () => {
     await assert.rejects(runHealth({ depth: "abissal" }), (e) => e.httpStatus === 400);
+    // e2e existe (corte 4b): pedir realtime_b com depth=deep é 400 apontando depth=e2e
+    await assert.rejects(runHealth({ depth: "deep", ids: ["realtime_b"] }), (e) => e.httpStatus === 400 && /depth=e2e/.test(e.message));
+    const e2e = await runHealth({ depth: "e2e", ids: ["config"] });
+    assert.equal(e2e.depth, "e2e");
+    assert.equal(e2e.cost_usd, 0);
     await assert.rejects(runHealth({ ids: ["db", "inexistente"] }), (e) => e.httpStatus === 400 && /inexistente/.test(e.message));
     await assert.rejects(runHealth({ ids: [] }), (e) => e.httpStatus === 400 && /vazio/.test(e.message), "checks=,,, não pode virar relatório vazio com ok:true");
     // Pedir um check deep com depth=shallow não é "pular": é 400 — um relatório
@@ -86,6 +90,71 @@ test("e2e é recusado com 501; depth/ids ruins e seleção vazia, 400; check de 
 });
 
 // ------------------------------------------------------------- deep -----
+
+test("registro e2e: só a perna B, paga, com orçamento próprio, sem cliente de banco do health", async () => {
+    const { E2E_CHECKS } = await import("../lib/healthE2e.js");
+    assert.deepEqual(E2E_CHECKS.map(c => [c.id, c.level, c.paid, c.db]), [["realtime_b", "e2e", true, false]]);
+    assert.ok(CHECK_IDS.includes("realtime_b"));
+});
+
+test("realtime_b: orçamento esgotado ou ausente → skip sem abrir o relay nem criar envio", async () => {
+    let abriu = 0, criou = 0;
+    const deps = { WebSocket: class { constructor() { abriu++; } }, ops: { limparSondasAntigas: async () => 0, criarSonda: async () => { criou++; return { id: 1, submission_token: "x" }; }, custoDaSonda: async () => ({ cost_usd: 0, events: 0 }), registrarEstimativa: async () => {} } };
+    for (const orcamento of [null, { work_id: null }, { work_id: 7, exceeded: true, month_spent_usd: 1.1, monthly_budget_usd: 1 }]) {
+        const r = await check("realtime_b").run({ deps, orcamento });
+        assert.equal(r.status, "skip");
+    }
+    assert.equal(abriu + criou, 0, "nem envio nem socket sem orçamento");
+});
+
+test("realtime_b: cria envio de teste, escuta o relay e mede o primeiro som; sem fala é fail; recusa é fail; abort fecha", async () => {
+    const { EventEmitter } = await import("node:events");
+    const ordem = [];
+    let estimativas = [];
+    const ops = {
+        limparSondasAntigas: async () => { ordem.push("limpar"); return 2; },
+        criarSonda: async (_q, workId) => { ordem.push("criar"); return { id: 99, submission_token: "sonda-teste", work_id: workId }; },
+        // 1ª leitura: o relay não mediu (fala cortada antes do response.done);
+        // depois da estimativa, o ledger tem o evento.
+        custoDaSonda: async () => estimativas.length ? ({ cost_usd: 0.0123, events: 1 }) : ({ cost_usd: 0, events: 0 }),
+        registrarEstimativa: async (_q, x) => { estimativas.push(x); },
+    };
+    class FakeWS extends EventEmitter {
+        constructor(url) { super(); FakeWS.url = url; FakeWS.last = this; this.fechado = 0; setTimeout(() => { this.emit("open"); FakeWS.roteiro?.(this); }, 5); }
+        close() { this.fechado++; this.emit("close", 1000); }
+    }
+    const orcamento = { work_id: 7, exceeded: false, month_spent_usd: 0, monthly_budget_usd: 1 };
+    // 1) examinador fala: eventos de estado, depois áudio binário
+    FakeWS.roteiro = (ws) => {
+        setTimeout(() => ws.emit("message", Buffer.from(JSON.stringify({ type: "state", state: "intro" })), false), 5);
+        setTimeout(() => { for (let i = 0; i < 12; i++) ws.emit("message", Buffer.alloc(4800, 1), true); }, 30);
+    };
+    let r = await check("realtime_b").run({ deps: { WebSocket: FakeWS, ops, baseWs: "ws://fake", settleMs: 10 }, orcamento });
+    assert.equal(r.status, "ok", JSON.stringify(r.detail));
+    assert.equal(FakeWS.url, "ws://fake/s/sonda-teste/oral/relay");
+    assert.deepEqual(ordem, ["limpar", "criar"], "limpa as sondas antigas ANTES de criar a nova");
+    assert.ok(r.detail.first_audio_ms >= 0 && r.detail.audio_bytes === 12 * 4800);
+    assert.equal(r.detail.probes_cleaned, 2);
+    assert.equal(r.detail.billed_to_work, 7);
+    assert.equal(r.cost_usd, 0.0123, "o custo vem do ledger");
+    assert.equal(r.detail.cost_estimated, true, "fala cortada → o relay não mediu → estimativa gravada e marcada");
+    assert.deepEqual(estimativas.map(e => [e.workId, e.submissionId, Math.round(e.audioSeconds * 10) / 10]), [[7, 99, 1.2]]);
+    assert.ok(FakeWS.last.fechado >= 1, "fecha o socket ao terminar");
+    // 2) relay recusa (close sem open) → fail com motivo
+    class Recusa extends EventEmitter { constructor() { super(); setTimeout(() => this.emit("close", 1006), 5); } close() {} }
+    r = await check("realtime_b").run({ deps: { WebSocket: Recusa, ops, baseWs: "ws://fake", settleMs: 10 }, orcamento });
+    assert.equal(r.status, "fail");
+    assert.match(r.detail.reason, /não aceitou/);
+    // 3) abre mas o examinador não fala: abort do check fecha e é fail
+    FakeWS.roteiro = null;
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 60);
+    r = await check("realtime_b").run({ deps: { WebSocket: FakeWS, ops, baseWs: "ws://fake", settleMs: 10 }, orcamento, signal: ac.signal });
+    assert.equal(r.status, "fail");
+    assert.match(r.detail.reason, /não falou/);
+    assert.ok(r.detail.events.includes("abort:prazo do check"));
+    assert.ok(FakeWS.last.fechado >= 1);
+});
 
 test("registro deep: dez checks, todos com orçamento próprio e sem cliente de banco do health", async () => {
     const { DEEP_CHECKS, DEEP_BUDGET_MS, estimateDeepCostUsd } = await import("../lib/healthDeep.js");
@@ -293,11 +362,126 @@ test("seedHealthWork: cria uma vez, é idempotente, inativo, sem is_benchmark, e
     assert.equal(await seedHealthWork(), id);
     const w = (await pool.query(`SELECT is_health, is_active, is_benchmark, kind, budget_usd::float8 AS b FROM works WHERE id = $1`, [id])).rows[0];
     assert.equal(w.is_health, true);
-    assert.equal(w.is_active, false, "não é trabalho de aluno");
+    assert.equal(w.is_active, true, "ATIVO: o relay recusa trabalho inativo, e a perna B abre o relay como aluno");
     assert.equal(w.is_benchmark, false, "nunca pela chave de benchmark");
+    const q = (await pool.query(`SELECT jsonb_array_length(oral_questions) AS n, question_count FROM works WHERE id = $1`, [id])).rows[0];
+    assert.ok(q.n >= 3 && q.question_count === 3, "exame preparado para a sonda");
+    // reconcilia: desativado à mão volta a ativo no boot seguinte
+    await pool.query(`UPDATE works SET is_active = false WHERE id = $1`, [id]);
+    await seedHealthWork();
+    assert.equal((await pool.query(`SELECT is_active FROM works WHERE id = $1`, [id])).rows[0].is_active, true);
     assert.ok(w.b >= 100, "teto acumulado alto: o freio real é o mensal");
     assert.equal((await pool.query(`SELECT count(*)::int n FROM works WHERE is_health`)).rows[0].n, 1);
     await assert.rejects(pool.query(`UPDATE works SET is_health = true WHERE id = (SELECT min(id) FROM works WHERE NOT is_health)`), /works_is_health_uidx/);
+});
+
+test("realtime_b: sinal já abortado ou abortado durante o banco → nem envio nem socket; contabilidade não confirmada → fail", async () => {
+    // Revisão do #399: o relatório voltava por prazo e o corpo abandonado
+    // ainda criava o envio e abria o Realtime depois.
+    const { EventEmitter } = await import("node:events");
+    let criou = 0, abriu = 0;
+    class WS extends EventEmitter { constructor() { super(); abriu++; setTimeout(() => { this.emit("open"); for (let i = 0; i < 12; i++) this.emit("message", Buffer.alloc(4800, 1), true); }, 5); } close() { this.emit("close", 1000); } }
+    const ops = (extra = {}) => ({
+        limparSondasAntigas: async () => 0,
+        criarSonda: async () => { criou++; return { id: 5, submission_token: "s" }; },
+        custoDaSonda: async () => ({ cost_usd: 0.01, events: 1 }),
+        registrarEstimativa: async () => {},
+        ...extra,
+    });
+    const orcamento = { work_id: 7, exceeded: false, month_spent_usd: 0, monthly_budget_usd: 1 };
+    // 1) sinal JÁ abortado quando o check começa
+    const ja = new AbortController(); ja.abort();
+    await assert.rejects(check("realtime_b").run({ deps: { WebSocket: WS, ops: ops(), settleMs: 5 }, orcamento, signal: ja.signal }), /prazo do check estourado antes de/);
+    assert.equal(criou + abriu, 0);
+    // 2) aborta ENQUANTO a limpeza no banco está presa: depois de liberada, não cria nem abre
+    const ac = new AbortController();
+    let liberar; const presa = new Promise(r => { liberar = r; });
+    const lenta = ops({ limparSondasAntigas: async () => { await presa; return 0; } });
+    const corrida = check("realtime_b").run({ deps: { WebSocket: WS, ops: lenta, settleMs: 5 }, orcamento, signal: ac.signal });
+    setTimeout(() => { ac.abort(); liberar(); }, 30);
+    await assert.rejects(corrida, /antes de criar o envio/);
+    assert.equal(criou + abriu, 0, "corpo abandonado não pode gerar custo depois do relatório");
+    // 3) o executor com prazo vem do runHealth (ctx.escritaComPrazo); a
+    //    regressão com banco real está no teste seguinte
+    const txt = fonte("lib/healthE2e.js");
+    assert.match(txt, /OPS_TIMEOUT_MS = 5000/);
+    assert.match(txt, /ctx\.escritaComPrazo/);
+    assert.ok(!/recordRealtimeCost\(/.test(txt), "a estimativa vai pelo executor com prazo, não pelo pool do app (recordCost não tem prazo)");
+    // 4) contabilidade: leitura falha / estimativa não persiste → fail mesmo com fala
+    for (const [nome, extra, re] of [
+        ["leitura falha", { custoDaSonda: async () => { throw new Error("banco fora (teste)"); } }, /banco fora/],
+        ["estimativa não persiste", { custoDaSonda: async () => ({ cost_usd: 0, events: 0 }) }, /não ficou persistida/],
+    ]) {
+        const r = await check("realtime_b").run({ deps: { WebSocket: WS, ops: ops(extra), settleMs: 5 }, orcamento });
+        assert.equal(r.status, "fail", nome);
+        assert.match(r.detail.reason, /gasto não ficou confirmado/);
+        assert.match(r.detail.accounting_error, re);
+    }
+});
+
+test("sonda e2e com o banco preso: desiste no prazo, NADA fica na fila do pool, e nada acontece tarde no banco", semBanco, async () => {
+    // Revisão do #399 (2ª rodada): Promise.race só larga a espera — a consulta
+    // continuava na fila e rodava depois. Aqui as operações REAIS da sonda vão
+    // por comClienteRW no pool do health, cuja única conexão está PRESA.
+    const { comClienteRW } = health;
+    const wid = (await pool.query(`SELECT id FROM works WHERE is_health`)).rows[0]?.id;
+    assert.ok(wid, "seed do trabalho de saúde");
+    const antes = (await pool.query(`SELECT count(*)::int n FROM submissions WHERE work_id = $1 AND is_test`, [wid])).rows[0].n;
+    const preso = await healthPool.connect();
+    try {
+        const { EventEmitter } = await import("node:events");
+        class WS extends EventEmitter { constructor() { super(); WS.abriu = (WS.abriu || 0) + 1; } close() {} }
+        const t0 = Date.now();
+        await assert.rejects(
+            check("realtime_b").run({ deps: { WebSocket: WS, settleMs: 5 }, escritaComPrazo: (fn, ms) => comClienteRW(fn, ms), orcamento: { work_id: wid, exceeded: false, month_spent_usd: 0, monthly_budget_usd: 1 } }),
+            /conexão com o banco|timeout exceeded when trying to connect/);
+        assert.ok(Date.now() - t0 < 4500, "desiste no prazo de aquisição");
+        assert.equal(healthPool.waitingCount, 0, "pedido de conexão não pode ficar na fila");
+        assert.ok(!WS.abriu, "sem banco, não abre o relay");
+    } finally { preso.release(); }
+    await new Promise(r => setTimeout(r, 500));
+    const depois = (await pool.query(`SELECT count(*)::int n FROM submissions WHERE work_id = $1 AND is_test`, [wid])).rows[0].n;
+    assert.equal(depois, antes, "nenhuma operação tardia criou envio depois de a conexão voltar");
+});
+
+test("comClienteRW: escreve numa transação com prazo do servidor e devolve o cliente; prazo estourado descarta", semBanco, async () => {
+    const { comClienteRW } = health;
+    const r = await comClienteRW(async (q) => (await q("SELECT current_setting('statement_timeout') AS st, now() AS t")).rows[0]);
+    assert.notEqual(r.st, "0", "statement_timeout tem de estar ligado na transação");
+    assert.equal(healthPool.waitingCount, 0);
+    await assert.rejects(comClienteRW(async (q) => q("SELECT pg_sleep(3)"), 1500), /prazo|timeout|cancel/i);
+    const ok = await comClienteRW(async (q) => (await q("SELECT 1 AS um")).rows[0].um);
+    assert.equal(ok, 1, "o pool se recupera depois do descarte");
+});
+
+test("trabalho de saúde não pode ser desativado: 409 na API, SQL protege, painel sem o botão", async () => {
+    const adminRouter = (await import("../routes/admin.js")).default;
+    const layer = adminRouter.stack.find(l => l.route?.path === "/admin/works/:workToken/active" && l.route.methods.patch);
+    const handler = layer.route.stack.at(-1).handle;
+    const original = pool.query;
+    try {
+        let updates = 0;
+        pool.query = async (sql) => { if (/UPDATE works/.test(sql)) updates++; return { rows: [{ id: 1, is_health: true, is_active: true }], rowCount: 1 }; };
+        const res = { status(n) { this.code = n; return this; }, json(b) { this.body = b; return this; } };
+        await handler({ params: { workToken: "saude" }, body: { is_active: false }, session: { user: { username: "t" } } }, res);
+        assert.equal(res.code, 409);
+        assert.match(res.body.error, /permanente/);
+        assert.equal(updates, 0, "nada de UPDATE");
+    } finally { pool.query = original; }
+    assert.match(fonte("lib/db/works.js"), /SET is_active = \$1, updated_at = now\(\)\s+WHERE id = \$2 AND NOT is_health/);
+    const html = fonte("static/admin.html");
+    assert.match(html, /const toggleBtn = w\.is_health \? ''/);
+});
+
+test("invariantes do e2e: nunca envia áudio de aluno, fecha o socket sempre, limpa só sondas ANTIGAS, e não roda no deep", () => {
+    const txt = fonte("lib/healthE2e.js");
+    assert.ok(!/ws\.send\(/.test(txt), "a sonda só escuta — nenhum áudio de aluno");
+    assert.match(txt, /finally \{[\s\S]*ws\.close\(1000/);
+    assert.match(txt, /created_at < now\(\) - interval '2 minutes'/, "a sonda atual nunca é apagada na própria execução");
+    assert.match(txt, /is_test = true/);
+    assert.match(txt, /orcamentoPermite\(ctx\)/, "paga: passa pelo orçamento mensal");
+    assert.match(txt, /INSERT INTO work_cost_events/, "gasto do Realtime cortado antes do response.done é ESTIMADO e lançado — nunca fica fora do ledger");
+    assert.match(txt, /UPDATE works SET spent_usd = spent_usd \+ \$1/, "a estimativa também soma no spent_usd do trabalho, como o recordCost faria");
 });
 
 test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {
