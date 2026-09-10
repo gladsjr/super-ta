@@ -484,6 +484,22 @@ test("invariantes do e2e: nunca envia áudio de aluno, fecha o socket sempre, li
     assert.match(txt, /UPDATE works SET spent_usd = spent_usd \+ \$1/, "a estimativa também soma no spent_usd do trabalho, como o recordCost faria");
 });
 
+
+test("sondas de processo do deep têm prazo abaixo do orçamento do check e acima do cache frio medido em prod", async () => {
+    // Prod, 09/09: o 1º `import mediapipe` após o Publish levou 14–15 s e
+    // estourou a sonda de 15 s → 503 falso no primeiro deep.
+    const txt = fonte("lib/healthDeep.js");
+    const { DEEP_BUDGET_MS } = await import("../lib/healthDeep.js");
+    const sidecar = /import mediapipe.*?\],\s*(\d[\d_]*)\)/.exec(txt);
+    const ffmpeg = /\["-version"\],\s*(\d[\d_]*)\)/.exec(txt);
+    assert.ok(sidecar && ffmpeg, "as duas sondas têm de passar o prazo explicitamente");
+    for (const [nome, m] of [["sidecar", sidecar], ["ffmpeg", ffmpeg]]) {
+        const ms = Number(m[1].replace(/_/g, ""));
+        assert.ok(ms >= 20_000, `${nome}: prazo ${ms} ms abaixo do cache frio medido (15 s)`);
+        assert.ok(ms < DEEP_BUDGET_MS, `${nome}: prazo ${ms} ms tem de caber no orçamento do check (${DEEP_BUDGET_MS})`);
+    }
+});
+
 test("retranscrição local: com motor api é skip (não se aplica), nunca ok", async () => {
     const r = await check("retranscribe_local").run({});
     const { RETRANSCRIBE_ENGINE } = await import("../lib/config.js");
