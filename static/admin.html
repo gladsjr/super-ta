@@ -494,7 +494,8 @@ function renderWorks() {
     const exhaustedNote = (budget > 0 && spent >= budget)
       ? ' <span class="badge badge-pending" title="Sem saldo">orçamento esgotado</span>'
       : '';
-    const toggleBtn = inactive
+    const toggleBtn = w.is_health ? ''
+      : inactive
       ? `<button class="btn btn-sm" onclick="toggleActive('${w.work_token}', true)" title="Reativar — alunos voltam a ter acesso">Ativar</button>`
       : `<button class="btn btn-sm" onclick="toggleActive('${w.work_token}', false)" title="Desativar — alunos perdem acesso, mas estado é preservado">Desativar</button>`;
     return `

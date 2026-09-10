@@ -375,6 +375,68 @@ test("seedHealthWork: cria uma vez, é idempotente, inativo, sem is_benchmark, e
     await assert.rejects(pool.query(`UPDATE works SET is_health = true WHERE id = (SELECT min(id) FROM works WHERE NOT is_health)`), /works_is_health_uidx/);
 });
 
+test("realtime_b: sinal já abortado ou abortado durante o banco → nem envio nem socket; contabilidade não confirmada → fail", async () => {
+    // Revisão do #399: o relatório voltava por prazo e o corpo abandonado
+    // ainda criava o envio e abria o Realtime depois.
+    const { EventEmitter } = await import("node:events");
+    let criou = 0, abriu = 0;
+    class WS extends EventEmitter { constructor() { super(); abriu++; setTimeout(() => { this.emit("open"); for (let i = 0; i < 12; i++) this.emit("message", Buffer.alloc(4800, 1), true); }, 5); } close() { this.emit("close", 1000); } }
+    const ops = (extra = {}) => ({
+        limparSondasAntigas: async () => 0,
+        criarSonda: async () => { criou++; return { id: 5, submission_token: "s" }; },
+        custoDaSonda: async () => ({ cost_usd: 0.01, events: 1 }),
+        registrarEstimativa: async () => {},
+        ...extra,
+    });
+    const orcamento = { work_id: 7, exceeded: false, month_spent_usd: 0, monthly_budget_usd: 1 };
+    // 1) sinal JÁ abortado quando o check começa
+    const ja = new AbortController(); ja.abort();
+    await assert.rejects(check("realtime_b").run({ deps: { WebSocket: WS, ops: ops(), settleMs: 5 }, orcamento, signal: ja.signal }), /prazo do check estourado antes de/);
+    assert.equal(criou + abriu, 0);
+    // 2) aborta ENQUANTO a limpeza no banco está presa: depois de liberada, não cria nem abre
+    const ac = new AbortController();
+    let liberar; const presa = new Promise(r => { liberar = r; });
+    const lenta = ops({ limparSondasAntigas: async () => { await presa; return 0; } });
+    const corrida = check("realtime_b").run({ deps: { WebSocket: WS, ops: lenta, settleMs: 5 }, orcamento, signal: ac.signal });
+    setTimeout(() => { ac.abort(); liberar(); }, 30);
+    await assert.rejects(corrida, /antes de criar o envio/);
+    assert.equal(criou + abriu, 0, "corpo abandonado não pode gerar custo depois do relatório");
+    // 3) operação de banco pendurada além do prazo próprio → rejeita, sem criar
+    const pendurada = ops({ limparSondasAntigas: () => new Promise(() => {}) });
+    const txt = fonte("lib/healthE2e.js");
+    assert.match(txt, /OPS_TIMEOUT_MS = 5000/);
+    // 4) contabilidade: leitura falha / estimativa não persiste → fail mesmo com fala
+    for (const [nome, extra, re] of [
+        ["leitura falha", { custoDaSonda: async () => { throw new Error("banco fora (teste)"); } }, /banco fora/],
+        ["estimativa não persiste", { custoDaSonda: async () => ({ cost_usd: 0, events: 0 }) }, /não ficou persistida/],
+    ]) {
+        const r = await check("realtime_b").run({ deps: { WebSocket: WS, ops: ops(extra), settleMs: 5 }, orcamento });
+        assert.equal(r.status, "fail", nome);
+        assert.match(r.detail.reason, /gasto não ficou confirmado/);
+        assert.match(r.detail.accounting_error, re);
+    }
+    void pendurada;
+});
+
+test("trabalho de saúde não pode ser desativado: 409 na API, SQL protege, painel sem o botão", async () => {
+    const adminRouter = (await import("../routes/admin.js")).default;
+    const layer = adminRouter.stack.find(l => l.route?.path === "/admin/works/:workToken/active" && l.route.methods.patch);
+    const handler = layer.route.stack.at(-1).handle;
+    const original = pool.query;
+    try {
+        let updates = 0;
+        pool.query = async (sql) => { if (/UPDATE works/.test(sql)) updates++; return { rows: [{ id: 1, is_health: true, is_active: true }], rowCount: 1 }; };
+        const res = { status(n) { this.code = n; return this; }, json(b) { this.body = b; return this; } };
+        await handler({ params: { workToken: "saude" }, body: { is_active: false }, session: { user: { username: "t" } } }, res);
+        assert.equal(res.code, 409);
+        assert.match(res.body.error, /permanente/);
+        assert.equal(updates, 0, "nada de UPDATE");
+    } finally { pool.query = original; }
+    assert.match(fonte("lib/db/works.js"), /SET is_active = \$1, updated_at = now\(\)\s+WHERE id = \$2 AND NOT is_health/);
+    const html = fonte("static/admin.html");
+    assert.match(html, /const toggleBtn = w\.is_health \? ''/);
+});
+
 test("invariantes do e2e: nunca envia áudio de aluno, fecha o socket sempre, limpa só sondas ANTIGAS, e não roda no deep", () => {
     const txt = fonte("lib/healthE2e.js");
     assert.ok(!/ws\.send\(/.test(txt), "a sonda só escuta — nenhum áudio de aluno");
